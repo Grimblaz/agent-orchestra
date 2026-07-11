@@ -126,17 +126,17 @@ function script:Test-JudgeRulingsHasDefenseSustainedConcept {
         Get-JudgeRulingsSustainedCountInternal uses (four-value/intake
         checked first, then canonical).
 
-        This is a deliberately narrow, self-contained duplication of that
-        priority check — not the full region-isolation/ambiguity-detection
-        machinery — because Get-DispositionTally has already authoritatively
-        isolated and parsed the body (callers only invoke this after
-        confirming ParseStatus 'ok'), so this function only needs to answer a
-        single vocabulary-priority question on the raw body text, not
-        re-parse counts. Scanning the raw body rather than the isolated
-        region carries a small theoretical risk if unrelated prose elsewhere
-        in the same body coincidentally matches one of these tokens; this is
-        an accepted, documented trade-off for a presentation-only cost
-        metric (same spirit as the M6 dedup known-limitation note below).
+        CM3 fix (judge-sustained PR #833 review): this function used to scan
+        the raw whole $Body rather than the isolated judge-rulings region —
+        a stray line-start token elsewhere in the SAME body (e.g. a
+        `disposition: reject` line quoted in unrelated prose, outside the
+        real judge-rulings region) could misclassify a genuinely canonical
+        block as non-canonical, silently shunting real sustained/
+        defense-sustained data to could-not-verify. This function now calls
+        Get-JudgeRulingsIsolatedRegion (the SAME region-isolation
+        Get-JudgeRulingsSustainedCountInternal uses internally) and applies
+        the vocabulary-priority check to that isolated region only, never to
+        the raw body.
     .PARAMETER Body
         The raw comment body text to scan (the same body already parsed via
         Get-DispositionTally -Surface plan-stress-test).
@@ -146,12 +146,15 @@ function script:Test-JudgeRulingsHasDefenseSustainedConcept {
     param(
         [Parameter(Mandatory)][string]$Body
     )
+    $isolated = Get-JudgeRulingsIsolatedRegion -Body $Body
+    if ($isolated.ParseStatus -ne 'ok') { return $false }
+    $region = $isolated.Region
     $keyAnchor = '(?:^\s*(?:-\s+)?|[{,]\s*)'
-    $hasFourValue = $Body -match "(?m)${keyAnchor}disposition\s*:\s*(Fix-now|Fix-in-PR|Defer|Dismiss)\b"
-    $hasIntake = ($Body -match "review_mode\s*:\s*['""]?github-intake-proxy-prosecution") -or
-                 ($Body -match "(?m)${keyAnchor}disposition\s*:\s*(accept|reject)\b")
+    $hasFourValue = $region -match "(?m)${keyAnchor}disposition\s*:\s*(Fix-now|Fix-in-PR|Defer|Dismiss)\b"
+    $hasIntake = ($region -match "review_mode\s*:\s*['""]?github-intake-proxy-prosecution") -or
+                 ($region -match "(?m)${keyAnchor}disposition\s*:\s*(accept|reject)\b")
     if ($hasFourValue -or $hasIntake) { return $false }
-    return [bool]($Body -match '(?m)judge_ruling\s*:\s*\S')
+    return [bool]($region -match '(?m)judge_ruling\s*:\s*\S')
 }
 
 #endregion
@@ -674,6 +677,18 @@ function Format-ReviewCostSection {
     $lines.Add('Review Cost (presentation-only)')
     $lines.Add('')
 
+    # CM6 fix (judge-sustained PR #833 review, plan AC4): $Rollup.Truncated
+    # was computed and passed through but never rendered here — only the
+    # CLI-level population-DIVERGENCE warning (report.ps1) mentioned it, and
+    # only when the value-side and cost-side Truncated flags DISAGREE. When
+    # both agree Truncated=true, the section previously showed confident
+    # rates with zero truncation caveat. Render an explicit caveat whenever
+    # Rollup.Truncated is true, independent of that CLI-level check.
+    if ($Rollup.Truncated) {
+        $lines.Add('CAUTION: comment corpus fetch was Truncated — the rates below may be computed from an incomplete population.')
+        $lines.Add('')
+    }
+
     # ---- design-challenge ----
     $lines.Add('Stage: design-challenge')
     $lines.Add('  Value-side reference: see the Stage: design-challenge block in the report above.')
@@ -719,7 +734,19 @@ function Format-ReviewCostSection {
     $lines.Add('')
 
     # ---- forward gap (always rendered, independent of fetch state) ----
-    $lines.Add("PRs with value data but no cost marker: $($Rollup.ForwardGapCount)")
+    # CM5 fix (judge-sustained PR #833 review): under a corpus fetch failure
+    # (Source: timeout | repo-resolution-failed), Get-ReviewCostRollup skips
+    # the tuple walk entirely, so ForwardGapCount becomes the ENTIRE
+    # value-side population — a confident-looking number computed from data
+    # that was never actually fetched. Render the same honest
+    # COST DATA UNAVAILABLE state the rate lines already use instead of a
+    # confident count in that case.
+    if ($fetchUnavailable) {
+        $lines.Add("PRs with value data but no cost marker: COST DATA UNAVAILABLE (fetch $($Rollup.FetchSource))")
+    }
+    else {
+        $lines.Add("PRs with value data but no cost marker: $($Rollup.ForwardGapCount)")
+    }
     $lines.Add('')
 
     return $lines.ToArray()

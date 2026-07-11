@@ -66,6 +66,153 @@ $script:JudgeRulingsVocabGatePattern = '(?m)(?:^\s*(?:-\s+)?|[{,]\s*)(dispositio
 
 #endregion
 
+#region Get-BlockScalarSpans / Test-IndexInBlockScalarSpan (private)
+
+function script:Get-BlockScalarSpans {
+    <#
+    .SYNOPSIS
+        Finds every YAML block-scalar (`key: |` / `key: >`) CONTENT span in a
+        text, so callers can exclude structural-looking substrings that fall
+        inside block-scalar string content from being treated as real YAML
+        structure (CM1/CM4 fix, judge-sustained PR #833 review).
+    .DESCRIPTION
+        Hand-rolled scan only — no ConvertFrom-Yaml / powershell-yaml
+        (file-level SECURITY invariant at the top of this file).
+
+        A block-scalar key line is any line matching `key: |` or `key: >`
+        (optionally with a chomping indicator +/- and/or an explicit
+        indentation-indicator digit), anchored at end-of-line. Every
+        subsequent line that is either blank or indented strictly MORE than
+        the key line is part of that block scalar's content; the first
+        non-blank line indented at or less than the key line's own
+        indentation ends the span (or end-of-text, if none).
+
+        Before this fix, entry-boundary detection (Get-ReviewDispositionsTallyInternal)
+        and judge-rulings head detection (Get-RealJudgeRulingsHeadMatches)
+        both scanned the raw/region text with no awareness of block-scalar
+        boundaries, so a `disposition_rationale: |` block scalar's indented
+        CONTENT could contain a line that looks exactly like real YAML
+        structure (a `- finding_id:` entry-boundary key, or a
+        `<!-- judge-rulings pr=N -->` head) and be mistaken for the real
+        thing. Callers now compute this text's block-scalar spans once and
+        exclude any structural match whose start index falls inside one.
+    .PARAMETER Text
+        The text to scan (a whole body or an already-isolated region).
+    .OUTPUTS
+        Array of [PSCustomObject]@{ Start; End } character-offset spans
+        (End exclusive), covering only the block-scalar's CONTENT lines (not
+        the `key: |`/`key: >` line itself). Empty array when none found.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Text
+    )
+    $spans = [System.Collections.Generic.List[PSCustomObject]]::new()
+    if ([string]::IsNullOrEmpty($Text)) {
+        return , $spans.ToArray()
+    }
+
+    $keyLinePattern = '(?m)^([ \t]*)\S[^\r\n]*:[ \t]*[|>][+-]?\d?[ \t]*$'
+    $keyLineMatches = [regex]::Matches($Text, $keyLinePattern)
+    foreach ($keyMatch in $keyLineMatches) {
+        $keyIndent = $keyMatch.Groups[1].Value.Length
+        $keyLineEnd = $Text.IndexOf("`n", $keyMatch.Index, [System.StringComparison]::Ordinal)
+        if ($keyLineEnd -lt 0) {
+            # The key line is the last line in the text; no content follows.
+            continue
+        }
+        $contentStart = $keyLineEnd + 1
+        $pos = $contentStart
+        $contentEnd = $Text.Length
+        while ($pos -le $Text.Length) {
+            $nextNewline = $Text.IndexOf("`n", $pos, [System.StringComparison]::Ordinal)
+            $lineText = if ($nextNewline -ge 0) { $Text.Substring($pos, $nextNewline - $pos) } else { $Text.Substring($pos) }
+            if ($lineText.Trim().Length -eq 0) {
+                # Blank line: still part of the block scalar.
+                if ($nextNewline -lt 0) { $contentEnd = $Text.Length; break }
+                $pos = $nextNewline + 1
+                continue
+            }
+            $lineIndent = [regex]::Match($lineText, '^[ \t]*').Value.Length
+            if ($lineIndent -le $keyIndent) {
+                $contentEnd = $pos
+                break
+            }
+            if ($nextNewline -lt 0) { $contentEnd = $Text.Length; break }
+            $pos = $nextNewline + 1
+        }
+        if ($contentEnd -gt $contentStart) {
+            $spans.Add([PSCustomObject]@{ Start = $contentStart; End = $contentEnd })
+        }
+    }
+    return , $spans.ToArray()
+}
+
+function script:Test-IndexInBlockScalarSpan {
+    <#
+    .SYNOPSIS
+        Reports whether a character offset falls inside any of the supplied
+        block-scalar spans (CM1/CM4 fix, judge-sustained PR #833 review).
+    .PARAMETER Index
+        The character offset to test.
+    .PARAMETER Spans
+        The Get-BlockScalarSpans result to test against.
+    .OUTPUTS
+        [bool]
+    #>
+    param(
+        [Parameter(Mandatory)][int]$Index,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Spans
+    )
+    foreach ($span in $Spans) {
+        if ($Index -ge $span.Start -and $Index -lt $span.End) {
+            return $true
+        }
+    }
+    return $false
+}
+
+#endregion
+
+#region ConvertFrom-YamlQuotedScalar (private)
+
+function script:ConvertFrom-YamlQuotedScalar {
+    <#
+    .SYNOPSIS
+        Strips a single layer of symmetric YAML scalar quoting (single OR
+        double quotes) from an extracted field value (CM7 fix, judge-sustained
+        PR #833 review).
+    .DESCRIPTION
+        Before this fix, extraction sites trimmed only double quotes
+        (`.Trim('"')`), so a single-quoted value (valid YAML, e.g.
+        `reviewer_source: 'copilot'`) kept its literal quote characters all
+        the way through comparison/grouping — silently breaking an `-eq`
+        stage-filter comparison (indistinguishable from an intentional
+        exclusion) or fragmenting a per-source group into a phantom distinct
+        row. Strips one matching leading/trailing quote pair (single or
+        double) only when BOTH ends carry the SAME quote character; an
+        unquoted or asymmetric value passes through unchanged.
+    .PARAMETER Value
+        The raw extracted value (already whitespace-trimmed by the caller is
+        not required; this function trims internally).
+    .OUTPUTS
+        [string]
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Value
+    )
+    $trimmed = $Value.Trim()
+    if ($trimmed.Length -ge 2) {
+        $first = $trimmed[0]
+        $last = $trimmed[$trimmed.Length - 1]
+        if (($first -eq '"' -or $first -eq "'") -and $first -eq $last) {
+            return $trimmed.Substring(1, $trimmed.Length - 2)
+        }
+    }
+    return $trimmed
+}
+
+#endregion
+
 #region Get-RealJudgeRulingsHeadMatches (private)
 
 function script:Get-RealJudgeRulingsHeadMatches {
@@ -97,8 +244,18 @@ function script:Get-RealJudgeRulingsHeadMatches {
     )
 
     $allHeadMatches = [regex]::Matches($Body, $script:JudgeRulingsHeadPattern)
+    # CM4 fix (judge-sustained PR #833 review): a judge-rulings head embedded
+    # inside another marker's `disposition_rationale: |` block-scalar CONTENT
+    # is string data, not a real structural head — exclude any candidate
+    # whose match start falls inside a block-scalar span before applying the
+    # vocab gate, so it can never be mistaken for (and fabricate a
+    # contribution from) a genuine head.
+    $blockScalarSpans = Get-BlockScalarSpans -Text $Body
     $realHeadMatches = [System.Collections.Generic.List[System.Text.RegularExpressions.Match]]::new()
     foreach ($candidateHead in $allHeadMatches) {
+        if (Test-IndexInBlockScalarSpan -Index $candidateHead.Index -Spans $blockScalarSpans) {
+            continue
+        }
         $windowEnd = [Math]::Min($Body.Length, $candidateHead.Index + $candidateHead.Length + $script:JudgeRulingsLookaheadWindow)
         $window = $Body.Substring($candidateHead.Index, $windowEnd - $candidateHead.Index)
         if ([regex]::IsMatch($window, $script:JudgeRulingsVocabGatePattern)) {
@@ -449,6 +606,18 @@ function Get-DispositionTally {
         # stage field, default to 'code-review' inside the internal parser
         # above and so pass this filter; a 'stage: ce' entry is excluded).
         $filteredEntries = @( if ($inner.ParseStatus -eq 'ok') { $inner.Entries | Where-Object { $_.Stage -eq 'code-review' } } )
+        # CM12 defensive fail-loud (judge-sustained PR #833 review): an entry
+        # with an empty/missing StableFindingKey on the code-review surface
+        # must never silently participate with key='' — that is either a
+        # malformed/legacy payload or a parser defect (e.g. a phantom entry
+        # produced by a boundary-key collision). Route the whole surface
+        # result to could-not-verify instead, per DD3.
+        if ($inner.ParseStatus -eq 'ok') {
+            $hasEmptyKeyEntry = @($filteredEntries | Where-Object { [string]::IsNullOrWhiteSpace($_.StableFindingKey) }).Count -gt 0
+            if ($hasEmptyKeyEntry) {
+                return [PSCustomObject]@{ Surface = $Surface; Entries = @(); ParseStatus = 'could-not-verify' }
+            }
+        }
         return [PSCustomObject]@{ Surface = $Surface; Entries = $filteredEntries; ParseStatus = $inner.ParseStatus }
     }
 
@@ -581,8 +750,16 @@ function script:Get-ReviewDispositionsTallyInternal {
     # `- finding_id:` dash-item starts (entry-boundary markers) — never on
     # any other key, so an injected-newline field value cannot be mistaken
     # for a new entry.
+    #
+    # CM1 fix (judge-sustained PR #833 review): this boundary pattern used to
+    # match those literal boundary keys even when they appeared INSIDE a
+    # `disposition_rationale: |` block scalar's indented CONTENT, fabricating
+    # a phantom entry with attacker-controlled disposition/reviewer_source
+    # values. Exclude any boundary match whose start index falls inside a
+    # block-scalar span computed over this already-isolated $region.
     $entryBoundaryPattern = '(?m)^\s*-\s+(?:stable_finding_key|finding_id)\s*:'
-    $entryStarts = [regex]::Matches($region, $entryBoundaryPattern)
+    $blockScalarSpans = Get-BlockScalarSpans -Text $region
+    $entryStarts = @([regex]::Matches($region, $entryBoundaryPattern) | Where-Object { -not (Test-IndexInBlockScalarSpan -Index $_.Index -Spans $blockScalarSpans) })
     if ($entryStarts.Count -eq 0) {
         return [PSCustomObject]@{ Entries = @(); ParseStatus = 'could-not-verify' }
     }
@@ -594,7 +771,7 @@ function script:Get-ReviewDispositionsTallyInternal {
         $entrySpan = $region.Substring($spanStart, $spanEnd - $spanStart)
 
         $stableKeyMatch = [regex]::Match($entrySpan, "(?m)${keyAnchor}stable_finding_key\s*:\s*(.+)")
-        $stableFindingKey = if ($stableKeyMatch.Success) { $stableKeyMatch.Groups[1].Value.Trim().Trim('"') } else { $null }
+        $stableFindingKey = if ($stableKeyMatch.Success) { ConvertFrom-YamlQuotedScalar -Value $stableKeyMatch.Groups[1].Value } else { $null }
 
         # First key-anchored match only (see .DESCRIPTION): the real
         # `disposition:` key is always written before disposition_rationale
@@ -609,14 +786,21 @@ function script:Get-ReviewDispositionsTallyInternal {
 
         $stageMatch = [regex]::Match($entrySpan, "(?m)${keyAnchor}stage\s*:\s*(\S+)")
         # v1/v2 entries predate or omit the stage field; default to
-        # 'code-review' (issue #768 s3, AC7).
-        $stage = if ($stageMatch.Success) { $stageMatch.Groups[1].Value.TrimEnd(',') } else { 'code-review' }
+        # 'code-review' (issue #768 s3, AC7). CM7 fix (judge-sustained PR #833
+        # review): dequote AFTER stripping a trailing flow-mapping comma, so a
+        # quoted value like `stage: "code-review",` still resolves to the
+        # bare `code-review` the -eq stage filter compares against.
+        $stage = if ($stageMatch.Success) { ConvertFrom-YamlQuotedScalar -Value ($stageMatch.Groups[1].Value.TrimEnd(',')) } else { 'code-review' }
 
         # reviewer_source is matched on its own distinct literal key name, so
         # it can never be confused with the nested ac_cross_check.source
         # field (a different key entirely, not merely a position collision).
+        # CM7 fix (judge-sustained PR #833 review): dequote symmetrically
+        # (single OR double quotes), so a single-quoted value like
+        # `reviewer_source: 'copilot'` groups with its bare equivalent instead
+        # of forming a phantom distinct per-source row.
         $reviewerSourceMatch = [regex]::Match($entrySpan, "(?m)${keyAnchor}reviewer_source\s*:\s*(.+)")
-        $reviewerSource = if ($reviewerSourceMatch.Success) { $reviewerSourceMatch.Groups[1].Value.Trim().Trim('"') } else { $null }
+        $reviewerSource = if ($reviewerSourceMatch.Success) { ConvertFrom-YamlQuotedScalar -Value $reviewerSourceMatch.Groups[1].Value } else { $null }
 
         $entries.Add([PSCustomObject]@{
                 StableFindingKey = $stableFindingKey
@@ -631,9 +815,38 @@ function script:Get-ReviewDispositionsTallyInternal {
 
 #endregion
 
-#region Get-JudgeRulingsSustainedCountInternal (private)
+#region Get-JudgeRulingsIsolatedRegion (private)
 
-function script:Get-JudgeRulingsSustainedCountInternal {
+function script:Get-JudgeRulingsIsolatedRegion {
+    <#
+    .SYNOPSIS
+        Isolates the single real judge-rulings marker region from a body,
+        applying the same duplicate-head guard, region-boundary selection,
+        and false-positive-closer ambiguity detection that
+        Get-JudgeRulingsSustainedCountInternal has always used internally —
+        extracted (CM3 fix, judge-sustained PR #833 review) so other
+        consumers can apply their OWN vocabulary checks to the SAME isolated
+        region instead of re-scanning the raw, unisolated body.
+    .DESCRIPTION
+        CM3 fix: Test-JudgeRulingsHasDefenseSustainedConcept
+        (phase-containment-cost-core.ps1) used to scan the raw whole $Body
+        for its vocabulary-priority check, so a stray line-start token
+        elsewhere in the SAME body (e.g. a `disposition: reject` line quoted
+        in unrelated prose, outside the real judge-rulings region) could
+        misclassify a genuinely canonical judge-rulings block as a
+        non-canonical vocabulary — shunting real sustained/defense-sustained
+        data to could-not-verify instead of the numerator/denominator. This
+        function is the single source of truth for "what text IS the
+        judge-rulings marker region," reused by both the counting logic
+        below and Test-JudgeRulingsHasDefenseSustainedConcept.
+    .PARAMETER Body
+        The raw comment body text to scan.
+    .OUTPUTS
+        [PSCustomObject] with:
+          Region      [string] — the isolated marker content (only
+                      meaningful when ParseStatus is 'ok')
+          ParseStatus [string] — 'ok' or 'could-not-verify'
+    #>
     param(
         [Parameter(Mandatory)][string]$Body
     )
@@ -665,7 +878,7 @@ function script:Get-JudgeRulingsSustainedCountInternal {
     # blocks still correctly fail loud; a bare prose mention no longer does.
     $realHeadMatches = Get-RealJudgeRulingsHeadMatches -Body $Body
     if ($realHeadMatches.Count -ge 2) {
-        return [PSCustomObject]@{ SustainedCount = 0; DefenseSustainedCount = 0; ParseStatus = 'could-not-verify' }
+        return [PSCustomObject]@{ Region = $null; ParseStatus = 'could-not-verify' }
     }
 
     # GH-3 fix (PR #815 review): region-isolation used to re-run its OWN
@@ -711,7 +924,7 @@ function script:Get-JudgeRulingsSustainedCountInternal {
     }
 
     if ($regionIndex -lt 0) {
-        return [PSCustomObject]@{ SustainedCount = 0; DefenseSustainedCount = 0; ParseStatus = 'could-not-verify' }
+        return [PSCustomObject]@{ Region = $null; ParseStatus = 'could-not-verify' }
     }
 
     $regionStart = $regionIndex + $regionHeadLength
@@ -733,7 +946,7 @@ function script:Get-JudgeRulingsSustainedCountInternal {
 
     if ($regionEnd -lt 0) {
         # Unclosed marker region — cannot safely isolate content.
-        return [PSCustomObject]@{ SustainedCount = 0; DefenseSustainedCount = 0; ParseStatus = 'could-not-verify' }
+        return [PSCustomObject]@{ Region = $null; ParseStatus = 'could-not-verify' }
     }
 
     # M8 fix (issue #782 post-review): region-end detection previously
@@ -781,12 +994,29 @@ function script:Get-JudgeRulingsSustainedCountInternal {
         # Test-EmissionMarkerPresent's vocab window and $keyAnchor below —
         # this ambiguity-detector copy must stay in sync with both.
         if ([regex]::IsMatch($between, '(?m)(?:^\s*(?:-\s+)?|[{,]\s*)(disposition|judge_ruling|verdict|finding_key)\s*:')) {
-            return [PSCustomObject]@{ SustainedCount = 0; DefenseSustainedCount = 0; ParseStatus = 'could-not-verify' }
+            return [PSCustomObject]@{ Region = $null; ParseStatus = 'could-not-verify' }
         }
         $walkPos = $nextCandidateCloser + 3
     }
 
     $region = $Body.Substring($regionStart, $regionEnd - $regionStart)
+    return [PSCustomObject]@{ Region = $region; ParseStatus = 'ok' }
+}
+
+#endregion
+
+#region Get-JudgeRulingsSustainedCountInternal (private)
+
+function script:Get-JudgeRulingsSustainedCountInternal {
+    param(
+        [Parameter(Mandatory)][string]$Body
+    )
+
+    $isolated = Get-JudgeRulingsIsolatedRegion -Body $Body
+    if ($isolated.ParseStatus -ne 'ok') {
+        return [PSCustomObject]@{ SustainedCount = 0; DefenseSustainedCount = 0; ParseStatus = 'could-not-verify' }
+    }
+    $region = $isolated.Region
 
     # required_fixes: is a parallel decoy list present in the intake variant
     # (PR #775). Strip it (and everything after it) before scanning, so its

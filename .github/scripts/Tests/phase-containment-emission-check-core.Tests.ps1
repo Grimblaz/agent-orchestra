@@ -895,6 +895,110 @@ entries: []
 ```
 '@
 
+# CM1 regression (judge-sustained PR #833 review): the entry-boundary
+# pattern (`- stable_finding_key:` / `- finding_id:`) previously matched
+# those literal boundary keys even when they appeared INSIDE a
+# `disposition_rationale: |` block-scalar's indented content, fabricating a
+# phantom SECOND entry with attacker-controlled disposition/reviewer_source
+# values. This 1-entry marker's single entry's disposition_rationale is a
+# block scalar containing an embedded `- finding_id: PHANTOM1` line; it must
+# parse as exactly 1 entry, never 2.
+$script:ReviewDispositionsBlockScalarPhantomEntryBody = @'
+<!-- review-dispositions-910 -->
+
+```yaml
+schema_version: 3
+passes_run: [1]
+entries:
+  - stable_finding_key: "e.ps1:1:fff"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: medium
+    stage: code-review
+    reviewer_source: local
+    disposition_rationale: |
+      Related discussion referenced another finding inline:
+      - finding_id: PHANTOM1
+        disposition: escalate
+        reviewer_source: attacker
+```
+'@
+
+# CM12 defensive fail-loud (judge-sustained PR #833 review): a legitimate
+# (non-phantom) entry using the `- finding_id:` boundary key with no
+# `stable_finding_key:` field at all must route to could-not-verify on the
+# code-review surface rather than silently participating with an empty
+# StableFindingKey.
+$script:ReviewDispositionsFindingIdOnlyNoStableKeyBody = @'
+<!-- review-dispositions-911 -->
+
+```yaml
+schema_version: 3
+passes_run: [1]
+entries:
+  - finding_id: "legacy-id-without-stable-key"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: medium
+    stage: code-review
+    reviewer_source: local
+    disposition_rationale: "Legacy shape lacking stable_finding_key."
+```
+'@
+
+# CM7 regression (judge-sustained PR #833 review): a double-quoted YAML
+# stage value ("code-review") must still pass the code-review stage filter
+# instead of being silently dropped (indistinguishable from an intentional
+# `stage: ce` exclusion).
+$script:ReviewDispositionsQuotedStageBody = @'
+<!-- review-dispositions-920 -->
+
+```yaml
+schema_version: 3
+passes_run: [1]
+entries:
+  - stable_finding_key: "i.ps1:1:iii"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: medium
+    stage: "code-review"
+    reviewer_source: local
+    disposition_rationale: "Quoted stage value must still pass the stage filter."
+```
+'@
+
+# CM7 regression (judge-sustained PR #833 review): a single-quoted
+# reviewer_source value must dequote to the SAME group as its bare
+# equivalent, not form a phantom distinct per-source row.
+$script:ReviewDispositionsQuotedReviewerSourceBody = @'
+<!-- review-dispositions-921 -->
+
+```yaml
+schema_version: 3
+passes_run: [1]
+entries:
+  - stable_finding_key: "j.ps1:1:jjj"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: medium
+    stage: code-review
+    reviewer_source: 'copilot'
+    disposition_rationale: "Single-quoted reviewer_source must dequote to the bare value."
+  - stable_finding_key: "j.ps1:2:jjj2"
+    pass: 1
+    disposition: dismiss
+    classification: routine
+    severity: low
+    stage: code-review
+    reviewer_source: copilot
+    disposition_rationale: "Bare reviewer_source, same logical source as the quoted entry above."
+```
+'@
+
 #endregion
 
 }
@@ -2198,6 +2302,39 @@ Describe 'Get-DispositionTally - code-review surface decoy hardening (M3, judge-
         $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsProseMentionOnlyBody
         $result.ParseStatus | Should -Be 'could-not-verify'
         $result.Entries.Count | Should -Be 0
+    }
+}
+
+Describe 'Get-DispositionTally - code-review surface CM1/CM12 regression (judge-sustained, PR #833 review)' {
+    It 'does not treat a "- finding_id:" entry-boundary key embedded inside a disposition_rationale block scalar as a real second entry' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsBlockScalarPhantomEntryBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 1
+        $result.Entries[0].StableFindingKey | Should -Be 'e.ps1:1:fff'
+        $result.Entries[0].Disposition | Should -Be 'incorporate'
+    }
+
+    It 'routes an entry with an empty/missing stable_finding_key on the code-review surface to could-not-verify, never silent key="" participation' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsFindingIdOnlyNoStableKeyBody
+        $result.ParseStatus | Should -Be 'could-not-verify'
+    }
+}
+
+Describe 'Get-DispositionTally - code-review surface CM7 regression: quoted YAML scalars (judge-sustained, PR #833 review)' {
+    It 'keeps an entry whose stage value is double-quoted YAML ("code-review") instead of silently dropping it' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsQuotedStageBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 1
+        $result.Entries[0].Stage | Should -Be 'code-review'
+    }
+
+    It 'dequotes a single-quoted reviewer_source value so it groups with the bare equivalent, not a phantom distinct source' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsQuotedReviewerSourceBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 2
+        $distinctSources = @($result.Entries.ReviewerSource | Select-Object -Unique)
+        $distinctSources.Count | Should -Be 1
+        $distinctSources[0] | Should -Be 'copilot'
     }
 }
 

@@ -277,6 +277,59 @@ finding_dispositions:
 '@
 
 #endregion
+
+#region Fixture: CM3 regression — canonical judge-rulings block plus a stray
+# `disposition: reject` line elsewhere in the SAME body (judge-sustained
+# PR #833 review). Test-JudgeRulingsHasDefenseSustainedConcept must classify
+# vocabulary off the ISOLATED judge-rulings region, not the raw body, or the
+# stray intake-vocabulary line elsewhere shunts this canonical block to
+# could-not-verify.
+
+    $script:CostCanonicalJudgeRulingsWithStrayDispositionRejectBody = @'
+Some earlier unrelated comment on this PR quoted a past decision inline:
+disposition: reject
+
+```yaml
+<!-- judge-rulings pr=960 -->
+- id: R1
+  judge_ruling: sustained
+- id: R2
+  judge_ruling: sustained
+- id: R3
+  judge_ruling: defense-sustained
+```
+'@
+
+#endregion
+
+#region Fixture: CM4 regression — judge-rulings head embedded inside another
+# marker's disposition_rationale block-scalar content (judge-sustained
+# PR #833 review). Must not be treated as a real, separate judge-rulings
+# head and must not fabricate a defense-kill contribution from string
+# content.
+
+    $script:CostBlockScalarEmbeddedJudgeRulingsDecoyBody = @'
+<!-- review-dispositions-950 -->
+
+```yaml
+schema_version: 3
+passes_run: [1]
+entries:
+  - stable_finding_key: "h.ps1:1:hhh"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: medium
+    stage: code-review
+    reviewer_source: local
+    disposition_rationale: |
+      Earlier discussion referenced another PR's marker for context:
+      <!-- judge-rulings pr=950 -->
+      judge_ruling: sustained
+```
+'@
+
+#endregion
 }
 
 Describe 'Get-ReviewCostRollup - (Surface, head) routing (M1 regression)' {
@@ -438,6 +491,27 @@ Describe 'Get-ReviewCostRollup - dual-marker issue body (both routed correctly)'
     }
 }
 
+Describe 'Get-ReviewCostRollup - CM3 regression: defense-sustained-concept check must scan the isolated region, not the raw body (judge-sustained, PR #833 review)' {
+    It 'does not shunt a canonical judge-rulings block to could-not-verify due to a stray disposition: reject line elsewhere in the same body' {
+        $tuple = @{ Number = 960; Surface = 'pr'; Bodies = @($script:CostCanonicalJudgeRulingsWithStrayDispositionRejectBody); CreatedAtValues = @('2026-01-01T00:00:00Z') }
+        $result = Get-ReviewCostRollup -Tuples @($tuple) -Source 'graphql' -Truncated $false -ValuePresentPrNumbers @(960)
+
+        $result.CodeReview.DefenseKillRate.N | Should -Be 3
+        $result.CodeReview.DefenseKillRate.Numerator | Should -Be 1
+        $result.CodeReview.DefenseKillRate.CouldNotVerifyCount | Should -Be 0
+    }
+}
+
+Describe 'Get-ReviewCostRollup - CM4 regression: block-scalar-embedded judge-rulings head must not be treated as real (judge-sustained, PR #833 review)' {
+    It 'does not fabricate a defense-kill contribution from a judge-rulings head embedded inside another marker''s block-scalar content' {
+        $tuple = @{ Number = 950; Surface = 'pr'; Bodies = @($script:CostBlockScalarEmbeddedJudgeRulingsDecoyBody); CreatedAtValues = @('2026-01-01T00:00:00Z') }
+        $result = Get-ReviewCostRollup -Tuples @($tuple) -Source 'graphql' -Truncated $false -ValuePresentPrNumbers @(950)
+
+        $result.CodeReview.DefenseKillRate.N | Should -Be 0
+        $result.CodeReview.DefenseKillRate.Numerator | Should -Be 0
+    }
+}
+
 Describe 'Get-ReviewCostRollup - non-canonical judge-rulings vocabulary (M7 could-not-verify)' {
     It 'reports the intake accept|reject vocabulary as could-not-verify for defense-kill, never a silent zero' {
         $tuple = @{ Number = 500; Surface = 'pr'; Bodies = @($script:CostIntakeJudgeRulingsPr500Body); CreatedAtValues = @('2026-01-01T00:00:00Z') }
@@ -566,12 +640,13 @@ Describe 'Format-ReviewCostSection - COST DATA UNAVAILABLE rendering (distinct f
 }
 
 Describe 'Format-ReviewCostSection - forward-gap line' {
-    It 'renders the exact forward-gap line with the rollup ForwardGapCount' {
-        $rollup = Get-ReviewCostRollup -Tuples @() -Source 'timeout' -Truncated $false -ValuePresentPrNumbers @(1, 2, 3)
+    It 'renders the exact forward-gap line with the rollup ForwardGapCount when the fetch succeeded' {
+        $tuple = @{ Number = 100; Surface = 'pr'; Bodies = @($script:CostReviewDispositionsPr100Body); CreatedAtValues = @('2026-01-01T00:00:00Z') }
+        $rollup = Get-ReviewCostRollup -Tuples @($tuple) -Source 'graphql' -Truncated $false -ValuePresentPrNumbers @(100, 999)
         $reportText = (Format-ReviewCostSection -Rollup $rollup) -join "`n"
 
-        $reportText.Contains('PRs with value data but no cost marker: 3') | Should -BeTrue -Because (
-            "all 3 value-present PRs have no cost marker when the fetch fails entirely.`nActual report:`n$reportText"
+        $reportText.Contains('PRs with value data but no cost marker: 1') | Should -BeTrue -Because (
+            "PR 999 has value data but no cost marker present in this corpus.`nActual report:`n$reportText"
         )
     }
 
@@ -581,6 +656,40 @@ Describe 'Format-ReviewCostSection - forward-gap line' {
         $reportText = (Format-ReviewCostSection -Rollup $rollup) -join "`n"
 
         $reportText.Contains('PRs with value data but no cost marker: 0') | Should -BeTrue -Because (
+            "Actual report:`n$reportText"
+        )
+    }
+
+    It 'renders COST DATA UNAVAILABLE for the forward-gap line, never a confident numeric count, when the corpus fetch failed (CM5 regression, judge-sustained PR #833 review)' {
+        $rollup = Get-ReviewCostRollup -Tuples @() -Source 'timeout' -Truncated $false -ValuePresentPrNumbers @(1, 2, 3)
+        $reportText = (Format-ReviewCostSection -Rollup $rollup) -join "`n"
+
+        $reportText.Contains('PRs with value data but no cost marker: COST DATA UNAVAILABLE (fetch timeout)') | Should -BeTrue -Because (
+            "the forward-gap line must render the same honest fetch-failure state as the rate lines, never a confident count derived from an unfetched population.`nActual report:`n$reportText"
+        )
+        $reportText.Contains('PRs with value data but no cost marker: 3') | Should -BeFalse -Because (
+            "a fetch failure (Source=timeout) must never render a confident-looking numeric forward-gap count.`nActual report:`n$reportText"
+        )
+    }
+}
+
+Describe 'Format-ReviewCostSection - Truncated flag caveat rendering (CM6 regression, judge-sustained PR #833 review)' {
+    It 'renders an explicit truncation caveat when Rollup.Truncated is true' {
+        $tuple = @{ Number = 100; Surface = 'pr'; Bodies = @($script:CostReviewDispositionsPr100Body); CreatedAtValues = @('2026-01-01T00:00:00Z') }
+        $rollup = Get-ReviewCostRollup -Tuples @($tuple) -Source 'graphql' -Truncated $true -ValuePresentPrNumbers @(100)
+        $reportText = (Format-ReviewCostSection -Rollup $rollup) -join "`n"
+
+        $reportText.Contains('Truncated') | Should -BeTrue -Because (
+            "AC4 requires an explicit truncation caveat inside the cost section when Rollup.Truncated is true.`nActual report:`n$reportText"
+        )
+    }
+
+    It 'does not render a truncation caveat when Rollup.Truncated is false' {
+        $tuple = @{ Number = 100; Surface = 'pr'; Bodies = @($script:CostReviewDispositionsPr100Body); CreatedAtValues = @('2026-01-01T00:00:00Z') }
+        $rollup = Get-ReviewCostRollup -Tuples @($tuple) -Source 'graphql' -Truncated $false -ValuePresentPrNumbers @(100)
+        $reportText = (Format-ReviewCostSection -Rollup $rollup) -join "`n"
+
+        $reportText.Contains('Truncated') | Should -BeFalse -Because (
             "Actual report:`n$reportText"
         )
     }
