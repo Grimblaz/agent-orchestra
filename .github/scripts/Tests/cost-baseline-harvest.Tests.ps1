@@ -1280,6 +1280,44 @@ Describe 'Invoke-CostAttributionRepair (issue #825 s3)' {
         $script:UpsertCalled | Should -Be $false
     }
 
+    It 'refuses to write (no empty-splice data loss) and signals budget-exhaustion when the re-walk finds events but composes an empty cost section (issue #825 CE Gate regression pin)' {
+        # Data-loss reproduction: Invoke-CostSessionRender's step-6g budget-exhaustion
+        # edge returns CostEventsCount > 0 but CostSection = '' when the render budget
+        # is spent before the section is composed. The pre-fix caller guard gated only
+        # on CostEventsCount, so the empty section was spliced over the persisted block
+        # by Merge-CostBaselineHarvestSection (a pure substring splice) — DELETING the
+        # Cost Pattern section from real merged PRs #814/#815. This pins the refusal.
+        $pr = 814
+        $originalBody = New-HarvestCompositeCommentBody -Pr $pr -PortReportsMarker '### Port Reports (must survive)' -CostSection $script:PreV4DegradedCostSection
+
+        function global:Get-CostTranscriptSlug { param($CwdPath) return 'test-slug' }
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match "pr view $pr --json state,headRefName,body") {
+                return '{"state":"MERGED","headRefName":"feature/issue-814-real-branch","body":"Fixes #814"}'
+            }
+            if ($joined -match "pr view $pr --json comments") {
+                return (@{ comments = @(@{ body = $originalBody; authorAssociation = 'OWNER' }) } | ConvertTo-Json -Depth 6 -Compress)
+            }
+            return ''
+        }
+        function global:Invoke-CostSessionRender {
+            param($Pr, $Branch, $Slug, $ParentCwd, $RepoRoot, $PrBody, [switch]$AdmitCorroboratedFallback, $CorroborationWindowStart, $CorroborationWindowEnd)
+            return @{ CostSection = ''; CostEventsCount = 5 }
+        }
+        $script:UpsertCalled = $false
+        function global:Find-OrUpsertComment { $script:UpsertCalled = $true; return $null }
+
+        $result = Invoke-CostAttributionRepair -Pr $pr -ParentCwd 'C:\fake\cwd' -RepoRoot 'C:\fake\repo'
+
+        $script:UpsertCalled | Should -Be $false
+        $result.Upserted | Should -Be $false
+        $result.Signal | Should -Match 'exhausted its render budget'
+        $result.Signal | Should -Not -Match 'repaired'
+    }
+
     It 'skips the write and signals a concurrent-change race when the section changed since the earlier read' {
         $pr = 819
         $originalBody = New-HarvestCompositeCommentBody -Pr $pr -CostSection $script:PreV4DegradedCostSection

@@ -984,6 +984,21 @@ function Invoke-CostAttributionRepair {
             return $result
         }
 
+        # Data-loss guard (issue #825 CE Gate): Invoke-CostSessionRender's step-6g
+        # budget-exhaustion edge (cost-session-render.ps1 line ~479) can return
+        # CostEventsCount > 0 but an empty CostSection when the render budget runs out
+        # before the section is composed. Splicing that empty replacement over the
+        # matched block below would DELETE the persisted Cost Pattern section, because
+        # Merge-CostBaselineHarvestSection is a pure substring splice. Kept DISTINCT
+        # from the events<=0 "no matching transcripts" signal above: here the machine
+        # DID hold activity, so the honest, actionable signal is to enlarge the budget
+        # (FRAME_CREDIT_LEDGER_TEST_COST_BUDGET_SECONDS) and retry — never a silent
+        # write, never a false "repaired".
+        if ([string]::IsNullOrWhiteSpace($reWalkCostSection)) {
+            $result.Signal = "repair found activity for #$Pr but the re-walk exhausted its render budget before composing the cost section; existing block left intact — retry with a larger cost budget"
+            return $result
+        }
+
         # 4. Populated-beats-empty-unknown: upsert only when the re-walk found activity.
         $newBody = script:Merge-CostBaselineHarvestSection -Body $compositeBody -SectionMatch $sectionMatch -Replacement $reWalkCostSection.TrimEnd()
 

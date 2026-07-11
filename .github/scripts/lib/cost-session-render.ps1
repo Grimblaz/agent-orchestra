@@ -164,6 +164,16 @@ function Invoke-CostSessionRender {
     $degradedMarker = "<!-- cost-pattern-data-degraded-$Pr -->"
 
     try {
+        # Env override for the cost render budget (issue #825 CE Gate): on a
+        # large-profile machine (large ~/.claude/projects) the walk can legitimately
+        # exceed the 19s default before step-6g composes the section, so the section
+        # can never be rendered without a bigger budget. Resolved INSIDE this try so an
+        # unreachable FCL helper degrades to the 19s default via the outer fail-open
+        # catch (preserving the #824 dependency-chain contract) instead of throwing.
+        # Reuses Get-FCLCostWalkerTimeoutSeconds' exact shape, matching the walker-timeout
+        # overrides below: env present + valid positive int -> use it; else the default.
+        $costBudgetSeconds = script:Get-FCLCostWalkerTimeoutSeconds -EnvironmentVariableName 'FRAME_CREDIT_LEDGER_TEST_COST_BUDGET_SECONDS' -DefaultSeconds $costBudgetSeconds
+
         # 6a. Walkers
         $costEvents = @()
         $claudeWalk = $null
