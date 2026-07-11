@@ -543,8 +543,8 @@ function Get-CostWalkerCurrentSessionId {
         Real Claude Code transcript JSONL lines carry no embedded session-identity
         field (Invoke-CostTranscriptWalk's own events are plain hashtables filtered
         purely by type/cwd/gitBranch — see its docstring). The session identity is
-        instead the JSONL file's own name on disk: per
-        Documents/Design/peer-to-peer-dispatch-research.md's
+        instead the JSONL file's own name on disk: per the
+        Documents/Design/peer-to-peer-dispatch-research.md design doc's
         {slugDir}/{sessionId}/... path convention, a transcript file's BaseName
         (filename without the .jsonl extension) IS the session's UUID.
 

@@ -122,7 +122,7 @@ function Invoke-CostSessionRender {
     # names are case-insensitive; pre-declaring a local (even to $null) before
     # its real assignment CAN shadow a same-named OUTER/closure variable that
     # a later-called (possibly test-mocked) function reads — this is not
-    # theoretical: the existing test suite (cost-integration.Tests.ps1's
+    # theoretical: the existing test suite (the cost-integration.Tests.ps1 file's
     # "Baseline eligibility caller wiring" context) mocks Get-SessionCompleteness
     # as a closure that reads a bare `$Completeness` scriptblock parameter by
     # name; PowerShell variable lookup is case-insensitive, so pre-declaring
