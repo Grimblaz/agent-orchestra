@@ -257,6 +257,36 @@ function script:New-CostRateSubSection {
     }
 }
 
+function script:New-DefenseKillRateSubSection {
+    <#
+    .SYNOPSIS
+        Aggregates a defense-kill-rate sub-section from a list of judge-rulings
+        contributions (issue #768 s4). Shared by the code-review and
+        plan-stress-test defense-kill rates — both consume the SAME
+        contribution shape from Get-ReviewCostRollup's judge-rulings branch
+        (SustainedCount, DefenseSustainedCount, ParseStatus,
+        HasDefenseConcept), just routed to a different STAGE bucket by
+        (Surface, head) dispatch (M1).
+    .PARAMETER Contribs
+        List of contribution objects with SustainedCount,
+        DefenseSustainedCount, ParseStatus, HasDefenseConcept.
+    .OUTPUTS
+        [PSCustomObject] a New-CostRateSubSection result: N is the canonical
+        (ParseStatus 'ok' AND HasDefenseConcept) sustained + defense-sustained
+        total; Numerator is the canonical defense-sustained total;
+        CouldNotVerifyCount is the count of non-canonical-or-failed
+        contributions (M7).
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Contribs
+    )
+    $canonical = @($Contribs | Where-Object { $_.ParseStatus -eq 'ok' -and $_.HasDefenseConcept })
+    $nonCanonicalOrFailed = @($Contribs | Where-Object { -not ($_.ParseStatus -eq 'ok' -and $_.HasDefenseConcept) })
+    $n = [int](($canonical | ForEach-Object { $_.SustainedCount + $_.DefenseSustainedCount } | Measure-Object -Sum).Sum)
+    $numerator = [int](($canonical | ForEach-Object { $_.DefenseSustainedCount } | Measure-Object -Sum).Sum)
+    return New-CostRateSubSection -Numerator $numerator -N $n -CouldNotVerifyCount $nonCanonicalOrFailed.Count
+}
+
 #endregion
 
 #region Get-ReviewCostRollup
@@ -501,18 +531,10 @@ function Get-ReviewCostRollup {
     }
 
     # code-review: defense-kill rate (from Surface='pr' judge-rulings bodies)
-    $codeReviewCanonical = @($codeReviewDefenseKillContribs | Where-Object { $_.ParseStatus -eq 'ok' -and $_.HasDefenseConcept })
-    $codeReviewNonCanonicalOrFailed = @($codeReviewDefenseKillContribs | Where-Object { -not ($_.ParseStatus -eq 'ok' -and $_.HasDefenseConcept) })
-    $codeReviewDefenseN = [int](($codeReviewCanonical | ForEach-Object { $_.SustainedCount + $_.DefenseSustainedCount } | Measure-Object -Sum).Sum)
-    $codeReviewDefenseNumerator = [int](($codeReviewCanonical | ForEach-Object { $_.DefenseSustainedCount } | Measure-Object -Sum).Sum)
-    $codeReviewDefenseKillRate = New-CostRateSubSection -Numerator $codeReviewDefenseNumerator -N $codeReviewDefenseN -CouldNotVerifyCount $codeReviewNonCanonicalOrFailed.Count
+    $codeReviewDefenseKillRate = New-DefenseKillRateSubSection -Contribs $codeReviewDefenseKillContribs
 
     # plan-stress-test: defense-kill rate (from Surface='issue' judge-rulings bodies)
-    $planCanonical = @($planStressTestDefenseKillContribs | Where-Object { $_.ParseStatus -eq 'ok' -and $_.HasDefenseConcept })
-    $planNonCanonicalOrFailed = @($planStressTestDefenseKillContribs | Where-Object { -not ($_.ParseStatus -eq 'ok' -and $_.HasDefenseConcept) })
-    $planDefenseN = [int](($planCanonical | ForEach-Object { $_.SustainedCount + $_.DefenseSustainedCount } | Measure-Object -Sum).Sum)
-    $planDefenseNumerator = [int](($planCanonical | ForEach-Object { $_.DefenseSustainedCount } | Measure-Object -Sum).Sum)
-    $planStressTestDefenseKillRate = New-CostRateSubSection -Numerator $planDefenseNumerator -N $planDefenseN -CouldNotVerifyCount $planNonCanonicalOrFailed.Count
+    $planStressTestDefenseKillRate = New-DefenseKillRateSubSection -Contribs $planStressTestDefenseKillContribs
 
     # design-challenge: dismiss-rate (over dispositioned findings)
     $designOk = @($designChallengeContribs | Where-Object { $_.ParseStatus -eq 'ok' })
