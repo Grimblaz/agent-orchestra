@@ -2,6 +2,12 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.3.10] — 2026-07-11
+
+### Added
+
+- Add per-stage review-cost term (dismiss-rate, defense-kill rate, per-reviewer-source table) to the phase-containment ledger; schema v3 adds optional reviewer_source (#768).
+
 ## [3.3.9] — 2026-07-10
 
 ### Added

@@ -66,6 +66,153 @@ $script:JudgeRulingsVocabGatePattern = '(?m)(?:^\s*(?:-\s+)?|[{,]\s*)(dispositio
 
 #endregion
 
+#region Get-BlockScalarSpans / Test-IndexInBlockScalarSpan (private)
+
+function script:Get-BlockScalarSpans {
+    <#
+    .SYNOPSIS
+        Finds every YAML block-scalar (`key: |` / `key: >`) CONTENT span in a
+        text, so callers can exclude structural-looking substrings that fall
+        inside block-scalar string content from being treated as real YAML
+        structure (CM1/CM4 fix, judge-sustained PR #833 review).
+    .DESCRIPTION
+        Hand-rolled scan only — no ConvertFrom-Yaml / powershell-yaml
+        (file-level SECURITY invariant at the top of this file).
+
+        A block-scalar key line is any line matching `key: |` or `key: >`
+        (optionally with a chomping indicator +/- and/or an explicit
+        indentation-indicator digit), anchored at end-of-line. Every
+        subsequent line that is either blank or indented strictly MORE than
+        the key line is part of that block scalar's content; the first
+        non-blank line indented at or less than the key line's own
+        indentation ends the span (or end-of-text, if none).
+
+        Before this fix, entry-boundary detection (Get-ReviewDispositionsTallyInternal)
+        and judge-rulings head detection (Get-RealJudgeRulingsHeadMatches)
+        both scanned the raw/region text with no awareness of block-scalar
+        boundaries, so a `disposition_rationale: |` block scalar's indented
+        CONTENT could contain a line that looks exactly like real YAML
+        structure (a `- finding_id:` entry-boundary key, or a
+        `<!-- judge-rulings pr=N -->` head) and be mistaken for the real
+        thing. Callers now compute this text's block-scalar spans once and
+        exclude any structural match whose start index falls inside one.
+    .PARAMETER Text
+        The text to scan (a whole body or an already-isolated region).
+    .OUTPUTS
+        Array of [PSCustomObject]@{ Start; End } character-offset spans
+        (End exclusive), covering only the block-scalar's CONTENT lines (not
+        the `key: |`/`key: >` line itself). Empty array when none found.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Text
+    )
+    $spans = [System.Collections.Generic.List[PSCustomObject]]::new()
+    if ([string]::IsNullOrEmpty($Text)) {
+        return , $spans.ToArray()
+    }
+
+    $keyLinePattern = '(?m)^([ \t]*)\S[^\r\n]*:[ \t]*[|>][+-]?\d?[ \t]*\r?$'
+    $keyLineMatches = [regex]::Matches($Text, $keyLinePattern)
+    foreach ($keyMatch in $keyLineMatches) {
+        $keyIndent = $keyMatch.Groups[1].Value.Length
+        $keyLineEnd = $Text.IndexOf("`n", $keyMatch.Index, [System.StringComparison]::Ordinal)
+        if ($keyLineEnd -lt 0) {
+            # The key line is the last line in the text; no content follows.
+            continue
+        }
+        $contentStart = $keyLineEnd + 1
+        $pos = $contentStart
+        $contentEnd = $Text.Length
+        while ($pos -le $Text.Length) {
+            $nextNewline = $Text.IndexOf("`n", $pos, [System.StringComparison]::Ordinal)
+            $lineText = if ($nextNewline -ge 0) { $Text.Substring($pos, $nextNewline - $pos) } else { $Text.Substring($pos) }
+            if ($lineText.Trim().Length -eq 0) {
+                # Blank line: still part of the block scalar.
+                if ($nextNewline -lt 0) { $contentEnd = $Text.Length; break }
+                $pos = $nextNewline + 1
+                continue
+            }
+            $lineIndent = [regex]::Match($lineText, '^[ \t]*').Value.Length
+            if ($lineIndent -le $keyIndent) {
+                $contentEnd = $pos
+                break
+            }
+            if ($nextNewline -lt 0) { $contentEnd = $Text.Length; break }
+            $pos = $nextNewline + 1
+        }
+        if ($contentEnd -gt $contentStart) {
+            $spans.Add([PSCustomObject]@{ Start = $contentStart; End = $contentEnd })
+        }
+    }
+    return , $spans.ToArray()
+}
+
+function script:Test-IndexInBlockScalarSpan {
+    <#
+    .SYNOPSIS
+        Reports whether a character offset falls inside any of the supplied
+        block-scalar spans (CM1/CM4 fix, judge-sustained PR #833 review).
+    .PARAMETER Index
+        The character offset to test.
+    .PARAMETER Spans
+        The Get-BlockScalarSpans result to test against.
+    .OUTPUTS
+        [bool]
+    #>
+    param(
+        [Parameter(Mandatory)][int]$Index,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Spans
+    )
+    foreach ($span in $Spans) {
+        if ($Index -ge $span.Start -and $Index -lt $span.End) {
+            return $true
+        }
+    }
+    return $false
+}
+
+#endregion
+
+#region ConvertFrom-YamlQuotedScalar (private)
+
+function script:ConvertFrom-YamlQuotedScalar {
+    <#
+    .SYNOPSIS
+        Strips a single layer of symmetric YAML scalar quoting (single OR
+        double quotes) from an extracted field value (CM7 fix, judge-sustained
+        PR #833 review).
+    .DESCRIPTION
+        Before this fix, extraction sites trimmed only double quotes
+        (`.Trim('"')`), so a single-quoted value (valid YAML, e.g.
+        `reviewer_source: 'copilot'`) kept its literal quote characters all
+        the way through comparison/grouping — silently breaking an `-eq`
+        stage-filter comparison (indistinguishable from an intentional
+        exclusion) or fragmenting a per-source group into a phantom distinct
+        row. Strips one matching leading/trailing quote pair (single or
+        double) only when BOTH ends carry the SAME quote character; an
+        unquoted or asymmetric value passes through unchanged.
+    .PARAMETER Value
+        The raw extracted value (already whitespace-trimmed by the caller is
+        not required; this function trims internally).
+    .OUTPUTS
+        [string]
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Value
+    )
+    $trimmed = $Value.Trim()
+    if ($trimmed.Length -ge 2) {
+        $first = $trimmed[0]
+        $last = $trimmed[$trimmed.Length - 1]
+        if (($first -eq '"' -or $first -eq "'") -and $first -eq $last) {
+            return $trimmed.Substring(1, $trimmed.Length - 2)
+        }
+    }
+    return $trimmed
+}
+
+#endregion
+
 #region Get-RealJudgeRulingsHeadMatches (private)
 
 function script:Get-RealJudgeRulingsHeadMatches {
@@ -97,8 +244,18 @@ function script:Get-RealJudgeRulingsHeadMatches {
     )
 
     $allHeadMatches = [regex]::Matches($Body, $script:JudgeRulingsHeadPattern)
+    # CM4 fix (judge-sustained PR #833 review): a judge-rulings head embedded
+    # inside another marker's `disposition_rationale: |` block-scalar CONTENT
+    # is string data, not a real structural head — exclude any candidate
+    # whose match start falls inside a block-scalar span before applying the
+    # vocab gate, so it can never be mistaken for (and fabricate a
+    # contribution from) a genuine head.
+    $blockScalarSpans = Get-BlockScalarSpans -Text $Body
     $realHeadMatches = [System.Collections.Generic.List[System.Text.RegularExpressions.Match]]::new()
     foreach ($candidateHead in $allHeadMatches) {
+        if (Test-IndexInBlockScalarSpan -Index $candidateHead.Index -Spans $blockScalarSpans) {
+            continue
+        }
         $windowEnd = [Math]::Min($Body.Length, $candidateHead.Index + $candidateHead.Length + $script:JudgeRulingsLookaheadWindow)
         $window = $Body.Substring($candidateHead.Index, $windowEnd - $candidateHead.Index)
         if ([regex]::IsMatch($window, $script:JudgeRulingsVocabGatePattern)) {
@@ -328,18 +485,368 @@ function Get-SustainedFindingCount {
     }
 
     if ($Surface -eq 'design-challenge') {
-        return Get-DesignChallengeSustainedCountInternal -Body $Body
+        # issue #768 s3 (AC8): Get-DesignChallengeSustainedCountInternal now
+        # additionally returns DefenseSustainedCount (consumed by the new
+        # Get-DispositionTally, below). Re-project to the original two-field
+        # shape here so this function's public output stays byte-identical.
+        $internalResult = Get-DesignChallengeSustainedCountInternal -Body $Body
+        return [PSCustomObject]@{ SustainedCount = $internalResult.SustainedCount; ParseStatus = $internalResult.ParseStatus }
     }
 
     # code-review and plan-stress-test share the judge-rulings marker shape.
-    return Get-JudgeRulingsSustainedCountInternal -Body $Body
+    # Same re-projection as above (issue #768 s3, AC8): the internal now also
+    # returns DefenseSustainedCount, but this function's public output must
+    # stay byte-identical to its pre-#768 shape.
+    $internalResult = Get-JudgeRulingsSustainedCountInternal -Body $Body
+    return [PSCustomObject]@{ SustainedCount = $internalResult.SustainedCount; ParseStatus = $internalResult.ParseStatus }
 }
 
 #endregion
 
-#region Get-JudgeRulingsSustainedCountInternal (private)
+#region Get-DispositionTally
 
-function script:Get-JudgeRulingsSustainedCountInternal {
+function Get-DispositionTally {
+    <#
+    .SYNOPSIS
+        Per-entry segmented disposition tally for the phase-containment
+        review-cost accounting (issue #768 s3). Sibling to
+        Get-SustainedFindingCount; does not change that function's public
+        output (AC8).
+    .DESCRIPTION
+        Unlike Get-SustainedFindingCount (which isolates ONE marker region and
+        returns a single aggregate SustainedCount), this function SEGMENTS the
+        marker payload into its individual entries first — splitting on
+        entry-boundary dash-item starts (`- stable_finding_key:` for the
+        code-review review-dispositions marker; `- finding_id:` for the
+        judge-rulings / finding_dispositions markers) — and reads each entry's
+        own keys only within that entry's own bounds. This is what makes a
+        JOINT projection possible (e.g. code-review's per-reviewer-source x
+        disposition table, AC2): a flat, region-wide regex count can only ever
+        produce marginal counts, since it has no way to associate a
+        `disposition:` value with the `reviewer_source:`/`stage:` that came
+        from the SAME entry. Per-entry segmentation also closes two decoy
+        vectors a flat count cannot: a `disposition_rationale` block-scalar
+        value that quotes another finding's `disposition: dismiss` in prose,
+        and an injected-newline field value that could otherwise be mistaken
+        for a second entry.
+
+        -Surface code-review parses the `<!-- review-dispositions-{PR} -->`
+        marker (skills/solution-authoring/schemas/review-dispositions.schema.json)
+        — a DIFFERENT marker than the PR-level judge-rulings verdict
+        Get-SustainedFindingCount's code-review branch reads; both markers can
+        legitimately co-exist on the same PR (the judge-rulings marker is the
+        code-review pipeline's own sustained/defense-sustained verdict; the
+        review-dispositions marker is the per-finding engineer-disposition
+        ledger this function accounts). Returns a joint per-entry projection —
+        one tuple per entry, `{StableFindingKey; Disposition; Stage;
+        ReviewerSource}` — so callers can build both the AC1 per-stage
+        dismiss/defer marginal and the AC2 per-source x disposition joint
+        table from the same data. Entries are filtered to `stage ==
+        'code-review'` (v1/v2 entries, which predate or omit the `stage`
+        field, default to `code-review`); a `stage: ce` entry is excluded.
+
+        -Surface design-challenge / plan-stress-test extend the two existing
+        script-scoped internals (additive-return only; see
+        Get-JudgeRulingsSustainedCountInternal and
+        Get-DesignChallengeSustainedCountInternal above) and return the
+        `(SustainedCount, DefenseSustainedCount)` pair those internals now
+        compute. design-challenge's `finding_dispositions:` marker has no
+        defense-sustained vocabulary at all (its `disposition` enum is
+        incorporate|dismiss|escalate) — DefenseSustainedCount is always 0
+        there.
+
+        Fail-loud (DD3): any unparseable, ambiguous, or unknown-vocabulary
+        body, or an unrecognized/absent marker head, is a could-not-verify
+        condition, never treated as zero.
+    .PARAMETER Surface
+        One of: code-review, design-challenge, plan-stress-test
+    .PARAMETER Body
+        The raw comment body text to scan.
+    .OUTPUTS
+        [PSCustomObject]. For -Surface code-review:
+          Surface     [string] — 'code-review'
+          Entries     [PSCustomObject[]] — one per in-scope entry, each with
+                      StableFindingKey, Disposition, Stage, ReviewerSource
+          ParseStatus [string] — 'ok' or 'could-not-verify'
+        For -Surface plan-stress-test:
+          Surface               [string]
+          SustainedCount        [int]
+          DefenseSustainedCount [int]
+          ParseStatus           [string] — 'ok' or 'could-not-verify'
+        For -Surface design-challenge (issue #768 s4 additive field):
+          Surface               [string]
+          SustainedCount        [int]
+          DefenseSustainedCount [int] — always 0 (no defense-sustained concept)
+          DismissedCount        [int] — complementary dismiss count, so
+                                 SustainedCount + DismissedCount is the total
+                                 dispositioned-finding denominator
+          ParseStatus           [string] — 'ok' or 'could-not-verify'
+    #>
+    param(
+        [Parameter(Mandatory)][ValidateSet('code-review', 'design-challenge', 'plan-stress-test')][string]$Surface,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Body
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Body)) {
+        if ($Surface -eq 'code-review') {
+            return [PSCustomObject]@{ Surface = $Surface; Entries = @(); ParseStatus = 'could-not-verify' }
+        }
+        if ($Surface -eq 'design-challenge') {
+            # Additive (issue #768 s4): DismissedCount, see the design-challenge
+            # branch below and Get-DesignChallengeSustainedCountInternal.
+            return [PSCustomObject]@{ Surface = $Surface; SustainedCount = 0; DefenseSustainedCount = 0; DismissedCount = 0; ParseStatus = 'could-not-verify' }
+        }
+        return [PSCustomObject]@{ Surface = $Surface; SustainedCount = 0; DefenseSustainedCount = 0; ParseStatus = 'could-not-verify' }
+    }
+
+    if ($Surface -eq 'code-review') {
+        $inner = Get-ReviewDispositionsTallyInternal -Body $Body
+        # AC7 stage filter: only entries whose stage is 'code-review' are in
+        # scope for this surface (v1/v2 entries, which predate or omit the
+        # stage field, default to 'code-review' inside the internal parser
+        # above and so pass this filter; a 'stage: ce' entry is excluded).
+        $filteredEntries = @( if ($inner.ParseStatus -eq 'ok') { $inner.Entries | Where-Object { $_.Stage -eq 'code-review' } } )
+        # CM12 defensive fail-loud (judge-sustained PR #833 review): an entry
+        # with an empty/missing StableFindingKey on the code-review surface
+        # must never silently participate with key='' — that is either a
+        # malformed/legacy payload or a parser defect (e.g. a phantom entry
+        # produced by a boundary-key collision). Route the whole surface
+        # result to could-not-verify instead, per DD3.
+        if ($inner.ParseStatus -eq 'ok') {
+            $hasEmptyKeyEntry = @($filteredEntries | Where-Object { [string]::IsNullOrWhiteSpace($_.StableFindingKey) }).Count -gt 0
+            if ($hasEmptyKeyEntry) {
+                return [PSCustomObject]@{ Surface = $Surface; Entries = @(); ParseStatus = 'could-not-verify' }
+            }
+        }
+        return [PSCustomObject]@{ Surface = $Surface; Entries = $filteredEntries; ParseStatus = $inner.ParseStatus }
+    }
+
+    if ($Surface -eq 'design-challenge') {
+        $inner = Get-DesignChallengeSustainedCountInternal -Body $Body
+        return [PSCustomObject]@{
+            Surface               = $Surface
+            SustainedCount        = $inner.SustainedCount
+            DefenseSustainedCount = $inner.DefenseSustainedCount
+            DismissedCount        = $inner.DismissedCount
+            ParseStatus           = $inner.ParseStatus
+        }
+    }
+
+    # plan-stress-test
+    $inner = Get-JudgeRulingsSustainedCountInternal -Body $Body
+    return [PSCustomObject]@{
+        Surface               = $Surface
+        SustainedCount        = $inner.SustainedCount
+        DefenseSustainedCount = $inner.DefenseSustainedCount
+        ParseStatus           = $inner.ParseStatus
+    }
+}
+
+#endregion
+
+#region Get-ReviewDispositionsTallyInternal (private)
+
+function script:Get-ReviewDispositionsTallyInternal {
+    <#
+    .SYNOPSIS
+        Per-entry segmented parser for the `<!-- review-dispositions-{PR} -->`
+        marker (issue #768 s3). Private to Get-DispositionTally's code-review
+        branch.
+    .DESCRIPTION
+        Head detection is vocab-gated (same convention as
+        Get-RealJudgeRulingsHeadMatches above): the literal
+        `<!-- review-dispositions-{N} -->` head substring alone is not
+        sufficient — a bounded lookahead window after it must also contain
+        real field vocabulary (`entries:`/`schema_version:`/
+        `stable_finding_key:`), so a maintainer's prose sentence merely
+        describing the marker convention is not mistaken for a real block.
+
+        The marker's YAML payload lives inside a fenced ```yaml ... ``` code
+        block immediately following the head (writer contract:
+        skills/review-judgment/SKILL.md). Once that fenced region is
+        isolated, entries are segmented on `- stable_finding_key:` /
+        `- finding_id:` dash-item boundaries — never on any other key — so an
+        injected-newline field value that happens to contain a bare-looking
+        key line on its own line cannot be mistaken for a new entry.
+
+        Within each entry's own bounds, `disposition:` and `reviewer_source:`
+        are read via the FIRST key-anchored match only (same $keyAnchor
+        convention as the judge-rulings/finding_dispositions detectors — real
+        line-start, dash-item, or flow-mapping key position). Taking only the
+        first match closes the decoy vector where a later
+        `disposition_rationale` block-scalar value, or an injected-newline
+        `reviewer_source` value, happens to contain a second `disposition:`-
+        or `reviewer_source:`-shaped line further down the SAME entry: the
+        real field is always written before those free-text fields per the
+        schema/writer field order, so it always wins the first-match race.
+        `reviewer_source` is matched on its own distinct key name, so it can
+        never be confused with the unrelated nested `ac_cross_check.source`
+        field (different literal key, not merely different position).
+
+        Hand-rolled line-regex only — no ConvertFrom-Yaml / powershell-yaml
+        (file-level SECURITY invariant at the top of this file).
+
+        Fail-loud (DD3): no recognizable marker head, an unparseable/unclosed
+        fenced region, zero segmentable entries, or an entry whose
+        `disposition:` value is missing/unrecognized all return
+        ParseStatus 'could-not-verify', never a silently empty/zero result.
+    .PARAMETER Body
+        The raw comment body text to scan.
+    .OUTPUTS
+        [PSCustomObject] with:
+          Entries     [PSCustomObject[]] — one per entry (before the stage
+                      filter Get-DispositionTally applies), each with
+                      StableFindingKey, Disposition, Stage, ReviewerSource
+          ParseStatus [string] — 'ok' or 'could-not-verify'
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Body
+    )
+
+    # Same key-anchor convention as Get-JudgeRulingsSustainedCountInternal's
+    # and Get-DesignChallengeSustainedCountInternal's $keyAnchor (a real YAML
+    # key position: true line-start, a `- ` dash-space list-item prefix, or
+    # flow-mapping `{`/`,` position) — a fifth literal copy, tracked by the
+    # 'Key-anchor pattern' drift-guard meta-test in this file's Tests.
+    $keyAnchor = '(?:^\s*(?:-\s+)?|[{,]\s*)'
+
+    $headPattern = '<!--\s*review-dispositions-\d+\s*-->'
+    $headCandidates = [regex]::Matches($Body, $headPattern)
+    if ($headCandidates.Count -eq 0) {
+        return [PSCustomObject]@{ Entries = @(); ParseStatus = 'could-not-verify' }
+    }
+
+    $lookaheadWindow = 400
+    $realHead = $null
+    foreach ($candidate in $headCandidates) {
+        $windowEnd = [Math]::Min($Body.Length, $candidate.Index + $candidate.Length + $lookaheadWindow)
+        $window = $Body.Substring($candidate.Index, $windowEnd - $candidate.Index)
+        if ([regex]::IsMatch($window, '(?m)^\s*(entries|schema_version|stable_finding_key)\s*:')) {
+            $realHead = $candidate
+            break
+        }
+    }
+    if ($null -eq $realHead) {
+        return [PSCustomObject]@{ Entries = @(); ParseStatus = 'could-not-verify' }
+    }
+
+    $searchFrom = $realHead.Index + $realHead.Length
+    $openFenceIdx = $Body.IndexOf('```', $searchFrom, [System.StringComparison]::Ordinal)
+    if ($openFenceIdx -lt 0) {
+        return [PSCustomObject]@{ Entries = @(); ParseStatus = 'could-not-verify' }
+    }
+    $fenceLineEnd = $Body.IndexOf("`n", $openFenceIdx, [System.StringComparison]::Ordinal)
+    if ($fenceLineEnd -lt 0) {
+        return [PSCustomObject]@{ Entries = @(); ParseStatus = 'could-not-verify' }
+    }
+    $contentStart = $fenceLineEnd + 1
+    $closeFenceIdx = $Body.IndexOf('```', $contentStart, [System.StringComparison]::Ordinal)
+    if ($closeFenceIdx -lt 0) {
+        return [PSCustomObject]@{ Entries = @(); ParseStatus = 'could-not-verify' }
+    }
+    $region = $Body.Substring($contentStart, $closeFenceIdx - $contentStart)
+
+    # Per-entry segmentation: split ONLY on real `- stable_finding_key:` /
+    # `- finding_id:` dash-item starts (entry-boundary markers) — never on
+    # any other key, so an injected-newline field value cannot be mistaken
+    # for a new entry.
+    #
+    # CM1 fix (judge-sustained PR #833 review): this boundary pattern used to
+    # match those literal boundary keys even when they appeared INSIDE a
+    # `disposition_rationale: |` block scalar's indented CONTENT, fabricating
+    # a phantom entry with attacker-controlled disposition/reviewer_source
+    # values. Exclude any boundary match whose start index falls inside a
+    # block-scalar span computed over this already-isolated $region.
+    $entryBoundaryPattern = '(?m)^\s*-\s+(?:stable_finding_key|finding_id)\s*:'
+    $blockScalarSpans = Get-BlockScalarSpans -Text $region
+    $entryStarts = @([regex]::Matches($region, $entryBoundaryPattern) | Where-Object { -not (Test-IndexInBlockScalarSpan -Index $_.Index -Spans $blockScalarSpans) })
+    if ($entryStarts.Count -eq 0) {
+        return [PSCustomObject]@{ Entries = @(); ParseStatus = 'could-not-verify' }
+    }
+
+    $entries = [System.Collections.Generic.List[PSCustomObject]]::new()
+    for ($i = 0; $i -lt $entryStarts.Count; $i++) {
+        $spanStart = $entryStarts[$i].Index
+        $spanEnd = if ($i + 1 -lt $entryStarts.Count) { $entryStarts[$i + 1].Index } else { $region.Length }
+        $entrySpan = $region.Substring($spanStart, $spanEnd - $spanStart)
+
+        $stableKeyMatch = [regex]::Match($entrySpan, "(?m)${keyAnchor}stable_finding_key\s*:\s*(.+)")
+        $stableFindingKey = if ($stableKeyMatch.Success) { ConvertFrom-YamlQuotedScalar -Value $stableKeyMatch.Groups[1].Value } else { $null }
+
+        # First key-anchored match only (see .DESCRIPTION): the real
+        # `disposition:` key is always written before disposition_rationale
+        # per the schema/writer field order, so a block-scalar decoy quoting
+        # a second "disposition: dismiss" later in the same entry can never
+        # win this match.
+        $dispositionMatch = [regex]::Match($entrySpan, "(?m)${keyAnchor}disposition\s*:\s*(incorporate|dismiss|escalate|defer)\b")
+        if (-not $dispositionMatch.Success) {
+            return [PSCustomObject]@{ Entries = @(); ParseStatus = 'could-not-verify' }
+        }
+        $disposition = $dispositionMatch.Groups[1].Value
+
+        $stageMatch = [regex]::Match($entrySpan, "(?m)${keyAnchor}stage\s*:\s*(\S+)")
+        # v1/v2 entries predate or omit the stage field; default to
+        # 'code-review' (issue #768 s3, AC7). CM7 fix (judge-sustained PR #833
+        # review): dequote AFTER stripping a trailing flow-mapping comma, so a
+        # quoted value like `stage: "code-review",` still resolves to the
+        # bare `code-review` the -eq stage filter compares against.
+        $stage = if ($stageMatch.Success) { ConvertFrom-YamlQuotedScalar -Value ($stageMatch.Groups[1].Value.TrimEnd(',')) } else { 'code-review' }
+
+        # reviewer_source is matched on its own distinct literal key name, so
+        # it can never be confused with the nested ac_cross_check.source
+        # field (a different key entirely, not merely a position collision).
+        # CM7 fix (judge-sustained PR #833 review): dequote symmetrically
+        # (single OR double quotes), so a single-quoted value like
+        # `reviewer_source: 'copilot'` groups with its bare equivalent instead
+        # of forming a phantom distinct per-source row.
+        $reviewerSourceMatch = [regex]::Match($entrySpan, "(?m)${keyAnchor}reviewer_source\s*:\s*(.+)")
+        $reviewerSource = if ($reviewerSourceMatch.Success) { ConvertFrom-YamlQuotedScalar -Value $reviewerSourceMatch.Groups[1].Value } else { $null }
+
+        $entries.Add([PSCustomObject]@{
+                StableFindingKey = $stableFindingKey
+                Disposition      = $disposition
+                Stage            = $stage
+                ReviewerSource   = $reviewerSource
+            })
+    }
+
+    return [PSCustomObject]@{ Entries = $entries.ToArray(); ParseStatus = 'ok' }
+}
+
+#endregion
+
+#region Get-JudgeRulingsIsolatedRegion (private)
+
+function script:Get-JudgeRulingsIsolatedRegion {
+    <#
+    .SYNOPSIS
+        Isolates the single real judge-rulings marker region from a body,
+        applying the same duplicate-head guard, region-boundary selection,
+        and false-positive-closer ambiguity detection that
+        Get-JudgeRulingsSustainedCountInternal has always used internally —
+        extracted (CM3 fix, judge-sustained PR #833 review) so other
+        consumers can apply their OWN vocabulary checks to the SAME isolated
+        region instead of re-scanning the raw, unisolated body.
+    .DESCRIPTION
+        CM3 fix: Test-JudgeRulingsHasDefenseSustainedConcept
+        (phase-containment-cost-core.ps1) used to scan the raw whole $Body
+        for its vocabulary-priority check, so a stray line-start token
+        elsewhere in the SAME body (e.g. a `disposition: reject` line quoted
+        in unrelated prose, outside the real judge-rulings region) could
+        misclassify a genuinely canonical judge-rulings block as a
+        non-canonical vocabulary — shunting real sustained/defense-sustained
+        data to could-not-verify instead of the numerator/denominator. This
+        function is the single source of truth for "what text IS the
+        judge-rulings marker region," reused by both the counting logic
+        below and Test-JudgeRulingsHasDefenseSustainedConcept.
+    .PARAMETER Body
+        The raw comment body text to scan.
+    .OUTPUTS
+        [PSCustomObject] with:
+          Region      [string] — the isolated marker content (only
+                      meaningful when ParseStatus is 'ok')
+          ParseStatus [string] — 'ok' or 'could-not-verify'
+    #>
     param(
         [Parameter(Mandatory)][string]$Body
     )
@@ -371,7 +878,7 @@ function script:Get-JudgeRulingsSustainedCountInternal {
     # blocks still correctly fail loud; a bare prose mention no longer does.
     $realHeadMatches = Get-RealJudgeRulingsHeadMatches -Body $Body
     if ($realHeadMatches.Count -ge 2) {
-        return [PSCustomObject]@{ SustainedCount = 0; ParseStatus = 'could-not-verify' }
+        return [PSCustomObject]@{ Region = $null; ParseStatus = 'could-not-verify' }
     }
 
     # GH-3 fix (PR #815 review): region-isolation used to re-run its OWN
@@ -417,7 +924,7 @@ function script:Get-JudgeRulingsSustainedCountInternal {
     }
 
     if ($regionIndex -lt 0) {
-        return [PSCustomObject]@{ SustainedCount = 0; ParseStatus = 'could-not-verify' }
+        return [PSCustomObject]@{ Region = $null; ParseStatus = 'could-not-verify' }
     }
 
     $regionStart = $regionIndex + $regionHeadLength
@@ -439,7 +946,7 @@ function script:Get-JudgeRulingsSustainedCountInternal {
 
     if ($regionEnd -lt 0) {
         # Unclosed marker region — cannot safely isolate content.
-        return [PSCustomObject]@{ SustainedCount = 0; ParseStatus = 'could-not-verify' }
+        return [PSCustomObject]@{ Region = $null; ParseStatus = 'could-not-verify' }
     }
 
     # M8 fix (issue #782 post-review): region-end detection previously
@@ -487,12 +994,29 @@ function script:Get-JudgeRulingsSustainedCountInternal {
         # Test-EmissionMarkerPresent's vocab window and $keyAnchor below —
         # this ambiguity-detector copy must stay in sync with both.
         if ([regex]::IsMatch($between, '(?m)(?:^\s*(?:-\s+)?|[{,]\s*)(disposition|judge_ruling|verdict|finding_key)\s*:')) {
-            return [PSCustomObject]@{ SustainedCount = 0; ParseStatus = 'could-not-verify' }
+            return [PSCustomObject]@{ Region = $null; ParseStatus = 'could-not-verify' }
         }
         $walkPos = $nextCandidateCloser + 3
     }
 
     $region = $Body.Substring($regionStart, $regionEnd - $regionStart)
+    return [PSCustomObject]@{ Region = $region; ParseStatus = 'ok' }
+}
+
+#endregion
+
+#region Get-JudgeRulingsSustainedCountInternal (private)
+
+function script:Get-JudgeRulingsSustainedCountInternal {
+    param(
+        [Parameter(Mandatory)][string]$Body
+    )
+
+    $isolated = Get-JudgeRulingsIsolatedRegion -Body $Body
+    if ($isolated.ParseStatus -ne 'ok') {
+        return [PSCustomObject]@{ SustainedCount = 0; DefenseSustainedCount = 0; ParseStatus = 'could-not-verify' }
+    }
+    $region = $isolated.Region
 
     # required_fixes: is a parallel decoy list present in the intake variant
     # (PR #775). Strip it (and everything after it) before scanning, so its
@@ -540,10 +1064,14 @@ function script:Get-JudgeRulingsSustainedCountInternal {
         # Four-value variant: sustained = every finding whose disposition is not Dismiss.
         $dispositionMatches = [regex]::Matches($region, "(?m)${keyAnchor}disposition\s*:\s*(Fix-now|Fix-in-PR|Defer|Dismiss)\b")
         if ($dispositionMatches.Count -eq 0) {
-            return [PSCustomObject]@{ SustainedCount = 0; ParseStatus = 'could-not-verify' }
+            return [PSCustomObject]@{ SustainedCount = 0; DefenseSustainedCount = 0; ParseStatus = 'could-not-verify' }
         }
         $sustained = @($dispositionMatches | Where-Object { $_.Groups[1].Value -ne 'Dismiss' })
-        return [PSCustomObject]@{ SustainedCount = $sustained.Count; ParseStatus = 'ok' }
+        # Additive (issue #768 s3, AC8): the four-value vocabulary
+        # (Fix-now|Fix-in-PR|Defer|Dismiss) has no defense-sustained concept
+        # at all — DefenseSustainedCount is always 0 here. Get-SustainedFindingCount
+        # re-projects this away so its public output stays byte-identical.
+        return [PSCustomObject]@{ SustainedCount = $sustained.Count; DefenseSustainedCount = 0; ParseStatus = 'ok' }
     }
 
     if ($hasReviewModeIntake -or $hasAcceptReject) {
@@ -551,15 +1079,18 @@ function script:Get-JudgeRulingsSustainedCountInternal {
         # inside the findings: list (region already excludes required_fixes:).
         $findingsMatch = [regex]::Match($region, '(?ms)^findings\s*:\s*$(.*)')
         if (-not $findingsMatch.Success) {
-            return [PSCustomObject]@{ SustainedCount = 0; ParseStatus = 'could-not-verify' }
+            return [PSCustomObject]@{ SustainedCount = 0; DefenseSustainedCount = 0; ParseStatus = 'could-not-verify' }
         }
         $findingsRegion = $findingsMatch.Groups[1].Value
         $dispositionMatches = [regex]::Matches($findingsRegion, "(?m)${keyAnchor}disposition\s*:\s*(accept|reject)\b")
         if ($dispositionMatches.Count -eq 0) {
-            return [PSCustomObject]@{ SustainedCount = 0; ParseStatus = 'could-not-verify' }
+            return [PSCustomObject]@{ SustainedCount = 0; DefenseSustainedCount = 0; ParseStatus = 'could-not-verify' }
         }
         $sustained = @($dispositionMatches | Where-Object { $_.Groups[1].Value -eq 'accept' })
-        return [PSCustomObject]@{ SustainedCount = $sustained.Count; ParseStatus = 'ok' }
+        # Additive (issue #768 s3, AC8): the intake accept/reject vocabulary
+        # has no defense-sustained concept — DefenseSustainedCount is always
+        # 0 here.
+        return [PSCustomObject]@{ SustainedCount = $sustained.Count; DefenseSustainedCount = 0; ParseStatus = 'ok' }
     }
 
     if ($hasJudgeRuling) {
@@ -574,14 +1105,21 @@ function script:Get-JudgeRulingsSustainedCountInternal {
                 $val -ne 'sustained' -and $val -ne 'defense-sustained'
             })
         if ($unrecognized.Count -gt 0) {
-            return [PSCustomObject]@{ SustainedCount = 0; ParseStatus = 'could-not-verify' }
+            return [PSCustomObject]@{ SustainedCount = 0; DefenseSustainedCount = 0; ParseStatus = 'could-not-verify' }
         }
         $sustained = @($rulingMatches | Where-Object { $_.Groups[1].Value.TrimEnd(',') -eq 'sustained' })
-        return [PSCustomObject]@{ SustainedCount = $sustained.Count; ParseStatus = 'ok' }
+        # Additive (issue #768 s3, AC8): DefenseSustainedCount exposes the
+        # judge_ruling: defense-sustained count alongside SustainedCount, for
+        # Get-DispositionTally's judge-rulings-surface consumers (design-
+        # challenge, plan-stress-test). Purely additive —
+        # Get-SustainedFindingCount re-projects this away so its public
+        # {SustainedCount; ParseStatus} shape stays byte-identical.
+        $defenseSustained = @($rulingMatches | Where-Object { $_.Groups[1].Value.TrimEnd(',') -eq 'defense-sustained' })
+        return [PSCustomObject]@{ SustainedCount = $sustained.Count; DefenseSustainedCount = $defenseSustained.Count; ParseStatus = 'ok' }
     }
 
     # Marker present but vocabulary unrecognized.
-    return [PSCustomObject]@{ SustainedCount = 0; ParseStatus = 'could-not-verify' }
+    return [PSCustomObject]@{ SustainedCount = 0; DefenseSustainedCount = 0; ParseStatus = 'could-not-verify' }
 }
 
 #endregion
@@ -595,7 +1133,7 @@ function script:Get-DesignChallengeSustainedCountInternal {
 
     $headMatch = [regex]::Match($Body, '(?m)^finding_dispositions\s*:\s*$')
     if (-not $headMatch.Success) {
-        return [PSCustomObject]@{ SustainedCount = 0; ParseStatus = 'could-not-verify' }
+        return [PSCustomObject]@{ SustainedCount = 0; DefenseSustainedCount = 0; DismissedCount = 0; ParseStatus = 'could-not-verify' }
     }
 
     $regionStart = $headMatch.Index + $headMatch.Length
@@ -618,11 +1156,26 @@ function script:Get-DesignChallengeSustainedCountInternal {
     $keyAnchor = '(?:^\s*(?:-\s+)?|[{,]\s*)'
     $dispositionMatches = [regex]::Matches($region, "(?m)${keyAnchor}disposition\s*:\s*(incorporate|escalate|dismiss)\b")
     if ($dispositionMatches.Count -eq 0) {
-        return [PSCustomObject]@{ SustainedCount = 0; ParseStatus = 'could-not-verify' }
+        return [PSCustomObject]@{ SustainedCount = 0; DefenseSustainedCount = 0; DismissedCount = 0; ParseStatus = 'could-not-verify' }
     }
 
     $sustained = @($dispositionMatches | Where-Object { $_.Groups[1].Value -ne 'dismiss' })
-    return [PSCustomObject]@{ SustainedCount = $sustained.Count; ParseStatus = 'ok' }
+    # Additive (issue #768 s3, AC8): design-challenge's `finding_dispositions:`
+    # marker has no defense-sustained vocabulary at all — its `disposition`
+    # enum is incorporate|dismiss|escalate, with no separate defense pass
+    # concept. DefenseSustainedCount is always 0 here; carried purely for
+    # Get-DispositionTally's uniform (SustainedCount, DefenseSustainedCount)
+    # return shape across its judge-rulings-style surfaces.
+    #
+    # Additive (issue #768 s4): DismissedCount exposes the complementary
+    # dismiss count alongside SustainedCount, so Get-ReviewCostRollup
+    # (phase-containment-cost-core.ps1) can compute the design-challenge
+    # dismiss-rate's "over dispositioned findings" denominator
+    # (SustainedCount + DismissedCount) without re-parsing the marker.
+    # Get-SustainedFindingCount re-projects this away (AC8) so its public
+    # {SustainedCount; ParseStatus} shape stays byte-identical.
+    $dismissedCount = $dispositionMatches.Count - $sustained.Count
+    return [PSCustomObject]@{ SustainedCount = $sustained.Count; DefenseSustainedCount = 0; DismissedCount = $dismissedCount; ParseStatus = 'ok' }
 }
 
 #endregion
