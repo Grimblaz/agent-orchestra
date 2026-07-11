@@ -335,6 +335,65 @@ function script:Get-IdentityMatchedSlugDirs {
     return $matched
 }
 
+function script:Get-CostWalkerCandidateSlugDirs {
+    <#
+    .SYNOPSIS
+        Resolves the candidate slug-directory list shared by Invoke-CostTranscriptWalk
+        and Get-CostWalkerCurrentSessionId (issue #824 refactor pass).
+    .DESCRIPTION
+        Combines D2 identity-matched dirs (script:Get-IdentityMatchedSlugDirs), the
+        worktree-slug glob, and the primary-slug backward-compat fallback into one
+        list, so the two callers can never independently re-derive (and silently
+        diverge on) this resolution.
+
+        RepoRoot falls back to ParentCwd when blank — this preserves
+        Get-CostWalkerCurrentSessionId's pre-refactor behavior for callers that omit
+        RepoRoot, while letting a caller that HAS a distinct RepoRoot (e.g. a
+        worktree checkout) get the same identity resolution
+        Invoke-CostTranscriptWalk itself always used.
+    .OUTPUTS
+        [System.Collections.Generic.List[string]]
+    #>
+    param(
+        [Parameter(Mandatory)][string]$ProjectsRoot,
+        [AllowEmptyString()][string]$RepoRoot = '',
+        [Parameter(Mandatory)][string]$ParentCwd,
+        [AllowEmptyString()][string]$Slug = ''
+    )
+
+    $resolvedRepoRoot = if (-not [string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot } else { $ParentCwd }
+
+    $slugDirs = [System.Collections.Generic.List[string]]::new()
+
+    # D2: discover all slug dirs in ProjectsRoot that belong to the same git repo (identity match).
+    $identityDirs = script:Get-IdentityMatchedSlugDirs -ProjectsRoot $ProjectsRoot -RepoRoot $resolvedRepoRoot
+    foreach ($d in $identityDirs) {
+        $slugDirs.Add($d)
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($Slug)) {
+        # Also include worktree directories for the primary slug (backward compat / graceful
+        # fallback for worktree slugs that may not have first-event cwd pointing to the main
+        # repo root).
+        $worktreeDirs = @(Get-ChildItem -Path $ProjectsRoot -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -like "$Slug--claude-worktrees-*" } |
+            Where-Object { $slugDirs -notcontains $_.FullName })
+        foreach ($wtd in $worktreeDirs) {
+            $slugDirs.Add($wtd.FullName)
+        }
+
+        # Backward compat: include explicit slug dir when identity resolution is unavailable
+        # (e.g., tests without a real git repo). In production, identity matching already
+        # finds this dir; dedup guard prevents double-counting.
+        $primarySlugDir = script:Resolve-CostWalkerPrimarySlugDir -ProjectsRoot $ProjectsRoot -Slug $Slug
+        if ($null -ne $primarySlugDir -and $slugDirs -notcontains $primarySlugDir) {
+            $slugDirs.Add($primarySlugDir)
+        }
+    }
+
+    return $slugDirs
+}
+
 function Invoke-CostTranscriptWalk {
     <#
     .SYNOPSIS
@@ -381,38 +440,10 @@ function Invoke-CostTranscriptWalk {
 
     $included = [System.Collections.Generic.List[object]]::new()
 
-    # Collect all slug directories to search
-    $slugDirs = [System.Collections.Generic.List[string]]::new()
-
-    $resolvedRepoRoot = if (-not [string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot } else { $ParentCwd }
-
-    # D2: discover all slug dirs in ProjectsRoot that belong to the same git repo (identity match).
-    $identityDirs = script:Get-IdentityMatchedSlugDirs -ProjectsRoot $ProjectsRoot -RepoRoot $resolvedRepoRoot
-
-    foreach ($d in $identityDirs) {
-        $slugDirs.Add($d)
-    }
-
-    # Also include worktree directories for the primary slug (backward compat / graceful fallback
-    # for worktree slugs that may not have first-event cwd pointing to the main repo root).
-    if (-not [string]::IsNullOrWhiteSpace($Slug)) {
-        $worktreeDirs = @(Get-ChildItem -Path $ProjectsRoot -Directory -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -like "$Slug--claude-worktrees-*" } |
-            Where-Object { $slugDirs -notcontains $_.FullName })
-        foreach ($wtd in $worktreeDirs) {
-            $slugDirs.Add($wtd.FullName)
-        }
-    }
-
-    # Backward compat: include explicit slug dir when identity resolution is unavailable
-    # (e.g., tests without a real git repo). In production, identity matching already
-    # finds this dir; dedup guard prevents double-counting.
-    if (-not [string]::IsNullOrWhiteSpace($Slug)) {
-        $primarySlugDir = script:Resolve-CostWalkerPrimarySlugDir -ProjectsRoot $ProjectsRoot -Slug $Slug
-        if ($null -ne $primarySlugDir -and $slugDirs -notcontains $primarySlugDir) {
-            $slugDirs.Add($primarySlugDir)
-        }
-    }
+    # Collect all slug directories to search (D2 identity match + worktree glob + primary-slug
+    # backward-compat fallback — shared with Get-CostWalkerCurrentSessionId via
+    # script:Get-CostWalkerCandidateSlugDirs so the two callers can never diverge).
+    $slugDirs = script:Get-CostWalkerCandidateSlugDirs -ProjectsRoot $ProjectsRoot -RepoRoot $RepoRoot -ParentCwd $ParentCwd -Slug $Slug
 
     if ($slugDirs.Count -eq 0) {
         return $included
@@ -501,4 +532,244 @@ function Invoke-CostTranscriptWalk {
     }
 
     return $included
+}
+
+function Get-CostWalkerCurrentSessionId {
+    <#
+    .SYNOPSIS
+        Derives the current capture's session identity from transcript file names
+        (issue #824 s3).
+    .DESCRIPTION
+        Real Claude Code transcript JSONL lines carry no embedded session-identity
+        field (Invoke-CostTranscriptWalk's own events are plain hashtables filtered
+        purely by type/cwd/gitBranch — see its docstring). The session identity is
+        instead the JSONL file's own name on disk: per the
+        Documents/Design/peer-to-peer-dispatch-research.md design doc's
+        {slugDir}/{sessionId}/... path convention, a transcript file's BaseName
+        (filename without the .jsonl extension) IS the session's UUID.
+
+        Resolves the same candidate slug directories Invoke-CostTranscriptWalk
+        searches — script:Get-CostWalkerCandidateSlugDirs, the shared helper that
+        unions D2 identity-matched dirs, the worktree-slug glob, and the
+        primary-slug backward-compat fallback (mirrors Invoke-CostTranscriptWalk's
+        own directory-resolution logic so this returns an identity consistent with
+        what the walk itself would admit) — then, among the *.jsonl files directly
+        under those directories, finds the ones containing at least one event
+        matching the walk's own CURRENT admission predicate: type -eq 'assistant'
+        AND gitBranch matches Branch. (issue #824 post-review fix M14: the walk's
+        per-event filter dropped its cwd check once identity was enforced at the
+        slug-dir level — script:Test-CostWalkerAssistantMatchesStrictFilter is
+        branch-only today, so this resolver no longer applies an additional
+        per-event cwd check on top of it; doing so was stricter than the walk it
+        claims to mirror and could return '' for a session the walk fully admits.
+        Reuses script:Test-CostWalkerAssistantMatchesStrictFilter directly — no
+        predicate logic is reimplemented here.)
+
+        M7 (issue #824 post-review fix, low severity): candidate files across all
+        resolved slug dirs are sorted by LastWriteTime descending before the scan,
+        so the loop returns as soon as it finds the first (most recent) matching
+        file instead of always scanning every candidate file to find the max.
+
+        Returns the BaseName of the matching file with the most recent
+        LastWriteTime, or '' when no file matches (e.g. synthetic/test fixtures
+        that never touch disk, or no session has produced a matching event yet).
+    .PARAMETER Slug
+        Pre-computed slug string for the project directory.
+    .PARAMETER Branch
+        Git branch name to filter events by.
+    .PARAMETER ParentCwd
+        Working directory path; normalized before comparison.
+    .PARAMETER ProjectsRoot
+        Root directory containing project slug directories. Defaults to ~/.claude/projects.
+    .PARAMETER RepoRoot
+        Repo root used for D2 identity resolution (script:Get-IdentityMatchedSlugDirs).
+        Falls back to ParentCwd when omitted, matching this function's pre-refactor
+        behavior — pass this explicitly when the caller's repo root differs from its
+        parent cwd (e.g. a worktree checkout) so identity resolution agrees with
+        Invoke-CostTranscriptWalk's own -RepoRoot-based resolution for the same session.
+    .OUTPUTS
+        [string] the matching transcript file's BaseName (session UUID), or ''.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [AllowEmptyString()][string]$Slug = '',
+        [Parameter(Mandatory)][string]$Branch,
+        [Parameter(Mandatory)][string]$ParentCwd,
+        [string]$ProjectsRoot = '',
+        [AllowEmptyString()][string]$RepoRoot = ''
+    )
+
+    if (-not $ProjectsRoot) {
+        $ProjectsRoot = Join-Path ([System.Environment]::GetFolderPath('UserProfile')) '.claude' 'projects'
+    }
+
+    $normalizedParentCwd = Get-NormalizedPath -Path $ParentCwd
+
+    # Shared with Invoke-CostTranscriptWalk via script:Get-CostWalkerCandidateSlugDirs
+    # (issue #824 refactor pass) — see that helper's docstring for the RepoRoot
+    # fallback-to-ParentCwd rule.
+    $slugDirs = script:Get-CostWalkerCandidateSlugDirs -ProjectsRoot $ProjectsRoot -RepoRoot $RepoRoot -ParentCwd $ParentCwd -Slug $Slug
+
+    if ($slugDirs.Count -eq 0) {
+        return ''
+    }
+
+    # M7: gather every candidate file across all resolved slug dirs, then sort
+    # descending by LastWriteTime so the scan below can return on the first
+    # match (the most recent one) instead of unconditionally checking every
+    # file to find the max.
+    $allFiles = [System.Collections.Generic.List[System.IO.FileInfo]]::new()
+    foreach ($slugDir in $slugDirs) {
+        $jsonlFiles = @(Get-ChildItem -Path $slugDir -Filter '*.jsonl' -File -ErrorAction SilentlyContinue)
+        foreach ($file in $jsonlFiles) {
+            $allFiles.Add($file)
+        }
+    }
+
+    $sortedFiles = @($allFiles | Sort-Object -Property LastWriteTime -Descending)
+
+    foreach ($file in $sortedFiles) {
+        $lines = @(Get-Content -Path $file.FullName -Encoding utf8 -ErrorAction SilentlyContinue)
+
+        foreach ($line in $lines) {
+            $trimmed = $line.Trim()
+            if ([string]::IsNullOrEmpty($trimmed)) { continue }
+
+            $parsedEvent = $null
+            try {
+                $parsedEvent = $trimmed | ConvertFrom-Json -AsHashtable -ErrorAction Stop
+            }
+            catch { continue }
+
+            if ($parsedEvent['type'] -ne 'assistant') { continue }
+            # M14: branch-only predicate — matches Test-CostWalkerAssistantMatchesStrictFilter,
+            # which is what Invoke-CostTranscriptWalk itself actually applies today (the
+            # per-event cwd check was dropped once identity moved to the slug-dir level).
+            if (-not (script:Test-CostWalkerAssistantMatchesStrictFilter -TranscriptEvent $parsedEvent -NormalizedParentCwd $normalizedParentCwd -Branch $Branch)) { continue }
+
+            return $file.BaseName
+        }
+    }
+
+    return ''
+}
+
+function Test-CostWalkerSessionTranscriptExists {
+    <#
+    .SYNOPSIS
+        Checks whether a persisted session id's transcript file exists on THIS
+        machine (issue #824 s4 verify-then-select gate).
+    .DESCRIPTION
+        The startup harvest reads a candidate PR's `session_id` from a (editable)
+        GitHub comment before deciding whether to spend its one-per-startup
+        expensive re-walk on it. This function is the "verify" half of
+        verify-then-select: it answers a pure local-filesystem question — does
+        any candidate slug directory contain a "{SessionId}.jsonl" file. A
+        session id that resolves to no local file on this machine is
+        structurally a foreign/cross-machine capture that this harvest must
+        never act on.
+
+        Issue #824 post-review fix M3: this function previously called
+        script:Get-IdentityMatchedSlugDirs directly and had no -Slug parameter,
+        so — unlike Get-CostWalkerCurrentSessionId (the session-id writer, which
+        already resolves candidates via the shared
+        script:Get-CostWalkerCandidateSlugDirs helper) — it structurally could
+        not reach the worktree-slug glob ("$Slug--claude-worktrees-*") or the
+        primary-slug backward-compat fallback, even when a caller supplied one.
+        Since post-merge cleanup routinely removes sibling worktrees, and
+        Get-IdentityMatchedSlugDirs fail-closes when it can no longer
+        `git remote get-url` from a now-deleted worktree cwd, a worktree-origin
+        session's transcript could sit on disk under
+        ~/.claude/projects/{slug}--claude-worktrees-*/ while this gate still
+        reported "not found" — permanently blocking that PR from ever being
+        harvested. This function now calls the same shared
+        script:Get-CostWalkerCandidateSlugDirs helper Get-CostWalkerCurrentSessionId
+        and Invoke-CostTranscriptWalk already use, so the three callers can never
+        independently (and silently) diverge on slug-dir resolution again.
+        Passing -Slug is what actually unlocks the worktree-glob and
+        primary-slug-fallback branches; omitting it degrades to the old
+        identity-matched-dirs-only behavior for backward compatibility.
+
+        This is a filename existence check only — it does not open or validate
+        the file's contents. The original capturing session already verified
+        content-side admission when it wrote the transcript.
+    .PARAMETER SessionId
+        The persisted session identity to look for (a transcript file's BaseName).
+        Validated against the canonical GUID shape (M9) before use in a
+        filesystem path; a non-matching value is rejected (returns $false)
+        without ever reaching Join-Path.
+    .PARAMETER Branch
+        Accepted for signature parity with Get-CostWalkerCurrentSessionId (mirrors
+        its resolution shape). Not used to filter here — SessionId already
+        uniquely names the candidate transcript file.
+    .PARAMETER ParentCwd
+        Kept for signature parity with the sibling walker functions and passed
+        through to script:Get-CostWalkerCandidateSlugDirs (used only as that
+        helper's RepoRoot fallback when RepoRoot is blank — RepoRoot is
+        Mandatory here, so ParentCwd's value does not change resolution today).
+    .PARAMETER RepoRoot
+        Absolute path to the repository root; used to resolve this machine's git
+        remote identity for D2 identity matching.
+    .PARAMETER Slug
+        Optional pre-computed slug string for the project directory. Threading
+        this through from callers (e.g. cost-baseline-harvest.ps1, which already
+        has $Slug in scope) is what lets slug-dir resolution reach the
+        worktree-slug glob and primary-slug fallback — see M3 above. Omitted by
+        default for backward compatibility with existing callers.
+    .PARAMETER ProjectsRoot
+        Root directory containing project slug directories. Defaults to
+        ~/.claude/projects.
+    .PARAMETER PreResolvedSlugDirs
+        Optional pre-resolved slug-directory list (M10-enabling). When supplied,
+        this function skips its own internal script:Get-CostWalkerCandidateSlugDirs
+        resolution and searches these directories instead — lets a future
+        per-candidate-loop caller (e.g. cost-baseline-harvest.ps1) hoist the
+        loop-invariant slug-dir resolution once outside its loop rather than
+        re-resolving it on every candidate. Not wired to any caller yet.
+    .OUTPUTS
+        [bool] $true when a matching "{SessionId}.jsonl" file exists under any
+        candidate slug directory; otherwise $false.
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$SessionId,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Branch,
+        [Parameter(Mandatory)][string]$ParentCwd,
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [AllowEmptyString()][string]$Slug = '',
+        [string]$ProjectsRoot = '',
+        [System.Collections.Generic.List[string]]$PreResolvedSlugDirs = $null
+    )
+
+    if ([string]::IsNullOrWhiteSpace($SessionId)) { return $false }
+
+    # M9: SessionId is read from an untrusted, publicly editable PR comment.
+    # Reject any shape that isn't a canonical GUID (the actual shape of a real
+    # Claude Code transcript file BaseName — see Get-CostWalkerCurrentSessionId's
+    # docstring) before it is ever used to construct a filesystem path.
+    if ($SessionId -notmatch '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') {
+        return $false
+    }
+
+    if (-not $ProjectsRoot) {
+        $ProjectsRoot = Join-Path ([System.Environment]::GetFolderPath('UserProfile')) '.claude' 'projects'
+    }
+
+    $slugDirs = if ($null -ne $PreResolvedSlugDirs) {
+        $PreResolvedSlugDirs
+    }
+    else {
+        script:Get-CostWalkerCandidateSlugDirs -ProjectsRoot $ProjectsRoot -RepoRoot $RepoRoot -ParentCwd $ParentCwd -Slug $Slug
+    }
+
+    foreach ($slugDir in $slugDirs) {
+        $candidatePath = Join-Path $slugDir "$SessionId.jsonl"
+        if (Test-Path -LiteralPath $candidatePath -PathType Leaf) {
+            return $true
+        }
+    }
+
+    return $false
 }

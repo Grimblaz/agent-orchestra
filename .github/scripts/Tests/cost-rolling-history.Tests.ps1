@@ -860,4 +860,198 @@ totals:
             $entry['unmapped_session_count'] | Should -Be $Unmapped -Because $Scenario
         }
     }
+
+    Context 'baseline-eligibility additive fields round-trip (issue #824 s2)' {
+
+        BeforeAll {
+            $script:RendererLibPath = Join-Path $script:RepoRoot '.github/scripts/lib/cost-pattern-renderer.ps1'
+            if (Test-Path $script:RendererLibPath) {
+                . $script:RendererLibPath
+            }
+        }
+
+        It 'capture_point, session_id, head_ref, and pr survive a render->parse round trip' {
+            # True render->parse round trip: renders via the real Format-CostPatternYaml
+            # (not a hand-typed fixture) and parses the result back via the real
+            # Get-CostRollingHistory -> ConvertFrom-CostPatternYaml pipeline. The renderer
+            # already emitted `pr:` before this fix; the parser had no matcher for it.
+            $attribution = @{
+                ports                 = @{
+                    'implement-code' = @{
+                        tokens               = @{ input = 100; output = 50; cache_creation = 0; cache_read = 0 }
+                        dispatch_count       = 1
+                        cost_estimate_usd    = 0.01
+                        cache_read_hit_ratio = 0.0
+                        mixed_regime         = $false
+                    }
+                }
+                orchestrator_overhead = @{
+                    tokens               = @{ input = 10; output = 5; cache_creation = 0; cache_read = 0 }
+                    cost_estimate_usd    = 0.001
+                    cache_read_hit_ratio = 0.0
+                }
+                dispatches            = @{ general_purpose_count = 0; unattributed_count = 0 }
+                totals                = @{
+                    tokens            = @{ input = 110; output = 55; cache_creation = 0; cache_read = 0 }
+                    cost_estimate_usd = 0.011
+                }
+            }
+            $completeness = @{
+                completeness                   = 'partial'
+                stop_reason                    = 'tool_use'
+                excluded_from_rolling_baseline = $false
+                exclude_reason                 = $null
+                capture_point                  = 'pr-creation-mid-session'
+            }
+
+            $rendered = Format-CostPatternYaml `
+                -Attribution $attribution `
+                -Completeness $completeness `
+                -Pr 824 `
+                -Branch 'feature/issue-824-baseline-eligibility' `
+                -SessionId 'session-abc-123' `
+                -HeadRef 'feature/issue-824-baseline-eligibility'
+
+            $commentBody = "Some PR comment text before the block.`n$rendered`nSome text after the block."
+            $graphqlResp = New-GraphQLResponse -CommentBodies @($commentBody)
+            Install-GhMock -GraphQLResponse $graphqlResp
+
+            $result = Get-CostRollingHistory -CachePath $script:TestCachePath -RepoRoot $script:RepoRoot -TimeoutSeconds 30
+
+            $result.timed_out | Should -Be $false
+            $result.entries.Count | Should -Be 1
+            $entry = $result.entries[0]
+
+            $entry['capture_point'] | Should -Be 'pr-creation-mid-session'
+            $entry['session_id']    | Should -Be 'session-abc-123'
+            $entry['head_ref']      | Should -Be 'feature/issue-824-baseline-eligibility'
+            $entry['pr']            | Should -Be 824
+        }
+
+        It 'parses upgrade_attempted_at when the startup harvest has stamped a candidate block (issue #824 s4)' {
+            $commentBody = New-CostPatternComment -ExtraTopLevel 'upgrade_attempted_at: 2026-07-01T00:00:00Z'
+            $graphqlResp = New-GraphQLResponse -CommentBodies @($commentBody)
+            Install-GhMock -GraphQLResponse $graphqlResp
+
+            $result = Get-CostRollingHistory -CachePath $script:TestCachePath -RepoRoot $script:RepoRoot -TimeoutSeconds 30
+
+            $result.timed_out | Should -Be $false
+            $result.entries.Count | Should -Be 1
+            $result.entries[0]['upgrade_attempted_at'] | Should -Be '2026-07-01T00:00:00Z'
+        }
+
+        It 'leaves upgrade_attempted_at unset (key absent) when the block never carried the field' {
+            $commentBody = New-CostPatternComment
+            $graphqlResp = New-GraphQLResponse -CommentBodies @($commentBody)
+            Install-GhMock -GraphQLResponse $graphqlResp
+
+            $result = Get-CostRollingHistory -CachePath $script:TestCachePath -RepoRoot $script:RepoRoot -TimeoutSeconds 30
+
+            $result.entries.Count | Should -Be 1
+            $result.entries[0].ContainsKey('upgrade_attempted_at') | Should -Be $false
+        }
+
+        It 'totals.tokens survives a render->parse round trip (M4, issue #824 post-review)' {
+            # M4: the harvest's no-downgrade guard compares Invoke-CostSessionRender's
+            # totals-first TokenSum against a persisted prior, but ConvertFrom-CostPatternYaml
+            # never parsed totals.tokens (only totals.cost_estimate_usd) even though
+            # Format-CostPatternYaml (cost-pattern-renderer.ps1) emits a totals.tokens
+            # sub-block. Without this, a totals-basis sum is unavailable from any parsed
+            # prior. True render->parse round trip via the real renderer, like the
+            # capture_point/session_id/head_ref/pr test above.
+            $attribution = @{
+                ports                 = @{
+                    'implement-code' = @{
+                        tokens               = @{ input = 100; output = 50; cache_creation = 0; cache_read = 0 }
+                        dispatch_count       = 1
+                        cost_estimate_usd    = 0.01
+                        cache_read_hit_ratio = 0.0
+                        mixed_regime         = $false
+                    }
+                }
+                orchestrator_overhead = @{
+                    tokens               = @{ input = 10; output = 5; cache_creation = 0; cache_read = 0 }
+                    cost_estimate_usd    = 0.001
+                    cache_read_hit_ratio = 0.0
+                }
+                dispatches            = @{ general_purpose_count = 0; unattributed_count = 0 }
+                totals                = @{
+                    # totals is deliberately totals-first-dominant: larger than the
+                    # sum of per-port tokens above (100+50=150 vs 500), modeling the
+                    # orchestrator-overhead + unattributed-tokens inclusion that makes
+                    # totals-basis sums diverge from ports-only sums (the M4 root cause).
+                    tokens            = @{ input = 400; output = 100; cache_creation = 0; cache_read = 0 }
+                    cost_estimate_usd = 0.05
+                }
+            }
+            $completeness = @{
+                completeness                   = 'complete'
+                stop_reason                    = 'end_turn'
+                excluded_from_rolling_baseline = $false
+                exclude_reason                 = $null
+                capture_point                  = 'end-of-session'
+            }
+
+            $rendered = Format-CostPatternYaml `
+                -Attribution $attribution `
+                -Completeness $completeness `
+                -Pr 824 `
+                -Branch 'feature/issue-824-baseline-eligibility' `
+                -SessionId 'session-m4-totals' `
+                -HeadRef 'feature/issue-824-baseline-eligibility'
+
+            $commentBody = "Some PR comment text before the block.`n$rendered`nSome text after the block."
+            $graphqlResp = New-GraphQLResponse -CommentBodies @($commentBody)
+            Install-GhMock -GraphQLResponse $graphqlResp
+
+            $result = Get-CostRollingHistory -CachePath $script:TestCachePath -RepoRoot $script:RepoRoot -TimeoutSeconds 30
+
+            $result.timed_out | Should -Be $false
+            $result.entries.Count | Should -Be 1
+            $entry = $result.entries[0]
+
+            $entry.ContainsKey('totals') | Should -Be $true
+            $entry['totals'].ContainsKey('tokens') | Should -Be $true -Because 'the renderer emits totals.tokens but the parser never captured it'
+            $entry['totals']['tokens']['input'] | Should -Be 400
+            $entry['totals']['tokens']['output'] | Should -Be 100
+            $entry['totals']['tokens']['cache_creation'] | Should -Be 0
+            $entry['totals']['tokens']['cache_read'] | Should -Be 0
+        }
+    }
+
+    Context 'scanned_count (M5, issue #824 post-review — DD7 recurrence guard visibility)' {
+        # M5: ConvertTo-CostRollingEntries filters out excluded_from_rolling_baseline: true
+        # rows before Get-CostRollingHistory ever returns, so a future caller (the DD7
+        # recurrence guard) can never distinguish "no PRs found" from "N PRs found, all
+        # excluded" by looking at entries alone. scanned_count exposes the pre-filter count
+        # of comment bodies that carried a cost-pattern-data block, so entries.Count vs
+        # scanned_count reveals a real "everything ineligible" recurrence.
+
+        It 'scanned_count reflects the pre-filter comment-body count with a mix of excluded and eligible entries' {
+            $eligibleA = New-CostPatternComment
+            $eligibleB = New-CostPatternComment
+            $excluded = New-CostPatternComment -ExcludedField 'excluded_from_rolling_baseline: true'
+            $graphqlResp = New-GraphQLResponse -CommentBodies @($eligibleA, $excluded, $eligibleB)
+            Install-GhMock -GraphQLResponse $graphqlResp
+
+            $result = Get-CostRollingHistory -CachePath $script:TestCachePath -RepoRoot $script:RepoRoot -TimeoutSeconds 30
+
+            $result.timed_out | Should -Be $false
+            $result.ContainsKey('scanned_count') | Should -Be $true -Because 'a future caller needs the pre-filter count to detect an all-excluded recurrence'
+            $result.entries.Count | Should -Be 2 -Because 'only the two non-excluded comments survive the exclusion filter'
+            $result.scanned_count | Should -Be 3 -Because 'all three comment bodies carried a cost-pattern-data block before filtering'
+        }
+
+        It 'scanned_count equals 0 and entries.Count equals 0 when every scanned entry is excluded (the DD7 recurrence case)' {
+            $excludedA = New-CostPatternComment -ExcludedField 'excluded_from_rolling_baseline: true'
+            $excludedB = New-CostPatternComment -ExcludedField 'excluded_from_rolling_baseline: true'
+            $graphqlResp = New-GraphQLResponse -CommentBodies @($excludedA, $excludedB)
+            Install-GhMock -GraphQLResponse $graphqlResp
+
+            $result = Get-CostRollingHistory -CachePath $script:TestCachePath -RepoRoot $script:RepoRoot -TimeoutSeconds 30
+
+            $result.entries.Count | Should -Be 0
+            $result.scanned_count | Should -Be 2 -Because 'scanned_count must stay visible even though every entry was filtered out — this is the signal entries alone cannot provide'
+        }
+    }
 }

@@ -16,6 +16,16 @@ Claude user transcript events must carry a command marker in the form `<command-
 
 Phase windows are scoped to one JSONL file. A marker in one transcript file does not carry over into another file in the same project slug directory.
 
+### Rolling-baseline eligibility
+
+Attribution decides whether a walked event is counted; baseline eligibility is a separate, downstream decision about whether a counted capture is trustworthy enough to feed the rolling-history baseline. `Resolve-BaselineEligibility` (`.github/scripts/lib/cost-completeness.ps1`) wraps `Get-SessionCompleteness` (unchanged) and augments its result in place with a `capture_point` disclosure.
+
+Before this mechanism existed, any session captured mid-work — for example at PR-creation time, before the session had actually ended — was always excluded from the baseline, because its transcript tail was an unresolved `tool_use` and therefore classified `partial`. `Resolve-BaselineEligibility` admits such captures when they carry real (non-zero) token data, labeling them `capture_point: pr-creation-mid-session` in the persisted cost-comment YAML. A session whose transcript tail genuinely finished is labeled `capture_point: end-of-session`.
+
+Eligibility is a strict whitelist, not a relaxation of the existing guards: `stop_reason` must be `tool_use`, `null`, or empty, and the session must carry non-zero tokens. The four named partial reasons (`refusal`, `pause_turn`, `max_tokens`, `stop_sequence`) and zero-token captures remain always excluded — the "zeros pin" guard from #777 is untouched. Phase-marker-only sessions (see Known gaps) are also excluded from mid-session eligibility, matching the existing exclusion for complete sessions.
+
+A later session-startup step (`skills/session-startup/SKILL.md` Step 7d, Claude-only) calls `Invoke-CostBaselineHarvest` (`.github/scripts/lib/cost-baseline-harvest.ps1`) to opportunistically upgrade these mid-session estimates. It looks for recently-merged PRs whose cost comment still says `capture_point: pr-creation-mid-session`, and — only once it verifies the originating transcript still exists locally and the PR is confirmed still merged — re-walks that session and replaces the comment in place with exact `capture_point: end-of-session` numbers. This is best-effort and bounded: a ~14-day candidate horizon and at most one re-walk attempt per session startup.
+
 ## Ambiguous-prompt fallback
 
 Non-canonical surfaces fall back to the strict branch filter. That includes subagent-name dispatch such as `@Experience-Owner`, freeform prompts like asking for planning in prose, and resume-via-marker flows that do not produce the canonical command marker tags in the Claude JSONL user event.
@@ -28,7 +38,7 @@ Subagent-name dispatch remains a known gap because `@Experience-Owner`, `@Soluti
 
 Freeform and resume-via-marker sessions can also miss upstream attribution when they do not emit the canonical command marker. They still contribute through strict-branch attribution if their assistant events occurred on the measured branch.
 
-Phase-marker-only sessions are excluded from rolling-history baselines. They can be complete and still stay out of the baseline because they contain attributed assistant work for the issue but no assistant events on the measured branch.
+Phase-marker-only sessions are excluded from rolling-history baselines. They can be complete and still stay out of the baseline because they contain attributed assistant work for the issue but no assistant events on the measured branch. This exclusion also holds for the mid-session eligibility predicate described under Rolling-baseline eligibility above — a phase-marker-only session never qualifies for baseline inclusion, complete or partial.
 
 ## Rejected alternatives summary
 

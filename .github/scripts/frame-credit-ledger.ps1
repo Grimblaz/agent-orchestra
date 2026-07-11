@@ -74,6 +74,14 @@ try {
     . (Join-Path $PSScriptRoot 'lib/cost-checkpoint-core.ps1')
     . (Join-Path $PSScriptRoot 'lib/cost-completeness.ps1')
     . (Join-Path $PSScriptRoot 'lib/cost-pattern-renderer.ps1')
+    # cost-fcl-helpers.ps1 (issue #824 post-review fix, Group 1): the
+    # script:-scoped FCL cost-pipeline helpers used by both this script's own
+    # Invoke-FrameCreditLedger below and cost-session-render.ps1's
+    # Invoke-CostSessionRender (dot-sourced next). Must load before
+    # cost-session-render.ps1 is invoked so both callers can resolve these
+    # functions regardless of dot-source order within this try block.
+    . (Join-Path $PSScriptRoot 'lib/cost-fcl-helpers.ps1')
+    . (Join-Path $PSScriptRoot 'lib/cost-session-render.ps1')
 }
 catch {
     [Console]::Error.WriteLine("frame-credit-ledger: cost lib load failed (cost composition disabled): $($_.Exception.Message)")
@@ -473,43 +481,6 @@ function script:Get-FCLFrameSpineComments {
     return @($Comments | Where-Object { (script:Get-FCLCommentBody -Comment $_) -match '<!--\s*frame-spine' })
 }
 
-function script:Resolve-FCLLinkedIssueNumber {
-    param(
-        [AllowEmptyString()][string]$PrBody,
-        [AllowEmptyString()][string]$Branch
-    )
-
-    if (-not [string]::IsNullOrWhiteSpace($Branch)) {
-        $branchMatch = [regex]::Match($Branch, '^feature/issue-(?<issue>\d+)(?:-|$)')
-        if ($branchMatch.Success) {
-            $branchIssue = 0
-            if ([int]::TryParse($branchMatch.Groups['issue'].Value, [ref]$branchIssue) -and $branchIssue -gt 0) {
-                return $branchIssue
-            }
-        }
-    }
-
-    if (-not [string]::IsNullOrWhiteSpace($PrBody)) {
-        $patterns = @(
-            '(?im)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|ref(?:s|erences)?|issue)\s+(?:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#(?<issue>\d+)\b',
-            '(?im)^\s*issue_id\s*:\s*(?<issue>\d+)\s*$',
-            '(?im)<!--\s*(?:plan|design)-issue-(?<issue>\d+)\s*-->'
-        )
-
-        foreach ($pattern in $patterns) {
-            $match = [regex]::Match($PrBody, $pattern)
-            if (-not $match.Success) { continue }
-
-            $issue = 0
-            if ([int]::TryParse($match.Groups['issue'].Value, [ref]$issue) -and $issue -gt 0) {
-                return $issue
-            }
-        }
-    }
-
-    return $null
-}
-
 function script:Resolve-FCLRepoRoot {
     [CmdletBinding()]
     param([AllowEmptyString()][string]$ScriptPath = $PSCommandPath)
@@ -894,437 +865,6 @@ function Update-FCLPrBodyDispatchCostSamples {
     if ($PSBoundParameters.ContainsKey('Model')) { $updateParameters['Model'] = $Model }
 
     return Update-DispatchCostSampleEvaluationInPrBody @updateParameters
-}
-
-function script:Get-FCLCostScriptState {
-    $state = @{}
-    foreach ($costStateName in @(
-            'CostWalkerSilentTypes',
-            'CostAttributionPortMap',
-            'CostCompletenessPartialReasons',
-            'CostRendererPortOrder',
-            'CostRendererSkillDrivenPorts'
-        )) {
-        try {
-            $state[$costStateName] = Get-Variable -Scope Script -Name $costStateName -ValueOnly -ErrorAction Stop
-        }
-        catch { $null = $_ }
-    }
-
-    return $state
-}
-
-function script:New-FCLInitialSessionStateClone {
-    $iss = [System.Management.Automation.Runspaces.InitialSessionState]::CreateDefault2()
-
-    # Use function definitions directly so advanced-function metadata survives cloning.
-    $parentFunctions = Get-ChildItem -Path Function:\ -ErrorAction SilentlyContinue
-    foreach ($fn in $parentFunctions) {
-        try {
-            $entry = New-Object System.Management.Automation.Runspaces.SessionStateFunctionEntry($fn.Name, $fn.Definition)
-            $iss.Commands.Add($entry)
-        }
-        catch { $null = $_ }
-    }
-
-    $autoNoneOptionsBlocklist = @('args', 'input', '_', '^', 'PWD', 'MyInvocation', 'PSCommandPath', 'PSScriptRoot', 'StackTrace', 'null')
-    $parentGlobals = Get-Variable -Scope Global -ErrorAction SilentlyContinue
-    foreach ($v in $parentGlobals) {
-        if ($v.Options -band [System.Management.Automation.ScopedItemOptions]::Constant) { continue }
-        if ($v.Options -band [System.Management.Automation.ScopedItemOptions]::ReadOnly) { continue }
-        if ($v.Options -band [System.Management.Automation.ScopedItemOptions]::AllScope) { continue }
-        if ($v.Options -band [System.Management.Automation.ScopedItemOptions]::Private) { continue }
-        if ($autoNoneOptionsBlocklist -contains $v.Name) { continue }
-        try {
-            $entry = New-Object System.Management.Automation.Runspaces.SessionStateVariableEntry($v.Name, $v.Value, '')
-            $iss.Variables.Add($entry)
-        }
-        catch { $null = $_ }
-    }
-
-    return $iss
-}
-
-function script:New-FCLCostWalkerResult {
-    param(
-        [AllowEmptyCollection()][object[]]$Events = @(),
-        [bool]$TimedOut = $false,
-        [bool]$Failed = $false,
-        [AllowEmptyCollection()][string[]]$Warnings = @()
-    )
-
-    return [pscustomobject]@{
-        Events   = @($Events)
-        TimedOut = $TimedOut
-        Failed   = $Failed
-        Warnings = @($Warnings)
-    }
-}
-
-function script:Invoke-FCLCostWalkerWithTimeout {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)][string]$WalkerName,
-        [Parameter(Mandatory)][string]$CommandName,
-        [Parameter(Mandatory)][hashtable]$Parameters,
-        [Parameter(Mandatory)][int]$TimeoutSeconds
-    )
-
-    if ($TimeoutSeconds -le 0) {
-        return (script:New-FCLCostWalkerResult -TimedOut $true)
-    }
-
-    if ($env:FRAME_CREDIT_LEDGER_TEST_WALKER_INLINE -eq '1') {
-        try {
-            $events = @(& $CommandName @Parameters)
-            return (script:New-FCLCostWalkerResult -Events $events)
-        }
-        catch {
-            [Console]::Error.WriteLine("frame-credit-ledger: cost $WalkerName walker failed: $($_.Exception.Message)")
-            return (script:New-FCLCostWalkerResult -Failed $true)
-        }
-    }
-
-    $runspace = $null
-    $worker = $null
-    try {
-        $runspace = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace((script:New-FCLInitialSessionStateClone))
-        $runspace.Open()
-        $worker = [System.Management.Automation.PowerShell]::Create()
-        $worker.Runspace = $runspace
-
-        $costScriptState = script:Get-FCLCostScriptState
-        $null = $worker.AddScript({
-                param($CommandNameArg, $ParametersArg, $CostScriptStateArg)
-                foreach ($costStateName in @($CostScriptStateArg.Keys)) {
-                    Set-Variable -Scope Script -Name $costStateName -Value $CostScriptStateArg[$costStateName]
-                }
-                & $CommandNameArg @ParametersArg
-            }).AddArgument($CommandName).AddArgument($Parameters).AddArgument($costScriptState)
-
-        $async = $worker.BeginInvoke()
-        $waited = $async.AsyncWaitHandle.WaitOne([int]($TimeoutSeconds * 1000))
-        if (-not $waited) {
-            try { $worker.Stop() } catch { $null = $_ }
-            [Console]::Error.WriteLine("frame-credit-ledger: cost $WalkerName walker timed out after ${TimeoutSeconds}s; continuing with empty $WalkerName events")
-            return (script:New-FCLCostWalkerResult -TimedOut $true)
-        }
-
-        $output = @()
-        $failed = $false
-        try { $output = @($worker.EndInvoke($async)) }
-        catch {
-            [Console]::Error.WriteLine("frame-credit-ledger: cost $WalkerName walker failed: $($_.Exception.Message)")
-            $failed = $true
-        }
-
-        foreach ($errRecord in $worker.Streams.Error) {
-            try { [Console]::Error.WriteLine([string]$errRecord) } catch { $null = $_ }
-        }
-
-        $warnings = @($worker.Streams.Warning | ForEach-Object { [string]$_ })
-        return (script:New-FCLCostWalkerResult -Events $output -Failed $failed -Warnings $warnings)
-    }
-    catch {
-        [Console]::Error.WriteLine("frame-credit-ledger: cost $WalkerName walker failed: $($_.Exception.Message)")
-        return (script:New-FCLCostWalkerResult -Failed $true)
-    }
-    finally {
-        if ($null -ne $worker) { $worker.Dispose() }
-        if ($null -ne $runspace) { $runspace.Dispose() }
-    }
-}
-
-function script:Resolve-FCLCostCopilotOtelJsonlPath {
-    [CmdletBinding()]
-    [OutputType([string])]
-    param([Parameter(Mandatory)][string]$RepoRoot)
-
-    if (-not [string]::IsNullOrWhiteSpace($env:FRAME_CREDIT_LEDGER_TEST_COPILOT_OTEL_JSONL)) {
-        return [string]$env:FRAME_CREDIT_LEDGER_TEST_COPILOT_OTEL_JSONL
-    }
-
-    $settingsPath = Join-Path $RepoRoot '.vscode/settings.json'
-    if (Test-Path -LiteralPath $settingsPath -PathType Leaf) {
-        try {
-            $settings = Get-Content -LiteralPath $settingsPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-            $outfileProperty = $settings.PSObject.Properties['github.copilot.chat.otel.outfile']
-            if ($null -ne $outfileProperty -and -not [string]::IsNullOrWhiteSpace([string]$outfileProperty.Value)) {
-                $resolved = Resolve-CostCopilotOutfileTemplate -Template ([string]$outfileProperty.Value) -WorkspaceRoot $RepoRoot
-                if ($null -ne $resolved -and -not [string]::IsNullOrWhiteSpace([string]$resolved.ResolvedPath)) {
-                    return [string]$resolved.ResolvedPath
-                }
-            }
-        }
-        catch { $null = $_ }
-    }
-
-    $workspaceFolderBasename = Split-Path -Leaf $RepoRoot
-    return (Join-Path ([Environment]::GetFolderPath('UserProfile')) ".copilot-otel/$workspaceFolderBasename/copilot.jsonl")
-}
-
-function script:Get-FCLCostWalkerTimeoutSeconds {
-    param(
-        [Parameter(Mandatory)][string]$EnvironmentVariableName,
-        [Parameter(Mandatory)][int]$DefaultSeconds
-    )
-
-    $raw = [Environment]::GetEnvironmentVariable($EnvironmentVariableName, 'Process')
-    $parsed = 0
-    if (-not [string]::IsNullOrWhiteSpace($raw) -and [int]::TryParse($raw, [ref]$parsed) -and $parsed -gt 0) {
-        return $parsed
-    }
-
-    return $DefaultSeconds
-}
-
-# Issue #794 s4 (sub-observation 4): detects the `frame-enforce.yml` CI landmine
-# case (documented at that workflow's "Run frame credit enforce" step) where
-# ~/.claude/projects — the Claude cost-transcript root Invoke-CostTranscriptWalk
-# defaults to — does not exist on ubuntu-latest. This is the SAME root
-# Invoke-CostTranscriptWalk resolves internally when no -ProjectsRoot is
-# supplied (cost-walker.ps1 line ~374); we re-resolve it here rather than
-# threading a new return value through the walker, so the walker's own
-# multi-turn traversal logic (out of scope; re-homed to #491) is untouched.
-# Test-only override mirrors the existing FRAME_CREDIT_LEDGER_TEST_* convention
-# so Pester can simulate both the present-and-empty and absent-root cases
-# deterministically without touching the real user profile.
-function script:Test-FCLClaudeProjectsRootAbsent {
-    $testOverride = [Environment]::GetEnvironmentVariable('FRAME_CREDIT_LEDGER_TEST_CLAUDE_PROJECTS_ROOT', 'Process')
-    $projectsRoot = if (-not [string]::IsNullOrWhiteSpace($testOverride)) {
-        $testOverride
-    }
-    else {
-        Join-Path ([System.Environment]::GetFolderPath('UserProfile')) '.claude' 'projects'
-    }
-
-    return -not (Test-Path -LiteralPath $projectsRoot -PathType Container)
-}
-
-function script:Get-FCLCostEventProviderSet {
-    param([AllowEmptyCollection()][object[]]$Events)
-
-    $providers = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($evt in @($Events)) {
-        if ($null -eq $evt) { continue }
-
-        $provider = $null
-        try { $provider = Get-EventProvider -Evt $evt }
-        catch {
-            if ($evt -is [System.Collections.IDictionary] -and $evt.ContainsKey('provider')) { $provider = $evt['provider'] }
-            elseif ($null -ne $evt.PSObject.Properties['provider']) { $provider = $evt.provider }
-        }
-
-        if (-not [string]::IsNullOrWhiteSpace([string]$provider)) {
-            $null = $providers.Add(([string]$provider).ToLowerInvariant())
-        }
-    }
-
-    $ordered = [System.Collections.Generic.List[string]]::new()
-    foreach ($candidate in @('claude', 'copilot')) {
-        if ($providers.Contains($candidate)) { $ordered.Add($candidate) }
-    }
-    foreach ($provider in $providers) {
-        if (-not $ordered.Contains($provider)) { $ordered.Add($provider) }
-    }
-
-    return [string[]]$ordered.ToArray()
-}
-
-function script:Get-FCLCostUnmappedSessionCount {
-    param([AllowEmptyCollection()][string[]]$Warnings)
-
-    $total = 0
-    foreach ($warning in @($Warnings)) {
-        $match = [regex]::Match([string]$warning, 'unmapped_session_count=(?<count>\d+)')
-        if ($match.Success) { $total += [int]$match.Groups['count'].Value }
-    }
-
-    return $total
-}
-
-function script:Get-FCLCostMetadataValue {
-    param(
-        [AllowNull()][object]$Entry,
-        [Parameter(Mandatory)][string]$Name
-    )
-
-    if ($null -eq $Entry) { return $null }
-    if ($Entry -is [System.Collections.IDictionary]) { return $Entry[$Name] }
-    $property = $Entry.PSObject.Properties[$Name]
-    if ($null -ne $property) { return $property.Value }
-    return $null
-}
-
-function script:Get-FCLEffectiveCostCoverageClass {
-    param([AllowNull()][object]$Entry)
-
-    $installStatus = script:Get-FCLCostMetadataValue -Entry $Entry -Name 'install_status'
-    if ([string]$installStatus -eq 'missing-or-fallback') { return 'claude-only' }
-
-    $coverage = script:Get-FCLCostMetadataValue -Entry $Entry -Name 'coverage'
-    if (-not [string]::IsNullOrWhiteSpace([string]$coverage)) { return [string]$coverage }
-
-    return 'claude-only'
-}
-
-function script:Set-FCLRollingMetaCoverageCount {
-    param(
-        [Parameter(Mandatory)][hashtable]$RollingResult,
-        [Parameter(Mandatory)][hashtable]$Attribution
-    )
-
-    if ($RollingResult['timed_out'] -eq $true) { return }
-
-    $currentCoverage = script:Get-FCLEffectiveCostCoverageClass -Entry $Attribution
-    $matchingCount = 0
-    foreach ($entry in @($RollingResult['entries'])) {
-        if ((script:Get-FCLEffectiveCostCoverageClass -Entry $entry) -eq $currentCoverage) {
-            $matchingCount++
-        }
-    }
-
-    $RollingResult['matching_coverage_history_count'] = $matchingCount
-}
-
-function script:Set-FCLCostCoverageMetadata {
-    param(
-        [Parameter(Mandatory)][hashtable]$Attribution,
-        [AllowEmptyCollection()][object[]]$Events,
-        [AllowNull()]$ClaudeWalk,
-        [AllowNull()]$CopilotWalk,
-        [Parameter(Mandatory)][string]$CopilotOtelJsonlPath
-    )
-
-    [string[]]$providers = @(script:Get-FCLCostEventProviderSet -Events $Events)
-    $hasClaude = $providers -contains 'claude'
-    $hasCopilot = $providers -contains 'copilot'
-    $copilotWarnings = if ($null -ne $CopilotWalk) { @($CopilotWalk.Warnings) } else { @() }
-    $unmappedSessionCount = script:Get-FCLCostUnmappedSessionCount -Warnings $copilotWarnings
-    $copilotTimedOut = ($null -ne $CopilotWalk -and $CopilotWalk.TimedOut -eq $true)
-    $copilotFailed = ($null -ne $CopilotWalk -and $CopilotWalk.Failed -eq $true)
-    # Issue #794 s4 (sub-observation 4): the #790 recurrence was specifically a
-    # CLAUDE walker timeout — read Claude's own TimedOut/Failed flags too, not
-    # only Copilot's, so degraded_reason below can be derived from EITHER walker.
-    $claudeTimedOut = ($null -ne $ClaudeWalk -and $ClaudeWalk.TimedOut -eq $true)
-    $claudeFailed = ($null -ne $ClaudeWalk -and $ClaudeWalk.Failed -eq $true)
-
-    $installStatus = 'ok'
-    if ([string]::IsNullOrWhiteSpace($CopilotOtelJsonlPath) -or -not (Test-Path -LiteralPath $CopilotOtelJsonlPath -PathType Leaf)) {
-        $installStatus = 'missing-or-fallback'
-    }
-
-    $coverage = 'claude-only'
-    if ($hasClaude -and $hasCopilot) { $coverage = 'claude+copilot' }
-    elseif ($hasCopilot) { $coverage = 'copilot-only' }
-    elseif ($hasClaude -and ($copilotTimedOut -or $copilotFailed -or $unmappedSessionCount -gt 0 -or $installStatus -eq 'missing-or-fallback')) { $coverage = 'claude-only-with-copilot-fallback-warning' }
-
-    if ($providers.Count -eq 0) { $providers = @('claude') }
-
-    # Issue #794 s4: typed degraded_reason, populated ONLY when coverage is
-    # actually degraded (no events attributed at all). Priority order:
-    #   1. env-absent          — the CI landmine (root literally absent); this
-    #                            is expected/routine, not a genuine anomaly.
-    #   2. budget-exceeded     — either walker genuinely timed out.
-    #   3. no-transcript-found — root exists, walk completed, found nothing.
-    $degradedReason = $null
-    if ($Events.Count -eq 0) {
-        if (script:Test-FCLClaudeProjectsRootAbsent) {
-            $degradedReason = 'env-absent'
-        }
-        elseif ($claudeTimedOut -or $copilotTimedOut) {
-            $degradedReason = 'budget-exceeded'
-        }
-        elseif ($claudeFailed -or $copilotFailed) {
-            $degradedReason = 'budget-exceeded'
-        }
-        else {
-            $degradedReason = 'no-transcript-found'
-        }
-    }
-
-    $Attribution['coverage'] = $coverage
-    $Attribution['install_status'] = $installStatus
-    $Attribution['unmapped_session_count'] = $unmappedSessionCount
-    $Attribution['provider_support'] = [string[]]$providers
-    $Attribution['degraded_reason'] = $degradedReason
-}
-
-# Issue #794 s4 (Part 2 / AC6): composes a schema-valid degraded-honest
-# cost-pattern-data comment for orchestrated-origin PRs where the walker
-# genuinely found no telemetry. Reuses the existing 'claude-only' coverage
-# value (the value Set-FCLCostCoverageMetadata already assigns for a fully
-# empty walk) rather than inventing a new enum member — see
-# lib/cost-pattern-data-schema.md `coverage` field for the authoritative enum.
-function script:Compose-FCLDegradedCostComment {
-    param(
-        [Parameter(Mandatory)][string]$DegradedReason,
-        [Parameter(Mandatory)][int]$Pr,
-        [Parameter(Mandatory)][string]$Branch
-    )
-
-    $inv = [System.Globalization.CultureInfo]::InvariantCulture
-    $generatedAt = [System.DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ', $inv)
-
-    # Distinct discovery marker (own hidden comment line) so Find-OrUpsertComment's
-    # substring lookup identifies THIS standalone degraded comment across re-runs
-    # without colliding with the bare '<!-- cost-pattern-data' substring that is
-    # always embedded inside the main frame-credit-ledger-{Pr} comment (Format-
-    # CostPatternYaml unconditionally emits that literal, even for empty walks).
-    # Kept on its own line (not appended to the YAML open tag) because
-    # Get-CostPatternDataFromComment's extraction regex requires a newline
-    # directly after 'cost-pattern-data' with nothing else on that line.
-    $discoveryMarker = "<!-- cost-pattern-data-degraded-$Pr -->"
-
-    $markdown = @(
-        '## Cost Pattern',
-        '',
-        "coverage: claude-only",
-        "⚠ degraded telemetry: $DegradedReason — no cost events were attributed to this PR."
-    ) -join "`n"
-
-    $yaml = @(
-        '<!-- cost-pattern-data',
-        'version: 1',
-        'coverage: claude-only',
-        'session_completeness: unknown',
-        'excluded_from_rolling_baseline: true',
-        "degraded_reason: $DegradedReason",
-        "generated_at: $generatedAt",
-        'phase_scope: branch-session-only',
-        "pr: $Pr",
-        "branch: $Branch",
-        '-->'
-    ) -join "`n"
-
-    return $discoveryMarker + "`n`n" + $markdown + "`n`n" + $yaml
-}
-
-function script:Get-FCLRemainingCostBudgetSeconds {
-    param(
-        [Parameter(Mandatory)][System.Diagnostics.Stopwatch]$Stopwatch,
-        [Parameter(Mandatory)][int]$BudgetSeconds
-    )
-
-    $remaining = $BudgetSeconds - [int][Math]::Ceiling($Stopwatch.Elapsed.TotalSeconds)
-    if ($remaining -lt 0) { return 0 }
-    return $remaining
-}
-
-# Sum the four token-count keys (input + output + cache_creation + cache_read)
-# from a single token bucket. Used by both the current-ports-fallback path and
-# the prior-side path (issue #777, R2). The internal $null check subsumes the
-# per-loop bucket null-guard (present key, null value).
-function script:Get-FCLTokenSumFromBucket {
-    param([hashtable]$Bucket)
-    [long]$sum = 0
-    if ($null -eq $Bucket) { return $sum }
-    foreach ($tk in @('input', 'output', 'cache_creation', 'cache_read')) {
-        if ($Bucket.ContainsKey($tk) -and $null -ne $Bucket[$tk]) {
-            $sum += [long]$Bucket[$tk]
-        }
-    }
-    return $sum
 }
 
 # ---------------------------------------------------------------------------
@@ -1766,287 +1306,62 @@ function Invoke-FrameCreditLedger {
     # Step 6: Cost Pattern composition (issue #467)
     # Sub-budgets total: 19s within the 30s outer budget.
     # On any sub-step failure, graceful degradation applies (cost section is empty string).
+    #
+    # The walk -> attribution -> completeness -> eligibility -> preservation ->
+    # render pipeline itself lives in Invoke-CostSessionRender (issue #824 s4a
+    # extraction, lib/cost-session-render.ps1) so a future startup-harvest
+    # caller can re-run the identical sequence against a different target. This
+    # block resolves the live session's own identity inputs, calls that
+    # function, and — since the function never posts anything itself — performs
+    # the two degraded-comment side posts (retraction/auto-post) using the
+    # decision + body values it returns, exactly as this block did inline
+    # before the extraction.
     # ---------------------------------------------------------------------------
     $costSection = ''
     if (-not $script:CostLibLoadFailed) {
-        $costStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
         try {
-            $costBudgetSeconds = 19
-
-            # 6a. Walkers
             $slug = Get-CostTranscriptSlug -CwdPath $repoRoot
             $costBranch = & git -C $repoRoot rev-parse --abbrev-ref HEAD 2>$null
-            $costEvents = @()
-            $claudeWalk = $null
-            $copilotWalk = $null
-            $copilotOtelJsonlPath = ''
-            if (-not [string]::IsNullOrWhiteSpace($slug) -and -not [string]::IsNullOrWhiteSpace($costBranch)) {
-                $resolvedIssueNumber = script:Resolve-FCLLinkedIssueNumber -PrBody $prBody -Branch ([string]$costBranch)
-                $walkParameters = @{
-                    Slug      = $slug
-                    Branch    = $costBranch
-                    ParentCwd = $repoRoot
-                    RepoRoot  = $repoRoot  # D2: used by identity-based slug discovery
-                }
-                if ($null -ne $resolvedIssueNumber) {
-                    $walkParameters['IssueNumber'] = [int]$resolvedIssueNumber
-                }
 
-                $claudeTimeoutSeconds = script:Get-FCLCostWalkerTimeoutSeconds -EnvironmentVariableName 'FRAME_CREDIT_LEDGER_TEST_CLAUDE_WALKER_TIMEOUT_SECONDS' -DefaultSeconds 10
-                $copilotTimeoutSeconds = script:Get-FCLCostWalkerTimeoutSeconds -EnvironmentVariableName 'FRAME_CREDIT_LEDGER_TEST_COPILOT_WALKER_TIMEOUT_SECONDS' -DefaultSeconds 6
+            $costResult = Invoke-CostSessionRender `
+                -Pr $Pr `
+                -Branch ([string]$costBranch) `
+                -Slug ([string]$slug) `
+                -ParentCwd $repoRoot `
+                -RepoRoot $repoRoot `
+                -PrBody $prBody `
+                -PriorComments $script:PrComments `
+                -IsOrchestrated $_isOrchestrated
 
-                $claudeWalk = script:Invoke-FCLCostWalkerWithTimeout `
-                    -WalkerName 'claude' `
-                    -CommandName 'Invoke-CostTranscriptWalk' `
-                    -Parameters $walkParameters `
-                    -TimeoutSeconds $claudeTimeoutSeconds
+            $costSection = [string]$costResult['CostSection']
 
-                $copilotOtelJsonlPath = script:Resolve-FCLCostCopilotOtelJsonlPath -RepoRoot $repoRoot
-                $copilotWalkParameters = @{
-                    Branch                  = [string]$costBranch
-                    RepoRoot                = $repoRoot
-                    OtelJsonlPath           = $copilotOtelJsonlPath
-                    WorkspaceFolderBasename = (Split-Path -Leaf $repoRoot)
-                }
-                $copilotWalk = script:Invoke-FCLCostWalkerWithTimeout `
-                    -WalkerName 'copilot' `
-                    -CommandName 'Invoke-CostCopilotWalk' `
-                    -Parameters $copilotWalkParameters `
-                    -TimeoutSeconds $copilotTimeoutSeconds
-
-                $costEvents = @($claudeWalk.Events) + @($copilotWalk.Events)
-            }
-
-            if ($null -ne $claudeWalk -and $claudeWalk.Failed -eq $true -and ($null -eq $copilotWalk -or @($copilotWalk.Events).Count -eq 0)) {
-                throw 'Claude cost walker failed and no Copilot events were available for fallback attribution'
-            }
-
-            # 6b. Attribution
-            # Use $repoRoot to build the lib path because $PSScriptRoot may be empty
-            # inside the worker runspace (it is re-derived from $PSCommandPath at call time).
-            $costScriptsDir = if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
-                $PSScriptRoot
-            }
-            else {
-                Join-Path $repoRoot '.github/scripts'
-            }
-            $costAttribution = Get-CostAttribution -Events $costEvents -RateTablePath (Join-Path $costScriptsDir 'lib/cost-rate-table.json')
-            script:Set-FCLCostCoverageMetadata -Attribution $costAttribution -Events $costEvents -ClaudeWalk $claudeWalk -CopilotWalk $copilotWalk -CopilotOtelJsonlPath $copilotOtelJsonlPath
-
-            # 6c. Rolling history (has its own 10s timeout via Get-CostRollingHistory)
-            $rollingResult = @{ timed_out = $false; entries = @() }
-            $remainingCostBudgetSeconds = script:Get-FCLRemainingCostBudgetSeconds -Stopwatch $costStopwatch -BudgetSeconds $costBudgetSeconds
-            if ($remainingCostBudgetSeconds -gt 0) {
-                try { $rollingResult = Get-CostRollingHistory -TimeoutSeconds ([Math]::Min(10, $remainingCostBudgetSeconds)) }
-                catch { $rollingResult = @{ timed_out = $true; entries = @() } }
-            }
-            script:Set-FCLRollingMetaCoverageCount -RollingResult $rollingResult -Attribution $costAttribution
-
-            # 6d. Regime checkpoint
-            $checkpoint = $null
-            if ((script:Get-FCLRemainingCostBudgetSeconds -Stopwatch $costStopwatch -BudgetSeconds $costBudgetSeconds) -gt 0) {
+            if ([bool]$costResult['ShouldRetractDegraded']) {
                 try {
-                    $cpPath = Join-Path $repoRoot '.github/scripts/cost-regime-checkpoints.yaml'
-                    if (Test-Path $cpPath) { $checkpoint = Get-MostRecentRegimeCheckpoint -Path $cpPath -Coverage ([string]$costAttribution['coverage']) }
-                }
-                catch { $checkpoint = $null }
-            }
-
-            # 6e. Completeness + preservation
-            $completenessParameters = @{ Events = $costEvents }
-            if (-not [string]::IsNullOrWhiteSpace($costBranch)) {
-                $completenessParameters['Branch'] = [string]$costBranch
-            }
-            $completeness = Get-SessionCompleteness @completenessParameters
-            $priorCostData = $null
-            $priorComment = $null
-            if ($null -ne $script:PrComments) {
-                $priorComment = @($script:PrComments | Where-Object { $_.body -match '<!-- cost-pattern-data' }) | Select-Object -Last 1
-                if ($priorComment) {
-                    # Fix #760-D1-c: parse the actual prior comment body rather than using a
-                    # hardcoded stub, and use a flat shape so Resolve-CostDataPreservation can
-                    # read $Prior['completeness'] as a string (not a nested hashtable).
-                    $priorYaml = script:Get-CostPatternDataFromComment -Body $priorComment.body
-                    if ($null -ne $priorYaml) {
-                        $priorCostData = script:ConvertFrom-CostPatternYaml -Yaml $priorYaml
-                    }
-                    # Fix #760-C3: a populated prior cost-pattern-data block must never be
-                    # clobbered by an empty/partial current walk.  A block that predates the
-                    # session_completeness field parses with a null 'completeness' (and a fully
-                    # unextractable body yields $null priorCostData).  In both cases the marker's
-                    # presence means a genuine render already exists — the old contract only wrote
-                    # the block on a populated render — so default any prior block lacking an
-                    # explicit completeness to 'complete'.  Resolve-CostDataPreservation then
-                    # preserves it instead of overwriting with the empty/partial current.
-                    if ($null -eq $priorCostData) {
-                        $priorCostData = @{ completeness = 'complete' }
-                    }
-                    elseif ([string]::IsNullOrWhiteSpace([string]$priorCostData['completeness'])) {
-                        $priorCostData['completeness'] = 'complete'
-                    }
-                }
-            }
-
-            # Fix #760-D1-b: wire the Resolve-CostDataPreservation result instead of discarding it.
-            # This drives the skip-when-absent gate below (AC1 + AC2).
-
-            # Compute current token sum from attribution (populated predicate, issue #777 s2).
-            # Use totals['tokens'] as the authoritative full-session sum (includes overhead +
-            # unattributed tokens that are never placed into any port bucket — CR2).
-            # Fall back to ports-only sum if totals is unavailable (e.g., old data format).
-            [long]$currentTokenSum = 0
-            $currentTotalsTokens = if ($null -ne $costAttribution -and $costAttribution.ContainsKey('totals') -and
-                                        $null -ne $costAttribution['totals'] -and $costAttribution['totals'].ContainsKey('tokens')) {
-                $costAttribution['totals']['tokens']
-            } else { $null }
-            if ($null -ne $currentTotalsTokens) {
-                $currentTokenSum += script:Get-FCLTokenSumFromBucket -Bucket $currentTotalsTokens
-            } elseif ($null -ne $costAttribution -and $costAttribution.ContainsKey('ports')) {
-                foreach ($portBucket in $costAttribution['ports'].Values) {
-                    if ($null -ne $portBucket -and $portBucket.ContainsKey('tokens')) {
-                        $currentTokenSum += script:Get-FCLTokenSumFromBucket -Bucket $portBucket['tokens']
-                    }
-                }
-            }
-
-            # Compute prior token sum from parsed prior YAML (if available).
-            # cost-rolling-history ConvertFrom-CostPatternYaml does not parse totals.tokens, so
-            # use ports-only sum for prior. This is consistent with what was stored.
-            [long]$priorTokenSum = 0
-            if ($null -ne $priorCostData -and $priorCostData.ContainsKey('ports')) {
-                $priorPorts = $priorCostData['ports']
-                # ports is a hashtable keyed by port name (ConvertFrom-CostPatternYaml line 327)
-                $priorPortValues = if ($priorPorts -is [hashtable]) { $priorPorts.Values } elseif ($priorPorts -is [array]) { $priorPorts } else { @() }
-                foreach ($portBucket in $priorPortValues) {
-                    if ($null -ne $portBucket -and $portBucket.ContainsKey('tokens')) {
-                        $priorTokenSum += script:Get-FCLTokenSumFromBucket -Bucket $portBucket['tokens']
-                    }
-                }
-            }
-
-            $preservationResult = Resolve-CostDataPreservation -Current $completeness -Prior $priorCostData -CurrentTokenSum $currentTokenSum -PriorTokenSum $priorTokenSum
-
-            # Fix #760-D1-a: skip-when-absent gate — if preservation says to use_prior, reuse the
-            # prior comment's cost section verbatim.  This fires when the projects root is absent
-            # (CI enforce on ubuntu-latest) AND the prior comment had a complete render, preventing
-            # an empty walk from overwriting a populated cost-pattern-data block.  Invariant: a
-            # populated block is NEVER replaced by an empty one.
-            $usePriorCostSection = $preservationResult['use_prior'] -eq $true
-
-            # Issue #794 review fix H (post-fix review F1): retract a stale standalone
-            # degraded-telemetry comment once real cost events show up on a later run of the
-            # same orchestrated-origin PR. Without this, the degraded comment posted elsewhere
-            # (AC6, below) persists indefinitely, misleadingly asserting "no cost events" beside
-            # real data. This check is branch-independent: it must fire whenever real events are
-            # found and a prior degraded comment exists, regardless of which cost-data-rendering
-            # path ($usePriorCostSection true or false) the rest of this function takes below --
-            # a current run can find real events while still using the prior comment's rendered
-            # section verbatim (e.g. current completeness is 'partial' while the prior comment is
-            # 'complete'), so gating this solely on the use_prior branch would miss that case.
-            # Guard mirrors the degraded-post guard's $_isOrchestrated check, but keys off real
-            # events being present rather than absent. An explicit existence check against
-            # $script:PrComments (already fetched earlier this run) avoids posting a brand-new
-            # tombstone comment when no prior degraded comment ever existed for this PR --
-            # Find-OrUpsertComment itself always posts on a zero-match lookup, so it cannot be
-            # relied on to no-op that case.
-            $degradedMarker = "<!-- cost-pattern-data-degraded-$Pr -->"
-            $priorDegradedComment = if ($null -ne $script:PrComments) {
-                @($script:PrComments | Where-Object { $_.body -like "*$degradedMarker*" }) | Select-Object -First 1
-            } else { $null }
-            if ($_isOrchestrated -and $null -ne $priorDegradedComment -and @($costEvents).Count -gt 0) {
-                try {
-                    $recoveredComment = "$degradedMarker`n_Telemetry recovered — see the main cost-pattern-data comment above for current data._"
-                    $null = Find-OrUpsertComment -Type 'pr' -Number $Pr -Marker $degradedMarker -Body $recoveredComment
+                    $null = Find-OrUpsertComment -Type 'pr' -Number $Pr -Marker ([string]$costResult['DegradedMarker']) -Body ([string]$costResult['RetractDegradedBody'])
                 }
                 catch {
                     [Console]::Error.WriteLine("frame-credit-ledger: degraded cost-pattern-data retraction failed: $($_.Exception.Message)")
                 }
             }
 
-            if ($usePriorCostSection -and $null -ne $priorComment) {
-                $priorYamlForSection = script:Get-CostPatternDataFromComment -Body $priorComment.body
-                $preservationNotice = $preservationResult['notice']
-                $noticeBlock = if ($null -ne $preservationNotice -and $preservationNotice -ne '') {
-                    "> [!NOTE]`n> $preservationNotice`n`n"
-                } else { '' }
-                if ($null -ne $priorYamlForSection) {
-                    # Fix #760-F3: preserve the full visible section (heading + rendered markdown
-                    # table + YAML block) from the prior comment, not only the hidden YAML comment.
-                    # Without this, the human-readable Cost Pattern table disappears when preservation
-                    # fires, even though the underlying data (rolling-baseline YAML) survives.
-                    $sectionMatch = [regex]::Match(
-                        $priorComment.body,
-                        '(?ms)(?<section>^##\s+Cost Pattern\b.*?<!--\s*cost-pattern-data[\s\S]*?-->)'
-                    )
-                    $priorSection = if ($sectionMatch.Success) {
-                        $sectionMatch.Groups['section'].Value.TrimEnd()
-                    } else {
-                        # Fallback: visible heading unavailable — use YAML block only.
-                        "<!-- cost-pattern-data`n$priorYamlForSection`n-->"
-                    }
-                    $costSection = $noticeBlock + $priorSection
+            if ([bool]$costResult['ShouldPostDegraded']) {
+                try {
+                    $null = Find-OrUpsertComment -Type 'pr' -Number $Pr -Marker ([string]$costResult['DegradedMarker']) -Body ([string]$costResult['PostDegradedBody'])
                 }
-                else {
-                    # Fix #760-F9: prior block exists (loose selector matched) but the strict
-                    # extractor could not parse its body (malformed block — missing closing -->,
-                    # no newline after marker, etc.).  C3 defaulted priorCostData to 'complete'
-                    # above, which correctly triggers use_prior=true, but without this fallback
-                    # the rebuild path left $costSection='' and erased the prior block — the
-                    # exact opposite of the D1 invariant.  Carry the raw block verbatim instead.
-                    $rawBlockMatch = [regex]::Match(
-                        $priorComment.body,
-                        '<!--\s*cost-pattern-data[\s\S]*?-->'
-                    )
-                    if ($rawBlockMatch.Success) {
-                        $costSection = $noticeBlock + $rawBlockMatch.Value
-                    }
-                    # else: truly no cost block in the body despite the selector match — leave
-                    # $costSection as-is (empty string). This path is not normally reachable.
-                }
-            }
-            else {
-                # 6f. Anomaly flags — only compute when not using prior (AC2: guard on use_prior)
-                $anomalyFlags = @()
-                if (-not $rollingResult.timed_out -and (script:Get-FCLRemainingCostBudgetSeconds -Stopwatch $costStopwatch -BudgetSeconds $costBudgetSeconds) -gt 0) {
-                    try { $anomalyFlags = @(Get-CostAnomalyFlags -ThisRun $costAttribution -RollingHistory @($rollingResult.entries) -RegimeCheckpoint $checkpoint) }
-                    catch { $anomalyFlags = @() }
-                }
-
-                # 6g. Render fresh cost section
-                if ((script:Get-FCLRemainingCostBudgetSeconds -Stopwatch $costStopwatch -BudgetSeconds $costBudgetSeconds) -gt 0) {
-                    $costMarkdown = Format-CostPatternMarkdown -Attribution $costAttribution -Completeness $completeness -AnomalyFlags $anomalyFlags -RollingMeta $rollingResult -Pr $Pr -Branch ([string]$costBranch)
-                    $costYaml = Format-CostPatternYaml -Attribution $costAttribution -Completeness $completeness -AnomalyFlags $anomalyFlags -Pr $Pr -Branch ([string]$costBranch)
-                    $costSection = $costMarkdown + "`n" + $costYaml
-                }
-
-                # Issue #794 s4 (Part 2 / AC6): auto-post a degraded-honest cost-pattern-data
-                # comment when the walker genuinely found no telemetry for an orchestrated-origin
-                # PR. Sits downstream of the non-clobber guard above ($usePriorCostSection is
-                # $false here, meaning either there is no prior comment, or the current data is
-                # allowed to win) — a real walk with events, or a populated prior comment, always
-                # wins and this branch never fires for those cases (6f/6g only run at all when
-                # $costEvents is non-empty OR there is no populated prior to protect).
-                # env-absent is intentionally EXCLUDED — it is the expected/routine CI shape
-                # (frame-enforce.yml on ubuntu-latest, see workflow's landmine comment), not a
-                # genuine anomaly worth an auto-posted comment.
-                $degradedReasonForPost = [string]$costAttribution['degraded_reason']
-                $genuineDegradation = $degradedReasonForPost -in @('budget-exceeded', 'no-transcript-found')
-                if ($_isOrchestrated -and $genuineDegradation -and @($costEvents).Count -eq 0) {
-                    try {
-                        $degradedComment = script:Compose-FCLDegradedCostComment -DegradedReason $degradedReasonForPost -Pr $Pr -Branch ([string]$costBranch)
-                        $null = Find-OrUpsertComment -Type 'pr' -Number $Pr -Marker "<!-- cost-pattern-data-degraded-$Pr -->" -Body $degradedComment
-                    }
-                    catch {
-                        [Console]::Error.WriteLine("frame-credit-ledger: degraded cost-pattern-data post failed: $($_.Exception.Message)")
-                    }
+                catch {
+                    [Console]::Error.WriteLine("frame-credit-ledger: degraded cost-pattern-data post failed: $($_.Exception.Message)")
                 }
             }
         }
         catch {
+            # Mirrors Invoke-CostSessionRender's own internal fail-open catch: this
+            # outer layer only needs to cover the caller-side identity resolution
+            # ($slug / $costBranch) that happens before the call, since the function
+            # itself already fails open (returns CostSection = '') for anything that
+            # throws inside its own pipeline.
             [Console]::Error.WriteLine("frame-credit-ledger: cost pattern composition failed: $($_.Exception.Message)")
             $costSection = ''
         }
-        $costStopwatch.Stop()
     }
 
     $comment = Compose-CommentWithCostPattern -MarkerToken $marker -PortReports $reportsArray -CostSection $costSection -Mode $Mode -HasBlock $hasBlock

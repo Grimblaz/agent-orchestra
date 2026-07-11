@@ -403,3 +403,180 @@ Describe 'Resolve-CostDataPreservation' {
         }
     }
 }
+
+Describe 'Resolve-BaselineEligibility' {
+    BeforeAll {
+        $script:LibPath = Join-Path $PSScriptRoot '../lib/cost-completeness.ps1'
+        if (Test-Path $script:LibPath) {
+            . $script:LibPath
+        }
+
+        # Helper: build a Get-SessionCompleteness-shaped result hashtable directly, so
+        # predicate-matrix cases can be expressed declaratively without re-deriving
+        # completeness classification through synthetic events.
+        function script:New-BaselineCompletenessResult {
+            param(
+                [string]$Completeness = 'partial',
+                $StopReason = $null,
+                [bool]$ExcludedFromRollingBaseline = $true,
+                [string]$ExcludeReason = $null
+            )
+            return @{
+                completeness                   = $Completeness
+                stop_reason                    = $StopReason
+                excluded_from_rolling_baseline = $ExcludedFromRollingBaseline
+                exclude_reason                 = $ExcludeReason
+            }
+        }
+
+        # Helper: build an assistant event carrying only a gitBranch tag, for the
+        # independent phase-marker-only check exercised on the partial branch.
+        function script:New-BaselineAssistantEvent {
+            param([string]$Branch = 'feature/test-branch')
+            return @{
+                type      = 'assistant'
+                uuid      = [System.Guid]::NewGuid().ToString()
+                gitBranch = $Branch
+                message   = @{ usage = @{ input_tokens = 10; output_tokens = 5 } }
+            }
+        }
+    }
+
+    Context 'predicate matrix' {
+        It 'mid-session tool_use eligible' {
+            $result = script:New-BaselineCompletenessResult -Completeness 'partial' -StopReason 'tool_use'
+            $events = @(script:New-BaselineAssistantEvent -Branch 'feature/x')
+            $out = Resolve-BaselineEligibility -CompletenessResult $result -TokenSum 500 -Events $events -Branch 'feature/x'
+            $out.excluded_from_rolling_baseline | Should -Be $false
+            $out.capture_point | Should -Be 'pr-creation-mid-session'
+        }
+
+        It 'mid-session null stop_reason eligible' {
+            $result = script:New-BaselineCompletenessResult -Completeness 'partial' -StopReason $null
+            $events = @(script:New-BaselineAssistantEvent -Branch 'feature/x')
+            $out = Resolve-BaselineEligibility -CompletenessResult $result -TokenSum 500 -Events $events -Branch 'feature/x'
+            $out.excluded_from_rolling_baseline | Should -Be $false
+            $out.capture_point | Should -Be 'pr-creation-mid-session'
+        }
+
+        It 'mid-session empty-string stop_reason eligible' {
+            $result = script:New-BaselineCompletenessResult -Completeness 'partial' -StopReason ''
+            $events = @(script:New-BaselineAssistantEvent -Branch 'feature/x')
+            $out = Resolve-BaselineEligibility -CompletenessResult $result -TokenSum 500 -Events $events -Branch 'feature/x'
+            $out.excluded_from_rolling_baseline | Should -Be $false
+            $out.capture_point | Should -Be 'pr-creation-mid-session'
+        }
+
+        It 'zeros tool_use excluded (TokenSum = 0)' {
+            $result = script:New-BaselineCompletenessResult -Completeness 'partial' -StopReason 'tool_use'
+            $out = Resolve-BaselineEligibility -CompletenessResult $result -TokenSum 0 -Events @() -Branch 'feature/x'
+            $out.excluded_from_rolling_baseline | Should -Be $true
+            $out.capture_point | Should -Be 'n/a'
+        }
+
+        It 'unknown stop_reason excluded' {
+            $result = script:New-BaselineCompletenessResult -Completeness 'partial' -StopReason 'some_future_value'
+            $out = Resolve-BaselineEligibility -CompletenessResult $result -TokenSum 500 -Events @() -Branch 'feature/x'
+            $out.excluded_from_rolling_baseline | Should -Be $true
+            $out.capture_point | Should -Be 'n/a'
+        }
+
+        It 'named partial reason <_> excluded even when populated' -ForEach @('refusal', 'pause_turn', 'max_tokens', 'stop_sequence') {
+            $result = script:New-BaselineCompletenessResult -Completeness 'partial' -StopReason $_
+            $out = Resolve-BaselineEligibility -CompletenessResult $result -TokenSum 500 -Events @() -Branch 'feature/x'
+            $out.excluded_from_rolling_baseline | Should -Be $true
+            $out.capture_point | Should -Be 'n/a'
+        }
+
+        It 'complete eligible end-of-session' {
+            $result = script:New-BaselineCompletenessResult -Completeness 'complete' -StopReason 'end_turn' -ExcludedFromRollingBaseline $false
+            $out = Resolve-BaselineEligibility -CompletenessResult $result -TokenSum 500 -Events @() -Branch 'feature/x'
+            $out.excluded_from_rolling_baseline | Should -Be $false
+            $out.capture_point | Should -Be 'end-of-session'
+        }
+
+        It 'partial phase-marker-only excluded' {
+            $result = script:New-BaselineCompletenessResult -Completeness 'partial' -StopReason 'tool_use'
+            # Assistant events exist but none tagged with the current branch -> phase-marker-only.
+            $events = @(script:New-BaselineAssistantEvent -Branch 'main')
+            $out = Resolve-BaselineEligibility -CompletenessResult $result -TokenSum 500 -Events $events -Branch 'feature/issue-824-baseline-eligibility'
+            $out.excluded_from_rolling_baseline | Should -Be $true
+            $out.capture_point | Should -Be 'n/a'
+        }
+
+        It '-ExcludeReason outlier excluded' {
+            $result = script:New-BaselineCompletenessResult -Completeness 'complete' -StopReason 'end_turn' -ExcludedFromRollingBaseline $true -ExcludeReason 'foundational PR #467 — ~10x typical cost'
+            $out = Resolve-BaselineEligibility -CompletenessResult $result -TokenSum 500 -Events @() -Branch 'feature/x'
+            $out.excluded_from_rolling_baseline | Should -Be $true
+            $out.capture_point | Should -Be 'n/a'
+        }
+
+        It 'overhead-only totals (TokenSum from totals, no per-port breakdown) still eligible' {
+            # TokenSum models the totals-first-with-ports-fallback value the caller computes
+            # (M9); this wrapper only sees the resolved TokenSum, so a nonzero totals-only sum
+            # takes the same eligible path as any other populated mid-session capture.
+            $result = script:New-BaselineCompletenessResult -Completeness 'partial' -StopReason 'tool_use'
+            $events = @(script:New-BaselineAssistantEvent -Branch 'feature/x')
+            $out = Resolve-BaselineEligibility -CompletenessResult $result -TokenSum 42 -Events $events -Branch 'feature/x'
+            $out.excluded_from_rolling_baseline | Should -Be $false
+            $out.capture_point | Should -Be 'pr-creation-mid-session'
+        }
+
+        It 'unknown completeness excluded' {
+            $result = script:New-BaselineCompletenessResult -Completeness 'unknown' -StopReason $null
+            $out = Resolve-BaselineEligibility -CompletenessResult $result -TokenSum 500 -Events @() -Branch 'feature/x'
+            $out.excluded_from_rolling_baseline | Should -Be $true
+            $out.capture_point | Should -Be 'n/a'
+        }
+    }
+
+    Context 'M16 — stale exclude_reason cleared on eligible transition (issue #824 post-review)' {
+        # DD1 specifies exclude_reason: null on the eligible branch. Get-SessionCompleteness
+        # populates exclude_reason (e.g. "session completeness: partial") before this
+        # function re-evaluates eligibility; a real caller passes that populated result
+        # straight through, so both eligible branches must clear the stale reason.
+
+        It 'mid-session eligible clears a stale exclude_reason from Get-SessionCompleteness' {
+            $result = script:New-BaselineCompletenessResult `
+                -Completeness 'partial' -StopReason 'tool_use' `
+                -ExcludedFromRollingBaseline $true -ExcludeReason 'session completeness: partial'
+            $events = @(script:New-BaselineAssistantEvent -Branch 'feature/x')
+
+            $out = Resolve-BaselineEligibility -CompletenessResult $result -TokenSum 500 -Events $events -Branch 'feature/x'
+
+            $out.excluded_from_rolling_baseline | Should -Be $false
+            $out.exclude_reason | Should -Be $null -Because 'DD1: eligible rows must not carry a contradictory stale exclude_reason'
+        }
+
+        It 'end-of-session eligible clears a stale exclude_reason from Get-SessionCompleteness' {
+            $result = script:New-BaselineCompletenessResult `
+                -Completeness 'complete' -StopReason 'end_turn' `
+                -ExcludedFromRollingBaseline $false -ExcludeReason 'session completeness: partial'
+
+            $out = Resolve-BaselineEligibility -CompletenessResult $result -TokenSum 500 -Events @() -Branch 'feature/x'
+
+            $out.excluded_from_rolling_baseline | Should -Be $false
+            $out.exclude_reason | Should -Be $null -Because 'DD1: eligible rows must not carry a contradictory stale exclude_reason'
+        }
+
+        It 'excluded (ineligible) rows still preserve their exclude_reason' {
+            $result = script:New-BaselineCompletenessResult -Completeness 'partial' -StopReason 'max_tokens' -ExcludeReason 'session completeness: partial'
+            $out = Resolve-BaselineEligibility -CompletenessResult $result -TokenSum 500 -Events @() -Branch 'feature/x'
+            $out.excluded_from_rolling_baseline | Should -Be $true
+            $out.exclude_reason | Should -Be 'session completeness: partial'
+        }
+    }
+
+    Context 'key parity and in-place mutation' {
+        It 'preserves all original keys, adds capture_point, and mutates the same hashtable instance' {
+            $result = script:New-BaselineCompletenessResult -Completeness 'complete' -StopReason 'end_turn' -ExcludedFromRollingBaseline $false
+            $out = Resolve-BaselineEligibility -CompletenessResult $result -TokenSum 500 -Events @() -Branch 'feature/x'
+            $out.Keys | Should -Contain 'completeness'
+            $out.Keys | Should -Contain 'stop_reason'
+            $out.Keys | Should -Contain 'exclude_reason'
+            $out.Keys | Should -Contain 'excluded_from_rolling_baseline'
+            $out.Keys | Should -Contain 'capture_point'
+            [System.Object]::ReferenceEquals($out, $result) | Should -Be $true
+        }
+    }
+}
