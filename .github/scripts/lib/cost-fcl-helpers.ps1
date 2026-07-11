@@ -403,7 +403,7 @@ function script:Set-FCLCostCoverageMetadata {
         [AllowEmptyCollection()][object[]]$Events,
         [AllowNull()]$ClaudeWalk,
         [AllowNull()]$CopilotWalk,
-        [Parameter(Mandatory)][string]$CopilotOtelJsonlPath
+        [Parameter(Mandatory)][AllowEmptyString()][string]$CopilotOtelJsonlPath
     )
 
     [string[]]$providers = @(script:Get-FCLCostEventProviderSet -Events $Events)
@@ -470,7 +470,7 @@ function script:Compose-FCLDegradedCostComment {
     param(
         [Parameter(Mandatory)][string]$DegradedReason,
         [Parameter(Mandatory)][int]$Pr,
-        [Parameter(Mandatory)][string]$Branch
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Branch
     )
 
     $inv = [System.Globalization.CultureInfo]::InvariantCulture
