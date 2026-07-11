@@ -306,3 +306,91 @@ function Resolve-CostDataPreservation {
     # Both partial/unknown, or prior = none → most-recent (current) wins
     return @{ use_prior = $false; notice = $null }
 }
+
+function Resolve-BaselineEligibility {
+    <#
+    .SYNOPSIS
+        Determines rolling-baseline eligibility and capture_point disclosure for a session
+        completeness result (issue #824, Step 1).
+    .DESCRIPTION
+        Augments the hashtable returned by Get-SessionCompleteness IN PLACE: every original
+        key (completeness, stop_reason, exclude_reason, excluded_from_rolling_baseline) is
+        preserved, excluded_from_rolling_baseline is overwritten with the final eligibility
+        verdict, and one key is added: capture_point. Get-SessionCompleteness itself is not
+        modified.
+
+        Predicate (strict whitelist):
+          - completeness = 'partial' AND stop_reason in {'tool_use', $null, ''} AND
+            TokenSum > 0 AND not phase-marker-only -> eligible,
+            capture_point: 'pr-creation-mid-session'.
+          - completeness = 'complete' AND the input result is not already excluded (per its
+            own excluded_from_rolling_baseline) -> eligible, capture_point: 'end-of-session'.
+          - Everything else (named partial reasons, unknown stop_reason, zero tokens,
+            phase-marker-only, unknown completeness, -ExcludeReason outliers) -> excluded,
+            capture_point: 'n/a'.
+
+        Phase-marker-only is evaluated independently here (via Events/Branch) for the partial
+        branch, because Get-SessionCompleteness only evaluates it for the complete branch.
+    .PARAMETER CompletenessResult
+        The hashtable returned by Get-SessionCompleteness. Mutated in place and returned.
+    .PARAMETER TokenSum
+        Total token count for the current capture (caller-computed; totals-first with
+        per-port fallback). Used by the mid-session eligible predicate.
+    .PARAMETER Events
+        Array of event hashtables, used only for the independent phase-marker-only check on
+        the partial branch.
+    .PARAMETER Branch
+        Current git branch, used only for the independent phase-marker-only check on the
+        partial branch.
+    .OUTPUTS
+        [hashtable] The same instance passed as -CompletenessResult, with
+        excluded_from_rolling_baseline overwritten and capture_point added.
+    #>
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param(
+        [Parameter(Mandatory)][hashtable]$CompletenessResult,
+        [long]$TokenSum = 0,
+        [AllowEmptyCollection()][object[]]$Events = @(),
+        [string]$Branch = ''
+    )
+
+    $completeness = $CompletenessResult['completeness']
+    $stopReason = $CompletenessResult['stop_reason']
+
+    $eligible = $false
+    $capturePoint = 'n/a'
+
+    if ($completeness -eq 'partial') {
+        $eligibleTail = ($stopReason -eq 'tool_use' -or $null -eq $stopReason -or $stopReason -eq '')
+        if ($eligibleTail -and $TokenSum -gt 0) {
+            $phaseMarkerOnly = script:Test-CostPhaseMarkerOnlySession -Events $Events -Branch $Branch
+            if (-not $phaseMarkerOnly) {
+                $eligible = $true
+                $capturePoint = 'pr-creation-mid-session'
+            }
+        }
+    }
+    elseif ($completeness -eq 'complete') {
+        if ($CompletenessResult['excluded_from_rolling_baseline'] -eq $false) {
+            $eligible = $true
+            $capturePoint = 'end-of-session'
+        }
+    }
+
+    $CompletenessResult['excluded_from_rolling_baseline'] = -not $eligible
+    $CompletenessResult['capture_point'] = $capturePoint
+
+    # M16 fix (issue #824 post-review): DD1 specifies exclude_reason: null on the
+    # eligible branch. Get-SessionCompleteness may have populated exclude_reason
+    # (e.g. "session completeness: partial") before this function re-evaluates
+    # eligibility using the mid-session TokenSum/phase-marker predicate; without
+    # this clear, an eligible row carries a stale, contradictory exclude_reason
+    # alongside excluded_from_rolling_baseline: false. Covers both eligible
+    # branches (mid-session-partial and complete/end-of-session) via one gate.
+    if ($eligible) {
+        $CompletenessResult['exclude_reason'] = $null
+    }
+
+    return $CompletenessResult
+}

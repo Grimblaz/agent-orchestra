@@ -286,6 +286,48 @@ Describe 'Format-CostPatternMarkdown' {
         }
     }
 
+    Context 'eligible-partial header (mid-session baseline-eligible, issue #824 M6)' {
+        It 'clean: header always carries the mid-session disclosure and never the excluded-partial or clean-baseline strings' {
+            $attribution = script:New-MinimalAttribution
+            $completeness = script:New-Completeness -Completeness 'partial' -StopReason 'tool_use' -Excluded $false
+            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
+            $result | Should -Match 'mid-session capture — baseline-eligible; totals may understate the final turn'
+            $result | Should -Not -Match 'session incomplete'
+            $result | Should -Not -Match 'excluded from rolling-history aggregation'
+            $result | Should -Not -Match 'within rolling baseline'
+        }
+
+        It 'anomalies present: header carries disclosure AND the anomaly-count qualifier, self-contained' {
+            $attribution = script:New-MinimalAttribution
+            $completeness = script:New-Completeness -Completeness 'partial' -StopReason 'tool_use' -Excluded $false
+            $flag1 = script:New-AnomalyFlag
+            $flag2 = script:New-AnomalyFlag -Metric 'cost_estimate_usd.total' -Port $null
+            $flags = @($flag1, $flag2)
+            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness -AnomalyFlags $flags
+            $result | Should -Match 'mid-session capture — baseline-eligible; totals may understate the final turn'
+            $result | Should -Match '2 anomalies vs rolling baseline'
+            $result | Should -Not -Match 'excluded from rolling-history aggregation'
+        }
+
+        It 'rolling-history timed out: header carries disclosure AND the timed-out qualifier, self-contained' {
+            $attribution = script:New-MinimalAttribution
+            $completeness = script:New-Completeness -Completeness 'partial' -StopReason 'tool_use' -Excluded $false
+            $rollingMeta = @{ timed_out = $true }
+            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness -RollingMeta $rollingMeta
+            $result | Should -Match 'mid-session capture — baseline-eligible; totals may understate the final turn'
+            $result | Should -Match 'rolling-history fetch timed out'
+            $result | Should -Not -Match 'excluded from rolling-history aggregation'
+        }
+
+        It 'excluded partial (excluded_from_rolling_baseline true) still uses the legacy excluded-partial string, not the disclosure' {
+            $attribution = script:New-MinimalAttribution
+            $completeness = script:New-Completeness -Completeness 'partial' -StopReason 'max_tokens' -Excluded $true -ExcludeReason 'session completeness: partial'
+            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
+            $result | Should -Match 'session incomplete'
+            $result | Should -Not -Match 'mid-session capture — baseline-eligible'
+        }
+    }
+
     Context 'table structure' {
         It 'emits per-port rows for ports that ran' {
             $attribution = script:New-MinimalAttribution -PortNames @('experience')
@@ -640,6 +682,39 @@ Describe 'Format-CostPatternYaml' {
         $phaseScopePos | Should -BeLessThan $prPos
     }
 
+    It 'emits capture_point, session_id, head_ref as additive top-level scalars before the ports: block (issue #824 s2)' {
+        $attribution = script:New-YamlAttribution
+        $completeness = script:New-YamlCompleteness -Completeness 'partial' -Excluded $false
+        $completeness['capture_point'] = 'pr-creation-mid-session'
+        $result = Format-CostPatternYaml `
+            -Attribution $attribution `
+            -Completeness $completeness `
+            -Pr 824 `
+            -Branch 'feature/issue-824-baseline-eligibility' `
+            -SessionId 'session-abc-123' `
+            -HeadRef 'feature/issue-824-baseline-eligibility'
+
+        $result | Should -Match '(?m)^capture_point: pr-creation-mid-session$'
+        $result | Should -Match '(?m)^session_id: session-abc-123$'
+        $result | Should -Match '(?m)^head_ref: feature/issue-824-baseline-eligibility$'
+
+        $capturePos = $result.IndexOf('capture_point:')
+        $sessionPos = $result.IndexOf('session_id:')
+        $headRefPos = $result.IndexOf('head_ref:')
+        $portsPos   = $result.IndexOf("`nports:")
+
+        $capturePos | Should -BeLessThan $portsPos
+        $sessionPos | Should -BeLessThan $portsPos
+        $headRefPos | Should -BeLessThan $portsPos
+    }
+
+    It 'defaults capture_point to n/a when the completeness hashtable does not carry it' {
+        $attribution = script:New-YamlAttribution
+        $completeness = script:New-YamlCompleteness
+        $result = Format-CostPatternYaml -Attribution $attribution -Completeness $completeness
+        $result | Should -Match '(?m)^capture_point: n/a$'
+    }
+
     It 'emits anomaly_flags array' {
         $attribution = script:New-YamlAttribution
         $completeness = script:New-YamlCompleteness
@@ -698,7 +773,7 @@ Describe 'cost-pattern-data schema documentation' {
         $schemaPath | Should -Exist
         $schema = Get-Content -LiteralPath $schemaPath -Raw
 
-        foreach ($field in @('provider_support', 'coverage', 'install_status', 'providers', 'unmapped_session_count', 'phase_scope')) {
+        foreach ($field in @('provider_support', 'coverage', 'install_status', 'providers', 'unmapped_session_count', 'phase_scope', 'capture_point', 'session_id', 'head_ref')) {
             $schema | Should -Match "``$field``"
         }
     }

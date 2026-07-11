@@ -198,6 +198,37 @@ function script:ConvertFrom-CostPatternYaml {
                 $result['rendered_at'] = $parsedAt
             }
 
+            # Additive post-#824 baseline-eligibility fields (issue #824 s2). capture_point/
+            # session_id/head_ref are new top-level scalars the s4 harvest needs to select
+            # and re-walk mid-session captures. pr was already emitted by the renderer
+            # (cost-pattern-renderer.ps1) but had no matcher here — the harvest needs it to
+            # resolve its upsert target.
+            if ($line -match '^capture_point\s*:\s*(.+)$') {
+                $result['capture_point'] = [string](script:ConvertFrom-CostPatternYamlScalar -Value $Matches[1])
+            }
+
+            if ($line -match '^session_id\s*:\s*(.+)$') {
+                $result['session_id'] = [string](script:ConvertFrom-CostPatternYamlScalar -Value $Matches[1])
+            }
+
+            if ($line -match '^head_ref\s*:\s*(.+)$') {
+                $result['head_ref'] = [string](script:ConvertFrom-CostPatternYamlScalar -Value $Matches[1])
+            }
+
+            if ($line -match '^pr\s*:\s*(.+)$') {
+                $result['pr'] = [int](script:ConvertFrom-CostPatternYamlScalar -Value $Matches[1])
+            }
+
+            # Additive post-#824 s4 field: stamped by the startup harvest onto a
+            # candidate's persisted block after a re-walk attempt that did not
+            # promote it to end-of-session (e.g. a null-tail/cross-tool row that
+            # stays 'partial' forever). Its presence lets the s4 selection filter
+            # skip/deprioritize the row on future scans instead of re-consuming
+            # the one-re-walk-per-startup budget on a row that can never promote.
+            if ($line -match '^upgrade_attempted_at\s*:\s*(.+)$') {
+                $result['upgrade_attempted_at'] = [string](script:ConvertFrom-CostPatternYamlScalar -Value $Matches[1])
+            }
+
             # cost_pattern_data block
             if ($line -match '^\s*cost_pattern_data\s*:\s*$') {
                 $j = $i + 1
@@ -384,7 +415,9 @@ function script:ConvertFrom-CostPatternYaml {
 
             # totals block
             if ($line -match '^\s*totals\s*:\s*$') {
-                $tot = @{}
+                $tot = @{
+                    tokens = (script:New-CostPatternTokenBucket)
+                }
                 $j = $i + 1
                 while ($j -lt $lines.Count) {
                     $subLine = $lines[$j]
@@ -392,6 +425,18 @@ function script:ConvertFrom-CostPatternYaml {
                     if (-not ($subLine -match '^\s')) { break }
                     if ($subLine -match '^\s+cost_estimate_usd\s*:\s*(.+)$') {
                         script:Set-CostPatternNumericField -Bucket $tot -Field 'cost_estimate_usd' -Value $Matches[1]
+                    }
+                    # M4 fix (issue #824 post-review): totals.tokens sub-block. The
+                    # renderer (cost-pattern-renderer.ps1 Format-CostPatternYaml,
+                    # lines ~859-864) has always emitted this bucket, but this parser
+                    # never captured it — only totals.cost_estimate_usd was matched.
+                    # The harvest's no-downgrade guard needs a totals-first token sum
+                    # (which includes orchestrator overhead + unattributed tokens
+                    # outside any per-port bucket) from a parsed prior; without this,
+                    # only a ports-only sum was available, which almost never matches
+                    # what the re-walk side computes.
+                    if ($subLine -match '^\s{4,}(input|output|cache_creation|cache_read)\s*:\s*(.+)$') {
+                        $tot['tokens'][$Matches[1]] = [int](script:ConvertFrom-CostPatternYamlScalar -Value $Matches[2])
                     }
                     $j++
                 }
@@ -560,7 +605,18 @@ function Get-CostRollingHistory {
                     if ($cacheData.ContainsKey('entries') -and $null -ne $cacheData['entries']) {
                         $cachedEntries = @($cacheData['entries'])
                     }
-                    return @{ timed_out = $false; entries = $cachedEntries }
+                    # M5 fix (issue #824 post-review): scanned_count round-trips through the
+                    # cache so a cache hit doesn't lose the pre-filter visibility a fresh fetch
+                    # provides. Older cache files written before this fix lack the key — fall
+                    # back to entries.Count (no known exclusions) rather than fabricating a
+                    # number, which matches this file's existing safe-default convention.
+                    $cachedScannedCount = if ($cacheData.ContainsKey('scanned_count') -and $null -ne $cacheData['scanned_count']) {
+                        [int]$cacheData['scanned_count']
+                    }
+                    else {
+                        $cachedEntries.Count
+                    }
+                    return @{ timed_out = $false; entries = $cachedEntries; scanned_count = $cachedScannedCount }
                 }
             }
         }
@@ -573,19 +629,19 @@ function Get-CostRollingHistory {
     # Budget check before first API call
     if ($stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
         Write-Warning "cost-rolling-history: timed out before repo view"
-        return @{ timed_out = $true; entries = @() }
+        return @{ timed_out = $true; entries = @(); scanned_count = 0 }
     }
 
     $repoViewJson = & gh repo view --json 'owner,name' 2>&1
     if ($LASTEXITCODE -ne 0) {
         Write-Warning "cost-rolling-history: gh repo view failed: $repoViewJson"
-        return @{ timed_out = $false; entries = @() }
+        return @{ timed_out = $false; entries = @(); scanned_count = 0 }
     }
 
     # Budget check after repo view (may have taken time)
     if ($stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
         Write-Warning "cost-rolling-history: timed out after repo view"
-        return @{ timed_out = $true; entries = @() }
+        return @{ timed_out = $true; entries = @(); scanned_count = 0 }
     }
 
     try {
@@ -595,7 +651,7 @@ function Get-CostRollingHistory {
     }
     catch {
         Write-Warning "cost-rolling-history: failed to parse repo view response: $_"
-        return @{ timed_out = $false; entries = @() }
+        return @{ timed_out = $false; entries = @(); scanned_count = 0 }
     }
 
     # ---- Try GraphQL first ----
@@ -604,7 +660,7 @@ function Get-CostRollingHistory {
 
     if ($stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
         Write-Warning "cost-rolling-history: timed out after GraphQL call"
-        return @{ timed_out = $true; entries = @() }
+        return @{ timed_out = $true; entries = @(); scanned_count = 0 }
     }
 
     $useRest = $false
@@ -674,19 +730,19 @@ function Get-CostRollingHistory {
     if ($useRest) {
         if ($stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
             Write-Warning "cost-rolling-history: timed out before REST fallback"
-            return @{ timed_out = $true; entries = @() }
+            return @{ timed_out = $true; entries = @(); scanned_count = $commentBodies.Count }
         }
 
         $prListOutput = & gh pr list --state merged --limit $Limit --json number 2>&1
 
         if ($stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
             Write-Warning "cost-rolling-history: timed out after REST pr list"
-            return @{ timed_out = $true; entries = @() }
+            return @{ timed_out = $true; entries = @(); scanned_count = $commentBodies.Count }
         }
 
         if ($LASTEXITCODE -ne 0) {
             Write-Warning "cost-rolling-history: REST pr list failed: $prListOutput"
-            return @{ timed_out = $false; entries = @() }
+            return @{ timed_out = $false; entries = @(); scanned_count = $commentBodies.Count }
         }
 
         try {
@@ -699,7 +755,7 @@ function Get-CostRollingHistory {
                     # and the partial_fetch flag lets callers decide whether to trust the result.
                     $partialEntries = script:ConvertTo-CostRollingEntries -Bodies $commentBodies.ToArray()
                     Write-Warning "cost-rolling-history: timed out during REST pr comments fetch — returning $($partialEntries.Count) partial entries from $($commentBodies.Count) comment bodies fetched so far"
-                    return @{ timed_out = $true; entries = $partialEntries; partial_fetch = $true }
+                    return @{ timed_out = $true; entries = $partialEntries; partial_fetch = $true; scanned_count = $commentBodies.Count }
                 }
 
                 $prNum = $pr['number']
@@ -745,8 +801,9 @@ function Get-CostRollingHistory {
                 New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null
             }
             $cachePayload = @{
-                generated_at = (Get-Date).ToUniversalTime().ToString('o')
-                entries      = $entries
+                generated_at  = (Get-Date).ToUniversalTime().ToString('o')
+                entries       = $entries
+                scanned_count = $commentBodies.Count
             }
             $cachePayload | ConvertTo-Json -Depth 20 | Set-Content -Path $CachePath -Encoding UTF8
         }
@@ -755,5 +812,5 @@ function Get-CostRollingHistory {
         }
     }
 
-    return @{ timed_out = $false; entries = $entries }
+    return @{ timed_out = $false; entries = $entries; scanned_count = $commentBodies.Count }
 }
