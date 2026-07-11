@@ -411,10 +411,18 @@ function Get-DispositionTally {
           Entries     [PSCustomObject[]] — one per in-scope entry, each with
                       StableFindingKey, Disposition, Stage, ReviewerSource
           ParseStatus [string] — 'ok' or 'could-not-verify'
-        For -Surface design-challenge / plan-stress-test:
+        For -Surface plan-stress-test:
           Surface               [string]
           SustainedCount        [int]
           DefenseSustainedCount [int]
+          ParseStatus           [string] — 'ok' or 'could-not-verify'
+        For -Surface design-challenge (issue #768 s4 additive field):
+          Surface               [string]
+          SustainedCount        [int]
+          DefenseSustainedCount [int] — always 0 (no defense-sustained concept)
+          DismissedCount        [int] — complementary dismiss count, so
+                                 SustainedCount + DismissedCount is the total
+                                 dispositioned-finding denominator
           ParseStatus           [string] — 'ok' or 'could-not-verify'
     #>
     param(
@@ -425,6 +433,11 @@ function Get-DispositionTally {
     if ([string]::IsNullOrWhiteSpace($Body)) {
         if ($Surface -eq 'code-review') {
             return [PSCustomObject]@{ Surface = $Surface; Entries = @(); ParseStatus = 'could-not-verify' }
+        }
+        if ($Surface -eq 'design-challenge') {
+            # Additive (issue #768 s4): DismissedCount, see the design-challenge
+            # branch below and Get-DesignChallengeSustainedCountInternal.
+            return [PSCustomObject]@{ Surface = $Surface; SustainedCount = 0; DefenseSustainedCount = 0; DismissedCount = 0; ParseStatus = 'could-not-verify' }
         }
         return [PSCustomObject]@{ Surface = $Surface; SustainedCount = 0; DefenseSustainedCount = 0; ParseStatus = 'could-not-verify' }
     }
@@ -445,6 +458,7 @@ function Get-DispositionTally {
             Surface               = $Surface
             SustainedCount        = $inner.SustainedCount
             DefenseSustainedCount = $inner.DefenseSustainedCount
+            DismissedCount        = $inner.DismissedCount
             ParseStatus           = $inner.ParseStatus
         }
     }
@@ -889,7 +903,7 @@ function script:Get-DesignChallengeSustainedCountInternal {
 
     $headMatch = [regex]::Match($Body, '(?m)^finding_dispositions\s*:\s*$')
     if (-not $headMatch.Success) {
-        return [PSCustomObject]@{ SustainedCount = 0; DefenseSustainedCount = 0; ParseStatus = 'could-not-verify' }
+        return [PSCustomObject]@{ SustainedCount = 0; DefenseSustainedCount = 0; DismissedCount = 0; ParseStatus = 'could-not-verify' }
     }
 
     $regionStart = $headMatch.Index + $headMatch.Length
@@ -912,7 +926,7 @@ function script:Get-DesignChallengeSustainedCountInternal {
     $keyAnchor = '(?:^\s*(?:-\s+)?|[{,]\s*)'
     $dispositionMatches = [regex]::Matches($region, "(?m)${keyAnchor}disposition\s*:\s*(incorporate|escalate|dismiss)\b")
     if ($dispositionMatches.Count -eq 0) {
-        return [PSCustomObject]@{ SustainedCount = 0; DefenseSustainedCount = 0; ParseStatus = 'could-not-verify' }
+        return [PSCustomObject]@{ SustainedCount = 0; DefenseSustainedCount = 0; DismissedCount = 0; ParseStatus = 'could-not-verify' }
     }
 
     $sustained = @($dispositionMatches | Where-Object { $_.Groups[1].Value -ne 'dismiss' })
@@ -922,7 +936,16 @@ function script:Get-DesignChallengeSustainedCountInternal {
     # concept. DefenseSustainedCount is always 0 here; carried purely for
     # Get-DispositionTally's uniform (SustainedCount, DefenseSustainedCount)
     # return shape across its judge-rulings-style surfaces.
-    return [PSCustomObject]@{ SustainedCount = $sustained.Count; DefenseSustainedCount = 0; ParseStatus = 'ok' }
+    #
+    # Additive (issue #768 s4): DismissedCount exposes the complementary
+    # dismiss count alongside SustainedCount, so Get-ReviewCostRollup
+    # (phase-containment-cost-core.ps1) can compute the design-challenge
+    # dismiss-rate's "over dispositioned findings" denominator
+    # (SustainedCount + DismissedCount) without re-parsing the marker.
+    # Get-SustainedFindingCount re-projects this away (AC8) so its public
+    # {SustainedCount; ParseStatus} shape stays byte-identical.
+    $dismissedCount = $dispositionMatches.Count - $sustained.Count
+    return [PSCustomObject]@{ SustainedCount = $sustained.Count; DefenseSustainedCount = 0; DismissedCount = $dismissedCount; ParseStatus = 'ok' }
 }
 
 #endregion
