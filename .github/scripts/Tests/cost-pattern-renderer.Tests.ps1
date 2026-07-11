@@ -246,17 +246,18 @@ Describe 'Format-CostPatternMarkdown' {
             $result | Should -Match 'max_tokens'
         }
 
-        It 'unknown: header renders cross-tool diagnostic and unavailable cost fields' {
+        It 'unknown: header renders honest environment-state diagnostic and unavailable cost fields, no #488 pointer' {
             $attribution = script:Add-CoverageMetadata `
                 -Attribution (script:New-MinimalAttribution) `
                 -Coverage 'claude-only-with-copilot-fallback-warning' `
                 -InstallStatus 'missing-or-fallback' `
                 -ProviderSupport @('claude')
             $completeness = script:New-Completeness -Completeness 'unknown' -StopReason $null -Excluded $true -ExcludeReason 'session completeness: unknown'
-            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
+            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness -RenderContext @{ IsCi = $false; ProjectsRootPresent = $false }
             $result | Should -Not -Match ([regex]::Escape((script:Get-LegacyUnknownSessionWarningText)))
             $result | Should -Match 'cost-fields unavailable'
-            $result | Should -Match 'no Claude or Copilot session activity recorded for this PR''s branch; cross-tool collection is enabled — see `Initialize-CopilotCostCollection` if Copilot is installed but data is missing, or #488 for diagnostics\.'
+            $result | Should -Match 'no local session data on this machine'
+            $result | Should -Not -Match '488'
         }
 
         It 'timeout: header contains "rolling-history fetch timed out"' {
@@ -281,8 +282,77 @@ Describe 'Format-CostPatternMarkdown' {
             $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
             $result | Should -Match 'phase-marker-only attribution; rolling-history excluded'
             $result | Should -Match 'Claude-side phase-marker attribution'
-            $result | Should -Match 'Copilot-side collection remains tracked by \[#488\]\(https://github\.com/Grimblaz/agent-orchestra/issues/488\)'
+            $result | Should -Match 'Copilot-side collection was not captured for this run'
+            $result | Should -Not -Match '488'
             $result | Should -Not -Match 'session not found'
+        }
+    }
+
+    Context 'unknown-completeness three render states (issue #825 s2, M12)' {
+        It 'CI state: RenderContext IsCi true renders the CI-cannot-see-local-transcripts message' {
+            $attribution = script:New-MinimalAttribution
+            $completeness = script:New-Completeness -Completeness 'unknown' -StopReason $null -Excluded $true -ExcludeReason 'session completeness: unknown'
+            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness -RenderContext @{ IsCi = $true; ProjectsRootPresent = $false }
+            $result | Should -Match 'CI cannot see local transcripts'
+            $result | Should -Not -Match '488'
+            $result | Should -Not -Match 'no session activity'
+        }
+
+        It 'non-CI, no local projects root: renders the no-local-session-data message' {
+            $attribution = script:New-MinimalAttribution
+            $completeness = script:New-Completeness -Completeness 'unknown' -StopReason $null -Excluded $true -ExcludeReason 'session completeness: unknown'
+            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness -RenderContext @{ IsCi = $false; ProjectsRootPresent = $false }
+            $result | Should -Match 'no local session data on this machine'
+            $result | Should -Not -Match '488'
+            $result | Should -Not -Match 'no session activity'
+        }
+
+        It 'non-CI, projects root present, genuinely empty walk: renders the honest-zero message naming the pinned loss modes' {
+            $attribution = script:New-MinimalAttribution
+            $completeness = script:New-Completeness -Completeness 'unknown' -StopReason $null -Excluded $true -ExcludeReason 'session completeness: unknown'
+            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness -RenderContext @{ IsCi = $false; ProjectsRootPresent = $true }
+            $result | Should -Match 'transcripts were searched on this machine and none matched'
+            $result | Should -Match 'walk ran where transcripts are unavailable'
+            $result | Should -Match 'local walk never ran or exited before the cost step'
+            $result | Should -Match 'since-deleted sibling worktree'
+            $result | Should -Match 'mid-session'
+            $result | Should -Match 'linked issue could not be resolved'
+            $result | Should -Not -Match '488'
+            $result | Should -Not -Match 'no session activity'
+        }
+
+        It 'all three unknown-completeness states are textually distinct' {
+            $attribution = script:New-MinimalAttribution
+            $completeness = script:New-Completeness -Completeness 'unknown' -StopReason $null -Excluded $true -ExcludeReason 'session completeness: unknown'
+            $ci = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness -RenderContext @{ IsCi = $true; ProjectsRootPresent = $false }
+            $noRoot = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness -RenderContext @{ IsCi = $false; ProjectsRootPresent = $false }
+            $emptyWalk = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness -RenderContext @{ IsCi = $false; ProjectsRootPresent = $true }
+            $ci | Should -Not -BeExactly $noRoot
+            $ci | Should -Not -BeExactly $emptyWalk
+            $noRoot | Should -Not -BeExactly $emptyWalk
+        }
+    }
+
+    Context 'coverage annotation on populated blocks (issue #825 s2, M6)' {
+        It 'appends the coverage annotation when RejectedDirCount is greater than zero' {
+            $attribution = script:New-MinimalAttribution
+            $completeness = script:New-Completeness
+            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness -RejectedDirCount 3
+            $result | Should -Match 'activity from 3 unverifiable location\(s\) may be excluded'
+        }
+
+        It 'omits the coverage annotation when RejectedDirCount is zero' {
+            $attribution = script:New-MinimalAttribution
+            $completeness = script:New-Completeness
+            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness -RejectedDirCount 0
+            $result | Should -Not -Match 'unverifiable location'
+        }
+
+        It 'never appends the coverage annotation on an unknown-completeness (unpopulated) block, even with RejectedDirCount set' {
+            $attribution = script:New-MinimalAttribution
+            $completeness = script:New-Completeness -Completeness 'unknown' -StopReason $null -Excluded $true -ExcludeReason 'session completeness: unknown'
+            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness -RenderContext @{ IsCi = $false; ProjectsRootPresent = $true } -RejectedDirCount 5
+            $result | Should -Not -Match 'unverifiable location'
         }
     }
 
@@ -432,7 +502,7 @@ Describe 'Format-CostPatternMarkdown' {
             $result | Should -Match '⚠ building cross-tool baseline — matching-coverage history < 5 entries'
         }
 
-        It 'replaces the legacy unknown-session warning with the cross-tool diagnostic text' {
+        It 'replaces the legacy unknown-session warning with an honest environment-state message, never #488' {
             $attribution = script:Add-CoverageMetadata `
                 -Attribution (script:New-MinimalAttribution) `
                 -Coverage 'claude-only-with-copilot-fallback-warning' `
@@ -440,10 +510,11 @@ Describe 'Format-CostPatternMarkdown' {
                 -ProviderSupport @('claude')
             $completeness = script:New-Completeness -Completeness 'unknown' -StopReason $null -Excluded $true -ExcludeReason 'session completeness: unknown'
 
-            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
+            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness -RenderContext @{ IsCi = $false; ProjectsRootPresent = $false }
 
             $result | Should -Not -Match ([regex]::Escape((script:Get-LegacyUnknownSessionWarningText)))
-            $result | Should -Match 'no Claude or Copilot session activity recorded for this PR''s branch; cross-tool collection is enabled — see `Initialize-CopilotCostCollection` if Copilot is installed but data is missing, or #488 for diagnostics\.'
+            $result | Should -Match 'no local session data on this machine'
+            $result | Should -Not -Match '488'
         }
 
         It 'renders the inline coverage-tag legend once when fallback-warning coverage appears' {

@@ -276,22 +276,93 @@ function script:Format-CostRendererFallbackRemediationNote {
 
 #region ---- Header builder -----------------------------------------------------
 
+function script:Format-CostPatternCoverageAnnotation {
+    <#
+    .SYNOPSIS
+        Renders the coverage-annotation suffix appended to a populated header
+        when the walker's Tier-2 corroboration rejected one or more candidate
+        directories (issue #825 s2, M6). Returns '' when RejectedDirCount is
+        not positive, so callers can unconditionally append the result.
+    #>
+    [OutputType([string])]
+    param([int]$RejectedDirCount = 0)
+
+    if ($RejectedDirCount -le 0) { return '' }
+    return " (activity from $RejectedDirCount unverifiable location(s) may be excluded)"
+}
+
+function script:Format-CostPatternUnknownHeader {
+    <#
+    .SYNOPSIS
+        Renders the unknown-completeness header across the three honest render
+        states (issue #825 s2, M12). Pure — reads only the caller-computed
+        -RenderContext, never $env: itself, so the sharded Pester runner stays
+        deterministic. None of the three states asserts "no session activity"
+        as settled fact: each names the real reason the walk found nothing, or
+        that the walk could not run at all.
+    .PARAMETER RenderContext
+        Optional hashtable with IsCi / ProjectsRootPresent booleans. Missing
+        keys default to false (non-CI, projects root absent) — the more
+        conservative "no local data" framing rather than a false honest-zero
+        claim when the caller did not supply enough context.
+    #>
+    [OutputType([string])]
+    param([hashtable]$RenderContext = $null)
+
+    $isCi = $false
+    $projectsRootPresent = $false
+    if ($null -ne $RenderContext) {
+        if ($RenderContext.ContainsKey('IsCi')) { $isCi = [bool]$RenderContext['IsCi'] }
+        if ($RenderContext.ContainsKey('ProjectsRootPresent')) { $projectsRootPresent = [bool]$RenderContext['ProjectsRootPresent'] }
+    }
+
+    if ($isCi) {
+        return "## Cost Pattern `u{26A0} CI cannot see local transcripts; a local re-walk will upgrade this block. cost-fields unavailable; this run is excluded from rolling-history aggregation"
+    }
+
+    if (-not $projectsRootPresent) {
+        return "## Cost Pattern `u{26A0} no local session data on this machine; a re-walk from the machine holding the transcripts will upgrade this block. cost-fields unavailable; this run is excluded from rolling-history aggregation"
+    }
+
+    return "## Cost Pattern `u{26A0} transcripts were searched on this machine and none matched this PR's branch/session; possible causes: the walk ran where transcripts are unavailable, the local walk never ran or exited before the cost step, a since-deleted sibling worktree held the events, the branch was created mid-session outside the phase-marker windows, or the linked issue could not be resolved from the branch name. cost-fields unavailable; this run is excluded from rolling-history aggregation"
+}
+
 function script:Build-CostPatternHeader {
     <#
     .SYNOPSIS
         Returns the header line for the ## Cost Pattern section.
+    .PARAMETER RenderContext
+        Issue #825 s2. Optional hashtable with IsCi / ProjectsRootPresent
+        booleans, used only for the unknown-completeness branch. See
+        Format-CostPatternUnknownHeader.
+    .PARAMETER RejectedDirCount
+        Issue #825 s2, M6. Count of Tier-2 branch-matched candidate
+        directories the walker rejected for failing corroboration. When
+        greater than zero, a populated (non-unknown) header carries a
+        coverage-annotation suffix naming the excluded location count.
     #>
     [OutputType([string])]
     param(
         [Parameter(Mandatory)][hashtable]$Completeness,
         [AllowEmptyCollection()][hashtable[]]$AnomalyFlags = @(),
-        [hashtable]$RollingMeta = $null
+        [hashtable]$RollingMeta = $null,
+        [hashtable]$RenderContext = $null,
+        [int]$RejectedDirCount = 0
     )
 
     $completenessValue = $Completeness['completeness']
     $excluded = $Completeness['excluded_from_rolling_baseline']
     $excludeReason = $Completeness['exclude_reason']
     $stopReason = $Completeness['stop_reason']
+
+    # unknown session (issue #825 s2, M12): no populated data exists, so this
+    # branch returns directly — it is never decorated with the coverage
+    # annotation below, which is scoped to populated blocks only.
+    if ($completenessValue -eq 'unknown') {
+        return script:Format-CostPatternUnknownHeader -RenderContext $RenderContext
+    }
+
+    $header = $null
 
     # eligible-partial session (issue #824 M6): a mid-session capture that
     # Resolve-BaselineEligibility promoted to baseline-eligible. Self-contained —
@@ -301,44 +372,40 @@ function script:Build-CostPatternHeader {
     if ($completenessValue -eq 'partial' -and $excluded -eq $false) {
         $disclosure = 'mid-session capture — baseline-eligible; totals may understate the final turn'
         if ($null -ne $RollingMeta -and $RollingMeta['timed_out'] -eq $true) {
-            return "## Cost Pattern `u{26A0} $disclosure; rolling-history fetch timed out — anomaly review unavailable for this run; per-port table shown below"
+            $header = "## Cost Pattern `u{26A0} $disclosure; rolling-history fetch timed out — anomaly review unavailable for this run; per-port table shown below"
         }
-        if ($null -ne $AnomalyFlags -and $AnomalyFlags.Count -gt 0) {
+        elseif ($null -ne $AnomalyFlags -and $AnomalyFlags.Count -gt 0) {
             $n = $AnomalyFlags.Count
-            return "## Cost Pattern `u{26A0} $disclosure ($n anomalies vs rolling baseline)"
+            $header = "## Cost Pattern `u{26A0} $disclosure ($n anomalies vs rolling baseline)"
         }
-        return "## Cost Pattern `u{26A0} $disclosure"
+        else {
+            $header = "## Cost Pattern `u{26A0} $disclosure"
+        }
     }
-
     # partial session (excluded from rolling-baseline aggregation)
-    if ($completenessValue -eq 'partial') {
+    elseif ($completenessValue -eq 'partial') {
         $reason = if ($stopReason) { $stopReason } else { 'unknown stop reason' }
-        return "## Cost Pattern `u{26A0} session incomplete ($reason); cost-fields show partial data; this run is excluded from rolling-history aggregation"
+        $header = "## Cost Pattern `u{26A0} session incomplete ($reason); cost-fields show partial data; this run is excluded from rolling-history aggregation"
     }
-
-    # unknown session
-    if ($completenessValue -eq 'unknown') {
-        return "## Cost Pattern `u{26A0} no Claude or Copilot session activity recorded for this PR's branch; cross-tool collection is enabled — see ``Initialize-CopilotCostCollection`` if Copilot is installed but data is missing, or #488 for diagnostics. cost-fields unavailable; this run is excluded from rolling-history aggregation"
-    }
-
     # rolling-history timed out
-    if ($null -ne $RollingMeta -and $RollingMeta['timed_out'] -eq $true) {
-        return "## Cost Pattern `u{26A0} rolling-history fetch timed out — anomaly review unavailable for this run; per-port table shown below"
+    elseif ($null -ne $RollingMeta -and $RollingMeta['timed_out'] -eq $true) {
+        $header = "## Cost Pattern `u{26A0} rolling-history fetch timed out — anomaly review unavailable for this run; per-port table shown below"
     }
-
     # complete session, excluded (outlier-PR annotation)
-    if ($excluded -and $null -ne $excludeReason -and $excludeReason -ne '' -and $completenessValue -eq 'complete') {
-        return "## Cost Pattern `u{26A0} this PR is annotated $excludeReason; excluded from rolling-history aggregation by future PRs"
+    elseif ($excluded -and $null -ne $excludeReason -and $excludeReason -ne '' -and $completenessValue -eq 'complete') {
+        $header = "## Cost Pattern `u{26A0} this PR is annotated $excludeReason; excluded from rolling-history aggregation by future PRs"
     }
-
     # complete, anomaly flags present
-    if ($null -ne $AnomalyFlags -and $AnomalyFlags.Count -gt 0) {
+    elseif ($null -ne $AnomalyFlags -and $AnomalyFlags.Count -gt 0) {
         $n = $AnomalyFlags.Count
-        return "## Cost Pattern ($n anomalies vs rolling baseline)"
+        $header = "## Cost Pattern ($n anomalies vs rolling baseline)"
+    }
+    # complete, clean
+    else {
+        $header = "## Cost Pattern — within rolling baseline"
     }
 
-    # complete, clean
-    return "## Cost Pattern — within rolling baseline"
+    return $header + (script:Format-CostPatternCoverageAnnotation -RejectedDirCount $RejectedDirCount)
 }
 
 #endregion
@@ -623,6 +690,14 @@ function Format-CostPatternMarkdown {
         PR number (informational; not rendered in markdown body but available for callers).
     .PARAMETER Branch
         Branch name (informational).
+    .PARAMETER RenderContext
+        Issue #825 s2. Optional hashtable with IsCi / ProjectsRootPresent
+        booleans, threaded to the unknown-completeness header. Pure — this
+        function never reads $env: itself; the caller computes both flags.
+    .PARAMETER RejectedDirCount
+        Issue #825 s2, M6. Count of Tier-2 branch-matched candidate
+        directories the walker rejected for failing corroboration; drives the
+        coverage-annotation suffix on populated (non-unknown) headers.
     .OUTPUTS
         [string] Full ## Cost Pattern markdown section.
     #>
@@ -634,10 +709,12 @@ function Format-CostPatternMarkdown {
         [AllowEmptyCollection()][hashtable[]]$AnomalyFlags = @(),
         [hashtable]$RollingMeta = $null,
         [int]$Pr = 0,
-        [string]$Branch = ''
+        [string]$Branch = '',
+        [hashtable]$RenderContext = $null,
+        [int]$RejectedDirCount = 0
     )
 
-    $header = script:Build-CostPatternHeader -Completeness $Completeness -AnomalyFlags $AnomalyFlags -RollingMeta $RollingMeta
+    $header = script:Build-CostPatternHeader -Completeness $Completeness -AnomalyFlags $AnomalyFlags -RollingMeta $RollingMeta -RenderContext $RenderContext -RejectedDirCount $RejectedDirCount
     $table = script:Build-CostPatternTable  -Attribution $Attribution -AnomalyFlags $AnomalyFlags
     $coverage = script:Get-CostRendererCoverage -Attribution $Attribution
 
@@ -669,7 +746,7 @@ function Format-CostPatternMarkdown {
         $body += "`n`n> **Note**: $nullEventTotal cost event(s) had unknown models not present in ``cost-rate-table.json`` and contributed null to the cost estimate. Update the rate table to include the missing model(s) for accurate attribution."
     }
     if ($Completeness['exclude_reason'] -eq 'phase-marker-only attribution; rolling-history excluded') {
-        $body += "`n`n> **Note**: This Cost Pattern shows Claude-side phase-marker attribution. Copilot-side collection remains tracked by [#488](https://github.com/Grimblaz/agent-orchestra/issues/488)."
+        $body += "`n`n> **Note**: This Cost Pattern shows Claude-side phase-marker attribution. Copilot-side collection was not captured for this run."
     }
     if (script:Test-CostRendererFallbackWarning -Attribution $Attribution -Coverage $coverage) {
         $body += "`n`n" + (script:Format-CostRendererFallbackRemediationNote)

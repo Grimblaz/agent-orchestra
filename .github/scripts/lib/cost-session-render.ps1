@@ -146,13 +146,23 @@ function Invoke-CostSessionRender {
         $claudeWalk = $null
         $copilotWalk = $null
         $copilotOtelJsonlPath = ''
+        # Issue #825 s2, M6: out-parameter ref for the walker's Tier-2
+        # rejected-dir count (see cost-walker.ps1's -RejectedDirCountVar,
+        # added by s1). AdmitCorroboratedFallback is not set by this caller
+        # (M10 — the live PR-create path stays fail-closed), so this stays 0
+        # today; the s3 targeted-repair entry point is the caller that turns
+        # the switch on and produces a nonzero count. Threaded through
+        # regardless so the annotation wiring below is already correct once
+        # s3 lands.
+        $rejectedDirCountRef = [ref]0
         if (-not [string]::IsNullOrWhiteSpace($Slug) -and -not [string]::IsNullOrWhiteSpace($Branch)) {
             $resolvedIssueNumber = script:Resolve-FCLLinkedIssueNumber -PrBody $PrBody -Branch ([string]$Branch)
             $walkParameters = @{
-                Slug      = $Slug
-                Branch    = $Branch
-                ParentCwd = $ParentCwd
-                RepoRoot  = $RepoRoot  # D2: used by identity-based slug discovery
+                Slug                = $Slug
+                Branch              = $Branch
+                ParentCwd           = $ParentCwd
+                RepoRoot            = $RepoRoot  # D2: used by identity-based slug discovery
+                RejectedDirCountVar = $rejectedDirCountRef
             }
             if ($null -ne $resolvedIssueNumber) {
                 $walkParameters['IssueNumber'] = [int]$resolvedIssueNumber
@@ -407,7 +417,19 @@ function Invoke-CostSessionRender {
 
             # 6g. Render fresh cost section
             if ((script:Get-FCLRemainingCostBudgetSeconds -Stopwatch $costStopwatch -BudgetSeconds $costBudgetSeconds) -gt 0) {
-                $costMarkdown = Format-CostPatternMarkdown -Attribution $costAttribution -Completeness $completeness -AnomalyFlags $anomalyFlags -RollingMeta $rollingResult -Pr $Pr -Branch ([string]$Branch)
+                # Issue #825 s2, M12: the renderer stays pure (no $env: reads inside
+                # cost-pattern-renderer.ps1, so the sharded Pester runner stays
+                # deterministic) — this caller computes both environment-state flags
+                # and threads them in. GITHUB_ACTIONS='true' mirrors the existing
+                # repo-wide CI-detection convention (see render-portfolio.ps1);
+                # ProjectsRootPresent reuses the same root-absence check the
+                # degraded_reason='env-absent' classification already relies on
+                # (script:Test-FCLClaudeProjectsRootAbsent, cost-fcl-helpers.ps1).
+                $renderContext = @{
+                    IsCi                = ($env:GITHUB_ACTIONS -eq 'true')
+                    ProjectsRootPresent = -not (script:Test-FCLClaudeProjectsRootAbsent)
+                }
+                $costMarkdown = Format-CostPatternMarkdown -Attribution $costAttribution -Completeness $completeness -AnomalyFlags $anomalyFlags -RollingMeta $rollingResult -Pr $Pr -Branch ([string]$Branch) -RenderContext $renderContext -RejectedDirCount ([int]$rejectedDirCountRef.Value)
                 $costYaml = Format-CostPatternYaml -Attribution $costAttribution -Completeness $completeness -AnomalyFlags $anomalyFlags -Pr $Pr -Branch ([string]$Branch) -SessionId $currentSessionId -HeadRef ([string]$Branch)
                 $costSection = $costMarkdown + "`n" + $costYaml
             }
