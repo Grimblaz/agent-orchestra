@@ -316,6 +316,32 @@ function script:Get-CostWalkerTargetIdentity {
     return $null
 }
 
+function script:ConvertFrom-CostWalkerJsonLine {
+    <#
+    .SYNOPSIS
+        Trims a raw JSONL line and parses it to a hashtable, or returns $null for
+        a blank line or a parse failure (issue #825 s1 extraction — shared by the
+        three Tier-2 corroborated-fallback probe helpers below, which previously
+        each duplicated this same trim/skip-blank/parse-or-skip shape inline).
+    .DESCRIPTION
+        Deliberately silent on parse failure (no Write-Warning) — these probe
+        helpers scan candidate transcripts speculatively and a malformed line is
+        just not-a-match, unlike Invoke-CostTranscriptWalk's own main walk loop
+        (and its Tier-2 file walk), which warns because it is the authoritative
+        pass over admitted events.
+    .OUTPUTS
+        [hashtable] the parsed event, or $null.
+    #>
+    param([AllowNull()][string]$Line)
+
+    if ([string]::IsNullOrEmpty($Line)) { return $null }
+    $trimmed = $Line.Trim()
+    if ([string]::IsNullOrEmpty($trimmed)) { return $null }
+
+    try { return $trimmed | ConvertFrom-Json -AsHashtable -ErrorAction Stop }
+    catch { return $null }
+}
+
 function script:Get-CostWalkerFirstEventCwd {
     <#
     .SYNOPSIS
@@ -334,18 +360,15 @@ function script:Get-CostWalkerFirstEventCwd {
         if ($null -ne $firstCwd) { break }
         $lines = @(Get-Content -Path $jf.FullName -Encoding utf8 -ErrorAction SilentlyContinue | Select-Object -First 20)
         foreach ($ln in $lines) {
-            $trimmed = $ln.Trim()
-            if ([string]::IsNullOrEmpty($trimmed)) { continue }
-            try {
-                $ev = $trimmed | ConvertFrom-Json -AsHashtable -ErrorAction Stop
-                if (-not [string]::IsNullOrEmpty([string]$ev['cwd'])) {
-                    $cwd = [string]$ev['cwd']
-                    if (-not $cwd.StartsWith($script:CostWalkerCopilotOtelCwdPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-                        $firstCwd = $cwd
-                        break
-                    }
+            $ev = script:ConvertFrom-CostWalkerJsonLine -Line $ln
+            if ($null -eq $ev) { continue }
+            if (-not [string]::IsNullOrEmpty([string]$ev['cwd'])) {
+                $cwd = [string]$ev['cwd']
+                if (-not $cwd.StartsWith($script:CostWalkerCopilotOtelCwdPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                    $firstCwd = $cwd
+                    break
                 }
-            } catch { }
+            }
         }
     }
     return $firstCwd
@@ -413,10 +436,8 @@ function script:Test-CostWalkerDirHasBranchMatchFile {
     foreach ($file in $jsonlFiles) {
         $lines = @(Get-Content -Path $file.FullName -Encoding utf8 -ErrorAction SilentlyContinue)
         foreach ($line in $lines) {
-            $trimmed = $line.Trim()
-            if ([string]::IsNullOrEmpty($trimmed)) { continue }
-            $ev = $null
-            try { $ev = $trimmed | ConvertFrom-Json -AsHashtable -ErrorAction Stop } catch { continue }
+            $ev = script:ConvertFrom-CostWalkerJsonLine -Line $line
+            if ($null -eq $ev) { continue }
             if ($ev['type'] -eq 'assistant' -and $null -ne $ev['gitBranch'] -and [string]$ev['gitBranch'] -eq $Branch) {
                 $matchedFiles.Add($file.FullName)
                 break
@@ -440,11 +461,8 @@ function script:Test-CostWalkerFileHasIssueMarker {
 
     $lines = @(Get-Content -Path $FilePath -Encoding utf8 -ErrorAction SilentlyContinue)
     foreach ($line in $lines) {
-        $trimmed = $line.Trim()
-        if ([string]::IsNullOrEmpty($trimmed)) { continue }
-        $ev = $null
-        try { $ev = $trimmed | ConvertFrom-Json -AsHashtable -ErrorAction Stop } catch { continue }
-        if ($ev['type'] -ne 'user') { continue }
+        $ev = script:ConvertFrom-CostWalkerJsonLine -Line $line
+        if ($null -eq $ev -or $ev['type'] -ne 'user') { continue }
         $marker = script:Get-CostWalkerPhaseMarker -TranscriptEvent $ev
         if ($null -ne $marker -and $marker.IssueId -eq $IssueNumber) { return $true }
     }
@@ -802,10 +820,52 @@ function Invoke-CostTranscriptWalk {
     }
 
     # Issue #825 s1: walk the Tier-2 corroborated-fallback admitted files (opt-in, empty unless
-    # -AdmitCorroboratedFallback was set). Uses the same branch-only per-event predicate as Tier
-    # 1 (script:Test-CostWalkerAssistantMatchesStrictFilter) plus the M8 merge-window bound,
-    # which never applies to Tier 1.
-    foreach ($filePath in $tier2AdmittedFiles) {
+    # -AdmitCorroboratedFallback was set). Extracted to script:Invoke-CostWalkerTier2Walk (issue
+    # #825 refactor pass) to keep this function's own per-PR growth from the trust ladder
+    # proportionate — see that helper's docstring for the predicate/bound details.
+    script:Invoke-CostWalkerTier2Walk -Included $included -Tier2AdmittedFiles $tier2AdmittedFiles `
+        -NormalizedParentCwd $normalizedParentCwd -Branch $Branch -SeenDedupKeys $seenDedupKeys `
+        -CorroborationWindowStart $CorroborationWindowStart -CorroborationWindowEnd $CorroborationWindowEnd
+
+    return $included
+}
+
+function script:Invoke-CostWalkerTier2Walk {
+    <#
+    .SYNOPSIS
+        Walks the Tier-2 corroborated-fallback admitted files and appends
+        admitted events to $Included (issue #825 s1; extracted from
+        Invoke-CostTranscriptWalk by the issue #825 refactor pass — this loop
+        is self-contained with its own predicate and merge-window bound, so it
+        does not need to share Invoke-CostTranscriptWalk's local scope).
+    .DESCRIPTION
+        Uses the same branch-only per-event predicate as Tier 1
+        (script:Test-CostWalkerAssistantMatchesStrictFilter) plus the M8
+        merge-window bound, which never applies to Tier 1. Reuses the same
+        composite-dedup-key event admission (script:Add-CostWalkerAssistantEventAndSubagents)
+        Tier 1 uses, via the caller-supplied $Included list and $SeenDedupKeys set,
+        so an event admitted by both tiers is still only counted once.
+    .PARAMETER Tier2AdmittedFiles
+        The file list returned by script:Get-CostWalkerCorroboratedFallbackAdmission
+        (empty when -AdmitCorroboratedFallback was not set on the caller).
+    .PARAMETER CorroborationWindowStart
+    .PARAMETER CorroborationWindowEnd
+        Issue #825 s1, M8. Bounds Tier-2-admitted events only. A $null bound is
+        not enforced, matching Invoke-CostTranscriptWalk's own contract.
+    .OUTPUTS
+        None — admitted events are appended directly to $Included.
+    #>
+    param(
+        [Parameter(Mandatory)]$Included,
+        [Parameter(Mandatory)]$Tier2AdmittedFiles,
+        [Parameter(Mandatory)][string]$NormalizedParentCwd,
+        [Parameter(Mandatory)][string]$Branch,
+        [Parameter(Mandatory)]$SeenDedupKeys,
+        [Nullable[datetime]]$CorroborationWindowStart = $null,
+        [Nullable[datetime]]$CorroborationWindowEnd = $null
+    )
+
+    foreach ($filePath in $Tier2AdmittedFiles) {
         $tier2SessionId = [System.IO.Path]::GetFileNameWithoutExtension($filePath)
         $tier2SlugDir = Split-Path -Parent $filePath
         $tier2Lines = @(Get-Content -Path $filePath -Encoding utf8 -ErrorAction SilentlyContinue)
@@ -824,7 +884,7 @@ function Invoke-CostTranscriptWalk {
             }
 
             if ($parsedEvent['type'] -ne 'assistant') { continue }
-            if (-not (script:Test-CostWalkerAssistantMatchesStrictFilter -TranscriptEvent $parsedEvent -NormalizedParentCwd $normalizedParentCwd -Branch $Branch)) { continue }
+            if (-not (script:Test-CostWalkerAssistantMatchesStrictFilter -TranscriptEvent $parsedEvent -NormalizedParentCwd $NormalizedParentCwd -Branch $Branch)) { continue }
 
             if ($null -ne $CorroborationWindowStart -or $null -ne $CorroborationWindowEnd) {
                 $eventTimestamp = $null
@@ -834,11 +894,9 @@ function Invoke-CostTranscriptWalk {
                 if ($null -ne $CorroborationWindowEnd -and $eventTimestamp -gt $CorroborationWindowEnd) { continue }
             }
 
-            script:Add-CostWalkerAssistantEventAndSubagents -Included $included -TranscriptEvent $parsedEvent -SlugDir $tier2SlugDir -SessionId $tier2SessionId -SeenKeys $seenDedupKeys
+            script:Add-CostWalkerAssistantEventAndSubagents -Included $Included -TranscriptEvent $parsedEvent -SlugDir $tier2SlugDir -SessionId $tier2SessionId -SeenKeys $SeenDedupKeys
         }
     }
-
-    return $included
 }
 
 function Get-CostWalkerCurrentSessionId {
