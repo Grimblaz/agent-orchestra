@@ -2,6 +2,12 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.3.9] — 2026-07-10
+
+### Added
+
+- Rolling-baseline eligibility for the cost-pattern startup harvest (issue 824): a strict whitelist predicate promotes eligible partial-session and complete-session cost patterns to end-of-session baselines, with capture-point tracking, session-id round-tripping, and a visible startup signal for both successful and expected-but-failed upgrade attempts.
+
 ## [3.3.8] — 2026-07-10
 
 ### Fixed
