@@ -355,7 +355,7 @@ gh issue list --repo {agent-orchestra-repo} --search "[Gotcha] {skill-name}" --s
 $proposal = @{
   Title  = "[Gotcha] {skill-name}: {brief description}"
   Body   = "## Gotcha Discovery`n`n- **Skill**: {skill-name}`n- **Trigger**: {trigger}`n- **Failure**: {what went wrong}`n- **Fix**: {correct approach}`n- **Source**: Discovered in {downstream-repo} during {workflow step}`n- **Frequency**: first occurrence`n`n## Context`n{additional context}"
-  Labels = "enhancement,priority: medium"
+  Labels = @('enhancement', 'priority: medium')
 }
 ```
 

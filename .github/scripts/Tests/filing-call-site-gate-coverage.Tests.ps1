@@ -34,8 +34,8 @@ BeforeAll {
             Reason = '§4.8 upstream-gotcha path and the §4 Step 4 calibration-improvement path route through §2e (surface 8)'
         },
         @{
-            Path   = 'skills/calibration-pipeline/scripts/create-improvement-issue.ps1'
-            Reason = 'internal gh issue create backing the §4 Step 4 calibration-improvement path routes through §2e (surface 8)'
+            Path   = 'skills/calibration-pipeline/scripts/create-improvement-issue-core.ps1'
+            Reason = 'internal gh issue create backing the §4 Step 4 calibration-improvement path routes through §2e (surface 8); create-improvement-issue.ps1 is a thin wrapper that dot-sources this core file, which houses the actual Add-FollowUpIssue call'
         },
         @{
             Path   = 'skills/review-judgment/SKILL.md'
@@ -66,6 +66,10 @@ BeforeAll {
         @{
             Path   = 'agents/Code-Conductor.agent.md:324'
             Reason = 'legacy design-doc-migration issue creation is user-confirmed inline, not autonomous filing'
+        },
+        @{
+            Path   = 'skills/calibration-pipeline/scripts/create-improvement-issue.ps1'
+            Reason = '#849 G7: this thin wrapper only dot-sources create-improvement-issue-core.ps1 (the real, gated call site); its own docstring mentions the literal phrase "gh issue create" as prose, which is not an executable filing call'
         }
     )
 
@@ -132,8 +136,8 @@ Describe 'Filing-call-site gate coverage allowlist: self-consistency' {
         $script:GatedCallers.Count | Should -Be 6
     }
 
-    It 'enumerates the three documented exemptions' {
-        $script:DocumentedExemptions.Count | Should -Be 3
+    It 'enumerates the four documented exemptions' {
+        $script:DocumentedExemptions.Count | Should -Be 4
     }
 }
 

@@ -29,6 +29,12 @@
          <!-- filing-provenance: {value} --> marker beside the sentinel block
          so every filed issue records how it cleared (or was exempted from)
          the safe-operations §2e Filing Approval Gate.
+
+    #849 G1: Accepts an optional -GhCliPath (default 'gh') and threads it
+         through every gh invocation in this function, so callers that
+         already forward a -GhCliPath to their own dedup gates (e.g.
+         Invoke-CreateImprovementIssue) can forward the same value to the
+         filing step instead of it silently reverting to the literal 'gh'.
 #>
 
 function ConvertTo-CanonicalFollowupTitle {
@@ -115,7 +121,15 @@ function Add-FollowUpIssue {
         # kept in sync with this list, not the other way around.
         [Parameter(Mandatory=$true)]
         [ValidateSet('gate-approved', 'gate-modified', 'queue-consumed', 'direct-request', 'pre-gate-legacy')]
-        [string]$FilingProvenance
+        [string]$FilingProvenance,
+
+        # G1 (#849 post-fix): the gh CLI binary/path to invoke. Defaults to
+        # the literal 'gh' (unchanged behavior). Callers that already thread
+        # a -GhCliPath through their own dedup gates (e.g.
+        # Invoke-CreateImprovementIssue) forward the same value here so the
+        # filing side effect uses the same gh binary as the gates that ran
+        # before it, instead of silently reverting to the bare 'gh' literal.
+        [string]$GhCliPath = 'gh'
     )
 
     # M1: Compose the body with parent ref, caller body, and sentinel block.
@@ -165,7 +179,7 @@ function Add-FollowUpIssue {
 
     # 1. Create the issue via gh
     $labelCsv = $Labels -join ','
-    $issueUrl = gh issue create --title $Title --body $bodyWithParent --label $labelCsv
+    $issueUrl = & $GhCliPath issue create --title $Title --body $bodyWithParent --label $labelCsv
 
     if (-not $issueUrl) {
         Write-Error "gh issue create failed."
@@ -191,8 +205,8 @@ function Add-FollowUpIssue {
     $childId = $null
     if ($hasParent) {
         try {
-            $parentId = gh issue view $ParentIssue --json id --jq .id 2>$null
-            $childId = gh issue view $childNumber --json id --jq .id 2>$null
+            $parentId = & $GhCliPath issue view $ParentIssue --json id --jq .id 2>$null
+            $childId = & $GhCliPath issue view $childNumber --json id --jq .id 2>$null
         } catch {
             Write-Warning "Failed to resolve GraphQL node IDs for parent #$ParentIssue or child #${childNumber}`: $($_.Exception.Message)"
         }
@@ -217,7 +231,7 @@ mutation {
         while (-not $graphqlSuccess -and $attempts -lt 2) {
             $attempts++
             try {
-                $result = gh api graphql -H "GraphQL-Features: sub_issues" -f "query=$mutation" 2>$null
+                $result = & $GhCliPath api graphql -H "GraphQL-Features: sub_issues" -f "query=$mutation" 2>$null
                 if ($LASTEXITCODE -eq 0 -and $result) {
                     # G4: check for GraphQL-level errors returned with exit code 0
                     $parsed = $result | ConvertFrom-Json -ErrorAction SilentlyContinue
@@ -247,7 +261,7 @@ mutation {
     $finalBody = "$bodyWithParent`n$linkMarker"
 
     try {
-        gh issue edit $childNumber --body $finalBody 2>$null | Out-Null
+        & $GhCliPath issue edit $childNumber --body $finalBody 2>$null | Out-Null
         if ($LASTEXITCODE -ne 0) {
             Write-Warning "Failed to append parent-link-mode marker to issue #$childNumber body."
         }

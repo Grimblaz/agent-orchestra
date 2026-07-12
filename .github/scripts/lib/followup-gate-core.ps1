@@ -335,9 +335,9 @@ function Set-ProposedFollowupsCommentState {
 
     $currentIndex = $script:ProposedFollowupsStateOrder[$currentState]
     $newIndex = $script:ProposedFollowupsStateOrder[$NewState]
-    if ($newIndex -le $currentIndex) {
+    if ($newIndex -ne $currentIndex + 1) {
         throw [System.ArgumentException]::new(
-            "Set-ProposedFollowupsCommentState: invalid transition '$currentState' -> '$NewState'; only forward transitions (proposed -> claimed -> consumed) are permitted.",
+            "Set-ProposedFollowupsCommentState: invalid transition '$currentState' -> '$NewState'; only a single forward step (proposed -> claimed or claimed -> consumed) is permitted -- state skips (e.g. proposed -> consumed) bypass the claimed ownership step and are rejected.",
             'NewState'
         )
     }
@@ -465,7 +465,12 @@ function Get-FollowupPriorMarkerBodies {
     }
 
     $apiPath = "repos/$Repo/issues/$Number/comments"
-    $rawJson = & $GhCliPath api $apiPath --paginate 2>$null
+    try {
+        $rawJson = & $GhCliPath api $apiPath --paginate 2>$null
+    } catch {
+        Write-Warning "Get-FollowupPriorMarkerBodies: gh api $apiPath --paginate threw an exception: $($_.Exception.Message)"
+        return @()
+    }
     if ($LASTEXITCODE -ne 0) {
         Write-Warning "Get-FollowupPriorMarkerBodies: gh api $apiPath --paginate failed (exit $LASTEXITCODE)."
         return @()
@@ -581,17 +586,20 @@ function Merge-FollowupRecords {
 
     if ($null -eq $CurrentBatch) { $CurrentBatch = @() }
 
-    # R9: -PriorMarkerBodies without an explicit -Number silently degrades. Read-EngagementRecords
+    # R9/G5: -PriorMarkerBodies without a positive -Number silently degrades. Read-EngagementRecords
     # requires -IssueNumber/-PullRequestNumber > 0 and throws otherwise; that throw is caught below
     # (per-marker try/catch) and treated as "unparseable", which drops EVERY prior entry without a
-    # clear error. Fail loud instead: require an explicit -Number whenever -PriorMarkerBodies is used.
-    if ($null -ne $PriorMarkerBodies -and -not $PSBoundParameters.ContainsKey('Number')) {
+    # clear error. Fail loud instead: require an explicit, positive -Number whenever -PriorMarkerBodies
+    # is used -- this covers both the unbound-defaulting-to-0 case AND an explicit `-Number 0` (or any
+    # non-positive value), since both would otherwise reach Read-EngagementRecords and silently drop
+    # every prior entry behind only a Write-Warning.
+    if ($null -ne $PriorMarkerBodies -and (-not $PSBoundParameters.ContainsKey('Number') -or $Number -le 0)) {
         throw [System.Management.Automation.PSArgumentException]::new(
-            'Merge-FollowupRecords: -PriorMarkerBodies was supplied but -Number was left at its default (0). ' +
-            'Read-EngagementRecords requires -IssueNumber/-PullRequestNumber > 0, so every prior marker would ' +
-            'otherwise be silently rejected downstream and treated as unparseable, dropping ALL prior entries ' +
-            'without a clear error. Supply an explicit -Number (the issue or PR number the prior markers were ' +
-            'read from) alongside -PriorMarkerBodies.',
+            'Merge-FollowupRecords: -PriorMarkerBodies was supplied but -Number was left at its default (0) or ' +
+            'set to a non-positive value. Read-EngagementRecords requires -IssueNumber/-PullRequestNumber > 0, ' +
+            'so every prior marker would otherwise be silently rejected downstream and treated as unparseable, ' +
+            'dropping ALL prior entries without a clear error. Supply an explicit, positive -Number (the issue ' +
+            'or PR number the prior markers were read from) alongside -PriorMarkerBodies.',
             'Number'
         )
     }

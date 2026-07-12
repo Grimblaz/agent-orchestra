@@ -447,7 +447,8 @@ function Invoke-CreateImprovementIssue {
             -Body $proposal.Body `
             -Labels $proposal.Labels `
             -OriginatingPr "$($EvidencePrs | Select-Object -First 1)" `
-            -FilingProvenance 'pre-gate-legacy'
+            -FilingProvenance 'pre-gate-legacy' `
+            -GhCliPath $GhCliPath
     }
     finally {
         $env:GH_REPO = $previousGhRepo

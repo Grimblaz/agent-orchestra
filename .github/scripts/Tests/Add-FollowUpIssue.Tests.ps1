@@ -211,4 +211,37 @@ Describe 'Add-FollowUpIssue' {
             $script:CapturedCreateBody | Should -Match '<!-- filing-provenance: queue-consumed -->'
         }
     }
+
+    Context 'Parentless filing (-ParentIssue blank, #837 post-fix F1/F2)' {
+        # G6 (#849 post-fix): dedicated coverage for the by-design parentless
+        # contract -- a blank -ParentIssue must omit the "Parent: #" body
+        # line, skip GraphQL sub-issue linkage entirely (no lookup of a
+        # parent that was never supposed to exist), and warn explicitly
+        # that this was by design rather than a silent no-op.
+        It 'omits "Parent: #", skips GraphQL linkage, and warns "by design" when -ParentIssue is blank' {
+            $warnings = @()
+            $Result = Add-FollowUpIssue `
+                -ParentIssue '' `
+                -Title 'Parentless filing' `
+                -Body 'Test Body' `
+                -Labels @('priority: medium') `
+                -FilingProvenance 'pre-gate-legacy' `
+                -WarningVariable warnings -WarningAction SilentlyContinue
+
+            $Result | Should -Be 'https://github.com/Grimblaz/agent-orchestra/issues/999'
+
+            # (a) the filed body must NOT contain a "Parent: #" line.
+            $script:CapturedCreateBody | Should -Not -BeNullOrEmpty
+            $script:CapturedCreateBody | Should -Not -Match 'Parent: #'
+
+            # (b) GraphQL linkage is skipped entirely -- no parent-resolution
+            # `gh issue view` call was ever made.
+            $log = Get-Content $script:LogFile -Raw
+            $log | Should -Not -Match 'issue view'
+            $log | Should -Not -Match 'api graphql'
+
+            # (c) the "by design" warning fires.
+            ($warnings | Where-Object { $_ -match 'No parent issue supplied \(by design\)' }).Count | Should -BeGreaterThan 0
+        }
+    }
 }

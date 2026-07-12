@@ -22,14 +22,22 @@ Describe 'Invoke-CreateImprovementIssue' -Tag 'no-gh' {
         $script:TempRoot = Join-Path ([System.IO.Path]::GetTempPath()) "cii-tests-$([System.Guid]::NewGuid().ToString('N'))"
         New-Item -ItemType Directory -Path $script:TempRoot -Force | Out-Null
 
-        # ── #837 R1: filing now routes through Add-FollowUpIssue, which calls
-        # the literal `gh` binary (not the $GhCliPath test seam Gates 1-3 use).
-        # This Describe is tagged 'no-gh', so `gh` is shadowed with the same
-        # global-function convention Add-FollowUpIssue.Tests.ps1 and
-        # followup-gate-flow.Tests.ps1 already use. Tests configure the
-        # 'issue create' response via $script:NextCreateIssueUrl (mirrors the
-        # old -IssueCreateOutput knob); arg-capture tests additionally set
-        # $script:CapturedCreateArgsFile so the real filed args are visible.
+        # ── #837 R1 / #849 G1: filing routes through Add-FollowUpIssue.
+        # Add-FollowUpIssue now accepts -GhCliPath and Invoke-CreateImprovementIssue
+        # forwards its own -GhCliPath value through to it (#849 G1), so filing
+        # travels through the SAME per-test mock script the Gates 1-3 dedup
+        # calls use, rather than always hitting the literal `gh` binary. This
+        # global:gh function remains as the shadow for the *default*
+        # -GhCliPath = 'gh' path only (used if a test ever omits -GhCliPath):
+        # Add-FollowUpIssue.ps1 is dot-sourced into this Describe's own scope
+        # (via create-improvement-issue-core.ps1's own dot-source), so a bare
+        # `gh` call from inside it resolves to this function with no scope
+        # boundary in between. The per-test mock .ps1 files below are a
+        # SEPARATE script file invoked via `&`, which creates a fresh script
+        # scope — `$script:` inside a function called from that new scope
+        # resolves to the mock's own (empty) scope, not this one, so those
+        # mocks must answer 'issue create'/'issue edit' with baked-in values
+        # instead of delegating back here.
         $script:NextCreateIssueUrl = ''
         $script:CapturedCreateArgsFile = $null
 
@@ -68,13 +76,13 @@ Describe 'Invoke-CreateImprovementIssue' -Tag 'no-gh' {
         }
 
         # ── helper: write mock gh CLI with argument routing ──────────
-        # #837 R1: the real 'issue create' call now goes through
-        # Add-FollowUpIssue's hardcoded `gh` (shadowed by the global:gh
-        # function above), not through this $GhCliPath-injected mock script.
-        # This mock script still backs Gates 1-3 (`& $GhCliPath issue list
-        # ...`); -IssueCreateOutput/-IssueCreateExitCode additionally seed
-        # $script:NextCreateIssueUrl so the shadow returns the same value
-        # tests previously configured here.
+        # #849 G1: filing now travels through this SAME mock (Add-FollowUpIssue
+        # forwards -GhCliPath), so it must answer 'issue create' (filing) and
+        # 'issue edit' (M13 marker append) itself with baked-in values, rather
+        # than delegating to the global:gh shadow -- a standalone .ps1 invoked
+        # via `&` gets its own fresh script scope, so `$script:` inside a
+        # function called back from there can't reach this Describe's state
+        # (see the BeforeAll note above this helper's Describe block).
         $script:WriteMockGh = {
             param(
                 [string]$WorkDir,
@@ -86,17 +94,24 @@ Describe 'Invoke-CreateImprovementIssue' -Tag 'no-gh' {
             $listFile = Join-Path $WorkDir 'gh-list-response.json'
             $mockPath = Join-Path $WorkDir 'gh.ps1'
             $IssueListOutput | Set-Content -Path $listFile -Encoding UTF8
+            $createOutputEscaped = $IssueCreateOutput -replace "'", "''"
             @"
-# Mock gh CLI — routes by command (Gates 1-3 only; see #837 R1 note above)
+# Mock gh CLI — routes 'issue list' (Gates 1-3), 'issue create' (filing,
+# #849 G1), and 'issue edit' (M13 marker append) with baked-in responses.
 `$joined = `$args -join ' '
 if (`$joined -match 'issue\s+list') {
     Get-Content -Raw -Path '$($listFile -replace "'", "''")'
     exit $IssueListExitCode
 }
-Write-Error "Mock gh: unknown command: `$joined"
-exit 99
+if (`$joined -match 'issue\s+create') {
+    Write-Output '$createOutputEscaped'
+    exit $IssueCreateExitCode
+}
+if (`$joined -match 'issue\s+edit') {
+    exit 0
+}
+exit 0
 "@ | Set-Content -Path $mockPath -Encoding UTF8
-            $script:NextCreateIssueUrl = $IssueCreateOutput
             return $mockPath
         }
 
@@ -115,9 +130,12 @@ exit 99
             $mockPath = Join-Path $WorkDir 'gh.ps1'
             $Section2dOutput   | Set-Content -Path $s2dFile    -Encoding UTF8
             $SearchDedupOutput | Set-Content -Path $dedupFile  -Encoding UTF8
+            $createOutputEscaped = $IssueCreateOutput -replace "'", "''"
             @"
-# Mock gh CLI — routes §2d list vs search-dedup list (Gates 1-3 only; the
-# real 'issue create' call routes through Add-FollowUpIssue's `gh` shadow)
+# Mock gh CLI — routes §2d list vs search-dedup list (Gates 1-3), plus
+# 'issue create'/'issue edit' with baked-in responses (#849 G1: filing now
+# travels through this same mock; see WriteMockGh's note on why it can't
+# delegate to the global:gh shadow).
 `$joined = `$args -join ' '
 if (`$joined -match 'issue\s+list' -and `$joined -match '--search') {
     Get-Content -Raw -Path '$($dedupFile -replace "'", "''")'
@@ -127,18 +145,24 @@ if (`$joined -match 'issue\s+list') {
     Get-Content -Raw -Path '$($s2dFile -replace "'", "''")'
     exit 0
 }
-Write-Error "Mock gh: unknown command: `$joined"
-exit 99
+if (`$joined -match 'issue\s+create') {
+    Write-Output '$createOutputEscaped'
+    exit $IssueCreateExitCode
+}
+if (`$joined -match 'issue\s+edit') {
+    exit 0
+}
+exit 0
 "@ | Set-Content -Path $mockPath -Encoding UTF8
-            $script:NextCreateIssueUrl = $IssueCreateOutput
             return $mockPath
         }
 
         # ── helper: mock gh with arg-capture for issue create ────────
-        # #837 R1: the real 'issue create' call now goes through the
-        # global:gh shadow (see above), which writes the captured args to
-        # $script:CapturedCreateArgsFile when set — routed here to the same
-        # $argsFile path so existing callers reading `.ArgsFile` keep working.
+        # #849 G1: filing travels through this same mock now, so 'issue
+        # create' captures its own args directly to $argsFile and returns
+        # the baked-in $CreateOutput, instead of delegating to the
+        # global:gh shadow (see WriteMockGh's note on why that delegation
+        # doesn't work from a standalone .ps1 invoked via `&`).
         $script:WriteMockGhWithArgCapture = {
             param(
                 [string]$WorkDir,
@@ -147,18 +171,26 @@ exit 99
             )
             $argsFile = Join-Path $WorkDir 'gh-captured-args.txt'
             $mockPath = Join-Path $WorkDir 'gh.ps1'
+            $createOutputEscaped = $CreateOutput -replace "'", "''"
             @"
-# Mock gh CLI — routes 'issue list' only (Gates 1-3); create is shadowed
+# Mock gh CLI — routes 'issue list' (Gates 1-3); 'issue create' captures its
+# args to '$($argsFile -replace "'", "''")' for assertion (#849 G1) and
+# returns a baked-in URL; 'issue edit' is a no-op success.
 `$joined = `$args -join ' '
 if (`$joined -match 'issue\s+list') {
     Write-Output '[]'
     exit 0
 }
-Write-Error "Mock gh: unknown command: `$joined"
-exit 99
+if (`$joined -match 'issue\s+create') {
+    `$args | Out-File -FilePath '$($argsFile -replace "'", "''")' -Encoding UTF8
+    Write-Output '$createOutputEscaped'
+    exit $CreateExitCode
+}
+if (`$joined -match 'issue\s+edit') {
+    exit 0
+}
+exit 0
 "@ | Set-Content -Path $mockPath -Encoding UTF8
-            $script:NextCreateIssueUrl = $CreateOutput
-            $script:CapturedCreateArgsFile = $argsFile
             return @{ MockPath = $mockPath; ArgsFile = $argsFile }
         }
 
@@ -605,14 +637,11 @@ exit 99
     Context 'New-ImprovementIssueProposal (assemble-only)' {
 
         It 'gates passed → returns a would-create proposal with Title/Body/Labels and never files' {
-            # Arrange — gh mock only knows 'issue list'; 'issue create' would
-            # error the mock script if New-ImprovementIssueProposal ever
-            # called it, proving this function has no filing side effect.
+            # Arrange
             $wd = & $script:NewWorkDir
             $mock = & $script:WriteMockGh -WorkDir $wd -IssueListOutput '[]'
             $params = $script:BaseParams.Clone()
             $params.GhCliPath = $mock
-            $script:NextCreateIssueUrl = 'SHOULD-NOT-BE-USED'
 
             # Act
             $result = New-ImprovementIssueProposal @params
@@ -623,11 +652,13 @@ exit 99
             $result.Body    | Should -Match 'defensive validation'
             $result.Labels  | Should -Be @('priority: medium')
             $result.ClassifiedLevel | Should -Be 5
-            # Confirm no filing side effect occurred: the mock gh.ps1 script
-            # only implements 'issue list'; if 'issue create' had been
-            # invoked through $GhCliPath it would have hit the mock's
-            # "unknown command" branch and thrown, which none of the
-            # gate-search calls above did (they only ever call 'issue list').
+            # #849 post-fix: New-ImprovementIssueProposal contains zero filing
+            # code — 'Action' can only ever be 'would-create' here (filing and
+            # the 'created' action value live exclusively in the separate
+            # Invoke-CreateImprovementIssue wrapper, after Add-FollowUpIssue
+            # succeeds). The Action assertion above is the real regression
+            # guard: it would fail if filing logic were ever moved into this
+            # assemble-only function, independent of what the gh mock does.
         }
 
         It 'consolidation-candidate short-circuits before assembling a proposal (no Title/Body)' {

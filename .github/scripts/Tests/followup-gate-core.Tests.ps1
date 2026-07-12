@@ -271,6 +271,12 @@ Describe 'Set-ProposedFollowupsCommentState: proposed -> claimed -> consumed' {
     It 'rejects a same-state no-op transition' {
         { Set-ProposedFollowupsCommentState -CommentBody $script:BaseBody -NewState proposed } | Should -Throw -ExceptionType ([System.ArgumentException])
     }
+
+    It 'rejects a state-skipping transition (proposed -> consumed) that bypasses the claimed step (G2)' {
+        if (-not $script:HasYaml) { Set-ItResult -Skipped -Because 'powershell-yaml module not installed'; return }
+
+        { Set-ProposedFollowupsCommentState -CommentBody $script:BaseBody -NewState consumed } | Should -Throw -ExceptionType ([System.ArgumentException])
+    }
 }
 
 Describe 'Write-ProposedFollowupsComment: delegates to Find-OrUpsertComment (no new gh call path)' {
@@ -423,6 +429,12 @@ $fence
             Should -Throw -ExceptionType ([System.Management.Automation.PSArgumentException])
     }
 
+    It 'throws a clear error when -PriorMarkerBodies is supplied with an explicit -Number 0 (G5)' {
+        $prior = @([PSCustomObject]@{ Body = 'irrelevant'; CreatedAt = [DateTime]::UtcNow })
+        { Merge-FollowupRecords -Type issue -Number 0 -PriorMarkerBodies $prior -WarningAction SilentlyContinue } |
+            Should -Throw -ExceptionType ([System.Management.Automation.PSArgumentException])
+    }
+
     It 'breaks a CreatedAt tie deterministically by preferring the higher comment Id (R17)' {
         if (-not $script:HasYaml) { Set-ItResult -Skipped -Because 'powershell-yaml module not installed'; return }
 
@@ -489,6 +501,16 @@ exit 1
 
         $result.Count | Should -Be 0
         ($warnings -join ' | ') | Should -Match 'gh api .* failed'
+    }
+
+    It 'warns and returns no prior markers when the gh binary is missing (throws, not just non-zero exit) (G4)' {
+        $missingGhPath = Join-Path $TestDrive 'gh-does-not-exist.ps1'
+
+        $warnings = $null
+        $result = Get-FollowupPriorMarkerBodies -Type issue -Number 42 -Repo 'example-owner/example-repo' -GhCliPath $missingGhPath -WarningVariable warnings -WarningAction SilentlyContinue
+
+        $result.Count | Should -Be 0
+        ($warnings -join ' | ') | Should -Match 'threw an exception'
     }
 
     It 'resolves owner/repo from the git remote via regex when -Repo is not supplied' {
