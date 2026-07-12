@@ -22,6 +22,7 @@ Persistence rationale: [../../../Documents/Design/session-memory-contract.md](..
 - `<!-- frame-credit-ledger-{PR} -->` — warn-only frame credit-ledger comment posted by the pre-PR hook (sub-issue #429 of frame umbrella #425); idempotently upserted on every PR after `gh pr create`
 - `<!-- review-judge-produced-{PR} -->` — sentinel written by the judge (both Copilot and Claude) immediately after the ruling finalizes, before pipeline-metrics persistence; the warn-only hook detects this to synthesize a `not-persisted` review credit when the PR body carries no review credit yet (SMC-16)
 - `<!-- credit-input-{port}-{ID} -->` — deferred-emission marker written by pipeline-entry agents (Experience-Owner, Solution-Designer, Issue-Planner) immediately after their completion marker; payload is a `yaml` fenced block carrying `{ port, adapter, evidence }`; harvested by Code-Conductor at PR-creation time to emit the corresponding credit row (SMC-17)
+- `<!-- proposed-followups-{PR|ISSUE} -->` — headless-queue fallback for the maintainer-approval filing gate (issue #837): posted as a PR or issue comment when no interactive surface is available, carrying proposed follow-up issues as a fenced YAML payload; transitions through `proposed` → `claimed` → `consumed` states. The `followup-` durable drop/modify records reuse the existing SMC-20 (issue-keyed) and SMC-23 (`engagement-record-review-{PR}`, PR-keyed) markers additively — this marker covers only the headless queue payload itself, not the drop/modify records (SMC-24)
 
 ## Retired Markers
 
