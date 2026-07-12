@@ -36,6 +36,20 @@ These instructions are global — they apply to every agent in the pipeline when
 - The default priority for automatically-created follow-up issues is `priority: medium`, preventing agents from defaulting to high-severity labels for speculative improvements.
 - Three priority label definitions (`priority: high`, `priority: medium`, `priority: low`) are included with recommended colors and descriptions so any new repository can bootstrap the label set with a single copy-paste block.
 
+### Filing Approval Gate (Section 2e)
+
+Before issue #837, every pipeline surface that decided a finding belonged in a follow-up issue (Section 2a's "follow-up issue creation" fork) filed that issue immediately and autonomously — the maintainer only ever saw the result after the fact. Eight such surfaces existed across the pipeline: Code-Conductor's Auto-Tracking sequence and its pre-edit ownership gate, Process-Review's §4.8 upstream-gotcha and §4.9 calibration paths, review-judgment's Loud Guard, code-review-intake, and defect-response's Track 1 and Track 2. Autonomous filing at that scale meant a maintainer could not review, correct, or veto a proposed issue before it existed on the board — wrong titles, wrong priority, or a proposal the maintainer simply disagreed with all shipped as real GitHub issues rather than as a decision point.
+
+The Filing Approval Gate closes that gap by interposing a single maintainer decision between "this should become a follow-up" and the `gh issue create` call that makes it real. All eight surfaces now route their proposed follow-ups through the gate (`skills/safe-operations/SKILL.md` § 2e) instead of filing directly.
+
+**Mechanism.** The gate batches proposals per review round rather than asking about them one at a time: each candidate is pre-computed (canonical title, deduplication result, board position) before presentation, so the maintainer reviews a ready-to-decide list, not raw findings. For each item the maintainer chooses one of three outcomes — **approve** (file as proposed), **modify** (edit title/scope/severity, then re-run the deduplication check before filing), or **drop** (do not file). Every filed issue is stamped with a `-FilingProvenance` value (`gate-approved`, `gate-modified`, `queue-consumed`, `direct-request`, or `pre-gate-legacy`) recording which path put it on the board, so provenance is auditable after the fact rather than inferred. Only the parent (dispatching) conversation ever presents the gate; subagents return proposed follow-ups as structured output for the parent to batch, since the gate is an interactive checkpoint tied to the structured-question surface.
+
+**Durable-record substrate.** Drop and modify decisions must survive across review rounds so a dropped proposal is not silently re-asked about later. The gate reuses the existing engagement-record comment as its durable substrate rather than inventing a new marker type: each decision is written as a `followup-`-prefixed entry, keyed by a collision-safe hash (`Get-FollowupRecordKey`) derived from the finding's stable identity or the proposal's canonical title. Because engagement-record writes are re-emitted per ruling round, a later round's write could otherwise silently drop an earlier round's recorded decision — the merge step (`Merge-FollowupRecords`) unions the current batch with every prior `followup-` entry and enforces a chain guard that raises a loud warning rather than silently losing a previously-recorded drop or modify.
+
+**Headless fallback.** When no interactive parent conversation exists to present the gate (a fully headless run), proposals are not silently filed and not silently discarded — they are queued. Exactly one `<!-- proposed-followups-{PR|ISSUE} -->` comment is written per PR or issue, carrying the batch as a fenced payload and advancing through the states `proposed` → `claimed` → `consumed` as a later, gate-capable session picks it up and adjudicates it.
+
+The full operational mechanics — proposal assembly, per-item outcome handling, record-before-file ordering and crash semantics, and the headless queue's state machine — live in `skills/safe-operations/SKILL.md` § 2e, the source of truth for this feature. This section documents why the gate exists and what it durably records, not how each step executes.
+
 ### Deduplication Check (Section 2c)
 
 Two confirmed duplicate-issue failure modes motivated a mandatory pre-creation search guard:
@@ -97,3 +111,4 @@ The following approaches were considered and rejected during the design of this 
 - Issue #67: [feat: add read-only tool preference guardrail](https://github.com/Grimblaz/agent-orchestra/issues/67)
 - Issue #127: [feat: add deduplication guard to issue creation protocol](https://github.com/Grimblaz/agent-orchestra/issues/127)
 - Issue #132: [feat: built-in-tool-first enforcement](https://github.com/Grimblaz/agent-orchestra/issues/132)
+- Issue #837: [Add a maintainer-approval gate before follow-up issues are auto-filed](https://github.com/Grimblaz/agent-orchestra/issues/837)

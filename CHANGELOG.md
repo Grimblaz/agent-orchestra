@@ -2,6 +2,12 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.3.11] — 2026-07-12
+
+### Added
+
+- Add a maintainer-approval gate (`safe-operations` §2e Filing Approval Gate) before pipeline-initiated follow-up issues are auto-filed, across eight filing surfaces (#837).
+
 ## [3.3.10] — 2026-07-11
 
 ### Added

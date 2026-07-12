@@ -134,7 +134,8 @@ Describe 'Code-Review-Deferral-Integration' {
                 -Body 'caller body content' `
                 -Labels @('priority: medium', 'filed-by: code-conductor') `
                 -CriterionIds @('S-cross-cutting', 'S-new-abstraction') `
-                -OriginatingPr '350'
+                -OriginatingPr '350' `
+                -FilingProvenance 'gate-approved'
 
             $result | Should -Be 'https://github.com/Grimblaz/agent-orchestra/issues/999'
             $script:CapturedCreateBody | Should -Not -BeNullOrEmpty
@@ -150,7 +151,8 @@ Describe 'Code-Review-Deferral-Integration' {
                 -ParentIssue 610 `
                 -Title 'AC8 sentinel - empty inputs' `
                 -Body 'caller body content' `
-                -Labels @('priority: medium')
+                -Labels @('priority: medium') `
+                -FilingProvenance 'gate-approved'
 
             $result | Should -Be 'https://github.com/Grimblaz/agent-orchestra/issues/999'
             $script:CapturedCreateBody | Should -Match '<!-- code-conductor-filed-followup'
@@ -380,7 +382,8 @@ Describe 'Code-Review-Deferral-Integration' {
                     result   = 'no-match'
                     source   = 'issue'
                     routed   = 'defer'
-                }
+                } `
+                -FilingProvenance 'gate-approved'
 
             $result | Should -Be 'https://github.com/Grimblaz/agent-orchestra/issues/999'
             $script:CapturedCreateBody | Should -Match 'AC Cross-Check'
@@ -394,7 +397,8 @@ Describe 'Code-Review-Deferral-Integration' {
                 -ParentIssue 709 `
                 -Title '[Structural] S-cross-cutting: some finding' `
                 -Body 'Caller body without ac cross check.' `
-                -Labels @('priority: medium', 'filed-by: code-conductor')
+                -Labels @('priority: medium', 'filed-by: code-conductor') `
+                -FilingProvenance 'gate-approved'
 
             $result | Should -Be 'https://github.com/Grimblaz/agent-orchestra/issues/999'
             $script:CapturedCreateBody | Should -Not -Match 'ac_cross_check'
@@ -413,7 +417,8 @@ Describe 'Code-Review-Deferral-Integration' {
                     ac_ref   = '- Gate: the renderer must fetch `triage`-labeled issues'
                     source   = 'issue'
                     routed   = 'force-accept'
-                }
+                } `
+                -FilingProvenance 'gate-approved'
 
             $result | Should -Be 'https://github.com/Grimblaz/agent-orchestra/issues/999'
             # ac_ref value must be quoted so the YAML is valid despite the colon
@@ -619,7 +624,8 @@ Describe 'Code-Review-Deferral-Integration' {
                 -Title '[Structural] S-maintainer-judgment: logging gap without AC coverage' `
                 -Body 'Logging gap found with no AC coverage — mandatory follow-up per AC3.' `
                 -Labels @('priority: medium', 'filed-by: code-conductor') `
-                -AcCrossCheck $Result.ac_cross_check
+                -AcCrossCheck $Result.ac_cross_check `
+                -FilingProvenance 'pre-gate-legacy'
 
             $subIssueResult | Should -Be 'https://github.com/Grimblaz/agent-orchestra/issues/999'
             # The body must contain the ac_cross_check block (AC4 provenance)

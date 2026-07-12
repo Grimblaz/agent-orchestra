@@ -104,7 +104,7 @@ Use `—` in the Pass column when the prosecution mode does not carry a pass num
 **Immediately after the judge ruling is finalized** and before any pipeline-metrics persistence,
 write an idempotent sentinel PR comment for the PR being reviewed:
 
-```
+```text
 <!-- review-judge-produced-{PR} -->
 ```
 
@@ -324,11 +324,11 @@ When the AC cross-check returns `routed: defer` (because `result: no-match` or `
 
 The agent MUST follow this sequence instead:
 
-1. **Emit a loud inline note** (not `AskUserQuestion` — this is a guard, not a user question): `⚠️ Finding {finding_id} deferred without AC coverage (ac_cross_check.result: {result}) — mandatory sub-issue required.`
+1. **Emit a loud inline note** (not `AskUserQuestion` — this is a guard, not a user question): `⚠️ Finding {finding_id} deferred without AC coverage (ac_cross_check.result: {result}) — mandatory proposal required.`
 
-2. **Create a mandatory sub-issue** via `Add-FollowUpIssue` (with `-AcCrossCheck` per the M16 guard). The canonical title uses `ConvertTo-CanonicalFollowupTitle`. The body MUST include the finding title, the judge ruling, and the `ac_cross_check` YAML block. This is mandatory regardless of the finding's classification tier — routine findings that lack AC coverage still get a sub-issue.
+2. **Enter a mandatory proposal** into the `§2e Filing Approval Gate` batch (`skills/safe-operations/SKILL.md` § 2e), pre-checked and recommended-approve, annotated `AC-uncovered defer`. The canonical title uses `ConvertTo-CanonicalFollowupTitle`. The proposal body MUST include the finding title, the judge ruling, and the `ac_cross_check` YAML block — this payload travels into the durable drop record if the maintainer drops the proposal. This is mandatory regardless of the finding's classification tier — routine findings that lack AC coverage still enter the gate as a proposal.
 
-3. **Record in the accumulator** with `disposition: defer`, the `ac_cross_check` object, and `disposition_rationale` that cites the `no-match`/`no-ac-section` outcome and references the created sub-issue URL.
+3. **Record in the accumulator** with `disposition: defer`, the `ac_cross_check` object, and `disposition_rationale` that cites the `no-match`/`no-ac-section` outcome and references the gate proposal (and the resulting issue URL once the maintainer approves it and it is filed).
 
 The loud guard does not apply when `routed: force-accept` (high-confidence AC match) or `routed: disposition-gate` (ambiguous match fires `AskUserQuestion` normally). It applies only to the `routed: defer` arm.
 
@@ -368,7 +368,7 @@ Write in this order (atomic marker first, engagement-record second):
 
 1. **`<!-- review-dispositions-{PR} -->`** — Post as a PR comment. Payload: `schema_version: 3`, `passes_run: [...]`, `entries: [...]` (all findings, routine and load-bearing, one entry per finding). v2 added per-entry `severity`, `ac_cross_check`, and `stage` fields; v3 adds per-entry `reviewer_source` (the reviewer identity or class — `local` for pipeline-native findings; external identities arrive with issue #834). This is the atomic per-finding record.
 
-   ~~~
+   ````text
    <!-- review-dispositions-{PR} -->
 
    ```yaml
@@ -391,7 +391,7 @@ Write in this order (atomic marker first, engagement-record second):
          source: issue
          routed: force-accept
    ```
-   ~~~
+   ````
 
    > **v3 per-entry requirements** (carried over unchanged from v2): For entries with `disposition: dismiss` or `disposition: defer` and `severity` ≥ medium, `ac_cross_check` is required. The `ac_cross_check` object records which arms ran (`file_arm`, `term_arm`), the result tier (`matched-high | matched-ambiguous | no-match`), the matched AC reference if any, the source, and the routing outcome. Legacy `schema_version: 1` entries are exempt from this check. `artifact_citation` covers non-AC inherited artifacts; `ac_cross_check.ac_ref` is the AC-specific channel.
    >

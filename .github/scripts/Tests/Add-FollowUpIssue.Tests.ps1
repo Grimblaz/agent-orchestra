@@ -91,7 +91,7 @@ Describe 'Add-FollowUpIssue' {
 
     Context 'Happy Path' {
         It 'successfully creates a follow-up issue with GraphQL parent linkage' {
-            $Result = Add-FollowUpIssue -ParentIssue 610 -Title "Test Title" -Body "Test Body" -Labels @("priority: medium", "filed-by: code-conductor")
+            $Result = Add-FollowUpIssue -ParentIssue 610 -Title "Test Title" -Body "Test Body" -Labels @("priority: medium", "filed-by: code-conductor") -FilingProvenance 'gate-approved'
 
             $Result | Should -Be "https://github.com/Grimblaz/agent-orchestra/issues/999"
 
@@ -123,6 +123,7 @@ Describe 'Add-FollowUpIssue' {
                 -Title 'Retry recovers' `
                 -Body 'Test Body' `
                 -Labels @('priority: medium') `
+                -FilingProvenance 'gate-approved' `
                 -WarningVariable warnings -WarningAction SilentlyContinue
 
             $Result | Should -Be 'https://github.com/Grimblaz/agent-orchestra/issues/999'
@@ -150,6 +151,7 @@ Describe 'Add-FollowUpIssue' {
                 -Title 'Fallback path' `
                 -Body 'Test Body' `
                 -Labels @('priority: medium') `
+                -FilingProvenance 'gate-approved' `
                 -WarningVariable warnings -WarningAction SilentlyContinue
 
             # gh issue create still returned the URL; that part is independent of GraphQL.
@@ -175,6 +177,71 @@ Describe 'Add-FollowUpIssue' {
         It 'trims spaces and trailing periods/colons' {
             $Title = ConvertTo-CanonicalFollowupTitle -FindingSubject "  Refactor locales. : " -CriterionIds @("S-design-decision")
             $Title | Should -Be "[Structural] S-design-decision: Refactor locales"
+        }
+    }
+
+    Context '-FilingProvenance parameter (#837 DD7)' {
+        # PF20: never invoke with a missing mandatory param - that can prompt-hang
+        # a non-interactive host. Assert mandatory-ness via Get-Command metadata.
+        It 'is declared as a mandatory parameter' {
+            $cmd = Get-Command Add-FollowUpIssue
+            $attr = $cmd.Parameters['FilingProvenance'].Attributes |
+                Where-Object { $_ -is [System.Management.Automation.ParameterAttribute] }
+            $attr.Mandatory | Should -Be $true
+        }
+
+        It 'declares the five-member ValidateSet enum authoritative for #837 DD7' {
+            $cmd = Get-Command Add-FollowUpIssue
+            $validateSet = $cmd.Parameters['FilingProvenance'].Attributes |
+                Where-Object { $_ -is [System.Management.Automation.ValidateSetAttribute] }
+            $validateSet.ValidValues | Should -Be @('gate-approved', 'gate-modified', 'queue-consumed', 'direct-request', 'pre-gate-legacy')
+        }
+
+        It 'rejects a value outside the five-member ValidateSet enum' {
+            {
+                Add-FollowUpIssue -ParentIssue 610 -Title 'Bad provenance' -Body 'Test Body' -Labels @('priority: medium') -FilingProvenance 'not-a-real-value' -ErrorAction Stop
+            } | Should -Throw
+        }
+
+        It 'stamps the provenance value into the composed issue body beside the sentinel' {
+            $Result = Add-FollowUpIssue -ParentIssue 610 -Title 'Provenance stamp test' -Body 'Test Body' -Labels @('priority: medium') -FilingProvenance 'queue-consumed'
+
+            $Result | Should -Be 'https://github.com/Grimblaz/agent-orchestra/issues/999'
+            $script:CapturedCreateBody | Should -Not -BeNullOrEmpty
+            $script:CapturedCreateBody | Should -Match '<!-- filing-provenance: queue-consumed -->'
+        }
+    }
+
+    Context 'Parentless filing (-ParentIssue blank, #837 post-fix F1/F2)' {
+        # G6 (#849 post-fix): dedicated coverage for the by-design parentless
+        # contract -- a blank -ParentIssue must omit the "Parent: #" body
+        # line, skip GraphQL sub-issue linkage entirely (no lookup of a
+        # parent that was never supposed to exist), and warn explicitly
+        # that this was by design rather than a silent no-op.
+        It 'omits "Parent: #", skips GraphQL linkage, and warns "by design" when -ParentIssue is blank' {
+            $warnings = @()
+            $Result = Add-FollowUpIssue `
+                -ParentIssue '' `
+                -Title 'Parentless filing' `
+                -Body 'Test Body' `
+                -Labels @('priority: medium') `
+                -FilingProvenance 'pre-gate-legacy' `
+                -WarningVariable warnings -WarningAction SilentlyContinue
+
+            $Result | Should -Be 'https://github.com/Grimblaz/agent-orchestra/issues/999'
+
+            # (a) the filed body must NOT contain a "Parent: #" line.
+            $script:CapturedCreateBody | Should -Not -BeNullOrEmpty
+            $script:CapturedCreateBody | Should -Not -Match 'Parent: #'
+
+            # (b) GraphQL linkage is skipped entirely -- no parent-resolution
+            # `gh issue view` call was ever made.
+            $log = Get-Content $script:LogFile -Raw
+            $log | Should -Not -Match 'issue view'
+            $log | Should -Not -Match 'api graphql'
+
+            # (c) the "by design" warning fires.
+            ($warnings | Where-Object { $_ -match 'No parent issue supplied \(by design\)' }).Count | Should -BeGreaterThan 0
         }
     }
 }

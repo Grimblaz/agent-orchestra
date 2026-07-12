@@ -38,7 +38,7 @@ After the judge emits rulings, check sustained findings against the prosecution 
 After judgment, pair the re-activation check above with the routing mechanics in [review-reconciliation.md](review-reconciliation.md):
 
 - `AC Cross-Check Gate`: acceptance-criteria violations cannot remain deferred or rejected.
-- `Auto-Tracking`: deferred-significant items create tracking issues automatically after the prevention-analysis advisory.
+- `Auto-Tracking`: deferred-significant items route through the Filing Approval Gate (§2e) before filing, after the prevention-analysis advisory.
 - `Batch Specialist Dispatch (R4)`: finish all routing decisions first, then batch one dispatch per specialist unless contradictory fix approaches force a split.
 - `Post-Fix Targeted Prosecution Pass`: use the R2 post-fix review cycle only after accepted findings are implemented.
 

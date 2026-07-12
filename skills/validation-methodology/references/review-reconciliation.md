@@ -115,7 +115,7 @@ During judgment and execution planning:
 - If a proposed change is a clear improvement, do it.
 - If improvement is uncertain or the change is not an improvement, reject it.
 - Out-of-scope/non-blocking improvements should still be done when small.
-- If an out-of-scope/non-blocking improvement matches at least one structural criterion (`S-new-abstraction`, `S-cross-cutting`, `S-design-decision`, `S-schema-or-contract`, `S-different-surface`, `S-maintainer-judgment` — see `skills/review-judgment/scripts/Test-DeferralCriteria.ps1`), create a follow-up issue automatically (via `skills/safe-operations/scripts/Add-FollowUpIssue.ps1`) and continue with in-scope fixes.
+- If an out-of-scope/non-blocking improvement matches at least one structural criterion (`S-new-abstraction`, `S-cross-cutting`, `S-design-decision`, `S-schema-or-contract`, `S-different-surface`, `S-maintainer-judgment` — see `skills/review-judgment/scripts/Test-DeferralCriteria.ps1`), route the proposed follow-up through the Filing Approval Gate (`skills/safe-operations/SKILL.md` §2e) before filing (via `skills/safe-operations/scripts/Add-FollowUpIssue.ps1`) and continue with in-scope fixes.
 
 ### Post-Judgment Fix Routing
 
@@ -131,7 +131,7 @@ Default to `✅ ACCEPT (fix inline)`. Only defer when the finding matches at lea
 
 #### Auto-Tracking
 
-For DEFERRED-SIGNIFICANT items, create a GitHub tracking issue automatically - no user approval required. Include PR link, review comment reference, and acceptance target in the issue body.
+For DEFERRED-SIGNIFICANT items, assemble a follow-up proposal and route it through the Filing Approval Gate (see §2e) before filing. Include PR link, review comment reference, and acceptance target in the issue body.
 
 Before creating the tracking issue, apply the prevention-analysis advisory from `skills/safe-operations/SKILL.md` §2d.
 
