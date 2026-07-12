@@ -71,7 +71,7 @@ When authoring new issues under these rules, apply the outsider-first authoring 
 When any agent discovers an out-of-scope or non-blocking improvement during its work, classify it against the structural-criteria gate (canonical taxonomy in `skills/review-judgment/scripts/Test-DeferralCriteria.ps1`):
 
 - **Inline (fix-in-PR) eligibility**: the change is small, single-file or single-system, doesn't introduce a new abstraction, doesn't cross architecture layer boundaries, and doesn't require a separate design decision. Address within the current task (or current PR if one is open).
-- **Follow-up issue creation**: the change matches at least one structural criterion (`S-new-abstraction`, `S-cross-cutting`, `S-design-decision`, `S-schema-or-contract`, `S-different-surface`, `S-maintainer-judgment`). Create a follow-up GitHub issue **immediately** using `gh issue create` (or the `Add-FollowUpIssue` helper in `skills/safe-operations/scripts/Add-FollowUpIssue.ps1` for the canonical sentinel + GraphQL parenting), then continue with in-scope work. Do not block the current PR on the deferred improvement.
+- **Follow-up issue creation**: the change matches at least one structural criterion (`S-new-abstraction`, `S-cross-cutting`, `S-design-decision`, `S-schema-or-contract`, `S-different-surface`, `S-maintainer-judgment`). Route the proposed follow-up through the **Filing Approval Gate** (§2e) — as a single-item batch when an interactive parent conversation is available, or via the headless queue when it is not — rather than filing it immediately, then continue with in-scope work. Do not block the current PR on the deferred improvement.
 
 > Supplementary rationale: as a quick sanity check, deferred (structural) issues typically represent more than a day of work, but structural-criteria match — not the effort estimate — is the load-bearing deferral criterion.
 
@@ -224,6 +224,36 @@ Before creating any issue that proposes **adding a new rule, directive, or guida
 - Bug reports, configuration fixes, or documentation corrections
 
 **Override**: This is advisory guidance — agent judgment determines the outcome. Users may always direct issue creation regardless of this advisory.
+
+### 2e. Filing Approval Gate (Additive to §2a–§2d)
+
+Some follow-up issues need a maintainer's approve/modify/drop decision before they are filed, batched per review round rather than asked about one at a time. This section is the authoritative methodology for that gate; §2a routes its "follow-up issue creation" outcome through it.
+
+**Gate ownership — parent-conversation-only.** The gate is an interactive checkpoint, so only the parent (dispatching) conversation — the agent that owns the structured-question surface — ever presents it. A subagent (a judge, a prosecution pass, Process-Review, or any dispatched specialist) never fires the gate directly; it returns proposed follow-ups as structured output for the parent to batch and present. When no interactive parent exists at all (a headless run), the queue fallback below applies instead.
+
+**Proposal assembly, before presentation.** Before any batch is shown, each candidate item is computed, not asked about live: its canonical title (via `ConvertTo-CanonicalFollowupTitle`), its §2c deduplication-check result, and its §2b-ter board position (priority label plus parent-or-standalone placement). Two kinds of items are excluded from the batch entirely rather than re-presented: an item whose canonical title dedup-matches an already-open issue, and an item whose `followup-` key (see `Get-FollowupRecordKey` below) already carries a prior drop or modify record. This exclusion is also what keeps an approval "implicit" across later rounds — an approved-and-filed item is found by the same assembly-time dedup check on every subsequent ruling, so it is never re-asked about.
+
+**Modify-re-dedup.** When a maintainer modifies a proposal's title as part of the "Modify" outcome below, that new title is not filed blindly — it re-runs the §2c dedup search. If the modified title now matches an existing issue, the gate records a modify-entry that points at that existing issue instead of filing a duplicate.
+
+**Batched presentation fields.** Each item in the batch is shown with: the proposed title, a one-line rationale, the judge disposition that produced it (or `—` when the item was not adjudicated by a judge, e.g. a §2a discovery), its severity, its computed board position, and its dedup status from proposal assembly.
+
+**Per-item outcomes.** The maintainer disposes of each item as one of three outcomes:
+
+- **Approve** — file the issue as proposed, with `Add-FollowUpIssue -FilingProvenance 'gate-approved'`.
+- **Modify** — the maintainer edits the title, scope, or severity; the edited title re-runs dedup per "Modify-re-dedup" above, and (absent a dedup hit) files with `-FilingProvenance 'gate-modified'`.
+- **Drop** — do not file; record the decision durably (see "Durable `followup-` entries" below) so the item is not re-proposed on a later ruling.
+
+**Record-before-file ordering, with honest crash semantics.** The durable decision record for a batch is written before any filing side effect executes. This has one important asymmetry: an approved item that has not yet been filed has no durable "worklist" entry of its own — the filed issue itself is the record once it exists, so approvals are implicit rather than tracked. Read together with proposal assembly's dedup exclusion, this makes crash recovery honest rather than silent: if a run crashes after recording a batch but before filing every approved item, the un-filed approval is simply re-presented — and, per assembly-time dedup, re-filed exactly once — on the next ruling. It is neither lost nor double-filed.
+
+**Durable `followup-` entries.** Drops and modifies persist as `followup-`-prefixed entries in the phase-matching engagement-record comment, using `Get-FollowupRecordKey` to derive the entry's key and `Merge-FollowupRecords` to union each fresh write with every prior `followup-` entry already on record. The authoritative marker-head state values are `'proposed'`, `'claimed'`, and `'consumed'` (see `.github/scripts/lib/followup-gate-core.ps1`). This cumulative re-emission, plus its unbroken-chain guard (a fresh marker that would otherwise drop a previously-recorded key triggers a loud warning instead of a silent drop), is what keeps an old drop or modify decision from being shadowed by a later ruling's write.
+
+**Counts line.** Each ruling's gate decision emits a `proposed: N, approved: K, modified: M, dropped: D` counts line in the same engagement-record comment as the per-item decisions. These counts are a snapshot of the batch outcome captured at decision time, not a value re-derived from durable entries afterward — because approved items have no durable entry of their own (see "Record-before-file ordering" above), a post-hoc derivation would undercount approvals.
+
+**Headless queue fallback.** When no interactive surface is available at all, the run posts exactly one `<!-- proposed-followups-{PR|ISSUE} -->` comment — built and written with `New-ProposedFollowupsComment` / `Write-ProposedFollowupsComment`, which itself reuses `find-or-upsert-comment.ps1` rather than opening a new `gh` call path — and files nothing. A later gate-capable session claim-stamps and then consumes that comment before presenting its contents as a batch. A proposal that targets a different repository than the one the run is on — for example, an upstream-gotcha finding meant for a template repo — still queues on the *current* repo's tracking artifact; its payload simply carries an explicit `target_repo` field so the eventual consumer knows where to file it.
+
+**Non-overridability.** The gate is in the same non-overridable class as plan approval and the other engagement-gate methodology checkpoints: a pacing directive such as "work without stopping" or "don't pause to ask" does not suppress it. See `CLAUDE.md` § Engagement-gate non-overridability for the full contract.
+
+**Direct-request exemption.** A maintainer's explicit request — "file an issue for X" — bypasses the gate entirely; the issue is filed immediately with `-FilingProvenance 'direct-request'`.
 
 ## Gotchas
 
