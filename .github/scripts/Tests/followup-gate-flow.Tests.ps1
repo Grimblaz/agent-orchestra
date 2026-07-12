@@ -189,6 +189,11 @@ Describe 'followup-gate-flow: approve + modify(re-dedup collision) + drop batch'
         $script:CallLog.Clear()
         $script:CapturedCreateBodies.Clear()
         $global:LASTEXITCODE = 0
+
+        # Default stub for the durable-record write. Tests that need to assert
+        # call order or content override this with their own `Mock` inside the
+        # `It` block (a same-scope Mock replaces this default for that test).
+        Mock Find-OrUpsertComment { return 'https://example.invalid/comment/1' }
     }
 
     BeforeAll {
@@ -257,8 +262,6 @@ Describe 'followup-gate-flow: approve + modify(re-dedup collision) + drop batch'
     }
 
     It "stamps the approved item's filing call with -FilingProvenance 'gate-approved'" {
-        Mock Find-OrUpsertComment { return 'https://example.invalid/comment/1' }
-
         $result = Invoke-StubbedGateRuling -Proposals $script:Proposals -Rulings $script:Rulings -ExistingOpenIssuesByTitle $script:ExistingOpenIssuesByTitle -Id 837
 
         # Exactly one item is actually filed in this batch: the approved one.
@@ -268,8 +271,6 @@ Describe 'followup-gate-flow: approve + modify(re-dedup collision) + drop batch'
     }
 
     It 'records a modify-redirect entry pointing at the existing issue instead of filing a duplicate' {
-        Mock Find-OrUpsertComment { return 'https://example.invalid/comment/1' }
-
         $result = Invoke-StubbedGateRuling -Proposals $script:Proposals -Rulings $script:Rulings -ExistingOpenIssuesByTitle $script:ExistingOpenIssuesByTitle -Id 837
 
         $modifyKey = Get-FollowupRecordKey -RawKey '[Structural] S-x: modify me'
@@ -283,8 +284,6 @@ Describe 'followup-gate-flow: approve + modify(re-dedup collision) + drop batch'
     }
 
     It 'produces a followup- drop record and no filing call for the dropped item' {
-        Mock Find-OrUpsertComment { return 'https://example.invalid/comment/1' }
-
         $result = Invoke-StubbedGateRuling -Proposals $script:Proposals -Rulings $script:Rulings -ExistingOpenIssuesByTitle $script:ExistingOpenIssuesByTitle -Id 837
 
         $dropKey = Get-FollowupRecordKey -RawKey '[Structural] S-x: drop me'
@@ -304,8 +303,6 @@ Describe 'followup-gate-flow: approve + modify(re-dedup collision) + drop batch'
     }
 
     It 'derives a counts line of proposed: 3, approved: 1, modified: 1, dropped: 1 from the batch outcome' {
-        Mock Find-OrUpsertComment { return 'https://example.invalid/comment/1' }
-
         $result = Invoke-StubbedGateRuling -Proposals $script:Proposals -Rulings $script:Rulings -ExistingOpenIssuesByTitle $script:ExistingOpenIssuesByTitle -Id 837
 
         $result.Counts.proposed | Should -Be 3
