@@ -24,6 +24,11 @@
 
     M16: When -AcCrossCheck is provided, appends a fenced YAML block before the
          sentinel block carrying the ac_cross_check provenance (AC4 contract).
+
+    #837 DD7: Requires -FilingProvenance and stamps a
+         <!-- filing-provenance: {value} --> marker beside the sentinel block
+         so every filed issue records how it cleared (or was exempted from)
+         the safe-operations §2e Filing Approval Gate.
 #>
 
 function ConvertTo-CanonicalFollowupTitle {
@@ -101,11 +106,20 @@ function Add-FollowUpIssue {
         # AC4: ac_cross_check object from Get-StructuralVerdict.
         # When provided, appended as a fenced YAML block in the issue body
         # before the sentinel block so the follow-up issue carries AC-provenance.
-        [hashtable]$AcCrossCheck
+        [hashtable]$AcCrossCheck,
+
+        # #837 DD7: how this filing cleared safe-operations SKILL.md §2e (the
+        # Filing Approval Gate). This ValidateSet is the AUTHORITATIVE source
+        # of the five-value provenance enum — safe-operations SKILL.md §2e and
+        # any consuming agent body reference these literal values and must be
+        # kept in sync with this list, not the other way around.
+        [Parameter(Mandatory=$true)]
+        [ValidateSet('gate-approved', 'gate-modified', 'queue-consumed', 'direct-request', 'pre-gate-legacy')]
+        [string]$FilingProvenance
     )
 
     # M1: Compose the body with parent ref, caller body, and sentinel block.
-    # Layout: "Parent: #X\n\n<Body>\n\n<sentinel>"
+    # Layout: "Parent: #X\n\n<Body>\n\n<sentinel>\n<provenance marker>"
     $parentRef = "Parent: #$ParentIssue"
     # If CriterionIds parameter is empty but the legacy -CriterionId alias is supplied, use that.
     $effectiveCriterionIds = if ($CriterionIds -and $CriterionIds.Count -gt 0) { $CriterionIds } elseif ($CriterionId) { $CriterionId } else { @() }
@@ -128,7 +142,10 @@ function Add-FollowUpIssue {
         $acBlock = "`n`n**AC Cross-Check**`n``````yaml`n$yaml`n``````"
     }
 
-    $bodyWithParent = "$parentRef`n`n$Body$acBlock`n`n$sentinel"
+    # #837 DD7: provenance marker, additive and placed beside the sentinel block.
+    $provenanceMarker = "<!-- filing-provenance: $FilingProvenance -->"
+
+    $bodyWithParent = "$parentRef`n`n$Body$acBlock`n`n$sentinel`n$provenanceMarker"
 
     # M3: Warn on comma-bearing labels before constructing the CSV.
     foreach ($label in $Labels) {
