@@ -324,11 +324,11 @@ When the AC cross-check returns `routed: defer` (because `result: no-match` or `
 
 The agent MUST follow this sequence instead:
 
-1. **Emit a loud inline note** (not `AskUserQuestion` — this is a guard, not a user question): `⚠️ Finding {finding_id} deferred without AC coverage (ac_cross_check.result: {result}) — mandatory sub-issue required.`
+1. **Emit a loud inline note** (not `AskUserQuestion` — this is a guard, not a user question): `⚠️ Finding {finding_id} deferred without AC coverage (ac_cross_check.result: {result}) — mandatory proposal required.`
 
-2. **Create a mandatory sub-issue** via `Add-FollowUpIssue` (with `-AcCrossCheck` per the M16 guard). The canonical title uses `ConvertTo-CanonicalFollowupTitle`. The body MUST include the finding title, the judge ruling, and the `ac_cross_check` YAML block. This is mandatory regardless of the finding's classification tier — routine findings that lack AC coverage still get a sub-issue.
+2. **Enter a mandatory proposal** into the `§2e Filing Approval Gate` batch (`skills/safe-operations/SKILL.md` § 2e), pre-checked and recommended-approve, annotated `AC-uncovered defer`. The canonical title uses `ConvertTo-CanonicalFollowupTitle`. The proposal body MUST include the finding title, the judge ruling, and the `ac_cross_check` YAML block — this payload travels into the durable drop record if the maintainer drops the proposal. This is mandatory regardless of the finding's classification tier — routine findings that lack AC coverage still enter the gate as a proposal.
 
-3. **Record in the accumulator** with `disposition: defer`, the `ac_cross_check` object, and `disposition_rationale` that cites the `no-match`/`no-ac-section` outcome and references the created sub-issue URL.
+3. **Record in the accumulator** with `disposition: defer`, the `ac_cross_check` object, and `disposition_rationale` that cites the `no-match`/`no-ac-section` outcome and references the gate proposal (and the resulting issue URL once the maintainer approves it and it is filed).
 
 The loud guard does not apply when `routed: force-accept` (high-confidence AC match) or `routed: disposition-gate` (ambiguous match fires `AskUserQuestion` normally). It applies only to the `routed: defer` arm.
 

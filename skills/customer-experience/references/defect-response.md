@@ -22,15 +22,15 @@ When a functional defect or intent deficiency is found:
 **When taking the follow-up-issue path for a CE defect**, apply the same AC cross-check pre-condition used for code-review deferred findings (see `skills/review-judgment/SKILL.md § AC Cross-Check — Blocking Pre-Condition`): call `Get-AcTermsFromIssue` then `Get-StructuralVerdict` with `-AcTerms` to produce an `ac_cross_check` object. Then:
 
 1. Record the deferred defect in the `review-dispositions-{PR}` accumulator with `stage: ce`, `disposition: defer`, and the `ac_cross_check` object (severity ≥ medium entries require `ac_cross_check` per the v2 schema).
-2. Pass `-AcCrossCheck` to `Add-FollowUpIssue` so the follow-up issue body carries AC-provenance for the deferral decision.
+2. Route the deferred defect through the `§2e Filing Approval Gate` (`skills/safe-operations/SKILL.md` § 2e) rather than filing directly. Once the maintainer approves (or modifies) the proposal, pass `-AcCrossCheck` to `Add-FollowUpIssue` so the follow-up issue body carries AC-provenance for the deferral decision.
 
 When taking the follow-up issue path, still invoke Track 2 before PR creation and log the outcome in the PR body.
 
 **Track 2 - Systemic analysis (always, after Track 1 fix is complete or when taking the follow-up-issue path):**
 
 - Call Process-Review subagent with: the defect description, what scenario revealed it, and which agent/file/instruction likely caused the gap
-- Process-Review will emit a structured CE Gate Defect Analysis (gap description, affected agent/file, recommended fix, ready-to-use issue title + body) - if a systemic gap is confirmed, **Code-Conductor creates the issue** using Process-Review's ready-to-use title and body; Process-Review does not create GitHub issues itself
-- If a systemic gap is confirmed: before creating the follow-up GitHub issue, apply the prevention-analysis advisory from `skills/safe-operations/SKILL.md` §2d. Then create the follow-up issue in the agent-orchestra repository (or fallback to current repo with label `process-gap-upstream`)
+- Process-Review will emit a structured CE Gate Defect Analysis (gap description, affected agent/file, recommended fix, ready-to-use issue title + body) - if a systemic gap is confirmed, Process-Review proposes the issue and **Code-Conductor routes it through the `§2e Filing Approval Gate`** (`skills/safe-operations/SKILL.md` § 2e) before creating it using Process-Review's ready-to-use title and body; Process-Review does not create GitHub issues itself and never fires the gate directly
+- If a systemic gap is confirmed: before creating the follow-up GitHub issue, apply the prevention-analysis advisory from `skills/safe-operations/SKILL.md` §2d. Then route the proposal through §2e and, once approved, create the follow-up issue in the agent-orchestra repository (or fallback to current repo with label `process-gap-upstream`)
 - `No systemic gap found` is a valid Process-Review outcome - log it in the PR body
 - Track 2 is non-blocking: do not hold up Track 1 fix or PR creation
 
