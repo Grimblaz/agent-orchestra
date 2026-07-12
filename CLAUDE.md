@@ -132,15 +132,13 @@ User pacing directives — including but not limited to "work without stopping,"
 - `solution-authoring` classification gates (including Code-Conductor's `scope-classification` touchpoint per the Code-Conductor body's `### Scope Classification Gate` section; pacing directives do not suppress orchestration touchpoints; same-decision-resume is the cross-session suppression mechanism for prior settled decisions)
 - `upstream-onboarding` standards-check questions
 - `plan-authoring` plan-approval prompts
-- design-convergence decisions
-- `safe-operations` Filing Approval Gate (§2e) batched proposal presentations
+- design-convergence decisions, and `safe-operations` Filing Approval Gate (§2e) batched proposal presentations
 
 Methodology checkpoints fire unconditionally per D3. The user's only in-band lever to skip an engagement-gate question is the option built into that specific question:
 
 - `solution-authoring`: the `Decline engagement — proceed without classification` option (or `decline:` free-text)
 - `upstream-onboarding`: selecting an alternative option in the structured question
-- `plan-authoring`: the documented `Reject` or equivalent plan-approval option
-- `safe-operations` §2e: the per-item approve/modify/drop decision — there is no separate decline option; the maintainer's per-item choice on each batched proposal is itself the override
+- `plan-authoring`: the documented `Reject` or equivalent plan-approval option; `safe-operations` §2e has no separate decline — the maintainer's per-item approve/modify/drop choice on each batched proposal is itself the override
 
 **The gate vs. the question (#786):** for Code-Conductor's `scope-classification` touchpoint, the *gate* — rubric evaluation plus the L0 gate-decision token — fires unconditionally on every run. The *question* (the `AskUserQuestion` call) is conditional: it fires only when the scope-classification outcome is genuinely indeterminate (every evidenced criterion holds so far, and at least one criterion still lacks an evidence-backed verdict that could flip the tier). When the outcome is determined by evidence-backed criteria, the gate announces the tier — naming the deciding criteria and carrying a standing pre-dispatch override — and records a lawful `{outcome: gate-fails, classification: routine}` token instead of asking. A `gate-fails` token is a documented, non-silent skip of the *question*, not a skip of the *gate*: the evaluation and token emission still happened. Pacing directives still cannot suppress a live (indeterminate-outcome) question — non-overridability governs the question whenever it actually fires.
 

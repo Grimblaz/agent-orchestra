@@ -2,30 +2,30 @@
 
 <#
 .SYNOPSIS
-    Core helper library for the Filing Approval Gate's durable-record spine (issue #837, plan step 1 / slice s1).
+    Core helper library for the Filing Approval Gate durable-record spine (issue #837, plan step 1 / slice s1).
 
 .DESCRIPTION
     Three building blocks used by the gate methodology (safe-operations SKILL.md §2e):
 
       1. Get-FollowupRecordKey
          Collision-safe, lowercase, fixed-length `followup-`-prefixed key derivation
-         from a raw identity string (a finding's stable_finding_key, or a
-         non-adjudicated proposal's canonical title).
+         from a raw identity string (the stable_finding_key of a finding, or the
+         canonical title of a non-adjudicated proposal).
 
       2. New-ProposedFollowupsComment / Read-ProposedFollowupsComment /
          Set-ProposedFollowupsCommentState / Write-ProposedFollowupsComment
          Build, parse, and transition the `<!-- proposed-followups-{ID} -->`
          headless-queue comment payload. The actual GitHub write/edit reuses
-         find-or-upsert-comment.ps1's Find-OrUpsertComment rather than a new
-         gh call path.
+         the Find-OrUpsertComment function from find-or-upsert-comment.ps1
+         rather than a new gh call path.
 
       3. Merge-FollowupRecords (plus its Get-FollowupPriorMarkerBodies and
          Get-FollowupKeysFromRawText helpers)
          Reads prior `followup-`-prefixed engagement-record entries via
          Read-EngagementRecords (frame-engagement-record-core.ps1), through an
          uncapped `gh api ... --paginate` read (never the 100-comment-capped
-         `gh ... --json comments` fetch), unions them with the current batch's
-         decisions (current-batch wins on key conflict; among prior entries the
+         `gh ... --json comments` fetch), unions them with the decisions of the
+         current batch (current-batch wins on key conflict; among prior entries the
          most-recently-created marker wins), and enforces an unbroken-chain
          guard: the merged result must be a superset of every `followup-` key
          seen in the raw text of every prior marker read, or a loud
@@ -50,7 +50,7 @@ function Get-FollowupRecordKey {
         Derives a collision-safe, lowercase, fixed-length `followup-` key from a raw identity string.
 
     .PARAMETER RawKey
-        The raw identity to hash: a finding's stable_finding_key for adjudicated
+        The raw identity to hash: the stable_finding_key of a finding for adjudicated
         findings, or the canonical title for non-adjudicated proposals. Must not
         be null, empty, or whitespace-after-trim.
 
@@ -288,7 +288,7 @@ function Read-ProposedFollowupsComment {
 function Set-ProposedFollowupsCommentState {
     <#
     .SYNOPSIS
-        Transitions the comment body's `state:` head line among proposed -> claimed -> consumed.
+        Transitions the `state:` head line of the comment body among proposed -> claimed -> consumed.
 
     .PARAMETER CommentBody
         The current comment body text.
@@ -348,7 +348,7 @@ function Write-ProposedFollowupsComment {
 
     .OUTPUTS
         [string] the html_url of the upserted comment, or $null on gh failure
-        (Find-OrUpsertComment's fail-open contract).
+        (the fail-open contract of Find-OrUpsertComment).
     #>
     [CmdletBinding()]
     [OutputType([string])]
@@ -485,7 +485,7 @@ function Get-FollowupPriorMarkerBodies {
 function Merge-FollowupRecords {
     <#
     .SYNOPSIS
-        Unions prior `followup-`-prefixed engagement-record entries with the current batch's decisions.
+        Unions prior `followup-`-prefixed engagement-record entries with the decisions of the current batch.
 
     .DESCRIPTION
         Reads prior entries via Read-EngagementRecords (frame-engagement-record-core.ps1),
@@ -496,8 +496,8 @@ function Merge-FollowupRecords {
         CreatedAt can be used for cross-marker tie-breaking, since followup-
         entries may ride design/plan/review markers whose phases differ.
 
-        Precedence: the current batch's decision wins over any prior marker's
-        decision for the same key; among prior entries, the most-recently-
+        Precedence: the decision of the current batch wins over any decision from a prior
+        marker for the same key; among prior entries, the most-recently-
         created marker wins.
 
         Unbroken-chain guard: the merged result must be a superset of every
@@ -567,7 +567,7 @@ function Merge-FollowupRecords {
         $markerBodies = @(Get-FollowupPriorMarkerBodies -Type $Type -Number $Number -Repo $Repo -GhCliPath $GhCliPath)
     }
 
-    # Step 2: independent raw-text scan — the unbroken-chain guard's truth source.
+    # Step 2: independent raw-text scan — the truth source for the unbroken-chain guard.
     $allPriorKeysSeen = New-Object System.Collections.Generic.HashSet[string]
     foreach ($marker in $markerBodies) {
         foreach ($k in (Get-FollowupKeysFromRawText -Text $marker.Body)) {
