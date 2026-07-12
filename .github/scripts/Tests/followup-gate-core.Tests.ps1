@@ -155,6 +155,88 @@ Describe 'New-ProposedFollowupsComment / Read-ProposedFollowupsComment: round-tr
     It 'throws on a comment body with no proposed-followups marker' {
         { Read-ProposedFollowupsComment -CommentBody 'not a marker at all' } | Should -Throw -ExceptionType ([System.ArgumentException])
     }
+
+    It 'round-trips a rationale field containing an embedded code fence without truncating the YAML block (R4)' {
+        if (-not $script:HasYaml) { Set-ItResult -Skipped -Because 'powershell-yaml module not installed'; return }
+
+        $fenceProposal = [PSCustomObject]@{
+            canonical_title       = '[Structural] S-fence: embedded code fence test'
+            rationale             = 'Example: ```js console.log("hi"); ``` embedded inline.'
+            disposition           = 'recommended-approve'
+            severity              = 'medium'
+            board_position        = 2
+            followup_key          = 'followup-6666666666666666'
+            originating_head_sha  = '8e1bba94c57d4f14fba57fbca32171782b01e652'
+            ruling_link           = 'https://github.com/Grimblaz/agent-orchestra/pull/2#issuecomment-2'
+        }
+        $body = New-ProposedFollowupsComment -Id 2 -Proposals @($fenceProposal) -State proposed
+
+        $parsed = Read-ProposedFollowupsComment -CommentBody $body
+        $parsed.Proposals.Count | Should -Be 1
+        $parsed.Proposals[0].rationale | Should -Be $fenceProposal.rationale
+        $parsed.Proposals[0].followup_key | Should -Be $fenceProposal.followup_key
+    }
+
+    It 'round-trips a rationale field containing an embedded newline (R11)' {
+        if (-not $script:HasYaml) { Set-ItResult -Skipped -Because 'powershell-yaml module not installed'; return }
+
+        $newlineProposal = [PSCustomObject]@{
+            canonical_title       = '[Structural] S-newline: embedded newline test'
+            rationale             = "First line of rationale.`nSecond line of rationale."
+            disposition           = 'recommended-approve'
+            severity              = 'low'
+            board_position        = 1
+            followup_key          = 'followup-1234567890abcdef'
+            originating_head_sha  = '8e1bba94c57d4f14fba57fbca32171782b01e652'
+            ruling_link           = 'https://github.com/Grimblaz/agent-orchestra/pull/3#issuecomment-3'
+        }
+        $body = New-ProposedFollowupsComment -Id 3 -Proposals @($newlineProposal) -State proposed
+
+        $parsed = Read-ProposedFollowupsComment -CommentBody $body
+        $parsed.Proposals[0].rationale | Should -Be $newlineProposal.rationale
+    }
+
+    It 'round-trips a colon-bearing board_position value without YAML corruption (R5)' {
+        if (-not $script:HasYaml) { Set-ItResult -Skipped -Because 'powershell-yaml module not installed'; return }
+
+        $colonProposal = [PSCustomObject]@{
+            canonical_title       = '[Structural] S-colon: board_position colon test'
+            rationale             = 'plain rationale'
+            disposition           = 'recommended-approve'
+            severity              = 'low'
+            board_position        = 'priority: medium, standalone'
+            followup_key          = 'followup-aaaaaaaaaaaaaaaa'
+            originating_head_sha  = '8e1bba94c57d4f14fba57fbca32171782b01e652'
+            ruling_link           = 'https://github.com/Grimblaz/agent-orchestra/pull/4#issuecomment-4'
+        }
+        $body = New-ProposedFollowupsComment -Id 4 -Proposals @($colonProposal) -State proposed
+
+        $parsed = Read-ProposedFollowupsComment -CommentBody $body
+        $parsed.Proposals.Count | Should -Be 1
+        $parsed.Proposals[0].board_position | Should -Be $colonProposal.board_position
+        $parsed.Proposals[0].followup_key | Should -Be $colonProposal.followup_key
+    }
+
+    It 'round-trips a newline-bearing board_position value without YAML corruption (R5)' {
+        if (-not $script:HasYaml) { Set-ItResult -Skipped -Because 'powershell-yaml module not installed'; return }
+
+        $newlineBpProposal = [PSCustomObject]@{
+            canonical_title       = '[Structural] S-newline-bp: board_position newline test'
+            rationale             = 'plain rationale'
+            disposition           = 'recommended-approve'
+            severity              = 'low'
+            board_position        = "line-one`nline-two"
+            followup_key          = 'followup-bbbbbbbbbbbbbbbb'
+            originating_head_sha  = '8e1bba94c57d4f14fba57fbca32171782b01e652'
+            ruling_link           = 'https://github.com/Grimblaz/agent-orchestra/pull/5#issuecomment-5'
+        }
+        $body = New-ProposedFollowupsComment -Id 5 -Proposals @($newlineBpProposal) -State proposed
+
+        $parsed = Read-ProposedFollowupsComment -CommentBody $body
+        $parsed.Proposals.Count | Should -Be 1
+        $parsed.Proposals[0].board_position | Should -Be $newlineBpProposal.board_position
+        $parsed.Proposals[0].followup_key | Should -Be $newlineBpProposal.followup_key
+    }
 }
 
 Describe 'Set-ProposedFollowupsCommentState: proposed -> claimed -> consumed' {
@@ -321,5 +403,109 @@ $fence
 
         ($result | Where-Object decision_id -eq 'followup-8888888888888888').engineer_choice | Should -Be 'keep-me'
         ($result | Where-Object decision_id -eq 'followup-9999999999999999').engineer_choice | Should -Be 'unrelated'
+    }
+
+    It 'exercises the -Type pr path end-to-end (R7)' {
+        if (-not $script:HasYaml) { Set-ItResult -Skipped -Because 'powershell-yaml module not installed'; return }
+
+        # review phase requires schema_version >= 4 (frame-engagement-record-core.ps1).
+        $marker = script:New-FollowupMarkerFixture -IssueNumber 555 -Phase 'review' -SchemaVersion 4 -DecisionId 'followup-4444444444444444' -EngineerChoice 'pr-choice'
+        $prior = @([PSCustomObject]@{ Body = $marker; CreatedAt = [DateTime]::Parse('2026-06-01T00:00:00Z').ToUniversalTime() })
+
+        $result = Merge-FollowupRecords -Number 555 -Type pr -PriorMarkerBodies $prior -WarningAction SilentlyContinue
+
+        ($result | Where-Object decision_id -eq 'followup-4444444444444444').engineer_choice | Should -Be 'pr-choice'
+    }
+
+    It 'throws a clear error when -PriorMarkerBodies is supplied without an explicit -Number (R9)' {
+        $prior = @([PSCustomObject]@{ Body = 'irrelevant'; CreatedAt = [DateTime]::UtcNow })
+        { Merge-FollowupRecords -Type issue -PriorMarkerBodies $prior -WarningAction SilentlyContinue } |
+            Should -Throw -ExceptionType ([System.Management.Automation.PSArgumentException])
+    }
+
+    It 'breaks a CreatedAt tie deterministically by preferring the higher comment Id (R17)' {
+        if (-not $script:HasYaml) { Set-ItResult -Skipped -Because 'powershell-yaml module not installed'; return }
+
+        $tiedCreatedAt = [DateTime]::Parse('2026-07-01T00:00:00Z').ToUniversalTime()
+        $markerLow = script:New-FollowupMarkerFixture -IssueNumber 999 -Phase 'plan' -SchemaVersion 2 -DecisionId 'followup-cccccccccccccccc' -EngineerChoice 'lower-id-choice'
+        $markerHigh = script:New-FollowupMarkerFixture -IssueNumber 999 -Phase 'design' -SchemaVersion 2 -DecisionId 'followup-cccccccccccccccc' -EngineerChoice 'higher-id-choice'
+        $prior = @(
+            [PSCustomObject]@{ Body = $markerLow; CreatedAt = $tiedCreatedAt; Id = 100 }
+            [PSCustomObject]@{ Body = $markerHigh; CreatedAt = $tiedCreatedAt; Id = 200 }
+        )
+
+        $result = Merge-FollowupRecords -Number 999 -Type issue -PriorMarkerBodies $prior -WarningAction SilentlyContinue
+
+        ($result | Where-Object decision_id -eq 'followup-cccccccccccccccc').engineer_choice | Should -Be 'higher-id-choice'
+    }
+
+    It 'skips ordinary discussion comments without the engagement-record- substring (R18 pre-filter)' {
+        if (-not $script:HasYaml) { Set-ItResult -Skipped -Because 'powershell-yaml module not installed'; return }
+
+        $marker = script:New-FollowupMarkerFixture -IssueNumber 999 -Phase 'plan' -SchemaVersion 2 -DecisionId 'followup-dddddddddddddddd' -EngineerChoice 'kept-choice'
+        $chatter = 'Just a regular discussion comment with no markers at all.'
+        $prior = @(
+            [PSCustomObject]@{ Body = $chatter; CreatedAt = [DateTime]::Parse('2026-07-05T00:00:00Z').ToUniversalTime() }
+            [PSCustomObject]@{ Body = $marker; CreatedAt = [DateTime]::Parse('2026-07-06T00:00:00Z').ToUniversalTime() }
+        )
+
+        $result = Merge-FollowupRecords -Number 999 -Type issue -PriorMarkerBodies $prior -WarningAction SilentlyContinue
+
+        ($result | Where-Object decision_id -eq 'followup-dddddddddddddddd').engineer_choice | Should -Be 'kept-choice'
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Get-FollowupPriorMarkerBodies (R13)
+# ---------------------------------------------------------------------------
+
+Describe 'Get-FollowupPriorMarkerBodies' {
+    It 'fetches multiple comment bodies from a successful gh api --paginate call' {
+        $mockGhPath = Join-Path $TestDrive 'gh-multi-body.ps1'
+        @'
+param()
+Write-Output '[{"body":"first marker","created_at":"2026-01-01T00:00:00Z","id":11},{"body":"second marker","created_at":"2026-02-02T00:00:00Z","id":22}]'
+exit 0
+'@ | Set-Content $mockGhPath -Encoding UTF8
+
+        $result = Get-FollowupPriorMarkerBodies -Type issue -Number 42 -Repo 'example-owner/example-repo' -GhCliPath $mockGhPath
+
+        $result.Count | Should -Be 2
+        $result[0].Body | Should -Be 'first marker'
+        $result[0].Id | Should -Be 11
+        $result[1].Body | Should -Be 'second marker'
+        $result[1].Id | Should -Be 22
+    }
+
+    It 'warns and returns no prior markers when gh api fails (non-zero exit)' {
+        $mockGhPath = Join-Path $TestDrive 'gh-failure.ps1'
+        @'
+param()
+exit 1
+'@ | Set-Content $mockGhPath -Encoding UTF8
+
+        $warnings = $null
+        $result = Get-FollowupPriorMarkerBodies -Type issue -Number 42 -Repo 'example-owner/example-repo' -GhCliPath $mockGhPath -WarningVariable warnings -WarningAction SilentlyContinue
+
+        $result.Count | Should -Be 0
+        ($warnings -join ' | ') | Should -Match 'gh api .* failed'
+    }
+
+    It 'resolves owner/repo from the git remote via regex when -Repo is not supplied' {
+        $mockGhPath = Join-Path $TestDrive 'gh-repo-resolution.ps1'
+        $argsCapturePath = Join-Path $TestDrive 'gh-args-capture.txt'
+        @"
+param()
+`$args -join ' ' | Set-Content -Path '$argsCapturePath' -Encoding UTF8
+Write-Output '[{"body":"marker body","created_at":"2026-01-01T00:00:00Z","id":1}]'
+exit 0
+"@ | Set-Content $mockGhPath -Encoding UTF8
+
+        $result = Get-FollowupPriorMarkerBodies -Type issue -Number 42 -GhCliPath $mockGhPath
+
+        $capturedArgs = Get-Content $argsCapturePath -Raw
+        $capturedArgs | Should -Match 'repos/[^/\s]+/[^/\s]+/issues/42/comments'
+        $result.Count | Should -Be 1
+        $result[0].Body | Should -Be 'marker body'
     }
 }

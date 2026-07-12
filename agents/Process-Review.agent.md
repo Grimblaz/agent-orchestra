@@ -451,7 +451,7 @@ guardrail_proposals:
     prevention_gate_outcome: created-new  # redirected=Step1-match; reframed=Step2-structural; created-new=Step3; exempt=outside-§2d-scope — outcome of the §2d prevention-analysis advisory applied before creating this upstream proposal
 ```
 
-**Step 4 — Propose improvement issues** (assembled via `create-improvement-issue.ps1`; filing routes through Code-Conductor's Filing Approval Gate — Process-Review proposes, Code-Conductor gates and files, per §2e):
+**Step 4 — Propose and file improvement issues** (assembled and filed by `create-improvement-issue.ps1`, which internally splits `New-ImprovementIssueProposal` (assemble) from `Invoke-CreateImprovementIssue` (file). Filing routes through `Add-FollowUpIssue` — the same shared safe-operations filing primitive every other §837-wired surface uses — stamped `-FilingProvenance 'pre-gate-legacy'`. This surface files directly rather than through an interactive §2e Filing Approval Gate: unlike §4.8's Process-Review-proposes/Code-Conductor-gates split, there is no callable production §2e orchestrator for this headless script to hand off to yet. `'pre-gate-legacy'` is the reserved, honest transitional stamp for exactly this case — see #837 R1):
 
 For each proposal from Step 3 where `previously_proposed: false`:
 
@@ -492,7 +492,7 @@ For each proposal from Step 3 where `previously_proposed: false`:
 4. **Handle action results** (Process-Review applies semantic judgment):
    - `consolidation-candidate` → include in report: "Suggested merge with issue #{ConsolidationTarget}". Apply §2d semantic judgment: assess principle-level similarity between proposed and existing issue; check prevention alternative per §2d Step 2. If merge is appropriate, comment on existing issue; if not, proceed with fresh creation by re-invoking with `-SkipConsolidation` to bypass Gate 1 (§2d consolidation check)
    - `skipped-dedup` → log "previously proposed" in report
-   - `created` → the script hands the assembled proposal to Code-Conductor's Filing Approval Gate (`skills/safe-operations/SKILL.md` §2e) for gating and filing; once filed, include the resulting issue URL and classification level in report and mark `previously_proposed: true` for pattern
+   - `created` → the script has already filed the issue directly (via `Add-FollowUpIssue -FilingProvenance 'pre-gate-legacy'`, not an interactive §2e gate); include the resulting issue URL and classification level in report and mark `previously_proposed: true` for pattern
    - `error` → log error, leave `previously_proposed: false` for retry on next calibration run
 
 > **Note**: Unlike §4.8, §4.9 requires no persistent error-state marker. When the script returns `error`, skipping issue creation leaves `previously_proposed: false` — the next calibration run will retry automatically. The script handles §2d surface search, calibration dedup (pattern_key-only with fix_issue_number check), GitHub search dedup, D10 ceiling advisory, D-259-7 classification, issue creation, and `fix_issue_number` calibration linkage mechanically; Process-Review retains pattern analysis (Steps 1–2), proposal formatting (Step 3), upstream repo resolution + pre-flight access check, §2d semantic judgment for `consolidation-candidate` results, error recovery, and report emission.
@@ -530,7 +530,7 @@ For each proposal from Step 3 where `previously_proposed: false`:
 - Patterns previously proposed: {N}
 ```
 
-**Guardrail**: Advisory only — this agent does NOT apply guardrail changes directly. Proposals require human approval. Code-Conductor handles application through normal change orchestration (Doc-Keeper for instruction/skill updates, Code-Smith for agent prompt changes, per D6). Issue proposal assembly in Step 4 is delegated to `create-improvement-issue.ps1`; filing itself routes through Code-Conductor's Filing Approval Gate (`skills/safe-operations/SKILL.md` §2e, surface 8) rather than a direct `gh issue create` call — Process-Review proposes, Code-Conductor gates and files. The board-positioning decision (§2b, §2b-bis, §2b-ter) for this path is exercised via the script's `-Labels` parameter — the agent's priority choice is the positioning lever; the gate's structured presentation satisfies the placement portion of the §2b-ter residue.
+**Guardrail**: Advisory only — this agent does NOT apply guardrail changes directly. Proposals require human approval. Code-Conductor handles application through normal change orchestration (Doc-Keeper for instruction/skill updates, Code-Smith for agent prompt changes, per D6). Issue proposal assembly and filing in Step 4 are both delegated to `create-improvement-issue.ps1` (surface 8): the script assembles the proposal and files it directly via `Add-FollowUpIssue -FilingProvenance 'pre-gate-legacy'` — the shared safe-operations filing primitive rather than a bare `gh issue create` call, but not yet gated through an interactive §2e Filing Approval Gate (no callable production §2e orchestrator exists for this headless script to hand off to; see #837 R1). The board-positioning decision (§2b, §2b-bis, §2b-ter) for this path is exercised via the script's `-Labels` parameter — the agent's priority choice is the positioning lever.
 
 ### 5. Standard Retrospective Analysis
 

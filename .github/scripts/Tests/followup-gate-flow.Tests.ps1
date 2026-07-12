@@ -30,8 +30,11 @@ exercises the REAL production helpers around that boundary:
 Get-FollowupRecordKey and Get-FollowupKeysFromRawText (s1,
 followup-gate-core.ps1), Find-OrUpsertComment (the durable-record write
 mechanism, existing lib), and Add-FollowUpIssue (s2, mandatory
--FilingProvenance). This is the only mechanical check of the
-record-before-file guarantee (plan step 3 Requirement Contract).
+-FilingProvenance). This test pins the intended record-before-file
+contract against a reference stub (Invoke-StubbedGateRuling); a future
+production §2e implementation must preserve this ordering, which this
+test does not and cannot enforce against non-existent production code
+(plan step 3 Requirement Contract).
 #>
 
 BeforeAll {

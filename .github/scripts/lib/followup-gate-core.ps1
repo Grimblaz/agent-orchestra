@@ -126,6 +126,12 @@ function ConvertTo-FollowupYamlString {
     )
     $strValue = if ($null -eq $Value) { '' } else { [string]$Value }
     $escaped = $strValue.Replace('\', '\\').Replace('"', '\"')
+    # R11: escape embedded newlines (CRLF, LF, and bare CR) as the YAML
+    # double-quoted \n escape sequence so free-text fields with embedded
+    # newlines round-trip exactly instead of triggering YAML block-folding
+    # or losing fidelity. Must run after the backslash/quote escaping above
+    # so the backslashes this introduces are not themselves re-escaped.
+    $escaped = $escaped.Replace("`r`n", '\n').Replace("`n", '\n').Replace("`r", '\n')
     return "`"$escaped`""
 }
 
@@ -183,7 +189,7 @@ function New-ProposedFollowupsComment {
             $lines += "    rationale: $(ConvertTo-FollowupYamlString $p.rationale)"
             $lines += "    disposition: $(ConvertTo-FollowupYamlString $p.disposition)"
             $lines += "    severity: $(ConvertTo-FollowupYamlString $p.severity)"
-            $lines += "    board_position: $($p.board_position)"
+            $lines += "    board_position: $(ConvertTo-FollowupYamlString $p.board_position)"
             $lines += "    followup_key: $(ConvertTo-FollowupYamlString $p.followup_key)"
             $lines += "    originating_head_sha: $(ConvertTo-FollowupYamlString $p.originating_head_sha)"
             $lines += "    ruling_link: $(ConvertTo-FollowupYamlString $p.ruling_link)"
@@ -241,7 +247,13 @@ function Read-ProposedFollowupsComment {
     }
     $state = $Matches[2]
 
-    if ($CommentBody -notmatch '(?s)```yaml\s*(.*?)```') {
+    # R4: the closing fence must be anchored to a line that is EXACTLY ``` (optional
+    # trailing whitespace) at the start of a line -- not just the next ``` occurrence
+    # anywhere in the body. Free-text fields (rationale/title) can legitimately contain
+    # a literal "```" substring mid-line; an unanchored non-greedy match would stop at
+    # that embedded sequence and silently truncate the YAML block. This is fence-aware
+    # extraction rather than mutating user content in ConvertTo-FollowupYamlString.
+    if ($CommentBody -notmatch '(?ms)^```yaml[ \t]*\r?\n(.*?)\r?\n^```[ \t]*$') {
         throw [System.InvalidOperationException]::new(
             'Read-ProposedFollowupsComment: no fenced yaml block found in the supplied comment body.'
         )
@@ -412,8 +424,9 @@ function Get-FollowupPriorMarkerBodies {
         uncapped read path so a busy PR/issue cannot shadow older markers.
 
     .OUTPUTS
-        [PSCustomObject[]] each with Body and CreatedAt, in ascending
-        (oldest-first) creation order.
+        [PSCustomObject[]] each with Body, CreatedAt, and Id (the GitHub
+        comment id, used by Merge-FollowupRecords as the R17 deterministic
+        CreatedAt tie-break), in ascending (oldest-first) creation order.
     #>
     [CmdletBinding()]
     [OutputType([PSCustomObject[]])]
@@ -478,6 +491,7 @@ function Get-FollowupPriorMarkerBodies {
         [PSCustomObject]@{
             Body      = $_.body
             CreatedAt = $createdAt
+            Id        = $_.id
         }
     })
 }
@@ -515,8 +529,12 @@ function Merge-FollowupRecords {
         'issue' or 'pr' — which comment thread prior markers live on.
 
     .PARAMETER Number
-        The issue or PR number backing the live gh read. Ignored when
-        -PriorMarkerBodies is supplied.
+        The issue or PR number backing the live gh read, and (R9) the number
+        every prior marker is re-validated against when -PriorMarkerBodies is
+        supplied instead of performing the live read. Must be explicitly
+        supplied (not left at its default 0) whenever -PriorMarkerBodies is
+        used, or the function throws immediately rather than silently
+        dropping every prior entry.
 
     .PARAMETER Repo
         Optional owner/repo. Auto-resolved from the git remote when omitted.
@@ -526,8 +544,9 @@ function Merge-FollowupRecords {
 
     .PARAMETER PriorMarkerBodies
         Test/offline seam: supply prior marker bodies directly (each a
-        hashtable/PSCustomObject with Body + CreatedAt), bypassing the live gh
-        fetch entirely.
+        hashtable/PSCustomObject with Body + CreatedAt, and optionally Id for
+        the R17 CreatedAt tie-break; Id defaults to 0 when omitted), bypassing
+        the live gh fetch entirely. Requires an explicit -Number (R9).
 
     .OUTPUTS
         [object[]] the merged decision objects, sorted by key.
@@ -559,6 +578,21 @@ function Merge-FollowupRecords {
 
     if ($null -eq $CurrentBatch) { $CurrentBatch = @() }
 
+    # R9: -PriorMarkerBodies without an explicit -Number silently degrades. Read-EngagementRecords
+    # requires -IssueNumber/-PullRequestNumber > 0 and throws otherwise; that throw is caught below
+    # (per-marker try/catch) and treated as "unparseable", which drops EVERY prior entry without a
+    # clear error. Fail loud instead: require an explicit -Number whenever -PriorMarkerBodies is used.
+    if ($null -ne $PriorMarkerBodies -and -not $PSBoundParameters.ContainsKey('Number')) {
+        throw [System.Management.Automation.PSArgumentException]::new(
+            'Merge-FollowupRecords: -PriorMarkerBodies was supplied but -Number was left at its default (0). ' +
+            'Read-EngagementRecords requires -IssueNumber/-PullRequestNumber > 0, so every prior marker would ' +
+            'otherwise be silently rejected downstream and treated as unparseable, dropping ALL prior entries ' +
+            'without a clear error. Supply an explicit -Number (the issue or PR number the prior markers were ' +
+            'read from) alongside -PriorMarkerBodies.',
+            'Number'
+        )
+    }
+
     # Step 1: gather prior marker bodies via the uncapped read path.
     $markerBodies = @()
     if ($null -ne $PriorMarkerBodies) {
@@ -579,12 +613,29 @@ function Merge-FollowupRecords {
     # retaining its own CreatedAt for cross-marker/cross-phase tie-breaking.
     $priorEntriesByKey = @{}
     $priorEntriesCreatedAt = @{}
+    $priorEntriesId = @{}
 
     foreach ($marker in $markerBodies) {
         $body = $marker.Body
         $createdAt = $marker.CreatedAt
+        $markerId = if ($null -ne $marker.Id) { $marker.Id } else { 0 }
         if ([string]::IsNullOrWhiteSpace($body)) { continue }
 
+        # R18: cheap pre-filter -- skip bodies that plainly are not engagement-record
+        # markers at all (ordinary discussion comments) before paying for full
+        # YAML/schema parsing via Read-EngagementRecords. Pure performance
+        # optimization: the unbroken-chain guard's independent raw-text scan
+        # (Step 2, above) still covers every body regardless of this filter.
+        if (-not $body.Contains('engagement-record-')) { continue }
+
+        # PR-path vs issue-path keying asymmetry is intentional, not a bug (R7):
+        # the PR path forwards Phase='review' because followup- entries riding a
+        # PR thread only ever arrive on engagement-record-review-{PR} markers (PR
+        # threads only ever carry the review phase, by marker locality). The
+        # issue path applies no phase filter because followup- entries riding an
+        # issue thread can legitimately arrive on any of several issue-keyed
+        # phases (experience/design/plan/orchestration), and a prior key must not
+        # be lost just because it rode a different issue-keyed phase marker.
         $rerArgs = @{ InMemoryMarkers = @($body); AcceptLegacy = $true; WarningAction = 'SilentlyContinue' }
         if ($Type -eq 'pr') {
             $rerArgs['PullRequestNumber'] = $Number
@@ -606,9 +657,29 @@ function Merge-FollowupRecords {
             if ([string]::IsNullOrWhiteSpace($key) -or $key -notlike 'followup-*') { continue }
 
             $existingCreatedAt = $priorEntriesCreatedAt[$key]
-            if ($null -eq $existingCreatedAt -or $createdAt -gt $existingCreatedAt) {
+            $shouldReplace = $false
+            if ($null -eq $existingCreatedAt) {
+                $shouldReplace = $true
+            } elseif ($createdAt -gt $existingCreatedAt) {
+                $shouldReplace = $true
+            } elseif ($createdAt -eq $existingCreatedAt) {
+                # R17: deterministic secondary tie-break. When CreatedAt is equal
+                # (including the shared [DateTime]::MinValue two markers can both
+                # receive after a created_at parse failure), prefer the marker
+                # with the higher comment Id as a stable secondary key -- GitHub
+                # comment IDs are monotonically increasing, so a higher Id
+                # reliably reflects a later comment even when timestamp
+                # resolution collides.
+                $existingId = $priorEntriesId[$key]
+                if ($null -eq $existingId -or $markerId -gt $existingId) {
+                    $shouldReplace = $true
+                }
+            }
+
+            if ($shouldReplace) {
                 $priorEntriesByKey[$key] = $dec
                 $priorEntriesCreatedAt[$key] = $createdAt
+                $priorEntriesId[$key] = $markerId
             }
         }
     }

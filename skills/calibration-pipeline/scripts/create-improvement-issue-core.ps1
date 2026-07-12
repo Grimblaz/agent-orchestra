@@ -1,5 +1,11 @@
 #Requires -Version 7.0
 
+# #837 R1 (judge-sustained, critical): filing (the `gh issue create` side
+# effect) now routes through the shared safe-operations filing primitive so
+# every filed improvement issue carries a -FilingProvenance stamp like the
+# other §837-wired surfaces, instead of calling `gh issue create` directly.
+. "$PSScriptRoot/../../safe-operations/scripts/Add-FollowUpIssue.ps1"
+
 # ── Private helpers (CII prefix) ─────────────────────────────────────
 
 function Get-CIIFlexProperty {
@@ -235,7 +241,12 @@ function New-CIIResult {
         $ConsolidationTarget = $null,
         $ClassifiedLevel = $null,
         $SuggestedLevel = $null,
-        $CeilingAdvisory = $null
+        $CeilingAdvisory = $null,
+        # #837 R1: carried only on the 'would-create' proposal shape returned
+        # by New-ImprovementIssueProposal, so the caller can file it.
+        $Title = $null,
+        $Body = $null,
+        $Labels = $null
     )
     return @{
         ExitCode            = $ExitCode
@@ -247,12 +258,31 @@ function New-CIIResult {
         ClassifiedLevel     = $ClassifiedLevel
         SuggestedLevel      = $SuggestedLevel
         CeilingAdvisory     = $CeilingAdvisory
+        Title               = $Title
+        Body                = $Body
+        Labels              = $Labels
     }
 }
 
-# ── Main function ─────────────────────────────────────────────────────
+# ── Main functions ─────────────────────────────────────────────────────
 
-function Invoke-CreateImprovementIssue {
+function New-ImprovementIssueProposal {
+    <#
+    .SYNOPSIS
+        Assembles a classified improvement-issue proposal without filing it.
+
+    .DESCRIPTION
+        #837 R1 (judge-sustained, critical, owner-ratified option 1): this
+        is the assemble-only half of the split. It runs every gate that
+        used to run inline in Invoke-CreateImprovementIssue -- §2d
+        consolidation -> calibration dedup -> GitHub search dedup -> D10
+        ceiling advisory -> D-259-7 classification -> title/body assembly
+        -- and returns either an early-exit result (consolidation-candidate
+        / skipped-dedup, unchanged from prior behavior) or a
+        'would-create' proposal carrying the assembled Title/Body/Labels
+        for the caller to file. This function never calls
+        `gh issue create` or any other filing side effect.
+    #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$PatternKey,
@@ -314,7 +344,7 @@ function Invoke-CreateImprovementIssue {
         -SystemicFixType $SystemicFixType -FixTypeLevel $FixTypeLevel `
         -ProposedChange $ProposedChange -FixTypeOverride $FixTypeOverride
 
-    # ── Create issue ─────────────────────────────────────────────
+    # ── Assemble title/body (no filing side effect) ──────────────
     $body = New-CIIIssueBody `
         -PatternKey $PatternKey -EvidencePrs $EvidencePrs `
         -FirstEmittedAt $FirstEmittedAt `
@@ -328,19 +358,111 @@ function Invoke-CreateImprovementIssue {
 
     $category = Get-CIICategory -PatternKey $PatternKey
     $title = "[Systemic Fix] $SystemicFixType — $category"
-    $labelArgs = @($Labels | ForEach-Object { '--label'; $_ })
 
-    $output = & $GhCliPath issue create --repo $Repo --title $title --body $body @labelArgs 2>$null
-    if ($LASTEXITCODE -ne 0) {
+    return New-CIIResult -Action 'would-create' `
+        -Title $title -Body $body -Labels $Labels `
+        -ClassifiedLevel $classification.ClassifiedLevel `
+        -SuggestedLevel $classification.SuggestedLevel `
+        -CeilingAdvisory $ceilingAdvisory
+}
+
+function Invoke-CreateImprovementIssue {
+    <#
+    .SYNOPSIS
+        Assembles a classified improvement-issue proposal and files it.
+
+    .DESCRIPTION
+        #837 R1: thin wrapper around New-ImprovementIssueProposal. Non-
+        filing outcomes (consolidation-candidate, skipped-dedup) pass
+        through unchanged. The 'would-create' outcome is filed via
+        safe-operations' Add-FollowUpIssue -- the same production filing
+        primitive every other §837-wired surface uses -- rather than a bare
+        `gh issue create`, stamped `-FilingProvenance 'pre-gate-legacy'`.
+
+        Why 'pre-gate-legacy' and not an interactively-gated value
+        ('gate-approved' / 'gate-modified' / 'direct-request' /
+        'queue-consumed'): safe-operations SKILL.md §2e's Filing Approval
+        Gate is a parent-conversation-only interactive checkpoint (see
+        §2e "Gate ownership"), and this calibration script is headless --
+        there is no callable production §2e orchestrator to hand the
+        proposal to yet. Process-Review.agent.md §4.8's upstream-gotcha
+        path shows the intended shape once that orchestrator exists
+        (Process-Review proposes, Code-Conductor gates and files); this
+        surface should adopt that same propose/gate split then. Until it
+        does, 'pre-gate-legacy' is the reserved, honest transitional stamp
+        for "filed without interactive gating" -- not a fabricated gate
+        call, per the owner-ratified #837 R1 fix.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$PatternKey,
+        [Parameter(Mandatory)][int[]]$EvidencePrs,
+        [Parameter(Mandatory)][string]$FirstEmittedAt,
+        [Parameter(Mandatory)][int]$FixTypeLevel,
+        [Parameter(Mandatory)][string]$TargetFile,
+        [Parameter(Mandatory)][string]$ProposedChange,
+        [Parameter(Mandatory)][string]$SystemicFixType,
+        [Parameter(Mandatory)][string]$Repo,
+        [Parameter(Mandatory)][bool]$UpstreamPreflightPassed,
+        [string]$CalibrationPath,
+        [string]$ComplexityJsonPath,
+        [string]$GhCliPath = 'gh',
+        [string]$FixTypeOverride,
+        [string[]]$Labels = @('priority: medium'),
+        [switch]$SkipConsolidation
+    )
+
+    $proposal = New-ImprovementIssueProposal @PSBoundParameters
+    if ($proposal.Action -ne 'would-create') {
+        return $proposal
+    }
+
+    # Add-FollowUpIssue has no -Repo parameter -- it always targets the
+    # ambient `gh` repo context -- but calibration-improvement issues may
+    # target an upstream hub repo distinct from the local checkout (see the
+    # `Repo = '{agent-orchestra-repo or current repo}'` construction in
+    # Process-Review.agent.md § Step 4). GH_REPO is gh's documented env-var
+    # override for exactly this case; it is set for the duration of the
+    # call and restored afterward rather than left as a process-wide change.
+    $previousGhRepo = $env:GH_REPO
+    try {
+        $env:GH_REPO = $Repo
+
+        # Calibration-improvement issues are standalone systemic-fix issues
+        # -- they are not children of any single tracked GitHub issue (the
+        # evidence is a set of PRs, not an owning issue) -- so ParentIssue
+        # is intentionally empty. (Add-FollowUpIssue's -ParentIssue is
+        # Mandatory but untyped without [AllowNull()], so $null itself is
+        # rejected at parameter binding; an empty string satisfies Mandatory
+        # while still carrying no real parent.) Add-FollowUpIssue already
+        # degrades this gracefully to a 'text-fallback' parent-link-mode
+        # instead of failing (verified: `gh issue view ''` exits non-zero
+        # immediately with "invalid issue format" rather than blocking on
+        # interactive input, and Add-FollowUpIssue's own parentId/childId
+        # check already handles a failed lookup via Write-Warning, not a
+        # thrown error).
+        $issueUrl = Add-FollowUpIssue `
+            -ParentIssue '' `
+            -Title $proposal.Title `
+            -Body $proposal.Body `
+            -Labels $proposal.Labels `
+            -OriginatingPr "$($EvidencePrs | Select-Object -First 1)" `
+            -FilingProvenance 'pre-gate-legacy'
+    }
+    finally {
+        $env:GH_REPO = $previousGhRepo
+    }
+
+    if (-not $issueUrl) {
         return New-CIIResult -ExitCode 1 -Action 'error' `
-            -ErrorMessage "gh issue create failed with exit code $LASTEXITCODE" `
-            -ClassifiedLevel $classification.ClassifiedLevel `
-            -SuggestedLevel $classification.SuggestedLevel `
-            -CeilingAdvisory $ceilingAdvisory
+            -ErrorMessage 'Add-FollowUpIssue failed to file the improvement issue' `
+            -ClassifiedLevel $proposal.ClassifiedLevel `
+            -SuggestedLevel $proposal.SuggestedLevel `
+            -CeilingAdvisory $proposal.CeilingAdvisory
     }
 
     # Parse issue number from URL
-    $issueNumber = if ("$output" -match '/issues/(\d+)') { [int]$Matches[1] } else { $null }
+    $issueNumber = if ("$issueUrl" -match '/issues/(\d+)') { [int]$Matches[1] } else { $null }
 
     # ── Calibration linkage ──────────────────────────────────────
     if ($issueNumber -and $CalibrationPath) {
@@ -351,7 +473,7 @@ function Invoke-CreateImprovementIssue {
     return New-CIIResult -Action 'created' `
         -Output "Created issue #$issueNumber" `
         -IssueNumber $issueNumber `
-        -ClassifiedLevel $classification.ClassifiedLevel `
-        -SuggestedLevel $classification.SuggestedLevel `
-        -CeilingAdvisory $ceilingAdvisory
+        -ClassifiedLevel $proposal.ClassifiedLevel `
+        -SuggestedLevel $proposal.SuggestedLevel `
+        -CeilingAdvisory $proposal.CeilingAdvisory
 }
