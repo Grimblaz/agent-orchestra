@@ -337,6 +337,50 @@ Describe 'Invoke-CostTranscriptWalk' {
             @(Invoke-CostTranscriptWalk -Slug $slug -Branch $script:TestBranch -ParentCwd $script:TestCwd -ProjectsRoot $tmp).Count | Should -Be 1
             Remove-Item -Recurse -Force $tmp
         }
+
+        It 'L12 (issue #825 post-review fix): captures a duplicate parent''s own subagent event when the subagent file exists only in the second-processed (duplicate) copy' {
+            $tmp = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-test-$([System.Guid]::NewGuid())"
+            $slug = 'test--l12-dedup'
+            $primaryDir = Join-Path $tmp $slug
+            $null = New-Item -ItemType Directory -Path $primaryDir -Force
+            # Discovered via the name-based worktree glob, and — per
+            # script:Get-CostWalkerCandidateSlugDirs's own resolution order (worktree
+            # glob before the primary-slug backward-compat fallback) — walked BEFORE
+            # $primaryDir, making $primaryDir the second-processed (duplicate) copy.
+            $worktreeDir = Join-Path $tmp "$slug--claude-worktrees-abc123"
+            $null = New-Item -ItemType Directory -Path $worktreeDir -Force
+
+            $sharedUuid = [System.Guid]::NewGuid().ToString()
+            $toolUseId = [System.Guid]::NewGuid().ToString()
+            $sharedSessionId = 'shared-session'
+
+            # The identical parent event (same session_id file BaseName + same event
+            # uuid) exists in BOTH copies.
+            $parentEvent = script:New-AssistantEvent -Uuid $sharedUuid -Content @(script:New-AgentToolUseContent -ToolUseId $toolUseId)
+            script:Write-TestJsonl -Path (Join-Path $worktreeDir "$sharedSessionId.jsonl") -Events @($parentEvent)
+            script:Write-TestJsonl -Path (Join-Path $primaryDir "$sharedSessionId.jsonl") -Events @($parentEvent)
+
+            # The subagent transcript exists ONLY in $primaryDir (the second-processed
+            # / duplicate copy) — $worktreeDir's own subagents/ dir is absent.
+            $subagDir = Join-Path $primaryDir 'subagents'
+            $null = New-Item -ItemType Directory -Path $subagDir -Force
+            $subEvent = @{
+                type      = 'assistant'
+                uuid      = 'subagent-only-in-duplicate'
+                timestamp = '2026-01-01T00:01:00Z'
+                message   = @{ usage = @{ input_tokens = 1; output_tokens = 1 }; content = @() }
+            }
+            script:Write-TestJsonl -Path (Join-Path $subagDir "agent-$toolUseId.jsonl") -Events @($subEvent)
+
+            $result = @(Invoke-CostTranscriptWalk -Slug $slug -Branch $script:TestBranch -ParentCwd $script:TestCwd -ProjectsRoot $tmp)
+
+            # Parent counted exactly once — dedup is not weakened by this fix.
+            @($result | Where-Object { $_.uuid -eq $sharedUuid }).Count | Should -Be 1
+            # The duplicate copy's own subagent traversal must still run and capture
+            # its subagent event, even though its parent event was a dedup no-op.
+            @($result | Where-Object { $_.uuid -eq 'subagent-only-in-duplicate' }).Count | Should -Be 1
+            Remove-Item -Recurse -Force $tmp
+        }
     }
 
     Context 'resilience' {
@@ -1041,6 +1085,356 @@ Describe 'Invoke-CostTranscriptWalk' {
             $result = Get-CostWalkerCurrentSessionId -Slug $slug -Branch $script:TestBranch -ParentCwd $script:TestCwd -ProjectsRoot $tmp
             $result | Should -Be $sessionUuid
             Remove-Item -Recurse -Force $tmp
+        }
+    }
+
+    Context 'Tier-2 corroborated-fallback trust ladder (issue #825 s1, opt-in via -AdmitCorroboratedFallback)' {
+        BeforeAll {
+            $script:CorrRepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+            $script:CorrRemoteAvailable = $true
+            $probe = @(& git -C $script:CorrRepoRoot remote get-url origin 2>&1) | Select-Object -First 1
+            if ($global:LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($probe)) {
+                $script:CorrRemoteAvailable = $false
+            }
+
+            # Phase-marker event for a Tier-2 candidate dir. Deliberately carries NO cwd by
+            # default: script:Get-CostWalkerFirstEventCwd scans ALL events (not just
+            # assistant ones) for the first non-empty cwd, so a marker with a real,
+            # on-disk cwd would falsely satisfy the M9 cwd-absent trigger before the
+            # walker ever reaches the branch-matched assistant event. Pass -Cwd only for a
+            # Tier-1 identity-matched dir's own marker-only file (ladder case 7).
+            function script:New-CorrPhaseMarkerEvent {
+                param(
+                    [Parameter(Mandatory)][string]$IssueArg,
+                    [string]$Command = '/plan',
+                    [AllowNull()][string]$Cwd = $null,
+                    [string]$Timestamp = '2026-01-01T00:00:00Z'
+                )
+                $ev = @{
+                    type      = 'user'
+                    message   = @{ content = "<command-name>$Command</command-name><command-args>$IssueArg</command-args>" }
+                    gitBranch = 'main'
+                    timestamp = $Timestamp
+                }
+                if ($Cwd) { $ev['cwd'] = $Cwd }
+                return $ev
+            }
+
+            function script:New-CorrAssistantEvent {
+                param(
+                    [string]$Uuid = [System.Guid]::NewGuid().ToString(),
+                    [Parameter(Mandatory)][string]$Cwd,
+                    [Parameter(Mandatory)][string]$Branch,
+                    [string]$Timestamp = '2026-01-01T00:05:00Z'
+                )
+                return @{
+                    type      = 'assistant'
+                    uuid      = $Uuid
+                    timestamp = $Timestamp
+                    cwd       = $Cwd
+                    gitBranch = $Branch
+                    message   = @{ usage = @{ input_tokens = 10; output_tokens = 5 }; content = @() }
+                }
+            }
+        }
+
+        It 'ladder case 1: Tier 1 identity-matched dir stays admitted unchanged when -AdmitCorroboratedFallback is set' {
+            if (-not $script:CorrRemoteAvailable) { Set-ItResult -Skipped -Because 'cannot resolve test repo remote'; return }
+            $tmpProjects = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-corr-t1-$([System.Guid]::NewGuid())"
+            $null = New-Item -ItemType Directory -Path $tmpProjects -Force
+            $branch = 'feature/corr-ladder-1'
+
+            $primarySlug = Get-CostTranscriptSlug -CwdPath $script:CorrRepoRoot
+            $primaryDir = Join-Path $tmpProjects $primarySlug
+            $null = New-Item -ItemType Directory -Path $primaryDir -Force
+
+            $ev = script:New-CorrAssistantEvent -Cwd $script:CorrRepoRoot -Branch $branch
+            script:Write-TestJsonl -Path (Join-Path $primaryDir 'session.jsonl') -Events @($ev)
+
+            $result = @(Invoke-CostTranscriptWalk -Branch $branch -ParentCwd $script:CorrRepoRoot -RepoRoot $script:CorrRepoRoot -ProjectsRoot $tmpProjects -AdmitCorroboratedFallback)
+            $result.Count | Should -Be 1
+            $result[0]['uuid'] | Should -Be $ev['uuid']
+            Remove-Item -Recurse -Force $tmpProjects
+        }
+
+        It 'ladder case 2: admits a cwd-absent dir corroborated by branch + issue phase marker' {
+            if (-not $script:CorrRemoteAvailable) { Set-ItResult -Skipped -Because 'cannot resolve test repo remote'; return }
+            $tmpProjects = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-corr-t2-$([System.Guid]::NewGuid())"
+            $null = New-Item -ItemType Directory -Path $tmpProjects -Force
+            $branch = 'feature/issue-825-corr-2'
+            $missingCwd = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-corr-missing-$([System.Guid]::NewGuid())"
+
+            $candidateDir = Join-Path $tmpProjects 'corroborated-candidate'
+            $null = New-Item -ItemType Directory -Path $candidateDir -Force
+
+            $marker = script:New-CorrPhaseMarkerEvent -IssueArg '825'
+            $asst = script:New-CorrAssistantEvent -Cwd $missingCwd -Branch $branch
+            script:Write-TestJsonl -Path (Join-Path $candidateDir 'session.jsonl') -Events @($marker, $asst)
+
+            $rejectedRef = [ref]0
+            $result = @(Invoke-CostTranscriptWalk -Branch $branch -ParentCwd $script:CorrRepoRoot -RepoRoot $script:CorrRepoRoot -ProjectsRoot $tmpProjects -IssueNumber 825 -AdmitCorroboratedFallback -RejectedDirCountVar $rejectedRef)
+
+            $result.Count | Should -Be 1
+            $result[0]['uuid'] | Should -Be $asst['uuid']
+            $rejectedRef.Value | Should -Be 0
+            Remove-Item -Recurse -Force $tmpProjects
+        }
+
+        It 'ladder case 3: rejects a cwd-absent branch-matched dir with no issue marker at all' {
+            if (-not $script:CorrRemoteAvailable) { Set-ItResult -Skipped -Because 'cannot resolve test repo remote'; return }
+            $tmpProjects = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-corr-t3-$([System.Guid]::NewGuid())"
+            $null = New-Item -ItemType Directory -Path $tmpProjects -Force
+            $branch = 'feature/issue-825-corr-3'
+            $missingCwd = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-corr-missing-$([System.Guid]::NewGuid())"
+
+            $candidateDir = Join-Path $tmpProjects 'branch-only-candidate'
+            $null = New-Item -ItemType Directory -Path $candidateDir -Force
+
+            $asst = script:New-CorrAssistantEvent -Cwd $missingCwd -Branch $branch
+            script:Write-TestJsonl -Path (Join-Path $candidateDir 'session.jsonl') -Events @($asst)
+
+            $rejectedRef = [ref]0
+            $result = @(Invoke-CostTranscriptWalk -Branch $branch -ParentCwd $script:CorrRepoRoot -RepoRoot $script:CorrRepoRoot -ProjectsRoot $tmpProjects -IssueNumber 825 -AdmitCorroboratedFallback -RejectedDirCountVar $rejectedRef)
+
+            $result.Count | Should -Be 0
+            $rejectedRef.Value | Should -Be 1
+            Remove-Item -Recurse -Force $tmpProjects
+        }
+
+        It 'ladder case 4: rejects a cwd-absent branch-matched dir whose phase marker names a different issue' {
+            if (-not $script:CorrRemoteAvailable) { Set-ItResult -Skipped -Because 'cannot resolve test repo remote'; return }
+            $tmpProjects = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-corr-t4-$([System.Guid]::NewGuid())"
+            $null = New-Item -ItemType Directory -Path $tmpProjects -Force
+            $branch = 'feature/issue-825-corr-4'
+            $missingCwd = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-corr-missing-$([System.Guid]::NewGuid())"
+
+            $candidateDir = Join-Path $tmpProjects 'wrong-issue-candidate'
+            $null = New-Item -ItemType Directory -Path $candidateDir -Force
+
+            $marker = script:New-CorrPhaseMarkerEvent -IssueArg '999'
+            $asst = script:New-CorrAssistantEvent -Cwd $missingCwd -Branch $branch
+            script:Write-TestJsonl -Path (Join-Path $candidateDir 'session.jsonl') -Events @($marker, $asst)
+
+            $rejectedRef = [ref]0
+            $result = @(Invoke-CostTranscriptWalk -Branch $branch -ParentCwd $script:CorrRepoRoot -RepoRoot $script:CorrRepoRoot -ProjectsRoot $tmpProjects -IssueNumber 825 -AdmitCorroboratedFallback -RejectedDirCountVar $rejectedRef)
+
+            $result.Count | Should -Be 0
+            $rejectedRef.Value | Should -Be 1
+            Remove-Item -Recurse -Force $tmpProjects
+        }
+
+        It 'ladder case 5: never re-admits a cwd-present, identity-mismatched dir via corroboration' {
+            if (-not $script:CorrRemoteAvailable) { Set-ItResult -Skipped -Because 'cannot resolve test repo remote'; return }
+            $tmpProj = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-corr-t5-$([System.Guid]::NewGuid())"
+            $tmpProjects = Join-Path $tmpProj 'projects'
+            $null = New-Item -ItemType Directory -Path $tmpProjects -Force
+            $branch = 'feature/issue-825-corr-5'
+
+            $otherRepoPath = Join-Path $tmpProj 'mismatched-repo'
+            $null = New-Item -ItemType Directory -Path $otherRepoPath -Force
+            $null = & git init $otherRepoPath 2>&1
+            $null = & git -C $otherRepoPath remote add origin 'https://github.com/fake-org/mismatched-corr-test'
+
+            $candidateDir = Join-Path $tmpProjects 'mismatched-candidate'
+            $null = New-Item -ItemType Directory -Path $candidateDir -Force
+
+            $marker = script:New-CorrPhaseMarkerEvent -IssueArg '825'
+            $asst = script:New-CorrAssistantEvent -Cwd $otherRepoPath -Branch $branch  # cwd EXISTS, wrong identity
+            script:Write-TestJsonl -Path (Join-Path $candidateDir 'session.jsonl') -Events @($marker, $asst)
+
+            $rejectedRef = [ref]0
+            $result = @(Invoke-CostTranscriptWalk -Branch $branch -ParentCwd $script:CorrRepoRoot -RepoRoot $script:CorrRepoRoot -ProjectsRoot $tmpProjects -IssueNumber 825 -AdmitCorroboratedFallback -RejectedDirCountVar $rejectedRef)
+
+            $result.Count | Should -Be 0
+            $rejectedRef.Value | Should -Be 0 -Because 'a cwd-present dir never reaches the Tier-2 branch-matched/rejected accounting'
+            Remove-Item -Recurse -Force $tmpProj
+        }
+
+        It 'ladder case 6: admits a corroborated dir whose slug name is outside both the primary and worktree slug families' {
+            if (-not $script:CorrRemoteAvailable) { Set-ItResult -Skipped -Because 'cannot resolve test repo remote'; return }
+            $tmpProjects = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-corr-t6-$([System.Guid]::NewGuid())"
+            $null = New-Item -ItemType Directory -Path $tmpProjects -Force
+            $branch = 'feature/issue-825-corr-6'
+            $missingCwd = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-corr-missing-$([System.Guid]::NewGuid())"
+
+            # Deliberately unrelated to both "$Slug" and "$Slug--claude-worktrees-*".
+            $candidateDir = Join-Path $tmpProjects 'totally-unrelated-sibling-clone-slug'
+            $null = New-Item -ItemType Directory -Path $candidateDir -Force
+
+            $marker = script:New-CorrPhaseMarkerEvent -IssueArg '825'
+            $asst = script:New-CorrAssistantEvent -Cwd $missingCwd -Branch $branch
+            script:Write-TestJsonl -Path (Join-Path $candidateDir 'session.jsonl') -Events @($marker, $asst)
+
+            $result = @(Invoke-CostTranscriptWalk -Slug 'primary-slug-not-present' -Branch $branch -ParentCwd $script:CorrRepoRoot -RepoRoot $script:CorrRepoRoot -ProjectsRoot $tmpProjects -IssueNumber 825 -AdmitCorroboratedFallback)
+
+            $result.Count | Should -Be 1
+            $result[0]['uuid'] | Should -Be $asst['uuid']
+            Remove-Item -Recurse -Force $tmpProjects
+        }
+
+        It 'ladder case 7 (M14): admits via cross-file signal-ii corroboration from a same-session sibling in a Tier-1 identity-matched dir' {
+            if (-not $script:CorrRemoteAvailable) { Set-ItResult -Skipped -Because 'cannot resolve test repo remote'; return }
+            $tmpProjects = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-corr-t7-$([System.Guid]::NewGuid())"
+            $null = New-Item -ItemType Directory -Path $tmpProjects -Force
+            $branch = 'feature/issue-825-corr-7'
+            $missingCwd = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-corr-missing-$([System.Guid]::NewGuid())"
+            $sharedSessionId = [System.Guid]::NewGuid().ToString()
+
+            # Tier-1 identity-matched dir: holds the phase marker for the SAME session id.
+            $primarySlug = Get-CostTranscriptSlug -CwdPath $script:CorrRepoRoot
+            $primaryDir = Join-Path $tmpProjects $primarySlug
+            $null = New-Item -ItemType Directory -Path $primaryDir -Force
+            $markerOnly = script:New-CorrPhaseMarkerEvent -IssueArg '825' -Cwd $script:CorrRepoRoot
+            script:Write-TestJsonl -Path (Join-Path $primaryDir "$sharedSessionId.jsonl") -Events @($markerOnly)
+
+            # Tier-2 candidate dir (cwd absent): holds cost events for the SAME session id, no local marker.
+            $candidateDir = Join-Path $tmpProjects 'deleted-worktree-candidate'
+            $null = New-Item -ItemType Directory -Path $candidateDir -Force
+            $asst = script:New-CorrAssistantEvent -Cwd $missingCwd -Branch $branch
+            script:Write-TestJsonl -Path (Join-Path $candidateDir "$sharedSessionId.jsonl") -Events @($asst)
+
+            $result = @(Invoke-CostTranscriptWalk -Branch $branch -ParentCwd $script:CorrRepoRoot -RepoRoot $script:CorrRepoRoot -ProjectsRoot $tmpProjects -IssueNumber 825 -AdmitCorroboratedFallback)
+
+            @($result | Where-Object { $_['uuid'] -eq $asst['uuid'] }).Count | Should -Be 1
+            Remove-Item -Recurse -Force $tmpProjects
+        }
+
+        It 'ladder case 8 (M11): excludes a branch-matched file when the only corroborating marker sits in a co-located, unrelated main-branch session' {
+            if (-not $script:CorrRemoteAvailable) { Set-ItResult -Skipped -Because 'cannot resolve test repo remote'; return }
+            $tmpProjects = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-corr-t8-$([System.Guid]::NewGuid())"
+            $null = New-Item -ItemType Directory -Path $tmpProjects -Force
+            $branch = 'feature/issue-825-corr-8'
+            $missingCwd = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-corr-missing-$([System.Guid]::NewGuid())"
+
+            $candidateDir = Join-Path $tmpProjects 'co-located-candidate'
+            $null = New-Item -ItemType Directory -Path $candidateDir -Force
+
+            # File A: branch-matched, no local marker.
+            $asstA = script:New-CorrAssistantEvent -Cwd $missingCwd -Branch $branch
+            script:Write-TestJsonl -Path (Join-Path $candidateDir 'session-a.jsonl') -Events @($asstA)
+
+            # File B: an unrelated, DIFFERENT session in the same dir with a main-branch marker
+            # for the SAME issue — must never corroborate File A (same-file/session scoping).
+            $markerB = script:New-CorrPhaseMarkerEvent -IssueArg '825'
+            script:Write-TestJsonl -Path (Join-Path $candidateDir 'session-b.jsonl') -Events @($markerB)
+
+            $rejectedRef = [ref]0
+            $result = @(Invoke-CostTranscriptWalk -Branch $branch -ParentCwd $script:CorrRepoRoot -RepoRoot $script:CorrRepoRoot -ProjectsRoot $tmpProjects -IssueNumber 825 -AdmitCorroboratedFallback -RejectedDirCountVar $rejectedRef)
+
+            $result.Count | Should -Be 0
+            $rejectedRef.Value | Should -Be 1
+            Remove-Item -Recurse -Force $tmpProjects
+        }
+
+        It 'ladder case 9 (M8): excludes an admitted Tier-2 event whose timestamp falls outside the merge window' {
+            if (-not $script:CorrRemoteAvailable) { Set-ItResult -Skipped -Because 'cannot resolve test repo remote'; return }
+            $tmpProjects = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-corr-t9-$([System.Guid]::NewGuid())"
+            $null = New-Item -ItemType Directory -Path $tmpProjects -Force
+            $branch = 'feature/issue-825-corr-9'
+            $missingCwd = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-corr-missing-$([System.Guid]::NewGuid())"
+
+            $candidateDir = Join-Path $tmpProjects 'windowed-candidate'
+            $null = New-Item -ItemType Directory -Path $candidateDir -Force
+
+            $marker = script:New-CorrPhaseMarkerEvent -IssueArg '825'
+            $inWindow = script:New-CorrAssistantEvent -Cwd $missingCwd -Branch $branch -Timestamp '2026-02-10T12:00:00Z'
+            $outOfWindow = script:New-CorrAssistantEvent -Cwd $missingCwd -Branch $branch -Timestamp '2026-03-01T12:00:00Z'
+            script:Write-TestJsonl -Path (Join-Path $candidateDir 'session.jsonl') -Events @($marker, $inWindow, $outOfWindow)
+
+            $result = @(Invoke-CostTranscriptWalk -Branch $branch -ParentCwd $script:CorrRepoRoot -RepoRoot $script:CorrRepoRoot -ProjectsRoot $tmpProjects -IssueNumber 825 -AdmitCorroboratedFallback -CorroborationWindowStart ([datetime]'2026-02-01T00:00:00Z') -CorroborationWindowEnd ([datetime]'2026-02-20T00:00:00Z'))
+
+            $result.Count | Should -Be 1
+            $result[0]['uuid'] | Should -Be $inWindow['uuid']
+            Remove-Item -Recurse -Force $tmpProjects
+        }
+
+        It 'ladder case 10a (M7 union): sums a legitimately split spanning session across a Tier-1 dir and a corroborated Tier-2 dir without collapsing distinct events' {
+            if (-not $script:CorrRemoteAvailable) { Set-ItResult -Skipped -Because 'cannot resolve test repo remote'; return }
+            $tmpProjects = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-corr-t10a-$([System.Guid]::NewGuid())"
+            $null = New-Item -ItemType Directory -Path $tmpProjects -Force
+            $branch = 'feature/issue-825-corr-10a'
+            $missingCwd = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-corr-missing-$([System.Guid]::NewGuid())"
+
+            $primarySlug = Get-CostTranscriptSlug -CwdPath $script:CorrRepoRoot
+            $primaryDir = Join-Path $tmpProjects $primarySlug
+            $null = New-Item -ItemType Directory -Path $primaryDir -Force
+            $primaryEvent = script:New-CorrAssistantEvent -Cwd $script:CorrRepoRoot -Branch $branch
+            script:Write-TestJsonl -Path (Join-Path $primaryDir 'session-primary.jsonl') -Events @($primaryEvent)
+
+            $candidateDir = Join-Path $tmpProjects 'spanning-candidate'
+            $null = New-Item -ItemType Directory -Path $candidateDir -Force
+            $marker = script:New-CorrPhaseMarkerEvent -IssueArg '825'
+            $fallbackEvent = script:New-CorrAssistantEvent -Cwd $missingCwd -Branch $branch
+            script:Write-TestJsonl -Path (Join-Path $candidateDir 'session-fallback.jsonl') -Events @($marker, $fallbackEvent)
+
+            $result = @(Invoke-CostTranscriptWalk -Branch $branch -ParentCwd $script:CorrRepoRoot -RepoRoot $script:CorrRepoRoot -ProjectsRoot $tmpProjects -IssueNumber 825 -AdmitCorroboratedFallback)
+
+            $result.Count | Should -Be 2
+            @($result | Where-Object { $_['uuid'] -eq $primaryEvent['uuid'] }).Count | Should -Be 1
+            @($result | Where-Object { $_['uuid'] -eq $fallbackEvent['uuid'] }).Count | Should -Be 1
+            Remove-Item -Recurse -Force $tmpProjects
+        }
+
+        It 'ladder case 10b (M7 identical-copy-collapse): collapses an identical duplicate copy of the same session file appearing in both the Tier-1 dir and a corroborated Tier-2 dir' {
+            if (-not $script:CorrRemoteAvailable) { Set-ItResult -Skipped -Because 'cannot resolve test repo remote'; return }
+            $tmpProjects = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-corr-t10b-$([System.Guid]::NewGuid())"
+            $null = New-Item -ItemType Directory -Path $tmpProjects -Force
+            $branch = 'feature/issue-825-corr-10b'
+            $missingCwd = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-corr-missing-$([System.Guid]::NewGuid())"
+            $sharedSessionId = [System.Guid]::NewGuid().ToString()
+            $sharedUuid = [System.Guid]::NewGuid().ToString()
+
+            $primarySlug = Get-CostTranscriptSlug -CwdPath $script:CorrRepoRoot
+            $primaryDir = Join-Path $tmpProjects $primarySlug
+            $null = New-Item -ItemType Directory -Path $primaryDir -Force
+            $primaryCopy = script:New-CorrAssistantEvent -Uuid $sharedUuid -Cwd $script:CorrRepoRoot -Branch $branch
+            script:Write-TestJsonl -Path (Join-Path $primaryDir "$sharedSessionId.jsonl") -Events @($primaryCopy)
+
+            $candidateDir = Join-Path $tmpProjects 'identical-copy-candidate'
+            $null = New-Item -ItemType Directory -Path $candidateDir -Force
+            $marker = script:New-CorrPhaseMarkerEvent -IssueArg '825'
+            $duplicateCopy = script:New-CorrAssistantEvent -Uuid $sharedUuid -Cwd $missingCwd -Branch $branch
+            script:Write-TestJsonl -Path (Join-Path $candidateDir "$sharedSessionId.jsonl") -Events @($marker, $duplicateCopy)
+
+            $result = @(Invoke-CostTranscriptWalk -Branch $branch -ParentCwd $script:CorrRepoRoot -RepoRoot $script:CorrRepoRoot -ProjectsRoot $tmpProjects -IssueNumber 825 -AdmitCorroboratedFallback)
+
+            $result.Count | Should -Be 1 -Because 'same session_id + uuid must be attributed exactly once (M7)'
+            $result[0]['uuid'] | Should -Be $sharedUuid
+            Remove-Item -Recurse -Force $tmpProjects
+        }
+
+        It 'ladder case 11 (L14, issue #825 post-review fix): rejects a branch+marker corroborated candidate whose own file evidence resolves to a different repository identity via a non-first, still-extant cwd' {
+            if (-not $script:CorrRemoteAvailable) { Set-ItResult -Skipped -Because 'cannot resolve test repo remote'; return }
+            $tmpProj = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-corr-t11-$([System.Guid]::NewGuid())"
+            $tmpProjects = Join-Path $tmpProj 'projects'
+            $null = New-Item -ItemType Directory -Path $tmpProjects -Force
+            $branch = 'feature/issue-825-corr-11'
+            $missingCwd = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-corr-missing-$([System.Guid]::NewGuid())"
+
+            $otherRepoPath = Join-Path $tmpProj 'other-identity-repo'
+            $null = New-Item -ItemType Directory -Path $otherRepoPath -Force
+            $null = & git init $otherRepoPath 2>&1
+            $null = & git -C $otherRepoPath remote add origin 'https://github.com/fake-org/l14-mismatch-test'
+
+            $candidateDir = Join-Path $tmpProjects 'different-repo-candidate'
+            $null = New-Item -ItemType Directory -Path $candidateDir -Force
+
+            $marker = script:New-CorrPhaseMarkerEvent -IssueArg '825'
+            # The M9 trigger cwd (first non-empty cwd found in the file) — absent, so
+            # this directory still becomes a Tier-2 candidate.
+            $asst = script:New-CorrAssistantEvent -Cwd $missingCwd -Branch $branch
+            # A SECOND, non-first event in the SAME file whose cwd currently exists on
+            # disk and resolves to a DIFFERENT repo identity than the target. L14 must
+            # catch this even though it is not the cwd that triggered the M9 fallback.
+            $identityProbe = script:New-CorrAssistantEvent -Cwd $otherRepoPath -Branch $branch
+            script:Write-TestJsonl -Path (Join-Path $candidateDir 'session.jsonl') -Events @($marker, $asst, $identityProbe)
+
+            $rejectedRef = [ref]0
+            $result = @(Invoke-CostTranscriptWalk -Branch $branch -ParentCwd $script:CorrRepoRoot -RepoRoot $script:CorrRepoRoot -ProjectsRoot $tmpProjects -IssueNumber 825 -AdmitCorroboratedFallback -RejectedDirCountVar $rejectedRef)
+
+            $result.Count | Should -Be 0 -Because 'own-marker corroboration must not admit a file whose own evidence proves a different repository identity'
+            $rejectedRef.Value | Should -Be 1
+            Remove-Item -Recurse -Force $tmpProj
         }
     }
 }

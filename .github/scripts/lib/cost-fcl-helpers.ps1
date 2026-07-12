@@ -106,7 +106,14 @@ function script:Get-FCLCostScriptState {
             'CostAttributionPortMap',
             'CostCompletenessPartialReasons',
             'CostRendererPortOrder',
-            'CostRendererSkillDrivenPorts'
+            'CostRendererSkillDrivenPorts',
+            # C3 (issue #825 post-review fix): missing from this marshal list meant an
+            # isolated runspace (New-FCLInitialSessionStateClone) never received this
+            # constant — PowerShell coerces the unmarshaled $null to '', and
+            # ''.StartsWith(anything) returns $true, misclassifying every real cwd as the
+            # Copilot-OTEL sentinel and silently killing both Tier-1 identity discovery
+            # and Tier-2 admission.
+            'CostWalkerCopilotOtelCwdPrefix'
         )) {
         try {
             $state[$costStateName] = Get-Variable -Scope Script -Name $costStateName -ValueOnly -ErrorAction Stop
@@ -396,7 +403,7 @@ function script:Set-FCLCostCoverageMetadata {
         [AllowEmptyCollection()][object[]]$Events,
         [AllowNull()]$ClaudeWalk,
         [AllowNull()]$CopilotWalk,
-        [Parameter(Mandatory)][string]$CopilotOtelJsonlPath
+        [Parameter(Mandatory)][AllowEmptyString()][string]$CopilotOtelJsonlPath
     )
 
     [string[]]$providers = @(script:Get-FCLCostEventProviderSet -Events $Events)
@@ -463,7 +470,7 @@ function script:Compose-FCLDegradedCostComment {
     param(
         [Parameter(Mandatory)][string]$DegradedReason,
         [Parameter(Mandatory)][int]$Pr,
-        [Parameter(Mandatory)][string]$Branch
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Branch
     )
 
     $inv = [System.Globalization.CultureInfo]::InvariantCulture

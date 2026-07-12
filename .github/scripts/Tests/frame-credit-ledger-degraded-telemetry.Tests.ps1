@@ -353,6 +353,28 @@ Describe 'frame-credit-ledger degraded telemetry (issue #794 s4)' {
 
             $attribution['degraded_reason'] | Should -Be 'env-absent' -Because 'env-absent is the routine CI shape and takes priority over a timeout that could not have meaningfully occurred without a projects root'
         }
+
+        It 'accepts an empty -CopilotOtelJsonlPath (Copilot OTEL absent) without throwing and treats it as the missing-path case' {
+            # Regression (#825 CE-Gate render-robustness): Resolve-FCLCostCopilotOtelJsonlPath
+            # returns '' when Copilot OTEL collection is not installed (the common case).
+            # Before the [AllowEmptyString()] fix, that empty value was rejected at bind
+            # time by the [Parameter(Mandatory)][string] attribute BEFORE the body's own
+            # IsNullOrWhiteSpace handling ran, throwing "Cannot bind argument ... empty
+            # string" and silently degrading the whole cost section to ''.
+            $presentRoot = Join-Path $TestDrive ('fcl-s4-unit-emptyotel-' + [System.Guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Path $presentRoot -Force | Out-Null
+            $env:FRAME_CREDIT_LEDGER_TEST_CLAUDE_PROJECTS_ROOT = $presentRoot
+
+            $attribution = @{}
+            $claudeWalk = [pscustomobject]@{ Events = @(); TimedOut = $false; Failed = $false; Warnings = @() }
+            {
+                script:Set-FCLCostCoverageMetadata -Attribution $attribution -Events @() -ClaudeWalk $claudeWalk -CopilotWalk $null -CopilotOtelJsonlPath ''
+            } | Should -Not -Throw
+
+            # Behaves as the empty/missing-path case: install status is the fallback value,
+            # not 'ok' — Copilot coverage is NOT marked present from a bogus path.
+            $attribution['install_status'] | Should -Be 'missing-or-fallback'
+        }
     }
 
     Context 'Part 1 (orchestrator-level): degraded standalone comment carries the typed reason' {

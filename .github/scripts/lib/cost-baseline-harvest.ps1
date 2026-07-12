@@ -14,6 +14,15 @@
     session-startup step in a later, separate slice (issue #824 s5) — that step
     owns the fail-open wiring/prose; this function owns the mechanics.
 
+    This file also supplies Invoke-CostAttributionRepair (issue #825, Step 3),
+    a second, independent public function: a maintainer-invoked, single-PR
+    targeted re-attribution repair for a merged PR whose block reads
+    `session_completeness: unknown`. It is NOT an extension of
+    script:Select-CostBaselineHarvestCandidates' automatic candidate loop —
+    that loop and Invoke-CostBaselineHarvest's own promote/stamp machinery are
+    untouched. See Invoke-CostAttributionRepair's own doc comment for the full
+    contract.
+
     Every failure path is silent no-op (fail-open): a failed `gh` call, no
     candidates, a verify-then-select miss, or a re-walk error all leave the
     harvest a no-op rather than throwing or blocking whatever invoked it.
@@ -768,5 +777,273 @@ function Invoke-CostBaselineHarvest {
     catch {
         [Console]::Error.WriteLine("cost-baseline-harvest: harvest failed (fail-open, no-op): $($_.Exception.Message)")
         return @{ Attempted = $false; Promoted = $false; Pr = $null; Signal = $null }
+    }
+}
+
+function Invoke-CostAttributionRepair {
+    <#
+    .SYNOPSIS
+        Targeted, maintainer-invoked re-attribution repair for ONE merged PR
+        whose persisted cost-pattern-data block reads
+        `session_completeness: unknown` (issue #825, Step 3).
+    .DESCRIPTION
+        NOT an extension of script:Select-CostBaselineHarvestCandidates' automatic
+        candidate loop — that function, and the rest of Invoke-CostBaselineHarvest's
+        own promote/stamp machinery, are untouched by this function. This is a
+        standalone entry point for a single, maintainer-named PR:
+
+          1. Resolves the PR's REAL head ref via a fresh `gh pr view
+             --json state,headRefName,body,createdAt,mergedAt` — never the
+             persisted block's own `branch:` field, which the CI-written
+             targets carry as the literal string `HEAD` (M2/M15, empirically
+             confirmed on #814/#815) — and confirms the PR is genuinely
+             MERGED before acting. The same call also fetches `createdAt`/
+             `mergedAt` (no extra API call) for step 3's corroboration
+             window.
+          2. Fetches the composite `<!-- frame-credit-ledger-$Pr -->` comment
+             (script:Get-CostBaselineHarvestCompositeComment — same
+             fail-closed authorship gate Invoke-CostBaselineHarvest uses) and
+             locates its Cost Pattern section. Only proceeds when the
+             persisted section reads `session_completeness: unknown` — this
+             function repairs exactly that degraded shape; a populated block
+             is left untouched (it is not this function's job to re-render an
+             already-populated session).
+          3. Re-walks via Invoke-CostSessionRender with
+             -AdmitCorroboratedFallback ON for this call only — turns on the
+             s1 Tier-2 corroborated-fallback trust ladder (cost-walker.ps1)
+             for this one targeted repair; the live PR-creation path never
+             sets this (M10). -CorroborationWindowStart/-End are passed as
+             this PR's own `createdAt`/`mergedAt` (issue #825 s3 post-review
+             fix, M8 wiring gap) — without this, Tier-2 admission ran
+             unbounded on the one path that actually ships in this issue
+             (the automatic-drain path where this would also matter is
+             deferred to #841), leaving the M8 same-repo reused-branch-name
+             collision guard inert. An unparseable timestamp degrades that
+             one bound to $null (unenforced) rather than blocking the repair
+             — matching the walker's own "a $null bound is not enforced"
+             contract.
+          4. Acceptance = populated-beats-empty-unknown: the composite
+             comment's Cost Pattern section is section-spliced (never a
+             full-body replace, never a new sibling comment) with the
+             re-walk's own rendered section — which already carries its own
+             honest completeness label and the M6 coverage annotation when
+             the walker rejected any corroborated directory — ONLY when the
+             re-walk actually produced a non-empty section. When the machine
+             holds no matching transcripts, this reports honestly and writes
+             nothing: no `upgrade_attempted_at` stamp, no budget bookkeeping —
+             that machinery belongs to the deferred automatic startup-drain
+             follow-up (issue #841), out of scope here.
+
+        Every failure path (gh failure, not-MERGED, no composite comment, no
+        matching section, non-unknown persisted block, empty re-walk, a
+        concurrent-change race on the pre-write re-check) returns
+        Upserted=$false with a Signal describing why, and never throws to its
+        caller.
+    .PARAMETER Pr
+        The merged PR number to re-attribute. Maintainer-supplied.
+    .PARAMETER ParentCwd
+        This (repairing) session's own parent cwd — the machine performing
+        the repair must hold the target PR's transcripts. Passed through to
+        Invoke-CostSessionRender.
+    .PARAMETER RepoRoot
+        This session's own repo root — used for slug/identity resolution and
+        passed through to Invoke-CostSessionRender.
+    .PARAMETER Slug
+        This session's own cost-transcript slug. Resolved from RepoRoot via
+        Get-CostTranscriptSlug when omitted.
+    .OUTPUTS
+        [hashtable] @{ Attempted = [bool]; Upserted = [bool]; Pr = [int]; Signal = [string] }
+        Attempted is $true only once the persisted block has been confirmed
+        `session_completeness: unknown` and the re-walk has actually been
+        invoked. Upserted is $true only when the composite comment was
+        successfully rewritten with populated data.
+    #>
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param(
+        [Parameter(Mandatory)][int]$Pr,
+        [Parameter(Mandatory)][string]$ParentCwd,
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [string]$Slug = ''
+    )
+
+    $result = @{ Attempted = $false; Upserted = $false; Pr = $Pr; Signal = $null }
+
+    try {
+        if ([string]::IsNullOrWhiteSpace($Slug)) {
+            try { $Slug = Get-CostTranscriptSlug -CwdPath $RepoRoot } catch { $Slug = '' }
+        }
+
+        # 1. Live merge-state + REAL head ref — never the persisted `branch:` field (M2/M15).
+        # createdAt/mergedAt/commits ride along on this same call (no extra API
+        # round-trip) for step 3's M8 corroboration-window bound.
+        $liveJson = $null
+        try { $liveJson = & gh pr view $Pr --json 'state,headRefName,body,createdAt,mergedAt,commits' 2>$null } catch { $liveJson = $null }
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($liveJson)) {
+            $result.Signal = "repair skipped for #$Pr — gh pr view failed"
+            return $result
+        }
+
+        $liveInfo = $null
+        try { $liveInfo = ($liveJson | Out-String) | ConvertFrom-Json -ErrorAction Stop } catch { $liveInfo = $null }
+        if ($null -eq $liveInfo -or [string]$liveInfo.state -ne 'MERGED') {
+            $result.Signal = "repair skipped for #$Pr — not MERGED"
+            return $result
+        }
+
+        $liveHeadRef = [string]$liveInfo.headRefName
+        if ([string]::IsNullOrWhiteSpace($liveHeadRef)) {
+            $result.Signal = "repair skipped for #$Pr — live headRefName unresolvable"
+            return $result
+        }
+        $prBody = [string]$liveInfo.body
+
+        # M8 corroboration-window bound (issue #825 s3/s4 post-review fix, C4): the PR's
+        # own first-branch-appearance -> merge lifetime. "First branch appearance" is the
+        # earliest commit's authoredDate, NOT the PR's createdAt — createdAt only reflects
+        # when the PR object itself was opened on GitHub, which can trail the branch's real
+        # start by the bulk of a multi-day session (the #814 flagship case: session ran
+        # 2026-07-04T16:20Z, PR wasn't opened until 2026-07-06T05:12Z near the very end).
+        # Using createdAt as the window start would silently exclude nearly all real
+        # activity from corroboration. Falls back to createdAt only when the commits list
+        # is empty or unparseable. An unparseable/absent timestamp still degrades that one
+        # bound to $null (unenforced), matching the walker's own "a $null bound is not
+        # enforced" contract — never blocks the repair.
+        [Nullable[datetime]]$corroborationWindowStart = $null
+        [Nullable[datetime]]$corroborationWindowEnd = $null
+        try {
+            $earliestCommitDate = $null
+            if ($null -ne $liveInfo.commits -and @($liveInfo.commits).Count -gt 0) {
+                $authoredDates = @(
+                    $liveInfo.commits | ForEach-Object {
+                        try { [datetime]$_.authoredDate } catch { $null }
+                    } | Where-Object { $null -ne $_ }
+                )
+                if ($authoredDates.Count -gt 0) {
+                    $earliestCommitDate = ($authoredDates | Sort-Object)[0]
+                }
+            }
+            if ($null -ne $earliestCommitDate) {
+                $corroborationWindowStart = $earliestCommitDate
+            }
+            elseif (-not [string]::IsNullOrWhiteSpace([string]$liveInfo.createdAt)) {
+                $corroborationWindowStart = [datetime]$liveInfo.createdAt
+            }
+        }
+        catch { $corroborationWindowStart = $null }
+        try { if (-not [string]::IsNullOrWhiteSpace([string]$liveInfo.mergedAt)) { $corroborationWindowEnd = [datetime]$liveInfo.mergedAt } } catch { $corroborationWindowEnd = $null }
+
+        # 2. Locate the composite comment's Cost Pattern section; only act on a
+        # persisted session_completeness: unknown block.
+        $fetchResult = script:Get-CostBaselineHarvestCompositeComment -Pr $Pr
+        if ($null -eq $fetchResult -or -not $fetchResult['Found']) {
+            $result.Signal = "repair skipped for #$Pr — composite comment not found"
+            return $result
+        }
+
+        $compositeBody = $fetchResult['Body']
+        $sectionMatch = [regex]::Match($compositeBody, $script:FCLCostPatternSectionRegex)
+        if (-not $sectionMatch.Success) {
+            $result.Signal = "repair skipped for #$Pr — cost section format mismatch"
+            return $result
+        }
+
+        if ($sectionMatch.Groups['section'].Value -notmatch '(?m)^session_completeness\s*:\s*unknown\s*$') {
+            $result.Signal = "repair skipped for #$Pr — persisted block is not session_completeness: unknown"
+            return $result
+        }
+
+        # L9 (issue #825 post-review fix): a null/unparseable bound previously
+        # degraded silently to an UNENFORCED window (the walker's own "a $null bound
+        # is not enforced" contract) — this repair path must never proceed with an
+        # unenforced corroboration window, since an unenforced window is exactly what
+        # lets a same-repo reused-branch collision outside this PR's real lifetime
+        # slip through the Tier-2 corroborated-fallback ladder this repair turns on.
+        # Checked here — after the cheaper composite-comment/session_completeness
+        # gates above, which take priority when they alone already explain a skip —
+        # and before $result.Attempted is set, so an unresolvable window is reported
+        # honestly instead of proceeding with an unenforced repair.
+        if ($null -eq $corroborationWindowStart -or $null -eq $corroborationWindowEnd) {
+            $result.Signal = "repair skipped for #$Pr — corroboration window could not be resolved"
+            return $result
+        }
+
+        $result.Attempted = $true
+
+        # 3. Re-walk with the Tier-2 corroborated-fallback ladder ON — this call only (M10) —
+        # bounded to this PR's own createdAt->mergedAt window (M8 wiring gap fix).
+        $renderResult = $null
+        try {
+            $renderResult = Invoke-CostSessionRender `
+                -Pr $Pr `
+                -Branch $liveHeadRef `
+                -Slug $Slug `
+                -ParentCwd $ParentCwd `
+                -RepoRoot $RepoRoot `
+                -PrBody $prBody `
+                -AdmitCorroboratedFallback `
+                -CorroborationWindowStart $corroborationWindowStart `
+                -CorroborationWindowEnd $corroborationWindowEnd
+        }
+        catch { $renderResult = $null }
+
+        $reWalkCostSection = if ($null -ne $renderResult) { [string]$renderResult['CostSection'] } else { '' }
+        # C1 fix (issue #825 post-review): the honest-unknown renderer always returns a
+        # non-empty, populated-looking section even on a zero-event walk, so gating on
+        # IsNullOrWhiteSpace($reWalkCostSection) never fires on the real "no matching
+        # transcripts" path. Gate on actual walk activity instead — CostEventsCount is the
+        # ground truth the render result already carries.
+        $reWalkEventsCount = if ($null -ne $renderResult) { [int]$renderResult['CostEventsCount'] } else { 0 }
+        if ($null -eq $renderResult -or $reWalkEventsCount -le 0) {
+            $result.Signal = "repair found no activity for #$Pr — machine holds no matching transcripts; nothing written"
+            return $result
+        }
+
+        # Data-loss guard (issue #825 CE Gate): Invoke-CostSessionRender's step-6g
+        # budget-exhaustion edge (cost-session-render.ps1 line ~479) can return
+        # CostEventsCount > 0 but an empty CostSection when the render budget runs out
+        # before the section is composed. Splicing that empty replacement over the
+        # matched block below would DELETE the persisted Cost Pattern section, because
+        # Merge-CostBaselineHarvestSection is a pure substring splice. Kept DISTINCT
+        # from the events<=0 "no matching transcripts" signal above: here the machine
+        # DID hold activity, so the honest, actionable signal is to enlarge the budget
+        # (FRAME_CREDIT_LEDGER_TEST_COST_BUDGET_SECONDS) and retry — never a silent
+        # write, never a false "repaired".
+        if ([string]::IsNullOrWhiteSpace($reWalkCostSection)) {
+            $result.Signal = "repair found activity for #$Pr but the re-walk exhausted its render budget before composing the cost section; existing block left intact — retry with a larger cost budget"
+            return $result
+        }
+
+        # 4. Populated-beats-empty-unknown: upsert only when the re-walk found activity.
+        $newBody = script:Merge-CostBaselineHarvestSection -Body $compositeBody -SectionMatch $sectionMatch -Replacement $reWalkCostSection.TrimEnd()
+
+        # M15-style cheap concurrency mitigation, reused from the harvest's own
+        # pre-write re-check: skip the write (rather than risk a last-write-wins
+        # clobber) if the section changed since it was matched above.
+        if (-not (script:Test-CostBaselineHarvestSectionStillCurrent -Pr $Pr -ExpectedSectionText $sectionMatch.Value)) {
+            $result.Signal = "repair for #$Pr — composite comment write failed (concurrent change)"
+            return $result
+        }
+
+        $upserted = $false
+        try {
+            $null = Find-OrUpsertComment -Type 'pr' -Number $Pr -Marker $fetchResult['Marker'] -Body $newBody
+            $upserted = $true
+        }
+        catch { $upserted = $false }
+
+        if ($upserted) {
+            $result.Upserted = $true
+            $result.Signal = "repaired #$Pr — attribution re-walked and upserted"
+        }
+        else {
+            $result.Signal = "repair for #$Pr — composite comment write failed"
+        }
+
+        return $result
+    }
+    catch {
+        [Console]::Error.WriteLine("cost-baseline-harvest: attribution repair failed (fail-open, no write): $($_.Exception.Message)")
+        return @{ Attempted = $false; Upserted = $false; Pr = $Pr; Signal = $null }
     }
 }

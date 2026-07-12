@@ -91,6 +91,26 @@ function Invoke-CostSessionRender {
     .PARAMETER IsOrchestrated
         Whether this PR is orchestrated-origin (gates both degraded-comment
         decisions, matching the pre-extraction inline behavior).
+    .PARAMETER AdmitCorroboratedFallback
+        Issue #825 s3. Opt-in switch, off by default — threaded straight through
+        to Invoke-CostTranscriptWalk's own -AdmitCorroboratedFallback (added by
+        s1). The live PR-creation caller never sets this (M10: that path stays
+        fail-closed). The s3 targeted-repair entry point
+        (Invoke-CostAttributionRepair, cost-baseline-harvest.ps1) is the one
+        caller that turns it on, for one maintainer-named PR at a time.
+    .PARAMETER CorroborationWindowStart
+    .PARAMETER CorroborationWindowEnd
+        Issue #825 s3 (post-review fix, M8 wiring gap). Threaded straight
+        through to Invoke-CostTranscriptWalk's own -CorroborationWindowStart/
+        -End (added by s1, bounds Tier-2-admitted events only). $null by
+        default and never set by the live PR-creation caller. Invoke-
+        CostAttributionRepair is the one caller that supplies these — the
+        target PR's own createdAt/mergedAt — so the M8 same-repo reused-
+        branch-name collision guard is actually enforced on the one path that
+        ships in issue #825 (the automatic-drain path where this would also
+        matter is deferred to #841). Without this, Tier-2 admission on the
+        shipped path runs unbounded despite the walker itself supporting the
+        bound.
     .OUTPUTS
         [hashtable] with keys: CostSection, Completeness, TokenSum, Attribution,
         SessionId, CostEventsCount, UsePriorCostSection, DegradedMarker,
@@ -107,7 +127,10 @@ function Invoke-CostSessionRender {
         [Parameter(Mandatory)][string]$RepoRoot,
         [AllowEmptyString()][string]$PrBody = '',
         [AllowNull()]$PriorComments = $null,
-        [bool]$IsOrchestrated = $false
+        [bool]$IsOrchestrated = $false,
+        [switch]$AdmitCorroboratedFallback,
+        [Nullable[datetime]]$CorroborationWindowStart = $null,
+        [Nullable[datetime]]$CorroborationWindowEnd = $null
     )
 
     $costBudgetSeconds = 19
@@ -141,18 +164,75 @@ function Invoke-CostSessionRender {
     $degradedMarker = "<!-- cost-pattern-data-degraded-$Pr -->"
 
     try {
+        # Env override for the cost render budget (issue #825 CE Gate): on a
+        # large-profile machine (large ~/.claude/projects) the walk can legitimately
+        # exceed the 19s default before step-6g composes the section, so the section
+        # can never be rendered without a bigger budget. Resolved INSIDE this try so an
+        # unreachable FCL helper degrades to the 19s default via the outer fail-open
+        # catch (preserving the #824 dependency-chain contract) instead of throwing.
+        # Reuses Get-FCLCostWalkerTimeoutSeconds' exact shape, matching the walker-timeout
+        # overrides below: env present + valid positive int -> use it; else the default.
+        $costBudgetSeconds = script:Get-FCLCostWalkerTimeoutSeconds -EnvironmentVariableName 'FRAME_CREDIT_LEDGER_TEST_COST_BUDGET_SECONDS' -DefaultSeconds $costBudgetSeconds
+
         # 6a. Walkers
         $costEvents = @()
         $claudeWalk = $null
         $copilotWalk = $null
         $copilotOtelJsonlPath = ''
+        # Issue #825 s2, M6: out-parameter ref for the walker's Tier-2
+        # rejected-dir count (see cost-walker.ps1's -RejectedDirCountVar,
+        # added by s1). AdmitCorroboratedFallback defaults off (this
+        # function's own switch, threaded straight through below) so this
+        # stays 0 for the live PR-create caller (M10 — that path stays
+        # fail-closed); the s3 targeted-repair entry point
+        # (Invoke-CostAttributionRepair) is the one caller that turns the
+        # switch on and produces a nonzero count. Threaded through
+        # regardless so the annotation wiring below is correct either way.
+        $rejectedDirCountRef = [ref]0
         if (-not [string]::IsNullOrWhiteSpace($Slug) -and -not [string]::IsNullOrWhiteSpace($Branch)) {
             $resolvedIssueNumber = script:Resolve-FCLLinkedIssueNumber -PrBody $PrBody -Branch ([string]$Branch)
             $walkParameters = @{
-                Slug      = $Slug
-                Branch    = $Branch
-                ParentCwd = $ParentCwd
-                RepoRoot  = $RepoRoot  # D2: used by identity-based slug discovery
+                Slug                = $Slug
+                Branch              = $Branch
+                ParentCwd           = $ParentCwd
+                RepoRoot            = $RepoRoot  # D2: used by identity-based slug discovery
+                RejectedDirCountVar = $rejectedDirCountRef
+            }
+            if ($AdmitCorroboratedFallback) {
+                # Issue #825 s3: opt-in Tier-2 corroborated-fallback trust ladder,
+                # this caller only (M10 — never set by the live PR-create path).
+                $walkParameters['AdmitCorroboratedFallback'] = $true
+
+                # C2 (issue #825 post-review fix): a SECOND, branch-prefix-ONLY
+                # resolution (PrBody forced empty) feeds specifically the Tier-2
+                # corroboration gate. $resolvedIssueNumber (body-inclusive, below)
+                # stays reserved for phase-marker windowing, where trusting the PR
+                # body is legitimate — the Tier-2 trust ladder must not accept an
+                # author-controllable PR-body issue reference as its corroboration
+                # signal. Scoped to the AdmitCorroboratedFallback branch only —
+                # Tier2IssueNumber is meaningless (and unconsumed) on the live
+                # PR-create path, which never turns Tier 2 on. Set UNCONDITIONALLY
+                # (even when $null) — cost-walker.ps1's Tier2 gate distinguishes an
+                # explicitly-supplied $null (fail closed) from an omitted parameter
+                # (legacy fallback to -IssueNumber) via ContainsKey; omitting this key
+                # here whenever resolution comes back empty would silently re-admit
+                # the PR-body-derived -IssueNumber as the Tier-2 fallback, defeating
+                # this fix for the exact case it targets (branch doesn't match the
+                # issue-prefix pattern, so only the PR body names an issue).
+                $tier2ResolvedIssueNumber = script:Resolve-FCLLinkedIssueNumber -PrBody '' -Branch ([string]$Branch)
+                $walkParameters['Tier2IssueNumber'] = if ($null -ne $tier2ResolvedIssueNumber) { [int]$tier2ResolvedIssueNumber } else { $null }
+            }
+            if ($null -ne $CorroborationWindowStart) {
+                # Issue #825 s3 (post-review fix, M8 wiring gap): bounds Tier-2
+                # admission to the caller-supplied window (Invoke-
+                # CostAttributionRepair passes the target PR's own
+                # createdAt/mergedAt). A $null bound is not enforced by the
+                # walker (see cost-walker.ps1), matching that function's own
+                # contract.
+                $walkParameters['CorroborationWindowStart'] = $CorroborationWindowStart
+            }
+            if ($null -ne $CorroborationWindowEnd) {
+                $walkParameters['CorroborationWindowEnd'] = $CorroborationWindowEnd
             }
             if ($null -ne $resolvedIssueNumber) {
                 $walkParameters['IssueNumber'] = [int]$resolvedIssueNumber
@@ -407,7 +487,24 @@ function Invoke-CostSessionRender {
 
             # 6g. Render fresh cost section
             if ((script:Get-FCLRemainingCostBudgetSeconds -Stopwatch $costStopwatch -BudgetSeconds $costBudgetSeconds) -gt 0) {
-                $costMarkdown = Format-CostPatternMarkdown -Attribution $costAttribution -Completeness $completeness -AnomalyFlags $anomalyFlags -RollingMeta $rollingResult -Pr $Pr -Branch ([string]$Branch)
+                # Issue #825 s2, M12: the renderer stays pure (no $env: reads inside
+                # cost-pattern-renderer.ps1, so the sharded Pester runner stays
+                # deterministic) — this caller computes both environment-state flags
+                # and threads them in. GITHUB_ACTIONS='true' mirrors the existing
+                # repo-wide CI-detection convention (see render-portfolio.ps1);
+                # ProjectsRootPresent reuses the same root-absence check the
+                # degraded_reason='env-absent' classification already relies on
+                # (script:Test-FCLClaudeProjectsRootAbsent, cost-fcl-helpers.ps1).
+                # DegradedReason (L11, issue #825 post-review fix): threaded from the
+                # already-computed $costAttribution so a local walker TIMEOUT renders
+                # a distinct message from a genuine empty walk instead of colliding on
+                # the same generic "searched and none matched" text.
+                $renderContext = @{
+                    IsCi                = ($env:GITHUB_ACTIONS -eq 'true')
+                    ProjectsRootPresent = -not (script:Test-FCLClaudeProjectsRootAbsent)
+                    DegradedReason      = [string]$costAttribution['degraded_reason']
+                }
+                $costMarkdown = Format-CostPatternMarkdown -Attribution $costAttribution -Completeness $completeness -AnomalyFlags $anomalyFlags -RollingMeta $rollingResult -Pr $Pr -Branch ([string]$Branch) -RenderContext $renderContext -RejectedDirCount ([int]$rejectedDirCountRef.Value)
                 $costYaml = Format-CostPatternYaml -Attribution $costAttribution -Completeness $completeness -AnomalyFlags $anomalyFlags -Pr $Pr -Branch ([string]$Branch) -SessionId $currentSessionId -HeadRef ([string]$Branch)
                 $costSection = $costMarkdown + "`n" + $costYaml
             }
@@ -462,6 +559,7 @@ function Invoke-CostSessionRender {
     # ancestor walk) rather than `Test-Path variable:...` — the latter has
     # the identical ancestor-walk behavior as a bare variable read and would
     # reintroduce the same shadowing hazard this guard exists to avoid.
+    if ($null -eq (Get-Variable -Name 'costEvents' -Scope 0 -ErrorAction SilentlyContinue)) { $costEvents = @() }
     if ($null -eq (Get-Variable -Name 'completeness' -Scope 0 -ErrorAction SilentlyContinue)) { $completeness = $null }
     if ($null -eq (Get-Variable -Name 'costAttribution' -Scope 0 -ErrorAction SilentlyContinue)) { $costAttribution = $null }
     if ($null -eq (Get-Variable -Name 'currentTokenSum' -Scope 0 -ErrorAction SilentlyContinue)) { [long]$currentTokenSum = 0 }
