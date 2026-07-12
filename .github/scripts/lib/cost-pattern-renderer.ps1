@@ -294,26 +294,36 @@ function script:Format-CostPatternCoverageAnnotation {
 function script:Format-CostPatternUnknownHeader {
     <#
     .SYNOPSIS
-        Renders the unknown-completeness header across the three honest render
-        states (issue #825 s2, M12). Pure — reads only the caller-computed
+        Renders the unknown-completeness header across the four honest render
+        states (issue #825 s2, M12; L11 issue #825 post-review fix added the
+        4th, budget-exceeded, state). Pure — reads only the caller-computed
         -RenderContext, never $env: itself, so the sharded Pester runner stays
-        deterministic. None of the three states asserts "no session activity"
+        deterministic. None of the four states asserts "no session activity"
         as settled fact: each names the real reason the walk found nothing, or
         that the walk could not run at all.
     .PARAMETER RenderContext
-        Optional hashtable with IsCi / ProjectsRootPresent booleans. Missing
-        keys default to false (non-CI, projects root absent) — the more
-        conservative "no local data" framing rather than a false honest-zero
-        claim when the caller did not supply enough context.
+        Optional hashtable with IsCi / ProjectsRootPresent / DegradedReason.
+        Missing IsCi/ProjectsRootPresent keys default to false (non-CI,
+        projects root absent) — the more conservative "no local data" framing
+        rather than a false honest-zero claim when the caller did not supply
+        enough context. DegradedReason (L11) is read only when IsCi is false
+        and ProjectsRootPresent is true — a local walker TIMEOUT
+        (degraded_reason = 'budget-exceeded', set in cost-fcl-helpers.ps1)
+        must not render the identical "searched and none matched" message a
+        genuine empty walk (degraded_reason = 'no-transcript-found') gets —
+        that collision loses the actionable "retry with a larger walker
+        budget" signal.
     #>
     [OutputType([string])]
     param([hashtable]$RenderContext = $null)
 
     $isCi = $false
     $projectsRootPresent = $false
+    $degradedReason = $null
     if ($null -ne $RenderContext) {
         if ($RenderContext.ContainsKey('IsCi')) { $isCi = [bool]$RenderContext['IsCi'] }
         if ($RenderContext.ContainsKey('ProjectsRootPresent')) { $projectsRootPresent = [bool]$RenderContext['ProjectsRootPresent'] }
+        if ($RenderContext.ContainsKey('DegradedReason')) { $degradedReason = [string]$RenderContext['DegradedReason'] }
     }
 
     if ($isCi) {
@@ -322,6 +332,10 @@ function script:Format-CostPatternUnknownHeader {
 
     if (-not $projectsRootPresent) {
         return "## Cost Pattern `u{26A0} no local session data on this machine; a re-walk from the machine holding the transcripts will upgrade this block. cost-fields unavailable; this run is excluded from rolling-history aggregation"
+    }
+
+    if ($degradedReason -eq 'budget-exceeded') {
+        return "## Cost Pattern `u{26A0} the local walk exceeded its time budget or stopped before finishing searching this PR's branch/session; if it was a timeout, retry the walk on this machine with a larger FRAME_CREDIT_LEDGER_TEST_COST_BUDGET_SECONDS override. cost-fields unavailable; this run is excluded from rolling-history aggregation"
     }
 
     return "## Cost Pattern `u{26A0} transcripts were searched on this machine and none matched this PR's branch/session; possible causes: the walk ran where transcripts are unavailable, the local walk never ran or exited before the cost step, a since-deleted sibling worktree held the events, the branch was created mid-session outside the phase-marker windows, or the linked issue could not be resolved from the branch name. cost-fields unavailable; this run is excluded from rolling-history aggregation"

@@ -126,6 +126,14 @@ function script:Add-CostWalkerAssistantEventAndSubagents {
         documented on Get-CostWalkerCurrentSessionId). An event with no uuid is
         never deduped (always added) — this preserves pre-#825 behavior for
         synthetic/test events that omit it.
+
+        L12 (issue #825 post-review fix): a duplicate PARENT event only skips its
+        own insertion into $Included — the subagent traversal below always runs,
+        even for a dedup no-op parent. A duplicate copy of the same session
+        directory can hold a `subagents/` file the first-processed copy's
+        directory lacks (or vice versa); returning early on the parent dedup hit
+        used to skip that copy's entire subagent traversal, silently losing those
+        subagent cost events.
     #>
     param(
         [Parameter(Mandatory)]$Included,
@@ -136,15 +144,24 @@ function script:Add-CostWalkerAssistantEventAndSubagents {
     )
 
     $eventUuid = [string]$TranscriptEvent['uuid']
+    # An event with no uuid is never deduped — always treated as a fresh parent.
+    $addParent = $true
     if (-not [string]::IsNullOrEmpty($eventUuid)) {
         $dedupKey = "$SessionId|$eventUuid"
-        if ($SeenKeys.Contains($dedupKey)) { return }
-        [void]$SeenKeys.Add($dedupKey)
+        # HashSet.Add() returns $false when the key was already present, $true when
+        # newly added — a single atomic membership-test-and-insert, replacing the
+        # prior Contains()-then-separate-Add() pair whose early `return` on a
+        # duplicate skipped the subagent traversal below along with the parent.
+        $addParent = $SeenKeys.Add($dedupKey)
     }
 
-    $Included.Add($TranscriptEvent)
+    if ($addParent) {
+        $Included.Add($TranscriptEvent)
+    }
 
-    # Traverse subagent transcripts for included Agent tool_use dispatches.
+    # Traverse subagent transcripts for included Agent tool_use dispatches — runs
+    # unconditionally so a duplicate parent's own subagent directory is still
+    # walked (see L12 note above).
     $messageContent = $TranscriptEvent['message']?['content']
     if ($null -eq $messageContent) { return }
 
@@ -157,7 +174,7 @@ function script:Add-CostWalkerAssistantEventAndSubagents {
             if ($null -ne $toolUseId) {
                 $subagPath = Join-Path $SlugDir 'subagents' "agent-$toolUseId.jsonl"
                 if (Test-Path -LiteralPath $subagPath) {
-                    $subLines = @(Get-Content -Path $subagPath -Encoding utf8 -ErrorAction SilentlyContinue)
+                    $subLines = @(Get-Content -LiteralPath $subagPath -Encoding utf8 -ErrorAction SilentlyContinue)
                     foreach ($subLine in $subLines) {
                         $subTrimmed = $subLine.Trim()
                         if ([string]::IsNullOrEmpty($subTrimmed)) { continue }
@@ -360,10 +377,10 @@ function script:Get-CostWalkerFirstEventCwd {
     param([Parameter(Mandatory)][string]$SlugDirPath)
 
     $firstCwd = $null
-    $jsonls = @(Get-ChildItem -Path $SlugDirPath -Filter '*.jsonl' -File -ErrorAction SilentlyContinue | Select-Object -First 5)
+    $jsonls = @(Get-ChildItem -LiteralPath $SlugDirPath -Filter '*.jsonl' -File -ErrorAction SilentlyContinue | Select-Object -First 5)
     foreach ($jf in $jsonls) {
         if ($null -ne $firstCwd) { break }
-        $lines = @(Get-Content -Path $jf.FullName -Encoding utf8 -ErrorAction SilentlyContinue | Select-Object -First 20)
+        $lines = @(Get-Content -LiteralPath $jf.FullName -Encoding utf8 -ErrorAction SilentlyContinue | Select-Object -First 20)
         foreach ($ln in $lines) {
             $ev = script:ConvertFrom-CostWalkerJsonLine -Line $ln
             if ($null -eq $ev) { continue }
@@ -443,9 +460,9 @@ function script:Test-CostWalkerDirHasBranchMatchFile {
     )
 
     $matchedFiles = [System.Collections.Generic.List[string]]::new()
-    $jsonlFiles = @(Get-ChildItem -Path $SlugDirPath -Filter '*.jsonl' -File -ErrorAction SilentlyContinue)
+    $jsonlFiles = @(Get-ChildItem -LiteralPath $SlugDirPath -Filter '*.jsonl' -File -ErrorAction SilentlyContinue)
     foreach ($file in $jsonlFiles) {
-        $lines = @(Get-Content -Path $file.FullName -Encoding utf8 -ErrorAction SilentlyContinue)
+        $lines = @(Get-Content -LiteralPath $file.FullName -Encoding utf8 -ErrorAction SilentlyContinue)
         foreach ($line in $lines) {
             $ev = script:ConvertFrom-CostWalkerJsonLine -Line $line
             if ($null -eq $ev) { continue }
@@ -470,13 +487,79 @@ function script:Test-CostWalkerFileHasIssueMarker {
         [Parameter(Mandatory)][int]$IssueNumber
     )
 
-    $lines = @(Get-Content -Path $FilePath -Encoding utf8 -ErrorAction SilentlyContinue)
+    $lines = @(Get-Content -LiteralPath $FilePath -Encoding utf8 -ErrorAction SilentlyContinue)
     foreach ($line in $lines) {
         $ev = script:ConvertFrom-CostWalkerJsonLine -Line $line
         if ($null -eq $ev -or $ev['type'] -ne 'user') { continue }
         $marker = script:Get-CostWalkerPhaseMarker -TranscriptEvent $ev
         if ($null -ne $marker -and $marker.IssueId -eq $IssueNumber) { return $true }
     }
+    return $false
+}
+
+function script:Test-CostWalkerFileEvidenceIdentityMismatch {
+    <#
+    .SYNOPSIS
+        Scans a Tier-2 candidate file's own recorded event cwd values for a
+        positive, verifiable repo-identity mismatch against $TargetIdentity
+        (issue #825 post-review fix, L14).
+    .DESCRIPTION
+        The Tier-2 M9 trigger only requires the directory's FIRST recorded cwd
+        to be absent from disk — it says nothing about every OTHER event in the
+        same file. This scans every distinct, non-sentinel cwd recorded in the
+        file and, for any that still exists on disk, resolves its git remote
+        identity. If any resolves and differs from $TargetIdentity, the file's
+        own evidence proves it does not belong to the target repository, and the
+        primary (own-marker) corroboration path must not admit it on that
+        evidence alone — closing the gap where a deleted-cwd candidate sharing
+        the same branch name and issue-marker number, but originating from a
+        DIFFERENT repository, could otherwise be admitted and cross-attributed.
+
+        "Where determinable" (the finding's framing): most Tier-2 candidates
+        have no OTHER existing cwd anywhere in the file (the typical case — the
+        whole worktree/session was deleted), so this returns $false (no proven
+        mismatch, not "no evidence of a match") and the existing own-marker
+        corroboration path is unaffected. This is intentionally NOT a
+        directory-name/slug check — Tier-2 admits arbitrarily-named directories
+        by design (ladder case 6); this only fires on a POSITIVE, git-resolved
+        contradiction.
+    .OUTPUTS
+        [bool] $true only when at least one recorded cwd in the file exists on
+        disk AND resolves to a git identity different from $TargetIdentity.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [Parameter(Mandatory)][string]$TargetIdentity
+    )
+
+    $lines = @(Get-Content -LiteralPath $FilePath -Encoding utf8 -ErrorAction SilentlyContinue)
+    $checkedCwds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+
+    foreach ($line in $lines) {
+        $ev = script:ConvertFrom-CostWalkerJsonLine -Line $line
+        if ($null -eq $ev) { continue }
+
+        $cwd = [string]$ev['cwd']
+        if ([string]::IsNullOrEmpty($cwd) -or -not $checkedCwds.Add($cwd)) { continue }
+
+        if (-not [string]::IsNullOrEmpty($script:CostWalkerCopilotOtelCwdPrefix) -and
+            $cwd.StartsWith($script:CostWalkerCopilotOtelCwdPrefix, [System.StringComparison]::OrdinalIgnoreCase)) { continue }
+
+        if (-not (Test-Path -LiteralPath $cwd -ErrorAction SilentlyContinue)) { continue }
+
+        $candidateIdentity = $null
+        try {
+            $rawUrl = @(& git -C $cwd remote get-url origin 2>$null) | Select-Object -First 1
+            if ($global:LASTEXITCODE -eq 0) {
+                $candidateIdentity = script:Resolve-CostWalkerRepoIdentity -RawUrl ([string]$rawUrl)
+            }
+        } catch { }
+
+        if ($null -ne $candidateIdentity -and $candidateIdentity -ne $TargetIdentity) {
+            return $true
+        }
+    }
+
     return $false
 }
 
@@ -509,6 +592,12 @@ function script:Get-CostWalkerCorroboratedFallbackAdmission {
         it had at least one branch-matched file and NONE of those files achieved
         corroboration — a directory that admits at least one file is not counted as
         rejected even if it also has non-corroborated siblings.
+
+        L14 (issue #825 post-review fix): the primary (own-marker) signal above has
+        no repo-identity tie by itself — see
+        script:Test-CostWalkerFileEvidenceIdentityMismatch, consulted before trusting
+        own-marker corroboration, for the guard that rejects a file whose own
+        evidence positively proves a different repository identity.
     .OUTPUTS
         [hashtable] @{ AdmittedFiles = [List[string]]; RejectedDirCount = [int] }
     #>
@@ -538,7 +627,7 @@ function script:Get-CostWalkerCorroboratedFallbackAdmission {
         $firstCwd = script:Get-CostWalkerFirstEventCwd -SlugDirPath $dir.FullName
         if ($null -eq $firstCwd) { continue }  # no usable cwd recorded at all; skip silently
 
-        if (Test-Path -LiteralPath $firstCwd) {
+        if (Test-Path -LiteralPath $firstCwd -ErrorAction SilentlyContinue) {
             # M9: cwd present — not the strict Tier-2 trigger. Tier 1 already made the
             # terminal (mismatched identity) or fail-closed (unresolvable identity) call
             # for this directory; Tier 2 never reconsiders it.
@@ -554,12 +643,23 @@ function script:Get-CostWalkerCorroboratedFallbackAdmission {
 
             $corroborated = script:Test-CostWalkerFileHasIssueMarker -FilePath $filePath -IssueNumber $resolvedIssueNumber
 
+            # L14 (issue #825 post-review fix): the primary (own-marker) corroboration
+            # signal above has no repo-identity tie of its own — branch name and issue
+            # marker are both coincidentally reproducible from a different repository.
+            # When this file's OWN evidence (a non-first, still-extant recorded cwd)
+            # positively proves a different repo identity, the primary path must not
+            # admit on marker-only evidence; fall through to the M14 sibling check below
+            # exactly as if the marker had never corroborated at all.
+            if ($corroborated -and (script:Test-CostWalkerFileEvidenceIdentityMismatch -FilePath $filePath -TargetIdentity $TargetIdentity)) {
+                $corroborated = $false
+            }
+
             if (-not $corroborated) {
                 # M14: cross-file corroboration via a sibling identity-matched (Tier-1)
                 # transcript of the SAME session (same file BaseName / session id).
                 foreach ($tier1Dir in $Tier1AdmittedDirs) {
                     $siblingPath = Join-Path $tier1Dir "$sessionId.jsonl"
-                    if ((Test-Path -LiteralPath $siblingPath -PathType Leaf) -and
+                    if ((Test-Path -LiteralPath $siblingPath -PathType Leaf -ErrorAction SilentlyContinue) -and
                         (script:Test-CostWalkerFileHasIssueMarker -FilePath $siblingPath -IssueNumber $resolvedIssueNumber)) {
                         $corroborated = $true
                         break
@@ -911,7 +1011,7 @@ function script:Invoke-CostWalkerTier2Walk {
     foreach ($filePath in $Tier2AdmittedFiles) {
         $tier2SessionId = [System.IO.Path]::GetFileNameWithoutExtension($filePath)
         $tier2SlugDir = Split-Path -Parent $filePath
-        $tier2Lines = @(Get-Content -Path $filePath -Encoding utf8 -ErrorAction SilentlyContinue)
+        $tier2Lines = @(Get-Content -LiteralPath $filePath -Encoding utf8 -ErrorAction SilentlyContinue)
 
         foreach ($line in $tier2Lines) {
             $trimmed = $line.Trim()

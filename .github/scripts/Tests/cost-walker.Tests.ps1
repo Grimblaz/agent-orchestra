@@ -337,6 +337,50 @@ Describe 'Invoke-CostTranscriptWalk' {
             @(Invoke-CostTranscriptWalk -Slug $slug -Branch $script:TestBranch -ParentCwd $script:TestCwd -ProjectsRoot $tmp).Count | Should -Be 1
             Remove-Item -Recurse -Force $tmp
         }
+
+        It 'L12 (issue #825 post-review fix): captures a duplicate parent''s own subagent event when the subagent file exists only in the second-processed (duplicate) copy' {
+            $tmp = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-test-$([System.Guid]::NewGuid())"
+            $slug = 'test--l12-dedup'
+            $primaryDir = Join-Path $tmp $slug
+            $null = New-Item -ItemType Directory -Path $primaryDir -Force
+            # Discovered via the name-based worktree glob, and — per
+            # script:Get-CostWalkerCandidateSlugDirs's own resolution order (worktree
+            # glob before the primary-slug backward-compat fallback) — walked BEFORE
+            # $primaryDir, making $primaryDir the second-processed (duplicate) copy.
+            $worktreeDir = Join-Path $tmp "$slug--claude-worktrees-abc123"
+            $null = New-Item -ItemType Directory -Path $worktreeDir -Force
+
+            $sharedUuid = [System.Guid]::NewGuid().ToString()
+            $toolUseId = [System.Guid]::NewGuid().ToString()
+            $sharedSessionId = 'shared-session'
+
+            # The identical parent event (same session_id file BaseName + same event
+            # uuid) exists in BOTH copies.
+            $parentEvent = script:New-AssistantEvent -Uuid $sharedUuid -Content @(script:New-AgentToolUseContent -ToolUseId $toolUseId)
+            script:Write-TestJsonl -Path (Join-Path $worktreeDir "$sharedSessionId.jsonl") -Events @($parentEvent)
+            script:Write-TestJsonl -Path (Join-Path $primaryDir "$sharedSessionId.jsonl") -Events @($parentEvent)
+
+            # The subagent transcript exists ONLY in $primaryDir (the second-processed
+            # / duplicate copy) — $worktreeDir's own subagents/ dir is absent.
+            $subagDir = Join-Path $primaryDir 'subagents'
+            $null = New-Item -ItemType Directory -Path $subagDir -Force
+            $subEvent = @{
+                type      = 'assistant'
+                uuid      = 'subagent-only-in-duplicate'
+                timestamp = '2026-01-01T00:01:00Z'
+                message   = @{ usage = @{ input_tokens = 1; output_tokens = 1 }; content = @() }
+            }
+            script:Write-TestJsonl -Path (Join-Path $subagDir "agent-$toolUseId.jsonl") -Events @($subEvent)
+
+            $result = @(Invoke-CostTranscriptWalk -Slug $slug -Branch $script:TestBranch -ParentCwd $script:TestCwd -ProjectsRoot $tmp)
+
+            # Parent counted exactly once — dedup is not weakened by this fix.
+            @($result | Where-Object { $_.uuid -eq $sharedUuid }).Count | Should -Be 1
+            # The duplicate copy's own subagent traversal must still run and capture
+            # its subagent event, even though its parent event was a dedup no-op.
+            @($result | Where-Object { $_.uuid -eq 'subagent-only-in-duplicate' }).Count | Should -Be 1
+            Remove-Item -Recurse -Force $tmp
+        }
     }
 
     Context 'resilience' {
@@ -1357,6 +1401,40 @@ Describe 'Invoke-CostTranscriptWalk' {
             $result.Count | Should -Be 1 -Because 'same session_id + uuid must be attributed exactly once (M7)'
             $result[0]['uuid'] | Should -Be $sharedUuid
             Remove-Item -Recurse -Force $tmpProjects
+        }
+
+        It 'ladder case 11 (L14, issue #825 post-review fix): rejects a branch+marker corroborated candidate whose own file evidence resolves to a different repository identity via a non-first, still-extant cwd' {
+            if (-not $script:CorrRemoteAvailable) { Set-ItResult -Skipped -Because 'cannot resolve test repo remote'; return }
+            $tmpProj = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-corr-t11-$([System.Guid]::NewGuid())"
+            $tmpProjects = Join-Path $tmpProj 'projects'
+            $null = New-Item -ItemType Directory -Path $tmpProjects -Force
+            $branch = 'feature/issue-825-corr-11'
+            $missingCwd = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-corr-missing-$([System.Guid]::NewGuid())"
+
+            $otherRepoPath = Join-Path $tmpProj 'other-identity-repo'
+            $null = New-Item -ItemType Directory -Path $otherRepoPath -Force
+            $null = & git init $otherRepoPath 2>&1
+            $null = & git -C $otherRepoPath remote add origin 'https://github.com/fake-org/l14-mismatch-test'
+
+            $candidateDir = Join-Path $tmpProjects 'different-repo-candidate'
+            $null = New-Item -ItemType Directory -Path $candidateDir -Force
+
+            $marker = script:New-CorrPhaseMarkerEvent -IssueArg '825'
+            # The M9 trigger cwd (first non-empty cwd found in the file) — absent, so
+            # this directory still becomes a Tier-2 candidate.
+            $asst = script:New-CorrAssistantEvent -Cwd $missingCwd -Branch $branch
+            # A SECOND, non-first event in the SAME file whose cwd currently exists on
+            # disk and resolves to a DIFFERENT repo identity than the target. L14 must
+            # catch this even though it is not the cwd that triggered the M9 fallback.
+            $identityProbe = script:New-CorrAssistantEvent -Cwd $otherRepoPath -Branch $branch
+            script:Write-TestJsonl -Path (Join-Path $candidateDir 'session.jsonl') -Events @($marker, $asst, $identityProbe)
+
+            $rejectedRef = [ref]0
+            $result = @(Invoke-CostTranscriptWalk -Branch $branch -ParentCwd $script:CorrRepoRoot -RepoRoot $script:CorrRepoRoot -ProjectsRoot $tmpProjects -IssueNumber 825 -AdmitCorroboratedFallback -RejectedDirCountVar $rejectedRef)
+
+            $result.Count | Should -Be 0 -Because 'own-marker corroboration must not admit a file whose own evidence proves a different repository identity'
+            $rejectedRef.Value | Should -Be 1
+            Remove-Item -Recurse -Force $tmpProj
         }
     }
 }

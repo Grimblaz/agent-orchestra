@@ -331,6 +331,32 @@ Describe 'Format-CostPatternMarkdown' {
             $ci | Should -Not -BeExactly $emptyWalk
             $noRoot | Should -Not -BeExactly $emptyWalk
         }
+
+        It 'non-CI, projects root present, walker budget-exceeded (L11, issue #825 post-review fix): renders a distinct message naming the timeout/budget cause, not the genuine-empty-walk message' {
+            $attribution = script:New-MinimalAttribution
+            $completeness = script:New-Completeness -Completeness 'unknown' -StopReason $null -Excluded $true -ExcludeReason 'session completeness: unknown'
+            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness -RenderContext @{ IsCi = $false; ProjectsRootPresent = $true; DegradedReason = 'budget-exceeded' }
+            $result | Should -Match 'exceeded its time budget'
+            $result | Should -Match 'FRAME_CREDIT_LEDGER_TEST_COST_BUDGET_SECONDS'
+            $result | Should -Not -Match 'transcripts were searched on this machine and none matched'
+            $result | Should -Not -Match '488'
+            $result | Should -Not -Match 'no session activity'
+        }
+
+        It 'all four unknown-completeness states (including budget-exceeded, L11) are textually distinct from each other' {
+            $attribution = script:New-MinimalAttribution
+            $completeness = script:New-Completeness -Completeness 'unknown' -StopReason $null -Excluded $true -ExcludeReason 'session completeness: unknown'
+            $ci = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness -RenderContext @{ IsCi = $true; ProjectsRootPresent = $false }
+            $noRoot = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness -RenderContext @{ IsCi = $false; ProjectsRootPresent = $false }
+            $emptyWalk = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness -RenderContext @{ IsCi = $false; ProjectsRootPresent = $true }
+            $budgetExceeded = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness -RenderContext @{ IsCi = $false; ProjectsRootPresent = $true; DegradedReason = 'budget-exceeded' }
+            $states = @($ci, $noRoot, $emptyWalk, $budgetExceeded)
+            for ($i = 0; $i -lt $states.Count; $i++) {
+                for ($j = $i + 1; $j -lt $states.Count; $j++) {
+                    $states[$i] | Should -Not -BeExactly $states[$j] -Because "state $i and state $j must render distinct text"
+                }
+            }
+        }
     }
 
     Context 'coverage annotation on populated blocks (issue #825 s2, M6)' {

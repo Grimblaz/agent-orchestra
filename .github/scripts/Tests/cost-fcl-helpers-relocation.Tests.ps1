@@ -177,4 +177,101 @@ Describe 'cost-session-render harvest dependency chain (issue #824 post-review f
         $captured.CostSection | Should -Not -BeNullOrEmpty -Because 'a real cost section must have been rendered from the fixture event'
         $captured.TokenSum | Should -Be 160 -Because 'input(120) + output(40) from the fixture event, summed via the relocated script:Get-FCLTokenSumFromBucket — proves the relocated function is both reachable AND executing correctly, not just silently absent'
     }
+
+    It 'M17 regression pin (L10, issue #825 post-review fix): $costEvents is guarded in the return block, so a StrictMode read never throws when an FCL helper call fails before $costEvents'' own first assignment' {
+        # Reproduces the exact M17 gap: script:Get-FCLCostWalkerTimeoutSeconds (the
+        # very first FCL call inside the try block, well before "$costEvents = @()"
+        # is reached) throws — caught by Invoke-CostSessionRender's own outer
+        # fail-open catch, which never assigns $costEvents. Without the costEvents
+        # guard line in the pre-return block, "CostEventsCount = @($costEvents).Count"
+        # in the final return statement throws under Set-StrictMode -Version Latest
+        # (a genuinely unassigned variable read), defeating the fail-open contract
+        # this whole guard block exists to preserve.
+        #
+        # Deliberately dot-sources the FULL, CORRECT (post-fix) dependency set —
+        # exactly like the GREEN test above — and forces the failure with an
+        # explicit override of script:Get-FCLCostWalkerTimeoutSeconds, rather than
+        # reproducing it via an incomplete dot-source list. Unlike the RED test
+        # above, a real cost-fcl-helpers.ps1 dot-source at "function script:X {}"
+        # scope is sticky across Its within the same Pester file run, so an
+        # omission-based repro run AFTER the GREEN test would silently inherit the
+        # GREEN test's already-defined script-scope function and never reproduce
+        # the throw at all — this explicit-override approach is immune to that
+        # ordering hazard and targets the exact call site directly.
+        $repoRoot = $script:RepoRoot
+        $fixtureEventsScript = $script:FixtureEventsScript
+
+        $captured = & {
+            param($repoRoot, $fixtureEventsScript)
+            $events = & $fixtureEventsScript
+
+            # The CORRECTED Step 7d set (matches the GREEN test above).
+            . (Join-Path $repoRoot '.github/scripts/lib/path-normalize.ps1')
+            . (Join-Path $repoRoot '.github/scripts/lib/cost-walker.ps1')
+            . (Join-Path $repoRoot '.github/scripts/lib/cost-walker-copilot.ps1')
+            . (Join-Path $repoRoot '.github/scripts/lib/cost-attribution.ps1')
+            . (Join-Path $repoRoot '.github/scripts/lib/cost-anomaly.ps1')
+            . (Join-Path $repoRoot '.github/scripts/lib/cost-rolling-history.ps1')
+            . (Join-Path $repoRoot '.github/scripts/lib/cost-checkpoint-core.ps1')
+            . (Join-Path $repoRoot '.github/scripts/lib/cost-completeness.ps1')
+            . (Join-Path $repoRoot '.github/scripts/lib/cost-pattern-renderer.ps1')
+            . (Join-Path $repoRoot '.github/scripts/lib/cost-fcl-helpers.ps1')
+            . (Join-Path $repoRoot '.github/scripts/lib/cost-session-render.ps1')
+            . (Join-Path $repoRoot '.github/scripts/lib/find-or-upsert-comment.ps1')
+            . (Join-Path $repoRoot '.github/scripts/lib/cost-baseline-harvest.ps1')
+
+            function Invoke-CostTranscriptWalk {
+                param([string]$Slug, [string]$Branch, [string]$ParentCwd, [Nullable[int]]$IssueNumber = $null)
+                return $events
+            }
+            function Invoke-CostCopilotWalk {
+                param([string]$Branch, [string]$RepoRoot, [string]$OtelJsonlPath, [string]$WorkspaceFolderBasename = '')
+                return @()
+            }
+            # Forces the exact M17 reproduction: the FIRST FCL call inside
+            # Invoke-CostSessionRender's try block throws, well before
+            # "$costEvents = @()" is ever reached.
+            function script:Get-FCLCostWalkerTimeoutSeconds {
+                param([string]$EnvironmentVariableName, [int]$DefaultSeconds)
+                throw 'M17 regression pin: forced failure before $costEvents is assigned'
+            }
+
+            $previousInline = $env:FRAME_CREDIT_LEDGER_TEST_WALKER_INLINE
+            $env:FRAME_CREDIT_LEDGER_TEST_WALKER_INLINE = '1'
+
+            # The load-bearing part of this test: force StrictMode Latest in THIS
+            # scope so an unassigned $costEvents read in the return block would
+            # actually throw if the guard were missing.
+            Set-StrictMode -Version Latest
+
+            $stderrWriter = [System.IO.StringWriter]::new()
+            $originalError = [Console]::Error
+            [Console]::SetError($stderrWriter)
+            $renderResult = $null
+            $threw = $false
+            $thrownMessage = ''
+            try {
+                $renderResult = Invoke-CostSessionRender -Pr 824003 -Branch 'feature/issue-824-fixture' -Slug 'fixture-slug' -ParentCwd $repoRoot -RepoRoot $repoRoot
+            }
+            catch {
+                $threw = $true
+                $thrownMessage = $_.Exception.Message
+            }
+            finally {
+                [Console]::SetError($originalError)
+                $env:FRAME_CREDIT_LEDGER_TEST_WALKER_INLINE = $previousInline
+            }
+
+            return @{
+                Threw           = $threw
+                ThrownMessage   = $thrownMessage
+                Stderr          = $stderrWriter.ToString()
+                CostEventsCount = $renderResult.CostEventsCount
+            }
+        } $repoRoot $fixtureEventsScript
+
+        $captured.Stderr | Should -Match 'M17 regression pin: forced failure' -Because 'confirms the forced failure actually fired inside the try block, proving this is a real reproduction and not a no-op'
+        $captured.Threw | Should -Be $false -Because "Invoke-CostSessionRender's own fail-open contract must hold under StrictMode even when an FCL helper fails before `$costEvents is first assigned; got: $($captured.ThrownMessage)"
+        $captured.CostEventsCount | Should -Be 0 -Because 'the costEvents guard defaults it to an empty array before the return block reads @($costEvents).Count'
+    }
 }

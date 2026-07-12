@@ -1097,7 +1097,7 @@ Describe 'Invoke-CostAttributionRepair (issue #825 s3)' {
             $joined = $Args -join ' '
             $global:LASTEXITCODE = 0
             if ($joined -match "pr view $pr --json state,headRefName,body") {
-                return '{"state":"MERGED","headRefName":"feature/issue-814-real-branch","body":"Fixes #814"}'
+                return '{"state":"MERGED","headRefName":"feature/issue-814-real-branch","body":"Fixes #814","createdAt":"2026-06-01T00:00:00Z","mergedAt":"2026-06-05T00:00:00Z"}'
             }
             if ($joined -match "pr view $pr --json comments") {
                 return (@{ comments = @(@{ body = $originalBody; authorAssociation = 'OWNER' }) } | ConvertTo-Json -Depth 6 -Compress)
@@ -1148,6 +1148,42 @@ Describe 'Invoke-CostAttributionRepair (issue #825 s3)' {
         { Invoke-CostAttributionRepair -Pr $pr -ParentCwd 'C:\fake\cwd' -RepoRoot 'C:\fake\repo' } | Should -Not -Throw
         $result = Invoke-CostAttributionRepair -Pr $pr -ParentCwd 'C:\fake\cwd' -RepoRoot 'C:\fake\repo'
         $result.Attempted | Should -Be $false
+    }
+
+    It 'skips repair (L9, issue #825 post-review fix) when the corroboration window cannot be resolved — unparseable/absent createdAt and empty commits — without ever calling Invoke-CostSessionRender or Find-OrUpsertComment' {
+        $pr = 825001
+        $originalBody = New-HarvestCompositeCommentBody -Pr $pr -CostSection $script:PreV4DegradedCostSection
+
+        function global:Get-CostTranscriptSlug { param($CwdPath) return 'test-slug' }
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match "pr view $pr --json state,headRefName,body") {
+                # createdAt absent entirely and commits an empty array — window start
+                # cannot resolve via either the earliest-commit or createdAt fallback.
+                return '{"state":"MERGED","headRefName":"feature/unresolvable-window","body":"","mergedAt":"2026-06-05T00:00:00Z","commits":[]}'
+            }
+            if ($joined -match "pr view $pr --json comments") {
+                # A real session_completeness: unknown composite comment exists — this
+                # test isolates the window-resolution guard, not the earlier
+                # composite-comment/session_completeness gates.
+                return (@{ comments = @(@{ body = $originalBody; authorAssociation = 'OWNER' }) } | ConvertTo-Json -Depth 6 -Compress)
+            }
+            return ''
+        }
+        $script:RenderCallCount = 0
+        function global:Invoke-CostSessionRender { $script:RenderCallCount++; return @{ CostSection = '' } }
+        $script:UpsertCalled = $false
+        function global:Find-OrUpsertComment { $script:UpsertCalled = $true; return $null }
+
+        $result = Invoke-CostAttributionRepair -Pr $pr -ParentCwd 'C:\fake\cwd' -RepoRoot 'C:\fake\repo'
+
+        $result.Attempted | Should -Be $false
+        $result.Upserted | Should -Be $false
+        $result.Signal | Should -Be "repair skipped for #$pr — corroboration window could not be resolved"
+        $script:RenderCallCount | Should -Be 0
+        $script:UpsertCalled | Should -Be $false
     }
 
     It 'skips when no composite comment is found for the PR' {
@@ -1212,7 +1248,7 @@ Describe 'Invoke-CostAttributionRepair (issue #825 s3)' {
             $joined = $Args -join ' '
             $global:LASTEXITCODE = 0
             if ($joined -match "pr view $pr --json state,headRefName,body") {
-                return '{"state":"MERGED","headRefName":"feature/issue-814-real-branch","body":"Fixes #814"}'
+                return '{"state":"MERGED","headRefName":"feature/issue-814-real-branch","body":"Fixes #814","createdAt":"2026-06-01T00:00:00Z","mergedAt":"2026-06-05T00:00:00Z"}'
             }
             if ($joined -match "pr view $pr --json comments") {
                 return (@{ comments = @(@{ body = $originalBody; authorAssociation = 'OWNER' }) } | ConvertTo-Json -Depth 6 -Compress)
@@ -1258,7 +1294,7 @@ Describe 'Invoke-CostAttributionRepair (issue #825 s3)' {
             $joined = $Args -join ' '
             $global:LASTEXITCODE = 0
             if ($joined -match "pr view $pr --json state,headRefName,body") {
-                return '{"state":"MERGED","headRefName":"feature/issue-815-real-branch","body":"Fixes #815"}'
+                return '{"state":"MERGED","headRefName":"feature/issue-815-real-branch","body":"Fixes #815","createdAt":"2026-06-01T00:00:00Z","mergedAt":"2026-06-05T00:00:00Z"}'
             }
             if ($joined -match "pr view $pr --json comments") {
                 return (@{ comments = @(@{ body = $originalBody; authorAssociation = 'OWNER' }) } | ConvertTo-Json -Depth 6 -Compress)
@@ -1296,7 +1332,7 @@ Describe 'Invoke-CostAttributionRepair (issue #825 s3)' {
             $joined = $Args -join ' '
             $global:LASTEXITCODE = 0
             if ($joined -match "pr view $pr --json state,headRefName,body") {
-                return '{"state":"MERGED","headRefName":"feature/issue-814-real-branch","body":"Fixes #814"}'
+                return '{"state":"MERGED","headRefName":"feature/issue-814-real-branch","body":"Fixes #814","createdAt":"2026-06-01T00:00:00Z","mergedAt":"2026-06-05T00:00:00Z"}'
             }
             if ($joined -match "pr view $pr --json comments") {
                 return (@{ comments = @(@{ body = $originalBody; authorAssociation = 'OWNER' }) } | ConvertTo-Json -Depth 6 -Compress)
@@ -1330,7 +1366,7 @@ Describe 'Invoke-CostAttributionRepair (issue #825 s3)' {
             $joined = $Args -join ' '
             $global:LASTEXITCODE = 0
             if ($joined -match "pr view $pr --json state,headRefName,body") {
-                return '{"state":"MERGED","headRefName":"feature/race","body":""}'
+                return '{"state":"MERGED","headRefName":"feature/race","body":"","createdAt":"2026-06-01T00:00:00Z","mergedAt":"2026-06-05T00:00:00Z"}'
             }
             if ($joined -match "pr view $pr --json comments") {
                 $script:FetchCallCount++

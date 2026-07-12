@@ -495,9 +495,14 @@ function Invoke-CostSessionRender {
                 # ProjectsRootPresent reuses the same root-absence check the
                 # degraded_reason='env-absent' classification already relies on
                 # (script:Test-FCLClaudeProjectsRootAbsent, cost-fcl-helpers.ps1).
+                # DegradedReason (L11, issue #825 post-review fix): threaded from the
+                # already-computed $costAttribution so a local walker TIMEOUT renders
+                # a distinct message from a genuine empty walk instead of colliding on
+                # the same generic "searched and none matched" text.
                 $renderContext = @{
                     IsCi                = ($env:GITHUB_ACTIONS -eq 'true')
                     ProjectsRootPresent = -not (script:Test-FCLClaudeProjectsRootAbsent)
+                    DegradedReason      = [string]$costAttribution['degraded_reason']
                 }
                 $costMarkdown = Format-CostPatternMarkdown -Attribution $costAttribution -Completeness $completeness -AnomalyFlags $anomalyFlags -RollingMeta $rollingResult -Pr $Pr -Branch ([string]$Branch) -RenderContext $renderContext -RejectedDirCount ([int]$rejectedDirCountRef.Value)
                 $costYaml = Format-CostPatternYaml -Attribution $costAttribution -Completeness $completeness -AnomalyFlags $anomalyFlags -Pr $Pr -Branch ([string]$Branch) -SessionId $currentSessionId -HeadRef ([string]$Branch)
@@ -554,6 +559,7 @@ function Invoke-CostSessionRender {
     # ancestor walk) rather than `Test-Path variable:...` — the latter has
     # the identical ancestor-walk behavior as a bare variable read and would
     # reintroduce the same shadowing hazard this guard exists to avoid.
+    if ($null -eq (Get-Variable -Name 'costEvents' -Scope 0 -ErrorAction SilentlyContinue)) { $costEvents = @() }
     if ($null -eq (Get-Variable -Name 'completeness' -Scope 0 -ErrorAction SilentlyContinue)) { $completeness = $null }
     if ($null -eq (Get-Variable -Name 'costAttribution' -Scope 0 -ErrorAction SilentlyContinue)) { $costAttribution = $null }
     if ($null -eq (Get-Variable -Name 'currentTokenSum' -Scope 0 -ErrorAction SilentlyContinue)) { [long]$currentTokenSum = 0 }

@@ -953,6 +953,21 @@ function Invoke-CostAttributionRepair {
             return $result
         }
 
+        # L9 (issue #825 post-review fix): a null/unparseable bound previously
+        # degraded silently to an UNENFORCED window (the walker's own "a $null bound
+        # is not enforced" contract) — this repair path must never proceed with an
+        # unenforced corroboration window, since an unenforced window is exactly what
+        # lets a same-repo reused-branch collision outside this PR's real lifetime
+        # slip through the Tier-2 corroborated-fallback ladder this repair turns on.
+        # Checked here — after the cheaper composite-comment/session_completeness
+        # gates above, which take priority when they alone already explain a skip —
+        # and before $result.Attempted is set, so an unresolvable window is reported
+        # honestly instead of proceeding with an unenforced repair.
+        if ($null -eq $corroborationWindowStart -or $null -eq $corroborationWindowEnd) {
+            $result.Signal = "repair skipped for #$Pr — corroboration window could not be resolved"
+            return $result
+        }
+
         $result.Attempted = $true
 
         # 3. Re-walk with the Tier-2 corroborated-fallback ladder ON — this call only (M10) —
