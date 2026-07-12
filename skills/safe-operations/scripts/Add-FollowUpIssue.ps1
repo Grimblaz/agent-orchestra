@@ -120,7 +120,12 @@ function Add-FollowUpIssue {
 
     # M1: Compose the body with parent ref, caller body, and sentinel block.
     # Layout: "Parent: #X\n\n<Body>\n\n<sentinel>\n<provenance marker>"
-    $parentRef = "Parent: #$ParentIssue"
+    # #837 post-fix (F1): a blank/whitespace -ParentIssue is a deliberate
+    # parentless filing (e.g. calibration-improvement issues have no natural
+    # parent) — omit the "Parent: #" line entirely rather than rendering the
+    # degenerate "Parent: #" with no number.
+    $hasParent = -not [string]::IsNullOrWhiteSpace([string]$ParentIssue)
+    $parentRef = if ($hasParent) { "Parent: #$ParentIssue" } else { '' }
     # If CriterionIds parameter is empty but the legacy -CriterionId alias is supplied, use that.
     $effectiveCriterionIds = if ($CriterionIds -and $CriterionIds.Count -gt 0) { $CriterionIds } elseif ($CriterionId) { $CriterionId } else { @() }
     $sentinel = New-FollowupSentinelBlock -CriterionIds $effectiveCriterionIds -OriginatingPr $OriginatingPr
@@ -145,7 +150,11 @@ function Add-FollowUpIssue {
     # #837 DD7: provenance marker, additive and placed beside the sentinel block.
     $provenanceMarker = "<!-- filing-provenance: $FilingProvenance -->"
 
-    $bodyWithParent = "$parentRef`n`n$Body$acBlock`n`n$sentinel`n$provenanceMarker"
+    $bodyWithParent = if ($hasParent) {
+        "$parentRef`n`n$Body$acBlock`n`n$sentinel`n$provenanceMarker"
+    } else {
+        "$Body$acBlock`n`n$sentinel`n$provenanceMarker"
+    }
 
     # M3: Warn on comma-bearing labels before constructing the CSV.
     foreach ($label in $Labels) {
@@ -174,18 +183,26 @@ function Add-FollowUpIssue {
 
     # 2. GraphQL Linkage with retry
     # Get parent and child GraphQL Node IDs
+    # #837 post-fix (F2): a by-design parentless filing (-ParentIssue blank)
+    # has no parent to link — skip GraphQL linkage entirely rather than
+    # letting the M15 "prerequisite failed" Write-Error fire on every
+    # successful filing for a parent that was never supposed to exist.
     $parentId = $null
     $childId = $null
-    try {
-        $parentId = gh issue view $ParentIssue --json id --jq .id 2>$null
-        $childId = gh issue view $childNumber --json id --jq .id 2>$null
-    } catch {
-        Write-Warning "Failed to resolve GraphQL node IDs for parent #$ParentIssue or child #${childNumber}`: $($_.Exception.Message)"
+    if ($hasParent) {
+        try {
+            $parentId = gh issue view $ParentIssue --json id --jq .id 2>$null
+            $childId = gh issue view $childNumber --json id --jq .id 2>$null
+        } catch {
+            Write-Warning "Failed to resolve GraphQL node IDs for parent #$ParentIssue or child #${childNumber}`: $($_.Exception.Message)"
+        }
     }
 
     $graphqlSuccess = $false
 
-    if ($parentId -and $childId) {
+    if (-not $hasParent) {
+        Write-Warning "No parent issue supplied (by design); skipping GraphQL sub-issue linkage for issue #$childNumber."
+    } elseif ($parentId -and $childId) {
         $mutation = @"
 mutation {
   addSubIssue(input: {

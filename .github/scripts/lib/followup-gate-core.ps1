@@ -253,7 +253,10 @@ function Read-ProposedFollowupsComment {
     # a literal "```" substring mid-line; an unanchored non-greedy match would stop at
     # that embedded sequence and silently truncate the YAML block. This is fence-aware
     # extraction rather than mutating user content in ConvertTo-FollowupYamlString.
-    if ($CommentBody -notmatch '(?ms)^```yaml[ \t]*\r?\n(.*?)\r?\n^```[ \t]*$') {
+    # F3 (post-fix): .NET multiline `$` anchors before `\n` only, so a CRLF body
+    # whose closing fence is followed by a trailing `\r` (not yet consumed) would
+    # fail to match. Tolerate an optional trailing `\r` at the closing anchor.
+    if ($CommentBody -notmatch '(?ms)^```yaml[ \t]*\r?\n(.*?)\r?\n^```[ \t]*\r?$') {
         throw [System.InvalidOperationException]::new(
             'Read-ProposedFollowupsComment: no fenced yaml block found in the supplied comment body.'
         )
