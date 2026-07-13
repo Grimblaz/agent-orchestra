@@ -230,13 +230,15 @@ Before the gate fires, compute a `stable_finding_key` for each finding. This key
 
 The `stable_finding_key` is what the resume-read mechanism uses to detect prior dispositions across re-reviews of the same PR (see § Stable-Key Resume below).
 
-### `reviewer_source` Lookup Order
+### `reviewer_source` Lookup Order (GitHub-Sourced Findings Only)
 
-Both disposition-recording sites below (§ Routine Findings and § Load-Bearing Findings) write a `reviewer_source` field. Resolve its value in this order:
+This lookup order applies only to findings that originated from an external GitHub review comment. Pipeline-native findings (local prosecution/defense/judge findings) never enter this lookup procedure — the disposition-recording sites below write `reviewer_source: local` directly for those findings, without evaluating any of the three tiers.
+
+Both disposition-recording sites below (§ Routine Findings and § Load-Bearing Findings) write a `reviewer_source` field. For GitHub-sourced findings, resolve its value in this order:
 
 1. **In-context intake ledger** — when the session is continuous with the GitHub-intake pass that built the finding, read the `reviewer_source` value the intake skill (`skills/code-review-intake/SKILL.md`) already recorded for this finding.
-2. **`gh api` re-derivation** — otherwise (standalone or resumed judge pass), extract the `comment_id` embedded in the finding's `stable_finding_key` and re-derive the reviewer identity via `gh api`, trying the PR-review-comment, issue-comment, and review endpoints in turn. Normalize the result per the intake skill's rule: `lowercase(author.login)` with a trailing `[bot]` stripped, sourced from the author's `.login` field only, written as a quoted scalar, with the same reserved-value collision escape (a real login colliding with `local` or `unresolved` is recorded as `ext-{login}`).
-3. **`unresolved` sentinel** — on any failure (comment deleted, API error, no comment ID embedded in the key to re-derive from), write the sentinel `unresolved`. Never write `local` on lookup failure — `local` is reserved exclusively for pipeline-native (non-GitHub-sourced) findings.
+2. **`gh api` re-derivation** — otherwise (standalone or resumed judge pass), extract the `comment_id` embedded in the finding's `stable_finding_key` — the numeric run immediately after the `gh-` prefix, up to the next `-` or end of string; this parse rule covers both the single-finding `gh-{comment_id}` key shape and the multi-finding `gh-{comment_id}-{hash}` key shape identically — and re-derive the reviewer identity via `gh api`, trying the PR-review-comment, issue-comment, and review endpoints in turn. Normalize the result per the intake skill's rule: `lowercase(author.login)` with a trailing `[bot]` suffix stripped, sourced from the author's `.login` field only (never display name), written as a quoted scalar, with the same reserved-value collision escape (a real login colliding with `local` or `unresolved` is recorded as `ext-{login}`).
+3. **`unresolved` sentinel** — on any failure (comment deleted, API error, no comment ID embedded in the key to re-derive from), write the sentinel `unresolved`. Never write `local` on lookup failure — `local` is reserved exclusively for pipeline-native (non-GitHub-sourced) findings, which are written directly per the guard above and never fall through to this sentinel.
 
 ### Routine Findings — Silent Recording
 
@@ -252,7 +254,7 @@ For routine findings, the agent records the disposition silently in the `review-
   classification: routine
   severity: medium           # v3: required field
   stage: code-review         # v3: required field
-  reviewer_source: local     # v3: writer always emits this field (writer obligation); the schema treats an absent field as local for backward compat with pre-v3 entries (reader-semantics fallback) — local is reserved for pipeline-native findings; external identities resolve per § reviewer_source Lookup Order
+  reviewer_source: local     # v3: writer always emits this field (writer obligation); the reader/consumer treats an absent field as local for backward compat with pre-v3 entries (reader-semantics fallback) — local is reserved for pipeline-native findings; external identities resolve per § reviewer_source Lookup Order
   disposition_rationale: "Trivial null-guard already required by the existing type contract; no maintainer choice required."
   artifact_citation: "src/types/index.ts:18 (NonNullable<T> constraint)"
 ```
@@ -288,7 +290,7 @@ Record as (v3 format — include `severity`, `stage`, `reviewer_source`, and `ac
   classification: load-bearing
   severity: high             # v3: required field
   stage: code-review         # v3: required field
-  reviewer_source: local     # v3: writer always emits this field (writer obligation); the schema treats an absent field as local for backward compat with pre-v3 entries (reader-semantics fallback) — local is reserved for pipeline-native findings; external identities resolve per § reviewer_source Lookup Order
+  reviewer_source: local     # v3: writer always emits this field (writer obligation); the reader/consumer treats an absent field as local for backward compat with pre-v3 entries (reader-semantics fallback) — local is reserved for pipeline-native findings; external identities resolve per § reviewer_source Lookup Order
   disposition_rationale: "Engineer chose incorporate: the expiry check was confirmed missing and the fix is bounded to one function."
 ```
 
