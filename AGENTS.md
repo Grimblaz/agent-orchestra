@@ -6,7 +6,7 @@ Agent Orchestra is a multi-agent workflow system built for Claude Code, combinin
 
 ## Agent surfaces: what works where
 
-Slash commands, plugin install/marketplace, subagent dispatch, and the plugin-distributed hooks at `hooks/hooks.json` (keyed on `${CLAUDE_PLUGIN_ROOT}`, the environment variable pointing at the installed plugin's root directory) are Claude Code-only surfaces.
+Slash commands, plugin install/marketplace, subagent dispatch, and the plugin-distributed hooks at `hooks/hooks.json` (its path is keyed on the environment variable the Claude Code plugin runtime sets to its own install root) are Claude Code-only surfaces.
 
 A frozen GitHub Copilot surface also ships today and remains until 2026-08-31: `.github/prompts/*.prompt.md` (Copilot slash-command prompts) and the **separate** root `hooks.json` — the Copilot/VS Code hook config. Do not conflate the two `hooks.json` files; they serve two different platforms.
 
@@ -14,7 +14,7 @@ None of these surfaces — Claude's or Copilot's — are available to a Codex se
 
 ## How changes are verified
 
-Pester tests live in `.github/scripts/Tests/*.Tests.ps1` and run under PowerShell 7 (`pwsh`). Markdown is held to `.markdownlint.json` and `.editorconfig`. Entry-point changes that ship require a version bump performed via `.github/scripts/bump-version.ps1` — version strings are never hand-edited.
+Pester tests live in `.github/scripts/Tests/*.Tests.ps1` and run under PowerShell 7 (`pwsh`). Markdown is held to `.markdownlint.json` and `.editorconfig`. Entry-point changes that ship require a version bump performed via `.github/scripts/bump-version.ps1` — version strings are never hand-edited. Reviewers should also expect script changes to carry test coverage and human-facing documentation to expand insider terms on first use.
 
 ## Where decisions live
 
@@ -22,7 +22,7 @@ Durable HTML-comment markers on GitHub issues and pull requests are the cross-se
 
 ## Repo map
 
-`agents/*.agent.md` are shared, tool-agnostic agent bodies; `agents/{name}.md` (lowercase) are the Claude Code dispatch shells that load them. `Documents/Design/` holds design records. Shorthand like `SMC-NN`, `D1`/`D2`/`D3`, and `CE Gate (Customer Experience Gate)` is decoded at [`HOW-IT-WORKS.md#vocab`](HOW-IT-WORKS.md#vocab).
+`agents/*.agent.md` are shared, tool-agnostic agent bodies; `agents/{name}.md` (lowercase) are the Claude Code dispatch shells that load them. `skills/` holds the shared methodology, with per-skill `platforms/` notes for tool-specific detail. `Documents/Design/` holds design records. Shorthand like `SMC-NN`, `D1`/`D2`/`D3`, and `CE Gate (Customer Experience Gate)` is decoded at [`HOW-IT-WORKS.md#vocab`](HOW-IT-WORKS.md#vocab).
 
 ## Maintenance rule
 
