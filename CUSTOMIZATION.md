@@ -232,6 +232,22 @@ When you run `/setup` and opt into Phase 5, the wizard can generate starter file
 
 If any file already exists, Phase 5 asks before overwriting (`.vscode/settings.json`, `.vscode/mcp.json`) or skips silently (`.vscode/extensions.json`). `.gitignore` additions are always additive — no existing lines are removed.
 
+## External AI Reviewers (Optional)
+
+You can add an external AI code-review bot (for example OpenAI Codex's GitHub integration) as an additional reviewer on your PRs — the review-intake pipeline is author-agnostic, so it ingests findings from any reviewer without plugin changes.
+
+**Setup**:
+
+1. Enable the reviewer app on your repository, following the reviewer's own GitHub-integration docs (for OpenAI Codex, see [OpenAI's Codex GitHub integration guide](https://developers.openai.com/codex/cloud/github)).
+2. Keep an honest root `AGENTS.md` — see the `ai-first-documentation` skill for authoring guidance.
+3. Run `/review-github` as usual once the external reviewer has posted its review.
+
+**What to expect**: each finding is attributed to `reviewer_source`, a value derived from the reviewer's GitHub login (never a display name — see the intake skill's normalization rule), and carries its own per-finding judge ruling.
+
+Adding a reviewer never requires plugin changes — intake is author-agnostic and recognizes any GitHub reviewer's comments the same way.
+
+**Reading the accept-rate**: samples smaller than 5 findings for a given reviewer render as `INSUFFICIENT DATA` rather than a misleadingly precise percentage. A reviewer that is enabled but has posted few or no findings yet ("reviewed but quiet") is not the same as a reviewer that was never enabled — check whether the app is installed before assuming silence means absence. The per-reviewer accept-rate covers **judge-sustained findings only**; findings that proxy prosecution's defense pass kills are aggregate-only and are not broken out per reviewer. This is a disclosure of the metric's scope, not a defect.
+
 ## Commit Policy
 
 By default, Code-Conductor auto-commits after each validated plan step. Each commit represents a state that has passed the validation ladder (Tier 1) and RC conformance gate — no untested code is committed.
