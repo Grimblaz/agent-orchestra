@@ -65,7 +65,9 @@ jobs:
             # Pester mock fall-through guard — issue #818 s6 (d-dead-filter-tripwire-v2)
             '.github/scripts/Tests/pester-mock-fallthrough-guard.Tests.ps1',
             # Post-port acceptance delta-gate core — issue #818 s7
-            '.github/scripts/Tests/pester6-baseline-delta-core.Tests.ps1'
+            '.github/scripts/Tests/pester6-baseline-delta-core.Tests.ps1',
+            # AGENTS.md BDD-heading guard — registered per issue #835
+            '.github/scripts/Tests/bdd-scenario-contract.Tests.ps1'
           )
           $config.Run.Exit = $true
           $config.Output.Verbosity = 'Detailed'
