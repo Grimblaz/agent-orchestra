@@ -946,9 +946,25 @@ function script:Get-ReviewDispositionsTallyInternal {
     # a phantom entry with attacker-controlled disposition/reviewer_source
     # values. Exclude any boundary match whose start index falls inside a
     # block-scalar span computed over this already-isolated $region.
-    $entryBoundaryPattern = '(?m)^\s*-\s+(?:stable_finding_key|finding_id)\s*:'
+    #
+    # CM1 refinement (issue #817 sibling bug, near-decoy window-bleed): the
+    # block-scalar exclusion check must test the KEYWORD capture group's own
+    # position (Groups[1], the stable_finding_key|finding_id token itself),
+    # not the overall match's start. The overall match's Index includes the
+    # pattern's leading `^\s*` prefix, which (since .NET's `\s` matches
+    # newlines) can backtrack across a preceding block scalar's trailing
+    # blank line — a line Get-BlockScalarSpans counts as part of that block
+    # scalar's span — even when the keyword itself sits just past the span's
+    # end. Anchoring the exclusion check on the keyword's own position keeps
+    # the original CM1 in-block-scalar-decoy protection intact while no
+    # longer wrongly excluding a genuine entry boundary that merely follows a
+    # preceding entry's block scalar plus blank line. Segmentation below
+    # still uses each surviving Match's own `.Index` (the `- ` dash start),
+    # matching the "split ONLY on real dash-item starts" contract above —
+    # only the exclusion test's index changes, not the split boundary.
+    $entryBoundaryPattern = '(?m)^\s*-\s+(stable_finding_key|finding_id)\s*:'
     $blockScalarSpans = Get-BlockScalarSpans -Text $region
-    $entryStarts = @([regex]::Matches($region, $entryBoundaryPattern) | Where-Object { -not (Test-IndexInBlockScalarSpan -Index $_.Index -Spans $blockScalarSpans) })
+    $entryStarts = @([regex]::Matches($region, $entryBoundaryPattern) | Where-Object { -not (Test-IndexInBlockScalarSpan -Index $_.Groups[1].Index -Spans $blockScalarSpans) })
     if ($entryStarts.Count -eq 0) {
         return [PSCustomObject]@{ Entries = @(); ParseStatus = 'could-not-verify' }
     }

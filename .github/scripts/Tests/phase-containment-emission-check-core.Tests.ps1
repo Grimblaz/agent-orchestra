@@ -1365,6 +1365,50 @@ entries:
 ```
 '@
 
+# Near-decoy window-bleed regression (issue #817 sibling bug, folded into
+# this PR): the FIRST entry's disposition_rationale is a `|` block scalar
+# immediately followed by a BLANK LINE, and the SECOND entry's real
+# `- stable_finding_key:` dash-item starts right after that blank line.
+# Get-BlockScalarSpans extends the first entry's block-scalar span through
+# the trailing blank line; the entry-boundary regex's `^\s*` prefix can
+# match starting from that blank line (a valid multiline `^` position) and
+# consume the newline plus the second entry's own leading indentation before
+# reaching its `-`, so the overall match's `.Index` lands inside the
+# extended span even though the actual `- stable_finding_key:` keyword
+# itself sits just outside it. This is the same match-start-vs-keyword-
+# position bug issue #817's M2 fix corrected in
+# Get-JudgeRulingsDuplicateDiagnosis, now found in the sibling
+# Get-ReviewDispositionsTallyInternal entry-boundary detector. Both entries
+# are genuine and must be returned; the second must never be silently
+# dropped.
+$script:ReviewDispositionsNearDecoyWindowBleedBody = @'
+<!-- review-dispositions-930 -->
+
+```yaml
+schema_version: 3
+passes_run: [1]
+entries:
+  - stable_finding_key: "k.ps1:1:kkk"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: medium
+    stage: code-review
+    reviewer_source: local
+    disposition_rationale: |
+      Fixed inline after discussion.
+
+  - stable_finding_key: "k.ps1:2:lll"
+    pass: 1
+    disposition: dismiss
+    classification: routine
+    severity: low
+    stage: code-review
+    reviewer_source: local
+    disposition_rationale: "Not applicable."
+```
+'@
+
 #endregion
 
 }
@@ -2870,6 +2914,18 @@ Describe 'Get-DispositionTally - code-review surface CM7 regression: quoted YAML
         $distinctSources = @($result.Entries.ReviewerSource | Select-Object -Unique)
         $distinctSources.Count | Should -Be 1
         $distinctSources[0] | Should -Be 'copilot'
+    }
+}
+
+Describe 'Get-DispositionTally - code-review surface near-decoy window-bleed regression (issue #817 sibling bug)' {
+    It 'returns BOTH entries when the second entry''s boundary immediately follows the first entry''s block-scalar trailing blank line' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsNearDecoyWindowBleedBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 2
+        $result.Entries[0].StableFindingKey | Should -Be 'k.ps1:1:kkk'
+        $result.Entries[0].Disposition | Should -Be 'incorporate'
+        $result.Entries[1].StableFindingKey | Should -Be 'k.ps1:2:lll'
+        $result.Entries[1].Disposition | Should -Be 'dismiss'
     }
 }
 
