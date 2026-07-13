@@ -213,7 +213,7 @@ function script:ConvertFrom-YamlQuotedScalar {
 
 #endregion
 
-#region Get-RealJudgeRulingsHeadMatches (private)
+#region Judge-rulings head detection and duplicate-diagnosis helpers (private)
 
 function script:Get-JudgeRulingsRawWindowEnd {
     <#
@@ -353,24 +353,38 @@ function script:Get-JudgeRulingsDuplicateDiagnosis {
         The raw comment body text to scan (the same text the caller already
         passed to Get-RealJudgeRulingsHeadMatches).
     .OUTPUTS
-        [string] — 'window-bleed' or 'genuine-duplicate'. A third,
-        zero-survivor outcome is impossible given the >=2-real-heads
-        precondition: every candidate already passed Get-RealJudgeRulingsHeadMatches's
-        own untruncated vocab gate to become a candidate at all, and the
-        last candidate's window here is never truncated by a next-candidate
-        boundary (only by the same body-length cap that function already
-        applies) — so the last candidate always re-survives its own,
-        unchanged window, making 0 survivors unreachable by construction.
-        The implementation still has a defensive fallback for this
-        unreachable case (see the comment at its `else` branch) rather than
-        throwing, since this file runs under strict mode as part of a
-        warn-only advisory sweep.
+        [string] — 'window-bleed' or 'genuine-duplicate'. M1 correction (PR
+        #833 judge-sustained review): the zero-survivor outcome is NOT
+        unreachable. Get-RealJudgeRulingsHeadMatches's own candidacy vocab
+        gate does not apply the block-scalar exclusion to its match, while
+        this helper's survivor check DOES (the M8 hardening) — so a
+        candidate can pass candidacy purely on block-scalar-interior
+        vocabulary yet fail to survive here. When every candidate's only
+        vocabulary lives inside a block scalar this way, 0 survivors is
+        genuinely reachable (see the else branch below, and the direct
+        M10 unit test that pins exactly this case). The implementation
+        conservatively returns the 'genuine-duplicate' fallback for this
+        reachable case rather than throwing, since this file runs under
+        strict mode as part of a warn-only advisory sweep.
     #>
     param(
         [Parameter(Mandatory)][AllowEmptyString()][string]$Body
     )
 
     $candidates = Get-RealJudgeRulingsHeadMatches -Body $Body
+
+    # M4 fix (PR #833 judge-sustained follow-up): defensive backstop only —
+    # this function's own documented precondition (and the caller's existing
+    # `.Count -ge 2` guard) already requires at least 2 real heads before
+    # this helper is ever invoked on the real call path. A direct call with
+    # fewer than 2 candidates has no genuine duplicate to diagnose at all,
+    # so return the conservative 'genuine-duplicate' label immediately
+    # rather than letting a lone candidate's own survival be misread as a
+    # 1-survivor window-bleed case.
+    if ($candidates.Count -lt 2) {
+        return 'genuine-duplicate'
+    }
+
     $blockScalarSpans = Get-BlockScalarSpans -Text $Body
     $survivorCount = 0
 
@@ -388,7 +402,20 @@ function script:Get-JudgeRulingsDuplicateDiagnosis {
 
         $survives = $false
         foreach ($vocabMatch in [regex]::Matches($window, $script:JudgeRulingsVocabGatePattern)) {
-            $absoluteIndex = $candidate.Index + $vocabMatch.Index
+            # M2 fix (PR #833 judge-sustained follow-up): test the KEYWORD
+            # capture group's own position (Groups[1], the
+            # disposition|judge_ruling|verdict|finding_key token itself),
+            # not the overall match's start. The overall match's Index
+            # includes the vocab pattern's leading `^\s*` prefix, which
+            # (since .NET's `\s` matches newlines) can backtrack across a
+            # preceding block scalar's trailing blank line — a line
+            # Get-BlockScalarSpans counts as part of that block scalar's
+            # span — even when the keyword itself sits just past the
+            # span's end. Anchoring on the keyword's own position keeps
+            # the genuine in-block-scalar-decoy exclusion (M8) intact
+            # while no longer wrongly excluding a genuine field that
+            # merely follows a block scalar's trailing blank line.
+            $absoluteIndex = $candidate.Index + $vocabMatch.Groups[1].Index
             if (-not (Test-IndexInBlockScalarSpan -Index $absoluteIndex -Spans $blockScalarSpans)) {
                 $survives = $true
                 break
@@ -406,17 +433,20 @@ function script:Get-JudgeRulingsDuplicateDiagnosis {
         return 'genuine-duplicate'
     }
     else {
-        # Defensive, believed unreachable by construction: the last
-        # candidate's window is never truncated by a next-candidate boundary
-        # (only capped by the same 400-char/body-length bound
-        # Get-RealJudgeRulingsHeadMatches itself already applies), and it
-        # already passed that exact untruncated vocab gate to be a candidate
-        # at all — so it always has at least one non-block-scalar vocab
-        # match in its own window here too, making 0 survivors impossible.
-        # This file runs under Set-StrictMode -Version Latest as part of a
-        # warn-only advisory sweep; throwing here would silently abort the
-        # whole emission-gap computation, so fail toward the more
-        # conservative 'genuine-duplicate' label instead of throwing.
+        # M1 correction (PR #833 judge-sustained review): this branch IS
+        # reachable, not merely defensive. Get-RealJudgeRulingsHeadMatches's
+        # own candidacy vocab gate does NOT exclude block-scalar-interior
+        # matches, but this helper's survivor check DOES (the M8
+        # hardening) — so a candidate can become a candidate purely on
+        # vocabulary living inside a block scalar, then lose its only
+        # match here once that same match is block-scalar-excluded. When
+        # every candidate's vocabulary is block-scalar-interior this way,
+        # 0 survivors genuinely occurs (pinned directly by a dedicated
+        # unit test, M10). This file runs under Set-StrictMode -Version
+        # Latest as part of a warn-only advisory sweep; throwing here would
+        # silently abort the whole emission-gap computation, so fail toward
+        # the more conservative 'genuine-duplicate' label instead of
+        # throwing.
         return 'genuine-duplicate'
     }
 }
@@ -471,7 +501,10 @@ function Test-EmissionMarkerPresent {
         `Reason` field: 'head-missing' when this fallback is what made the
         marker read as present (no real judge-rulings head exists at all);
         'head-corrupt' when a real head IS present elsewhere but failed to
-        parse; 'ok' otherwise. code-review is unaffected by this
+        parse; 'decoy-ambiguous' (issue #817) when a real head IS present
+        but the M1 duplicate-head guard fired only because a harmless
+        nearby mention's vocab-gate window bled into one genuine block's
+        own vocabulary; 'ok' otherwise. code-review is unaffected by this
         plan-stress-test-specific fallback/Reason logic specifically — it
         never reaches the fallback branch above. The duplicate-head guard in
         Get-JudgeRulingsSustainedCountInternal (M1 fix) is vocab-gated and
@@ -1555,7 +1588,11 @@ function Get-EmissionGap {
     # decoy-ambiguous when both occur across different bodies in the same
     # aggregation, since "a machine head exists but is genuinely broken /
     # a genuine duplicate" is the more actionable diagnosis than "one body
-    # merely had a near-decoy window-bleed." 'ok' when ParseStatus is 'ok'
+    # merely had a near-decoy window-bleed." decoy-ambiguous in turn
+    # outranks head-missing: a body with a present-but-ambiguous machine
+    # head (decoy-ambiguous) is more specific/actionable than a body with
+    # no real head detected at all (head-missing) — a present-if-confusing
+    # signal outranks an absent one. 'ok' when ParseStatus is 'ok'
     # (no could-not-verify body at all). This priority is cross-body only —
     # the per-body if/elseif classification above (see $hasRealHead handling)
     # already guarantees a single body sets at most one of
