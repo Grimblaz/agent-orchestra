@@ -239,14 +239,14 @@ You can add an external AI code-review bot (for example OpenAI Codex's GitHub in
 **Setup**:
 
 1. Enable the reviewer app on your repository, following the reviewer's own GitHub-integration docs (for OpenAI Codex, see [OpenAI's Codex GitHub integration guide](https://developers.openai.com/codex/integrations/github)).
-2. Keep an honest root `AGENTS.md` — see the `ai-first-documentation` skill for authoring guidance.
+2. Keep an honest root `AGENTS.md` — see the `ai-first-documentation` skill (`skills/ai-first-documentation/SKILL.md`) for authoring guidance.
 3. Run `/review-github` as usual once the external reviewer has posted its review.
 
-**What to expect**: each finding is attributed to `reviewer_source`, a value derived from the reviewer's GitHub login (never a display name — see the intake skill's normalization rule), and carries its own per-finding judge ruling.
+**What to expect**: each finding is attributed to `reviewer_source`, a value derived from the reviewer's GitHub login (never a display name — see the intake skill's normalization rule at `skills/code-review-intake/SKILL.md`), and carries its own per-finding judge ruling.
 
 Adding a reviewer never requires plugin changes — intake is author-agnostic and recognizes any GitHub reviewer's comments the same way.
 
-**Reading the per-reviewer dismiss-rate**: samples smaller than 5 findings for a given reviewer render as `INSUFFICIENT DATA` rather than a misleadingly precise percentage. A reviewer that is enabled but has posted few or no findings yet ("reviewed but quiet") is not the same as a reviewer that was never enabled — check whether the app is installed before assuming silence means absence. In the phase-containment cost report, this metric renders under **Review Cost** as **Post-judge dismiss-rate**, broken out **Per-reviewer-source (code-review)**, and covers **judge-sustained findings only**; findings that proxy prosecution's defense pass kills are aggregate-only and are not broken out per reviewer.
+**Reading the per-reviewer dismiss-rate**: samples smaller than 5 findings for a given reviewer render as `INSUFFICIENT DATA` rather than a misleadingly precise percentage. A reviewer that is enabled but has posted few or no findings yet ("reviewed but quiet") is not the same as a reviewer that was never enabled — check whether the app is installed before assuming silence means absence. Run `pwsh -File .github/scripts/phase-containment-report.ps1` to view the phase-containment cost report; this metric renders under **Review Cost** as **Post-judge dismiss-rate**, broken out **Per-reviewer-source (code-review)**, and covers **judge-sustained findings only**; findings that proxy prosecution's defense pass kills are aggregate-only and are not broken out per reviewer.
 
 ## Commit Policy
 
