@@ -1013,6 +1013,66 @@ $script:BothHeadsBlockScalarOnlyVocabBody = @'
 
 #endregion
 
+#region GH-2 (PR #853 review, judge-sustained): near-decoy window-bleed onto an independently-corrupt real head
+
+# GH-2 fixture: the SAME near-decoy shape as $script:NearDecoyPlanStressTestBody
+# (T1, ~L691 above) — a bare-prose decoy mention of the `<!-- judge-rulings -->`
+# convention sitting well under the 400-char lookahead window before a real
+# judge-rulings block — but the REAL block's own `judge_ruling:` field value
+# is itself invalid (`maybe-sustained-ish`, not the closed 2-value enum
+# `sustained`/`defense-sustained` per skills/review-judgment/SKILL.md:156).
+#
+# The bug: Get-JudgeRulingsDuplicateDiagnosis's per-candidate survivor check
+# (core ~L404) only re-runs $script:JudgeRulingsVocabGatePattern, which tests
+# for the KEY token's presence (`judge_ruling\s*:`) and never validates the
+# captured VALUE. The real block's own truncated/untruncated window still
+# contains a `judge_ruling:` key match regardless of the malformed value, so
+# it "survives" the truncated re-check exactly as a well-formed real block
+# would. Survivor count is 1 (the decoy's truncated window has no vocabulary
+# of its own) -> 'window-bleed' -> Get-EmissionGap reports Reason
+# 'decoy-ambiguous'. That is the wrong diagnosis: removing the decoy would
+# NOT fix this body — the surviving block is independently corrupt
+# (Get-SustainedFindingCount's own `$hasJudgeRuling` branch, core ~L1307-1314,
+# already treats an unrecognized `judge_ruling:` value as could-not-verify on
+# its own). The correct Reason is 'head-corrupt', not 'decoy-ambiguous'.
+#
+# Confirmed: Get-RealJudgeRulingsHeadMatches returns exactly 2 candidates for
+# this body (the decoy and the malformed real head both pass the KEY-only
+# vocab gate), the same bleed-confirmation shape as T1/T2 above.
+$script:NearDecoyMalformedRealHeadBody = @'
+<!-- plan-issue-819 -->
+
+**Plan Stress-Test** (5-pass `standard` adapter)
+
+This PR uses the standard <!-- judge-rulings --> marker convention for tracking review history, mentioned here only as ordinary narrative text.
+
+<!-- judge-rulings
+- finding_id: M1
+  judge_ruling: maybe-sustained-ish
+-->
+'@
+
+# GH-2 companion baseline: the SAME independently-corrupt real block, with NO
+# decoy mention preceding it (1 real head only). Get-RealJudgeRulingsHeadMatches
+# returns exactly 1 candidate, so the 2+-real-heads duplicate-head guard never
+# fires and Get-JudgeRulingsDuplicateDiagnosis is never invoked for this body
+# — Get-EmissionGap's could-not-verify/hasRealHead-but-not->=2-heads branch
+# (core ~L1540-1547) directly attributes 'head-corrupt'. This is the
+# existing, already-correct baseline the GH-2 RED test above contrasts
+# against.
+$script:MalformedRealHeadNoDecoyBody = @'
+<!-- plan-issue-819 -->
+
+**Plan Stress-Test** (5-pass `standard` adapter)
+
+<!-- judge-rulings
+- finding_id: M1
+  judge_ruling: maybe-sustained-ish
+-->
+'@
+
+#endregion
+
 #region 811-D1 s4: writer-contract round-trip fixtures (skills/plan-authoring/SKILL.md)
 
 # Round-trip fixture: exercises the SKILL's "one entry per merged finding_id"
@@ -1966,6 +2026,29 @@ Describe 'PR #833 judge-sustained M10 direct-isolation regression: Get-JudgeRuli
 
         { $script:m10Diagnosis = Get-JudgeRulingsDuplicateDiagnosis -Body $script:BothHeadsBlockScalarOnlyVocabBody } | Should -Not -Throw
         $script:m10Diagnosis | Should -Be 'genuine-duplicate'
+    }
+}
+
+Describe 'GH-2 (PR #853 review, judge-sustained): near-decoy window-bleed must not soften an independently-corrupt real head to decoy-ambiguous' {
+    It 'diagnostic: the decoy and the malformed real head both pass the vocab gate (bleed confirmed, key-only gate does not validate the value)' {
+        $realHeads = Get-RealJudgeRulingsHeadMatches -Body $script:NearDecoyMalformedRealHeadBody
+        $realHeads.Count | Should -Be 2
+    }
+
+    It 'reports Reason head-corrupt, not decoy-ambiguous, when the surviving real head is independently corrupt (RED today — currently reports decoy-ambiguous)' {
+        $result = Get-EmissionGap -Bodies @($script:NearDecoyMalformedRealHeadBody) -Id 819 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.Reason | Should -Be 'head-corrupt'
+        $result.Reason | Should -Not -Be 'decoy-ambiguous'
+    }
+
+    It 'companion baseline (no decoy): the same malformed real head alone already reports head-corrupt today (GREEN, contrast case for the RED test above)' {
+        $realHeads = Get-RealJudgeRulingsHeadMatches -Body $script:MalformedRealHeadNoDecoyBody
+        $realHeads.Count | Should -Be 1
+
+        $result = Get-EmissionGap -Bodies @($script:MalformedRealHeadNoDecoyBody) -Id 819 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.Reason | Should -Be 'head-corrupt'
     }
 }
 

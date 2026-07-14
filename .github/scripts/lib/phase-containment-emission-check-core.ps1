@@ -338,7 +338,22 @@ function script:Get-JudgeRulingsDuplicateDiagnosis {
         Survivor count 1 -> exactly one candidate has genuinely own
         vocabulary; the other candidate(s) only passed the ungated check by
         borrowing vocabulary that actually belongs to a different head.
-        Reported as 'window-bleed' (one real block, seen twice).
+        Reported as 'window-bleed' (one real block, seen twice) — UNLESS
+        (GH-2, PR #853 review, judge-sustained) the survivor's own window
+        carries a `judge_ruling:` key whose value is not a recognized
+        member of the closed 2-value enum (`sustained` |
+        `defense-sustained`). The vocab gate only checks that the KEY is
+        present, never the VALUE that follows, so a lone surviving real
+        block can still be independently corrupt on its own field content.
+        When that happens, 'window-bleed' would wrongly soften an
+        independently-corrupt head to 'decoy-ambiguous' (via
+        Get-EmissionGap's wiring); this helper instead falls through to
+        'genuine-duplicate' so the caller treats it conservatively as
+        'head-corrupt'. A survivor window with no `judge_ruling:` key at
+        all (it survived via `disposition`, `verdict`, or `finding_key`
+        instead, none of which have a similarly-documented closed enum in
+        this file) is unaffected and keeps the plain 'window-bleed'
+        verdict.
 
         Survivor count >= 2 -> at least two candidates each have their own
         genuine vocabulary; a real duplicate. Reported as
@@ -387,6 +402,7 @@ function script:Get-JudgeRulingsDuplicateDiagnosis {
 
     $blockScalarSpans = Get-BlockScalarSpans -Text $Body
     $survivorCount = 0
+    $survivorWindow = $null
 
     for ($i = 0; $i -lt $candidates.Count; $i++) {
         $candidate = $candidates[$i]
@@ -423,10 +439,37 @@ function script:Get-JudgeRulingsDuplicateDiagnosis {
         }
         if ($survives) {
             $survivorCount++
+            $survivorWindow = $window
         }
     }
 
     if ($survivorCount -eq 1) {
+        # GH-2 fix (PR #853 review, judge-sustained): a single surviving
+        # candidate's key-only vocab gate confirms a `judge_ruling:` (or
+        # other vocab-gate) KEY is present in its own window, but never
+        # validates the VALUE that follows. If the survivor's own window
+        # carries a `judge_ruling:` key whose value is not a recognized
+        # member of the closed 2-value enum (`sustained` |
+        # `defense-sustained`, per skills/review-judgment/SKILL.md:156 and
+        # the identical validation Get-JudgeRulingsSustainedCountInternal
+        # already applies), that single real block is independently
+        # corrupt regardless of the decoy — do not soften it to
+        # 'window-bleed' (which Get-EmissionGap maps to the friendlier
+        # 'decoy-ambiguous'). Fall through to 'genuine-duplicate' instead,
+        # this file's established "don't trust this, treat conservatively"
+        # signal (see the 0-survivor defensive fallback below, which uses
+        # the same label for a different reason). A window with no
+        # `judge_ruling:` key at all (survived via `disposition`,
+        # `verdict`, or `finding_key` instead) has no enum to validate, so
+        # it keeps the plain 'window-bleed' verdict unchanged.
+        $rulingMatches = [regex]::Matches($survivorWindow, '(?m)judge_ruling\s*:\s*(\S+)')
+        $unrecognized = @($rulingMatches | Where-Object {
+                $val = $_.Groups[1].Value.TrimEnd(',')
+                $val -ne 'sustained' -and $val -ne 'defense-sustained'
+            })
+        if ($unrecognized.Count -gt 0) {
+            return 'genuine-duplicate'
+        }
         return 'window-bleed'
     }
     elseif ($survivorCount -ge 2) {
