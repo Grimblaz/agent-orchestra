@@ -8,7 +8,7 @@
     "schema_version": {
       "type": "integer",
       "enum": [1, 2, 3],
-      "description": "Schema version. 1 = legacy; 2 = includes severity, ac_cross_check, and stage per-entry fields; 3 = adds optional reviewer_source per-entry field."
+      "description": "Schema version. 1 = legacy; 2 = includes severity, ac_cross_check, and stage per-entry fields; 3 = requires reviewer_source on every entry (writer-mandatory); readers fall back to 'local' for absent v1/v2 values."
     },
     "passes_run": {
       "type": "array",
@@ -25,7 +25,7 @@
         "properties": {
           "stable_finding_key": {
             "type": "string",
-            "description": "Stable identifier for the finding across re-reviews. Either 'file:line:normalized-title-hash' (local) or a GitHub comment ID (remote) -- 'gh-{comment_id}' when a comment yields a single finding, or a composite 'gh-{comment_id}-{hash}' when one comment yields multiple distinct findings. Must not change on re-review of the same PR, with the known exception that a comment's finding-count classification changing between review passes can produce a different composite key for the same logical finding."
+            "description": "Stable identifier for the finding across re-reviews. Either 'file:line:normalized-title-hash' (local) or a GitHub comment ID (remote) -- 'gh-{comment_id}' when a comment yields a single finding, or a composite 'gh-{comment_id}-{hash}' when one comment yields multiple distinct findings. The normalized-title-hash is the first 8 hex chars of SHA-256 over the UTF-8 normalized title (see skills/review-judgment/SKILL.md § Stable Finding Key). Must not change on re-review of the same PR, with the known exception that a comment's finding-count classification changing between review passes can produce a different composite key for the same logical finding."
           },
           "finding_id": {
             "type": "string",
@@ -77,7 +77,7 @@
           },
           "reviewer_source": {
             "type": "string",
-            "description": "v3: Optional. Identifies the reviewer/source that produced this disposition entry, for review-cost accounting (e.g. 'local' for pipeline-origin findings, 'unresolved' when GitHub-origin lookup fails, or the collision-escape form 'ext-{login}' when a real login collides with a reserved value like 'local' or 'unresolved'). Distinct from the nested ac_cross_check.source field, which records the AC cross-check's evidence source and is unrelated to reviewer identity. Absent on v1/v2 entries."
+            "description": "Identifies the reviewer/source that produced this disposition entry, for review-cost accounting (e.g. 'local' for pipeline-origin findings). Normalization and the collision-escape rule are defined canonically in skills/code-review-intake/SKILL.md -- this field does not restate that mechanism. Distinct from the nested ac_cross_check.source field, which records the AC cross-check's evidence source and is unrelated to reviewer identity. Required on every entry when the containing schema_version is 3 (writer-mandatory); optional and typically absent on v1/v2 entries, where readers fall back to 'local'."
           },
           "ac_cross_check": {
             "type": "object",
@@ -106,6 +106,19 @@
         "additionalProperties": false
       },
       "description": "Per-finding disposition entries."
+    }
+  },
+  "if": {
+    "properties": { "schema_version": { "const": 3 } },
+    "required": ["schema_version"]
+  },
+  "then": {
+    "properties": {
+      "entries": {
+        "items": {
+          "required": ["reviewer_source"]
+        }
+      }
     }
   },
   "additionalProperties": false
