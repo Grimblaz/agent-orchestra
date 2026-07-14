@@ -187,6 +187,9 @@ function script:Format-EmissionGapLine {
             if ($reason -eq 'head-corrupt') {
                 return "  ${Surface} #${Id}: COULD NOT VERIFY -- treat as gap (machine block present but unparseable: sustained=$($Gap.SustainedCount), blocks=$($Gap.BlockCount))"
             }
+            if ($reason -eq 'decoy-ambiguous') {
+                return "  ${Surface} #${Id}: COULD NOT VERIFY -- treat as gap (a nearby marker mention made this ambiguous, not necessarily corrupt: sustained=$($Gap.SustainedCount), blocks=$($Gap.BlockCount))"
+            }
         }
         # M13 fix (issue #782 post-review): could-not-verify means the
         # sustained/blocks numbers reflect only the bodies that DID parse —

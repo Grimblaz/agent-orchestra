@@ -460,6 +460,59 @@ Describe 'Format-EmissionGapLine — differentiated could-not-verify render (811
         $line | Should -Match 'COULD NOT VERIFY -- treat as gap \(partial, do not trust: sustained=1, blocks=0\)'
     }
 
+    # Issue #817 (PF-F1) T1: once s3 lands, a decoy-ambiguous Reason on the
+    # plan-stress-test surface should render a HEDGED line naming
+    # nearby-mention ambiguity (never claiming content corruption) — a new
+    # branch inside the existing `$Surface -eq 'plan-stress-test'` block in
+    # Format-EmissionGapLine (`.github/scripts/phase-containment-emission-check.ps1:183-190`).
+    # RED today: that branch does not exist yet, so this Reason value falls
+    # through to the generic M13 "partial, do not trust" wording, which does
+    # not mention ambiguity/nearby-mention at all.
+    It 'RED (s3 not implemented yet): renders a hedged nearby-mention-ambiguity variant when Reason is decoy-ambiguous, for plan-stress-test' {
+        $gap = [PSCustomObject]@{
+            SustainedCount = 0
+            BlockCount     = 3
+            Gap            = -3
+            ParseStatus    = 'could-not-verify'
+            Reason         = 'decoy-ambiguous'
+        }
+
+        $line = Format-EmissionGapLine -Surface 'plan-stress-test' -Id 817 -Gap $gap
+
+        $line | Should -Match 'COULD NOT VERIFY -- treat as gap'
+        $line | Should -Match 'ambiguous|nearby|near-decoy'
+        $line | Should -Not -Match 'unparseable'
+        $line | Should -Not -Match 'machine-head missing'
+    }
+
+    # Issue #817 (PF-F1) T2: the 811-D1 invariant that code-review rendering
+    # is byte-for-byte unchanged by the plan-stress-test-only Reason
+    # differentiation must hold even for the brand-new decoy-ambiguous value
+    # — code-review never enters the `$Surface -eq 'plan-stress-test'`
+    # branch at all, so this is GREEN today and must STAY green through
+    # s2/s3 (no code-review wording change is in scope for issue #817).
+    It 'GREEN (811-D1 invariant, must stay green through s2/s3): code-review rendering is byte-identical to the generic could-not-verify wording even when Reason is decoy-ambiguous' {
+        $gapWithReason = [PSCustomObject]@{
+            SustainedCount = 2
+            BlockCount     = 0
+            Gap            = 2
+            ParseStatus    = 'could-not-verify'
+            Reason         = 'decoy-ambiguous'
+        }
+        $gapWithoutReason = [PSCustomObject]@{
+            SustainedCount = 2
+            BlockCount     = 0
+            Gap            = 2
+            ParseStatus    = 'could-not-verify'
+        }
+
+        $lineWithReason = Format-EmissionGapLine -Surface 'code-review' -Id 816 -Gap $gapWithReason
+        $lineWithoutReason = Format-EmissionGapLine -Surface 'code-review' -Id 816 -Gap $gapWithoutReason
+
+        $lineWithReason | Should -BeExactly $lineWithoutReason
+        $lineWithReason | Should -Match 'COULD NOT VERIFY -- treat as gap \(partial, do not trust: sustained=2, blocks=0\)'
+    }
+
     It 'end-to-end: a compliant-but-headless plan-stress-test body renders the head-missing variant via the live orchestrator' {
         $issueBody = @'
 <!-- plan-issue-811 -->

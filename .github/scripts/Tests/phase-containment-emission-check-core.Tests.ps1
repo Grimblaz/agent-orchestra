@@ -647,6 +647,544 @@ duplicate rather than a vocab-window collision artifact.
 
 #endregion
 
+#region Issue #817 (PF-F1): near-decoy window-bleed fixtures (decoy-ambiguous, RED at s1)
+
+# All fixtures in this region assume LF-normalized bodies (`.gitattributes
+# eol=lf`), consistent with every other fixture in this file — window
+# semantics (the 400-char $script:JudgeRulingsLookaheadWindow) are defined
+# over LF text; no CRLF variant is authored here (lite scope, M4).
+#
+# Background: Get-RealJudgeRulingsHeadMatches's vocab-gate window is a FIXED
+# 400-char forward lookahead from each candidate head. When a harmless prose
+# mention of the marker convention sits <400 chars BEFORE a real,
+# vocab-gate-passing block, the mention's own window "bleeds" into the real
+# block's vocabulary and passes the gate too — both mention and real block
+# then count as "real" heads, tripping the M1 duplicate-head guard in
+# Get-JudgeRulingsIsolatedRegion (>= 2 real heads -> could-not-verify) and
+# producing Get-EmissionGap's misleading Reason 'head-corrupt' (implying
+# content corruption, when the real cause is a harmless nearby mention).
+# s2/s3 (a separate, later dispatch) will add a private helper,
+# Get-JudgeRulingsDuplicateDiagnosis, that re-runs the vocab gate per
+# candidate with the window TRUNCATED at the next real candidate's start
+# (the last candidate keeps its full, untruncated window and therefore
+# always survives — 0 survivors is unreachable by construction). Exactly 1
+# surviving candidate means the "duplicate" was actually one real block plus
+# a decoy whose own vocab-gate pass was borrowed via window bleed
+# ('window-bleed' diagnosis -> Reason 'decoy-ambiguous'); 2+ survivors means
+# every candidate had its OWN vocabulary independent of the others
+# ('genuine-duplicate' diagnosis -> Reason stays 'head-corrupt', unchanged).
+# THIS STEP (s1) ONLY AUTHORS FIXTURES AND RED TESTS — the helper does not
+# exist yet, so every `Reason -eq 'decoy-ambiguous'` assertion below is
+# expected to FAIL today (actual value is 'head-corrupt', per the M1 guard's
+# current undifferentiated behavior); see the per-Describe-block RED/GREEN
+# notes for exactly which assertions are current-behavior pins instead.
+
+# T1: bare-prose decoy mention (`<!-- judge-rulings -->`, self-closed, no
+# field vocabulary of its own) sitting well under 400 chars before a real,
+# well-formed judge-rulings block on the plan-stress-test surface. Unlike
+# $script:DecoyBeforeRealPlanStressTestBody (GH-3, ~L559 above), this
+# fixture deliberately OMITS the padding filler paragraphs — the whole
+# point here is that the decoy's window DOES reach the real block's
+# vocabulary (confirmed: Get-RealJudgeRulingsHeadMatches returns exactly 2
+# matches for this body — both the decoy and the real head pass the vocab
+# gate, proving the bleed is real and not a fixture-authoring mistake).
+$script:NearDecoyPlanStressTestBody = @'
+<!-- plan-issue-706 -->
+
+**Plan Stress-Test** (5-pass `standard` adapter)
+
+This PR uses the standard <!-- judge-rulings --> marker convention for tracking review history, mentioned here only as ordinary narrative text.
+
+<!-- judge-rulings
+- finding_id: M1
+  judge_ruling: sustained
+- finding_id: M2
+  judge_ruling: sustained
+-->
+'@
+
+# T2: the same near-decoy shape as T1, but on the code-review surface (no
+# plan-issue marker / Plan Stress-Test heading needed — code-review has no
+# fallback path to mask or interact with this bug). Confirmed: exactly 2
+# real head matches (decoy + real block both pass the vocab gate).
+$script:NearDecoyCodeReviewBody = @'
+This PR uses the standard <!-- judge-rulings --> marker convention for tracking review dispositions, mentioned here only as ordinary narrative text.
+
+<!-- judge-rulings
+- finding_id: M1
+  judge_ruling: sustained
+- finding_id: M2
+  judge_ruling: sustained
+-->
+'@
+
+# T5a: a decoy `<!-- judge-rulings -->` mention embedded INSIDE a
+# `disposition_rationale: |` block-scalar's CONTENT, where the block
+# scalar's own interior ALSO happens to contain real gate vocabulary (a
+# planted `judge_ruling: sustained` line). The embedded decoy occurrence
+# itself is already excluded from HEAD CANDIDACY today by the existing
+# CM4 fix (Get-BlockScalarSpans / Test-IndexInBlockScalarSpan, core L253-258)
+# — confirmed below: Get-RealJudgeRulingsHeadMatches returns exactly 2
+# matches (the M1 head and the far-away M2 head), never counting the
+# embedded mention as a third candidate. The M1 head itself, however, has
+# NO genuine field vocabulary of its own anywhere in its own content — it
+# is deemed "real" today ONLY because its 400-char forward window bleeds
+# into the planted fake `judge_ruling:` line living INSIDE the block
+# scalar. This is the specific gap the s2 helper's per-candidate vocab
+# MATCH must additionally close (M8): the truncated-window re-check must
+# ALSO exclude block-scalar-interior vocab tokens, not just block-scalar-
+# interior HEAD positions, so a planted decoy vocabulary token cannot
+# inflate the survivor count.
+$script:EmbeddedBlockScalarFakeVocabBody = @'
+<!-- plan-issue-708 -->
+
+**Plan Stress-Test** (5-pass `standard` adapter)
+
+<!-- judge-rulings
+  disposition_rationale: |
+    This note mentions a decoy <!-- judge-rulings --> pattern and a fake
+    judge_ruling: sustained line, purely as prose content inside a block
+    scalar, testing whether interior vocabulary wrongly counts as real.
+-->
+
+Padding prose to push the next real head well past the 400-character
+lookahead window, so the two real heads' vocab-gate windows cannot overlap
+each other. This paragraph exists purely as filler text with no
+judge-rulings vocabulary of its own, repeated a few times to guarantee
+sufficient distance between the two real heads. Padding prose to push the
+next real head well past the 400-character lookahead window so the two
+heads cannot overlap at all, guaranteeing this is a genuine two-real-head
+duplicate rather than a vocab-window collision artifact.
+
+<!-- judge-rulings
+- finding_id: M2
+  judge_ruling: sustained
+-->
+'@
+
+# T5b: TWO bare-prose decoy mentions (not one) before a single real block,
+# all three within bleed range of one another. Confirmed: exactly 3 real
+# head matches (both decoys plus the real head all pass the vocab gate).
+$script:TwoDecoysBeforeOneRealBody = @'
+<!-- plan-issue-709 -->
+
+**Plan Stress-Test** (5-pass `standard` adapter)
+
+This PR uses the standard <!-- judge-rulings --> marker convention for tracking review history, mentioned here in a first prose sentence.
+
+Another sentence also mentions the standard <!-- judge-rulings --> marker convention, purely descriptive narrative text with nothing field-shaped following it.
+
+<!-- judge-rulings
+- finding_id: M1
+  judge_ruling: sustained
+-->
+'@
+
+# T6 (documented D4 residual — close-heads genuine-duplicate): TWO
+# structurally genuine judge-rulings head-OPENs (`<!-- judge-rulings` with
+# no self-close), placed back-to-back with ZERO characters between them, so
+# the FIRST head's own gate-vocabulary token (belonging to its own
+# `finding_id: M1` entry) sits textually PAST the second head's start. This
+# is NOT the same shape as the existing close-separated
+# $script:DuplicateJudgeRulingsHeadsBody (~L458 above, pinned 'head-corrupt'
+# at ~L1374) — that fixture's own vocabulary comes BEFORE the next head
+# (each duplicate block is a complete, self-contained unit); here the first
+# head has no content of its own before the second head begins. Confirmed:
+# exactly 2 real head matches (both pass the vocab gate today, exactly as
+# $script:DuplicateJudgeRulingsHeadsBody does), so Get-EmissionGap already
+# reports 'head-corrupt' for this body today. Once the s2 helper lands, the
+# truncated-window re-check will find the FIRST candidate has no vocabulary
+# of its own before the second candidate starts (0 survivors from that
+# candidate), while the SECOND (last) candidate keeps its full window and
+# survives — exactly 1 survivor, which the 'window-bleed' rule maps to
+# 'decoy-ambiguous'. This is a genuine, ACCEPTED mislabel of what is
+# actually a real (if pathologically placed) duplicate — a documented D4
+# residual, not a bug the lite scope of issue #817 attempts to fix further.
+$script:CloseHeadsGenuineDuplicateResidualBody = @'
+<!-- plan-issue-710 -->
+
+**Plan Stress-Test** (5-pass `standard` adapter)
+
+<!-- judge-rulings
+<!-- judge-rulings
+- finding_id: M2
+  judge_ruling: sustained
+- finding_id: M1
+  judge_ruling: sustained
+-->
+'@
+
+# T7 (confirmed-correct edge case — mirror ordering, NOT a residual; see M9
+# correction below): a bare self-closed decoy mention embedded MID-SENTENCE,
+# positioned AFTER a genuine judge-rulings head-OPEN but BEFORE that same
+# head's own trailing `finding_id:`/`judge_ruling:` vocabulary. Confirmed:
+# exactly 2 real head matches today (the outer head bleeds forward through
+# the embedded decoy into its own trailing vocabulary; the embedded decoy
+# independently bleeds forward into the same trailing vocabulary), so
+# Get-EmissionGap already reports 'head-corrupt' for this body today (M1
+# duplicate-head guard, unchanged).
+#
+# RESOLVED POST-s2 VALUE: this fixture was originally documented (D4) as a
+# residual that "keeps head-corrupt" under the forward-only truncation the
+# lite scope permits. Tracing the truncated-window re-check as described in
+# the plan (each non-last candidate's window truncates at the NEXT
+# candidate's start; the last candidate keeps its full window and always
+# survives) against THIS specific placement produces exactly 1 survivor
+# (the embedded decoy, which is the last candidate here and therefore
+# always keeps its untruncated window reaching the trailing vocabulary; the
+# outer head's truncated window ends exactly at the decoy's start and
+# contains no vocabulary of its own) — the stated rule labels this
+# 'window-bleed'/'decoy-ambiguous', not 'head-corrupt'. Code-Conductor
+# independently re-traced this fixture, confirmed the mechanical result
+# above, and corrected the durable design record (issue #817 body, D4
+# section) to match: the "keeps head-corrupt" characterization was wrong
+# for this specific placement. No scope, AC, or implementation-algorithm
+# change follows from the correction — it is purely a corrected
+# characterization of what the already-approved truncated-window algorithm
+# actually produces for this fixture. This test now asserts the corrected
+# value (Reason -eq 'decoy-ambiguous'), RED today because the
+# 'decoy-ambiguous' Reason value does not exist yet (s2 not implemented).
+#
+# M9 correction (this file, post-#833 review pass): the design record's D4
+# section was itself corrected during the plan's Doc-Keeper pass to
+# recharacterize this placement as a CONFIRMED-CORRECT edge case, not a
+# residual — the truncated-window algorithm produces the intended,
+# considered-correct 'decoy-ambiguous' outcome for this shape by design.
+# T6 (the close-heads genuine-duplicate placement, above) remains the one
+# and only accepted D4 residual; T7 is not a second residual alongside it.
+$script:MirrorOrderingConfirmedCorrectBody = @'
+<!-- plan-issue-711 -->
+
+**Plan Stress-Test** (5-pass `standard` adapter)
+
+<!-- judge-rulings
+This PR uses the standard <!-- judge-rulings --> marker convention for tracking review history, mentioned only in prose here with nothing field-shaped following it before the real fields below.
+- finding_id: M1
+  judge_ruling: sustained
+-->
+'@
+
+# Window-edge pin: the decoy's own vocab-gate window reaches the real
+# block's vocabulary at exactly 1 char inside the 400-char boundary (bleeds)
+# — the filler length below (296 chars) was found by empirical bisection
+# against the live $script:JudgeRulingsLookaheadWindow=400 constant: 296
+# bleeds (2 real head matches), 297 does not (1 real head match). No
+# matching "just outside the window" counterpart is needed here — the
+# existing >400-padded GH-3 fixtures already in this file (e.g.
+# $script:DecoyBeforeRealPlanStressTestBody) already cover that side.
+$script:WindowEdgeFillerLength = 296
+$script:WindowEdgeBleedBody = (
+    "<!-- plan-issue-712 -->`n`n" +
+    "**Plan Stress-Test** (5-pass ``standard`` adapter)`n`n" +
+    "This PR uses the standard <!-- judge-rulings --> marker convention for tracking review history.`n" +
+    ('x' * $script:WindowEdgeFillerLength) + "`n`n" +
+    "<!-- judge-rulings`n" +
+    "- finding_id: M1`n" +
+    "  judge_ruling: sustained`n" +
+    "-->`n"
+)
+
+# Before+after arrangement: a bare decoy mention BEFORE a real block, and a
+# second bare decoy mention AFTER the real block closes. Confirmed:
+# Get-RealJudgeRulingsHeadMatches returns exactly 2 real matches today (the
+# before-decoy bleeds forward into the real block and passes; the
+# after-decoy has no vocabulary anywhere forward of its own position — the
+# real block's vocabulary is now BEHIND it, out of forward-lookahead reach
+# — so it does NOT independently pass the vocab gate and is excluded
+# entirely, never becoming a third candidate). With only the 2 real
+# candidates [before-decoy, real-block], the s2 helper's truncated re-check
+# would find: before-decoy's truncated window (ending at the real block's
+# start) has no vocabulary of its own -> fails; the real block, being the
+# LAST of the 2 candidates, keeps its full window and survives. Exactly 1
+# survivor -> 'window-bleed' -> 'decoy-ambiguous'.
+$script:DecoyBeforeAndAfterRealBody = @'
+<!-- plan-issue-713 -->
+
+**Plan Stress-Test** (5-pass `standard` adapter)
+
+This PR uses the standard <!-- judge-rulings --> marker convention for tracking review history, mentioned here only in prose.
+
+<!-- judge-rulings
+- finding_id: M1
+  judge_ruling: sustained
+-->
+
+Another prose mention of the standard <!-- judge-rulings --> marker convention, appearing after the real block, with nothing field-shaped following it.
+'@
+
+#endregion
+
+#region PR #833 judge-sustained follow-up: Get-JudgeRulingsDuplicateDiagnosis fixtures (M2/M4/M10)
+
+$script:M2M4M10PaddingProse = @'
+Padding prose to push the next real head well past the 400-character
+lookahead window, so the two real heads' vocab-gate windows cannot overlap
+each other. This paragraph exists purely as filler text with no
+judge-rulings vocabulary of its own, repeated a few times to guarantee
+sufficient distance between the two real heads. Padding prose to push the
+next real head well past the 400-character lookahead window so the two
+heads cannot overlap at all, guaranteeing this is a genuine two-real-head
+duplicate rather than a vocab-window collision artifact.
+'@
+
+# M2 regression fixture: two GENUINE, well-separated judge-rulings heads,
+# where the SECOND head's own real vocabulary sits immediately after a
+# `disposition_rationale: |` block scalar's trailing BLANK line. Confirmed
+# by direct instrumentation against the live core: Get-RealJudgeRulingsHeadMatches
+# returns exactly 2 real candidates (both heads pass the ungated raw vocab
+# check the same way $script:TwoRealHeadsBothVocabGatePassingBody's do).
+#
+# The bug: Get-JudgeRulingsDuplicateDiagnosis's per-candidate survivor check
+# (core ~L390-396) tests `$candidate.Index + $vocabMatch.Index` — the
+# OVERALL vocab-pattern match's start offset. Because the vocab pattern's
+# prefix alternative is `^\s*` and .NET's `\s` class matches newlines, the
+# leftmost successful match for the second head's own `judge_ruling:` line
+# actually STARTS at the block scalar's trailing blank line (the engine
+# backtracks `\s*` across the blank line's newline and the next line's
+# leading indentation to reach the "judge_ruling" capture). That blank line
+# is itself part of Get-BlockScalarSpans' computed span (a block scalar's
+# span includes trailing blank lines), so the match's overall Index falls
+# INSIDE the span even though the "judge_ruling" keyword text itself
+# (`$vocabMatch.Groups[1].Index`) sits just past the span's end. The second
+# head's only real vocabulary is therefore wrongly excluded, survivor count
+# drops from 2 to 1, and the diagnosis becomes 'window-bleed' instead of
+# 'genuine-duplicate' — Get-EmissionGap then renders Reason 'decoy-ambiguous'
+# for what is actually a genuine, well-separated duplicate (violating
+# design-final AC3, which requires genuine >=2-real-head duplicates to keep
+# 'head-corrupt'). This test is RED until the fix reads the keyword capture
+# group's own position instead of the overall match's start.
+$script:BlockScalarTrailingBlankLineGenuineDuplicateBody = @'
+<!-- plan-issue-715 -->
+
+**Plan Stress-Test** (5-pass `standard` adapter)
+
+<!-- judge-rulings
+- finding_id: M1
+  judge_ruling: sustained
+-->
+
+'@ + $script:M2M4M10PaddingProse + @'
+
+<!-- judge-rulings
+- finding_id: M2
+  disposition_rationale: |
+    This is the rationale filler content that occupies indented
+    block-scalar lines explaining the disposition in detail.
+
+  judge_ruling: sustained
+-->
+'@
+
+# M10 fixture: two real judge-rulings heads whose ENTIRE own field
+# vocabulary lives inside a `disposition_rationale: |` block scalar (same
+# shape as $script:EmbeddedBlockScalarFakeVocabBody's M1 head, above, but
+# applied to BOTH heads instead of just one). Get-RealJudgeRulingsHeadMatches
+# still counts both as real candidates (its raw window check does not apply
+# the block-scalar exclusion), but Get-JudgeRulingsDuplicateDiagnosis's
+# per-candidate block-scalar-aware check correctly excludes both candidates'
+# only vocabulary match, leaving 0 survivors for the whole body. This directly
+# pins the function's defensive "0 survivors reaches the else branch, returns
+# the conservative 'genuine-duplicate' fallback, never throws" behavior
+# (previously reachable only indirectly via Get-EmissionGap, never exercised
+# by a direct unit test). Expected GREEN today — the fallback is already safe.
+$script:BothHeadsBlockScalarOnlyVocabBody = @'
+<!-- plan-issue-716 -->
+
+**Plan Stress-Test** (5-pass `standard` adapter)
+
+<!-- judge-rulings
+  disposition_rationale: |
+    This note mentions a decoy fake vocabulary line below, purely as prose
+    content inside a block scalar, testing whether interior vocabulary
+    wrongly counts as real.
+    judge_ruling: sustained
+-->
+
+'@ + $script:M2M4M10PaddingProse + @'
+
+<!-- judge-rulings
+  disposition_rationale: |
+    This note also mentions a decoy fake vocabulary line below, purely as
+    prose content inside a block scalar, testing whether interior
+    vocabulary wrongly counts as real.
+    judge_ruling: sustained
+-->
+'@
+
+#endregion
+
+#region GH-2 (PR #853 review, judge-sustained): near-decoy window-bleed onto an independently-corrupt real head
+
+# GH-2 fixture: the SAME near-decoy shape as $script:NearDecoyPlanStressTestBody
+# (T1, ~L691 above) — a bare-prose decoy mention of the `<!-- judge-rulings -->`
+# convention sitting well under the 400-char lookahead window before a real
+# judge-rulings block — but the REAL block's own `judge_ruling:` field value
+# is itself invalid (`maybe-sustained-ish`, not the closed 2-value enum
+# `sustained`/`defense-sustained` per skills/review-judgment/SKILL.md:156).
+#
+# The bug: Get-JudgeRulingsDuplicateDiagnosis's per-candidate survivor check
+# (core ~L404) only re-runs $script:JudgeRulingsVocabGatePattern, which tests
+# for the KEY token's presence (`judge_ruling\s*:`) and never validates the
+# captured VALUE. The real block's own truncated/untruncated window still
+# contains a `judge_ruling:` key match regardless of the malformed value, so
+# it "survives" the truncated re-check exactly as a well-formed real block
+# would. Survivor count is 1 (the decoy's truncated window has no vocabulary
+# of its own) -> 'window-bleed' -> Get-EmissionGap reports Reason
+# 'decoy-ambiguous'. That is the wrong diagnosis: removing the decoy would
+# NOT fix this body — the surviving block is independently corrupt
+# (Get-SustainedFindingCount's own `$hasJudgeRuling` branch, core ~L1307-1314,
+# already treats an unrecognized `judge_ruling:` value as could-not-verify on
+# its own). The correct Reason is 'head-corrupt', not 'decoy-ambiguous'.
+#
+# Confirmed: Get-RealJudgeRulingsHeadMatches returns exactly 2 candidates for
+# this body (the decoy and the malformed real head both pass the KEY-only
+# vocab gate), the same bleed-confirmation shape as T1/T2 above.
+$script:NearDecoyMalformedRealHeadBody = @'
+<!-- plan-issue-819 -->
+
+**Plan Stress-Test** (5-pass `standard` adapter)
+
+This PR uses the standard <!-- judge-rulings --> marker convention for tracking review history, mentioned here only as ordinary narrative text.
+
+<!-- judge-rulings
+- finding_id: M1
+  judge_ruling: maybe-sustained-ish
+-->
+'@
+
+# GH-2 companion baseline: the SAME independently-corrupt real block, with NO
+# decoy mention preceding it (1 real head only). Get-RealJudgeRulingsHeadMatches
+# returns exactly 1 candidate, so the 2+-real-heads duplicate-head guard never
+# fires and Get-JudgeRulingsDuplicateDiagnosis is never invoked for this body
+# — Get-EmissionGap's could-not-verify/hasRealHead-but-not->=2-heads branch
+# (core ~L1540-1547) directly attributes 'head-corrupt'. This is the
+# existing, already-correct baseline the GH-2 RED test above contrasts
+# against.
+$script:MalformedRealHeadNoDecoyBody = @'
+<!-- plan-issue-819 -->
+
+**Plan Stress-Test** (5-pass `standard` adapter)
+
+<!-- judge-rulings
+- finding_id: M1
+  judge_ruling: maybe-sustained-ish
+-->
+'@
+
+#endregion
+
+#region GH-2 post-fix follow-up (PR #853 review, judge-sustained M1/M3/M-third-class): the GH-2 value-scan is a raw window substring scan, not scoped to the survivor's own marker region
+
+# Background: commit beaef6d fixed GH-2 by adding a VALUE-validation scan
+# (core ~L465, `[regex]::Matches($survivorWindow, '(?m)judge_ruling\s*:\s*(\S+)')`)
+# on top of the pre-existing KEY-only vocab gate. That scan runs directly
+# against $survivorWindow — the survivor's full, uncapped raw window
+# substring (candidate.Index through windowEnd) — with NO block-scalar
+# exclusion (unlike the KEY-scan survivor loop just above it, which DOES
+# call Test-IndexInBlockScalarSpan per match) and NO scoping to the
+# survivor's own head-to-closer marker region. Post-fix prosecution found
+# three distinct ways an invalid `judge_ruling:`-shaped token elsewhere in
+# the raw window — NOT the survivor's own field — gets wrongly counted by
+# this scan, flipping a genuinely-correct 'window-bleed' ('decoy-ambiguous')
+# verdict to the wrong 'genuine-duplicate' ('head-corrupt'): the exact
+# mirror-image of the original GH-2 bug. For all three fixtures below, the
+# survivor's OWN actual field is a valid `judge_ruling: sustained` — only
+# out-of-region decoy content carries the invalid value — so the correct
+# Reason is 'decoy-ambiguous' in every case. Confirmed empirically (direct
+# pwsh probe against the live core script, prior to authoring these
+# Pester assertions): all three currently return Reason 'head-corrupt',
+# i.e. all three are RED today.
+
+# M1 class: an invalid `judge_ruling:`-shaped token lives INSIDE a
+# `disposition_rationale: |` block scalar within the survivor's own window
+# — decoy content, not the survivor's real field. The survivor's own valid
+# `judge_ruling: sustained` field precedes the block scalar and is what
+# makes Get-RealJudgeRulingsHeadMatches/the KEY-scan survivor loop treat
+# this candidate as genuinely real (both of those checks already apply
+# block-scalar exclusion). The GH-2 value-scan, however, has no such
+# exclusion, so it also matches the block-scalar-interior
+# `judge_ruling: bogus-value` line and wrongly flags the survivor as
+# corrupt. Confirmed: Get-RealJudgeRulingsHeadMatches returns exactly 2
+# candidates (the decoy prose mention plus the real block), the same
+# bleed-confirmation shape as the original GH-2 fixtures above. RED today
+# — Get-EmissionGap reports Reason 'head-corrupt' instead of the correct
+# 'decoy-ambiguous'.
+$script:NearDecoyBlockScalarDecoyValueBody = @'
+<!-- plan-issue-820 -->
+
+**Plan Stress-Test** (5-pass `standard` adapter)
+
+This PR uses the standard <!-- judge-rulings --> marker convention for tracking review history, mentioned here only as ordinary narrative text.
+
+<!-- judge-rulings
+- finding_id: M1
+  judge_ruling: sustained
+  disposition_rationale: |
+    This rationale filler content plants a decoy line below that must not
+    count as this candidate's own field value.
+    judge_ruling: bogus-value
+-->
+'@
+
+# M3 class: an invalid `judge_ruling:`-shaped token appears in ordinary
+# narrative prose AFTER the survivor's own real, valid field — not inside a
+# block scalar, and not the survivor's own marker content at all — but
+# still within the same ~400-char lookahead window (the survivor is the
+# last real candidate, so its window is uncapped except at body length).
+# Confirmed: Get-RealJudgeRulingsHeadMatches returns exactly 2 candidates
+# (decoy prose mention + real block). RED today — reports 'head-corrupt'
+# instead of 'decoy-ambiguous'.
+$script:NearDecoyTrailingProseDecoyValueBody = @'
+<!-- plan-issue-821 -->
+
+**Plan Stress-Test** (5-pass `standard` adapter)
+
+This PR uses the standard <!-- judge-rulings --> marker convention for tracking review history, mentioned here only as ordinary narrative text.
+
+<!-- judge-rulings
+- finding_id: M1
+  judge_ruling: sustained
+-->
+
+This trailing narrative paragraph mentions a decoy note, as if a stray judge_ruling: bogus-value token appeared mid-sentence, well within the same lookahead window as the real block above, but wholly outside its own marker region.
+'@
+
+# Third class (judge-flagged as necessary to close the finding fully, not
+# yet reproduced by either prosecution pass): an invalid
+# `judge_ruling:`-shaped token appears at a genuine LINE-START position —
+# so it would pass even a naive `^`-anchored line-start check — but AFTER
+# the survivor's own marker region has already CLOSED (past the `-->` that
+# ends the real block), simulating a second, unrelated mention further
+# down the same comment body. Still within the ~400-char lookahead window.
+# This proves line-anchoring alone is not sufficient to fix the GH-2
+# value-scan: the check must be bounded to the region between the
+# survivor's own head and ITS OWN closer, not just any line-start match
+# anywhere in the raw window. Confirmed: Get-RealJudgeRulingsHeadMatches
+# returns exactly 2 candidates (decoy prose mention + real block).
+# Empirically verified (direct pwsh probe): this fixture IS currently RED
+# too — the raw-window value-scan has no closer-boundary awareness at all,
+# so a post-closer, genuine-line-start decoy token is caught by the same
+# unscoped scan as the M1/M3 classes above. Pinned as a test regardless of
+# today's RED/GREEN status, since the eventual region-scoped fix must
+# handle this class correctly.
+$script:NearDecoyPostCloserLineStartDecoyValueBody = @'
+<!-- plan-issue-822 -->
+
+**Plan Stress-Test** (5-pass `standard` adapter)
+
+This PR uses the standard <!-- judge-rulings --> marker convention for tracking review history, mentioned here only as ordinary narrative text.
+
+<!-- judge-rulings
+- finding_id: M1
+  judge_ruling: sustained
+-->
+
+Some other explanatory note follows here.
+judge_ruling: bogus-value
+'@
+
+#endregion
+
 #region 811-D1 s4: writer-contract round-trip fixtures (skills/plan-authoring/SKILL.md)
 
 # Round-trip fixture: exercises the SKILL's "one entry per merged finding_id"
@@ -1006,7 +1544,7 @@ entries:
 # internal whitespace, so \S+ (mirroring the sibling `stage` field's pattern)
 # must stop at the comment instead of the old greedy (.+) swallowing it.
 $script:ReviewDispositionsReviewerSourceTrailingCommentBody = @'
-<!-- review-dispositions-921 -->
+<!-- review-dispositions-931 -->
 
 ```yaml
 schema_version: 3
@@ -1020,6 +1558,50 @@ entries:
     stage: code-review
     reviewer_source: local   # or an origin-derived value per skills/review-judgment/SKILL.md:394
     disposition_rationale: "Trailing YAML comment after reviewer_source must not be captured as part of the value."
+```
+'@
+
+# Near-decoy window-bleed regression (issue #817 sibling bug, folded into
+# this PR): the FIRST entry's disposition_rationale is a `|` block scalar
+# immediately followed by a BLANK LINE, and the SECOND entry's real
+# `- stable_finding_key:` dash-item starts right after that blank line.
+# Get-BlockScalarSpans extends the first entry's block-scalar span through
+# the trailing blank line; the entry-boundary regex's `^\s*` prefix can
+# match starting from that blank line (a valid multiline `^` position) and
+# consume the newline plus the second entry's own leading indentation before
+# reaching its `-`, so the overall match's `.Index` lands inside the
+# extended span even though the actual `- stable_finding_key:` keyword
+# itself sits just outside it. This is the same match-start-vs-keyword-
+# position bug issue #817's M2 fix corrected in
+# Get-JudgeRulingsDuplicateDiagnosis, now found in the sibling
+# Get-ReviewDispositionsTallyInternal entry-boundary detector. Both entries
+# are genuine and must be returned; the second must never be silently
+# dropped.
+$script:ReviewDispositionsNearDecoyWindowBleedBody = @'
+<!-- review-dispositions-930 -->
+
+```yaml
+schema_version: 3
+passes_run: [1]
+entries:
+  - stable_finding_key: "k.ps1:1:kkk"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: medium
+    stage: code-review
+    reviewer_source: local
+    disposition_rationale: |
+      Fixed inline after discussion.
+
+  - stable_finding_key: "k.ps1:2:lll"
+    pass: 1
+    disposition: dismiss
+    classification: routine
+    severity: low
+    stage: code-review
+    reviewer_source: local
+    disposition_rationale: "Not applicable."
 ```
 '@
 
@@ -1411,6 +1993,237 @@ Describe '811-D1: Get-EmissionGap Reason field (head-missing vs head-corrupt vs 
         $result = Get-EmissionGap -Bodies @($script:Pr775Body) -Id 775 -Surface 'code-review'
         $result.ParseStatus | Should -Be 'ok'
         $result.Reason | Should -Be 'ok'
+    }
+}
+
+Describe 'Issue #817 (PF-F1) T1/T2: near-decoy window-bleed produces a false head-corrupt today' {
+    It 'T1 (plan-stress-test) diagnostic: the decoy and the real head both pass the vocab gate (bleed confirmed, GREEN today)' {
+        $realHeads = Get-RealJudgeRulingsHeadMatches -Body $script:NearDecoyPlanStressTestBody
+        $realHeads.Count | Should -Be 2
+    }
+
+    It 'T1 (plan-stress-test): Get-EmissionGap should report the honest decoy-ambiguous reason, not head-corrupt (RED — decoy-ambiguous does not exist yet)' {
+        $result = Get-EmissionGap -Bodies @($script:NearDecoyPlanStressTestBody) -Id 706 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.Reason | Should -Be 'decoy-ambiguous'
+    }
+
+    It 'T2 (code-review) diagnostic: the decoy and the real head both pass the vocab gate (bleed confirmed, GREEN today)' {
+        $realHeads = Get-RealJudgeRulingsHeadMatches -Body $script:NearDecoyCodeReviewBody
+        $realHeads.Count | Should -Be 2
+    }
+
+    It 'T2 (code-review): Get-EmissionGap should report the honest decoy-ambiguous reason, not head-corrupt (RED — decoy-ambiguous does not exist yet)' {
+        $result = Get-EmissionGap -Bodies @($script:NearDecoyCodeReviewBody) -Id 816 -Surface 'code-review'
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.Reason | Should -Be 'decoy-ambiguous'
+    }
+}
+
+Describe 'Issue #817 T3: the well-separated genuine duplicate stays head-corrupt (no regression from the new helper)' {
+    It 'GREEN today and must stay GREEN after s2: TwoRealHeadsBothVocabGatePassingBody resolves to head-corrupt, never decoy-ambiguous' {
+        $result = Get-EmissionGap -Bodies @($script:TwoRealHeadsBothVocabGatePassingBody) -Id 705 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.Reason | Should -Be 'head-corrupt'
+    }
+}
+
+Describe 'Issue #817 no-flip regression: the close-separated genuine duplicate (L458 DuplicateJudgeRulingsHeadsBody) must not flip to decoy-ambiguous' {
+    It 'GREEN today and must stay GREEN after s2 lands (each duplicate block has its own complete vocabulary before the next head, unlike T6)' {
+        $result = Get-EmissionGap -Bodies @($script:DuplicateJudgeRulingsHeadsBody) -Id 701 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.Reason | Should -Be 'head-corrupt'
+        # Explicit no-flip pin (belt-and-suspenders alongside the -Be assertion
+        # above): this fixture is the well-established close-separated
+        # GENUINE duplicate (existing pin at ~L1374 of this file before this
+        # insertion) and must never be relabeled decoy-ambiguous by the s2
+        # helper — both duplicate blocks carry their own complete vocabulary
+        # before the next head begins, which is exactly what should make the
+        # new truncated-window re-check count 2 survivors (genuine-duplicate),
+        # not 1.
+        $result.Reason | Should -Not -Be 'decoy-ambiguous'
+    }
+}
+
+Describe 'Issue #817 T4: cross-body reason priority' {
+    It 'pair 1 (a near-decoy body + a genuine-duplicate body): aggregate Reason is head-corrupt (matches current behavior; decoy-ambiguous does not exist yet to test the priority against)' {
+        $result = Get-EmissionGap -Bodies @($script:NearDecoyPlanStressTestBody, $script:TwoRealHeadsBothVocabGatePassingBody) -Id 1 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.Reason | Should -Be 'head-corrupt'
+    }
+
+    It 'pair 2 (a near-decoy body + a head-missing fallback-only body): aggregate Reason should be decoy-ambiguous (RED — today this resolves to head-corrupt, since the ladder has no decoy-ambiguous flag yet and head-corrupt currently outranks head-missing)' {
+        $result = Get-EmissionGap -Bodies @($script:NearDecoyPlanStressTestBody, $script:ProseOnlyPlanStressTestBody) -Id 1 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.Reason | Should -Be 'decoy-ambiguous'
+    }
+}
+
+Describe 'Issue #817 T5: block-scalar-embedded decoy vocabulary and multiple-decoys-before-one-block' {
+    It 'T5a diagnostic: the embedded decoy mention is already excluded from head candidacy today (GREEN — only 2 real matches, the embedded mention is never a third candidate)' {
+        $realHeads = Get-RealJudgeRulingsHeadMatches -Body $script:EmbeddedBlockScalarFakeVocabBody
+        $realHeads.Count | Should -Be 2
+    }
+
+    It 'T5a: Get-EmissionGap should report decoy-ambiguous once the new helper excludes block-scalar-interior vocab tokens from the truncated re-check (RED today)' {
+        $result = Get-EmissionGap -Bodies @($script:EmbeddedBlockScalarFakeVocabBody) -Id 708 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.Reason | Should -Be 'decoy-ambiguous'
+    }
+
+    It 'T5b diagnostic: two prose decoys plus one real block all pass the vocab gate today (GREEN — 3 real matches)' {
+        $realHeads = Get-RealJudgeRulingsHeadMatches -Body $script:TwoDecoysBeforeOneRealBody
+        $realHeads.Count | Should -Be 3
+    }
+
+    It 'T5b: Get-EmissionGap should report decoy-ambiguous for the two-decoys-before-one-real shape (RED today)' {
+        $result = Get-EmissionGap -Bodies @($script:TwoDecoysBeforeOneRealBody) -Id 709 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.Reason | Should -Be 'decoy-ambiguous'
+    }
+}
+
+Describe 'Issue #817 T6/T7: one accepted residual (T6) and one confirmed-correct edge case (T7)' {
+    It 'T6 diagnostic: both back-to-back heads pass the vocab gate today (GREEN — 2 real matches, same as the existing close-separated pin)' {
+        $realHeads = Get-RealJudgeRulingsHeadMatches -Body $script:CloseHeadsGenuineDuplicateResidualBody
+        $realHeads.Count | Should -Be 2
+    }
+
+    It 'T6: a genuine close-heads duplicate is documented to mislabel as decoy-ambiguous once the new helper lands (RED today; ACCEPTED D4 residual, not a bug)' {
+        $result = Get-EmissionGap -Bodies @($script:CloseHeadsGenuineDuplicateResidualBody) -Id 710 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.Reason | Should -Be 'decoy-ambiguous'
+    }
+
+    It 'T7 diagnostic: the outer head and the embedded mid-sentence decoy both pass the vocab gate today (GREEN — 2 real matches)' {
+        $realHeads = Get-RealJudgeRulingsHeadMatches -Body $script:MirrorOrderingConfirmedCorrectBody
+        $realHeads.Count | Should -Be 2
+    }
+
+    It 'T7: the mirror-ordering placement resolves to decoy-ambiguous per the corrected D4 characterization — a confirmed-correct edge case, not a residual (RED — confirms this author''s trace)' {
+        $result = Get-EmissionGap -Bodies @($script:MirrorOrderingConfirmedCorrectBody) -Id 711 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.Reason | Should -Be 'decoy-ambiguous'
+    }
+}
+
+Describe 'Issue #817: window-edge boundary and before+after placement fixtures' {
+    It 'window-edge diagnostic: the decoy bleeds at 296 chars of filler (1 char inside the 400-char window), GREEN today — 2 real matches' {
+        $realHeads = Get-RealJudgeRulingsHeadMatches -Body $script:WindowEdgeBleedBody
+        $realHeads.Count | Should -Be 2
+    }
+
+    It 'window-edge: Get-EmissionGap should report decoy-ambiguous at the window boundary (RED today)' {
+        $result = Get-EmissionGap -Bodies @($script:WindowEdgeBleedBody) -Id 712 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.Reason | Should -Be 'decoy-ambiguous'
+    }
+
+    It 'before+after diagnostic: only 2 candidates pass the vocab gate today, not 3 — the after-decoy has no vocabulary forward of itself so it never becomes a candidate at all (GREEN, describes current raw vocab-gate behavior)' {
+        $realHeads = Get-RealJudgeRulingsHeadMatches -Body $script:DecoyBeforeAndAfterRealBody
+        $realHeads.Count | Should -Be 2
+    }
+
+    It 'before+after: Get-EmissionGap should report decoy-ambiguous once the new helper lands (RED today; only the real block survives truncation since the after-decoy never registers as a candidate)' {
+        $result = Get-EmissionGap -Bodies @($script:DecoyBeforeAndAfterRealBody) -Id 713 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.Reason | Should -Be 'decoy-ambiguous'
+    }
+}
+
+Describe 'PR #833 judge-sustained M2 regression: block-scalar trailing-blank-line exclusion must use the keyword capture position, not the overall match start' {
+    It 'diagnostic: both heads pass the raw vocab gate today (GREEN — 2 real matches, same shape as the T3 well-separated genuine duplicate)' {
+        $realHeads = Get-RealJudgeRulingsHeadMatches -Body $script:BlockScalarTrailingBlankLineGenuineDuplicateBody
+        $realHeads.Count | Should -Be 2
+    }
+
+    It 'AC3: a genuine well-separated 2-real-head duplicate keeps head-corrupt even when the second head''s own vocabulary immediately follows a block scalar''s trailing blank line (RED today — the M2 bug currently misreads the second head''s vocab-match start as inside the block-scalar span, dropping the survivor count to 1 and misreporting decoy-ambiguous)' {
+        $result = Get-EmissionGap -Bodies @($script:BlockScalarTrailingBlankLineGenuineDuplicateBody) -Id 715 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.Reason | Should -Be 'head-corrupt'
+        $result.Reason | Should -Not -Be 'decoy-ambiguous'
+    }
+}
+
+Describe 'PR #833 judge-sustained M4 regression: Get-JudgeRulingsDuplicateDiagnosis must not mislabel a lone real head' {
+    It 'called directly with exactly 1 real head, returns the conservative genuine-duplicate label instead of window-bleed (RED today — no <2-heads guard exists yet, so the sole candidate''s own survival is misread as the window-bleed 1-survivor case)' {
+        $realHeads = Get-RealJudgeRulingsHeadMatches -Body $script:PlanStressTestBody
+        $realHeads.Count | Should -Be 1
+
+        $diagnosis = Get-JudgeRulingsDuplicateDiagnosis -Body $script:PlanStressTestBody
+        $diagnosis | Should -Be 'genuine-duplicate'
+    }
+}
+
+Describe 'PR #833 judge-sustained M10 direct-isolation regression: Get-JudgeRulingsDuplicateDiagnosis in isolation' {
+    It 'called directly with 2 candidates whose only vocabulary lives inside block scalars, returns genuine-duplicate (the conservative 0-survivor fallback) without throwing (GREEN today — the fallback behavior is already safe, just previously untested via a direct call)' {
+        $realHeads = Get-RealJudgeRulingsHeadMatches -Body $script:BothHeadsBlockScalarOnlyVocabBody
+        $realHeads.Count | Should -Be 2
+
+        { $script:m10Diagnosis = Get-JudgeRulingsDuplicateDiagnosis -Body $script:BothHeadsBlockScalarOnlyVocabBody } | Should -Not -Throw
+        $script:m10Diagnosis | Should -Be 'genuine-duplicate'
+    }
+}
+
+Describe 'GH-2 (PR #853 review, judge-sustained): near-decoy window-bleed must not soften an independently-corrupt real head to decoy-ambiguous' {
+    It 'diagnostic: the decoy and the malformed real head both pass the vocab gate (bleed confirmed, key-only gate does not validate the value)' {
+        $realHeads = Get-RealJudgeRulingsHeadMatches -Body $script:NearDecoyMalformedRealHeadBody
+        $realHeads.Count | Should -Be 2
+    }
+
+    It 'reports Reason head-corrupt, not decoy-ambiguous, when the surviving real head is independently corrupt (RED today — currently reports decoy-ambiguous)' {
+        $result = Get-EmissionGap -Bodies @($script:NearDecoyMalformedRealHeadBody) -Id 819 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.Reason | Should -Be 'head-corrupt'
+        $result.Reason | Should -Not -Be 'decoy-ambiguous'
+    }
+
+    It 'companion baseline (no decoy): the same malformed real head alone already reports head-corrupt today (GREEN, contrast case for the RED test above)' {
+        $realHeads = Get-RealJudgeRulingsHeadMatches -Body $script:MalformedRealHeadNoDecoyBody
+        $realHeads.Count | Should -Be 1
+
+        $result = Get-EmissionGap -Bodies @($script:MalformedRealHeadNoDecoyBody) -Id 819 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.Reason | Should -Be 'head-corrupt'
+    }
+}
+
+Describe 'GH-2 post-fix follow-up (PR #853 review, judge-sustained M1): the value-scan must not count a block-scalar-interior decoy value as the survivor''s own field' {
+    It 'diagnostic: the decoy and the real block both pass the vocab gate (bleed confirmed, matching the established near-decoy shape)' {
+        $realHeads = Get-RealJudgeRulingsHeadMatches -Body $script:NearDecoyBlockScalarDecoyValueBody
+        $realHeads.Count | Should -Be 2
+    }
+
+    It 'reports Reason decoy-ambiguous, not head-corrupt, when the only invalid judge_ruling value lives inside the survivor''s own disposition_rationale block scalar (RED today — currently reports head-corrupt)' {
+        $result = Get-EmissionGap -Bodies @($script:NearDecoyBlockScalarDecoyValueBody) -Id 820 -Surface 'plan-stress-test'
+        $result.Reason | Should -Be 'decoy-ambiguous'
+        $result.Reason | Should -Not -Be 'head-corrupt'
+    }
+}
+
+Describe 'GH-2 post-fix follow-up (PR #853 review, judge-sustained M3): the value-scan must not count trailing-prose decoy content as the survivor''s own field' {
+    It 'diagnostic: the decoy and the real block both pass the vocab gate (bleed confirmed, matching the established near-decoy shape)' {
+        $realHeads = Get-RealJudgeRulingsHeadMatches -Body $script:NearDecoyTrailingProseDecoyValueBody
+        $realHeads.Count | Should -Be 2
+    }
+
+    It 'reports Reason decoy-ambiguous, not head-corrupt, when the only invalid judge_ruling value lives in ordinary trailing prose after the survivor''s own real field (RED today — currently reports head-corrupt)' {
+        $result = Get-EmissionGap -Bodies @($script:NearDecoyTrailingProseDecoyValueBody) -Id 821 -Surface 'plan-stress-test'
+        $result.Reason | Should -Be 'decoy-ambiguous'
+        $result.Reason | Should -Not -Be 'head-corrupt'
+    }
+}
+
+Describe 'GH-2 post-fix follow-up (PR #853 review, judge-sustained, third class): the value-scan must not count a post-closer, line-start decoy mention as the survivor''s own field' {
+    It 'diagnostic: the decoy and the real block both pass the vocab gate (bleed confirmed, matching the established near-decoy shape)' {
+        $realHeads = Get-RealJudgeRulingsHeadMatches -Body $script:NearDecoyPostCloserLineStartDecoyValueBody
+        $realHeads.Count | Should -Be 2
+    }
+
+    It 'reports Reason decoy-ambiguous, not head-corrupt, when the only invalid judge_ruling value is a genuine line-start mention positioned after the survivor''s own marker region has closed (pinned regardless of today''s RED/GREEN status; see report for empirical result)' {
+        $result = Get-EmissionGap -Bodies @($script:NearDecoyPostCloserLineStartDecoyValueBody) -Id 822 -Surface 'plan-stress-test'
+        $result.Reason | Should -Be 'decoy-ambiguous'
+        $result.Reason | Should -Not -Be 'head-corrupt'
     }
 }
 
@@ -2366,6 +3179,18 @@ Describe 'Get-DispositionTally - code-review surface CM7 regression: quoted YAML
         $result.ParseStatus | Should -Be 'ok'
         $result.Entries.Count | Should -Be 1
         $result.Entries[0].ReviewerSource | Should -Be 'local'
+    }
+}
+
+Describe 'Get-DispositionTally - code-review surface near-decoy window-bleed regression (issue #817 sibling bug)' {
+    It 'returns BOTH entries when the second entry''s boundary immediately follows the first entry''s block-scalar trailing blank line' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsNearDecoyWindowBleedBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 2
+        $result.Entries[0].StableFindingKey | Should -Be 'k.ps1:1:kkk'
+        $result.Entries[0].Disposition | Should -Be 'incorporate'
+        $result.Entries[1].StableFindingKey | Should -Be 'k.ps1:2:lll'
+        $result.Entries[1].Disposition | Should -Be 'dismiss'
     }
 }
 
