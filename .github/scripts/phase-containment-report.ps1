@@ -41,8 +41,8 @@
 #>
 
 param(
-    [string]$RepoOwner = 'Grimblaz',
-    [string]$RepoName  = 'agent-orchestra',
+    [string]$RepoOwner = '',
+    [string]$RepoName  = '',
     [int]$WindowDays   = 90,
     [string]$Token     = $env:GH_TOKEN,
     [switch]$NoCache,

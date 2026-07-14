@@ -799,7 +799,7 @@ function script:Get-ReviewDispositionsTallyInternal {
         # (single OR double quotes), so a single-quoted value like
         # `reviewer_source: 'copilot'` groups with its bare equivalent instead
         # of forming a phantom distinct per-source row.
-        $reviewerSourceMatch = [regex]::Match($entrySpan, "(?m)${keyAnchor}reviewer_source\s*:\s*(.+)")
+        $reviewerSourceMatch = [regex]::Match($entrySpan, "(?m)${keyAnchor}reviewer_source\s*:\s*(\S+)")
         $reviewerSource = if ($reviewerSourceMatch.Success) { ConvertFrom-YamlQuotedScalar -Value $reviewerSourceMatch.Groups[1].Value } else { $null }
 
         $entries.Add([PSCustomObject]@{

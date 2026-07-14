@@ -999,6 +999,30 @@ entries:
 ```
 '@
 
+# GH-8 regression (Codex/ChatGPT PR #852 review): a trailing YAML comment on
+# the reviewer_source line (the documented example shape at
+# skills/review-judgment/SKILL.md:394) must not be captured as part of the
+# extracted value -- the field's own normalization contract guarantees no
+# internal whitespace, so \S+ (mirroring the sibling `stage` field's pattern)
+# must stop at the comment instead of the old greedy (.+) swallowing it.
+$script:ReviewDispositionsReviewerSourceTrailingCommentBody = @'
+<!-- review-dispositions-921 -->
+
+```yaml
+schema_version: 3
+passes_run: [1]
+entries:
+  - stable_finding_key: "k.ps1:1:kkk"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: medium
+    stage: code-review
+    reviewer_source: local   # or an origin-derived value per skills/review-judgment/SKILL.md:394
+    disposition_rationale: "Trailing YAML comment after reviewer_source must not be captured as part of the value."
+```
+'@
+
 #endregion
 
 }
@@ -2335,6 +2359,13 @@ Describe 'Get-DispositionTally - code-review surface CM7 regression: quoted YAML
         $distinctSources = @($result.Entries.ReviewerSource | Select-Object -Unique)
         $distinctSources.Count | Should -Be 1
         $distinctSources[0] | Should -Be 'copilot'
+    }
+
+    It 'strips a trailing YAML comment from reviewer_source instead of capturing it as part of the value (GH-8)' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsReviewerSourceTrailingCommentBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 1
+        $result.Entries[0].ReviewerSource | Should -Be 'local'
     }
 }
 
