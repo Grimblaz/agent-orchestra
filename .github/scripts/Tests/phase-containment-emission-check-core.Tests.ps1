@@ -1073,6 +1073,118 @@ $script:MalformedRealHeadNoDecoyBody = @'
 
 #endregion
 
+#region GH-2 post-fix follow-up (PR #853 review, judge-sustained M1/M3/M-third-class): the GH-2 value-scan is a raw window substring scan, not scoped to the survivor's own marker region
+
+# Background: commit beaef6d fixed GH-2 by adding a VALUE-validation scan
+# (core ~L465, `[regex]::Matches($survivorWindow, '(?m)judge_ruling\s*:\s*(\S+)')`)
+# on top of the pre-existing KEY-only vocab gate. That scan runs directly
+# against $survivorWindow — the survivor's full, uncapped raw window
+# substring (candidate.Index through windowEnd) — with NO block-scalar
+# exclusion (unlike the KEY-scan survivor loop just above it, which DOES
+# call Test-IndexInBlockScalarSpan per match) and NO scoping to the
+# survivor's own head-to-closer marker region. Post-fix prosecution found
+# three distinct ways an invalid `judge_ruling:`-shaped token elsewhere in
+# the raw window — NOT the survivor's own field — gets wrongly counted by
+# this scan, flipping a genuinely-correct 'window-bleed' ('decoy-ambiguous')
+# verdict to the wrong 'genuine-duplicate' ('head-corrupt'): the exact
+# mirror-image of the original GH-2 bug. For all three fixtures below, the
+# survivor's OWN actual field is a valid `judge_ruling: sustained` — only
+# out-of-region decoy content carries the invalid value — so the correct
+# Reason is 'decoy-ambiguous' in every case. Confirmed empirically (direct
+# pwsh probe against the live core script, prior to authoring these
+# Pester assertions): all three currently return Reason 'head-corrupt',
+# i.e. all three are RED today.
+
+# M1 class: an invalid `judge_ruling:`-shaped token lives INSIDE a
+# `disposition_rationale: |` block scalar within the survivor's own window
+# — decoy content, not the survivor's real field. The survivor's own valid
+# `judge_ruling: sustained` field precedes the block scalar and is what
+# makes Get-RealJudgeRulingsHeadMatches/the KEY-scan survivor loop treat
+# this candidate as genuinely real (both of those checks already apply
+# block-scalar exclusion). The GH-2 value-scan, however, has no such
+# exclusion, so it also matches the block-scalar-interior
+# `judge_ruling: bogus-value` line and wrongly flags the survivor as
+# corrupt. Confirmed: Get-RealJudgeRulingsHeadMatches returns exactly 2
+# candidates (the decoy prose mention plus the real block), the same
+# bleed-confirmation shape as the original GH-2 fixtures above. RED today
+# — Get-EmissionGap reports Reason 'head-corrupt' instead of the correct
+# 'decoy-ambiguous'.
+$script:NearDecoyBlockScalarDecoyValueBody = @'
+<!-- plan-issue-820 -->
+
+**Plan Stress-Test** (5-pass `standard` adapter)
+
+This PR uses the standard <!-- judge-rulings --> marker convention for tracking review history, mentioned here only as ordinary narrative text.
+
+<!-- judge-rulings
+- finding_id: M1
+  judge_ruling: sustained
+  disposition_rationale: |
+    This rationale filler content plants a decoy line below that must not
+    count as this candidate's own field value.
+    judge_ruling: bogus-value
+-->
+'@
+
+# M3 class: an invalid `judge_ruling:`-shaped token appears in ordinary
+# narrative prose AFTER the survivor's own real, valid field — not inside a
+# block scalar, and not the survivor's own marker content at all — but
+# still within the same ~400-char lookahead window (the survivor is the
+# last real candidate, so its window is uncapped except at body length).
+# Confirmed: Get-RealJudgeRulingsHeadMatches returns exactly 2 candidates
+# (decoy prose mention + real block). RED today — reports 'head-corrupt'
+# instead of 'decoy-ambiguous'.
+$script:NearDecoyTrailingProseDecoyValueBody = @'
+<!-- plan-issue-821 -->
+
+**Plan Stress-Test** (5-pass `standard` adapter)
+
+This PR uses the standard <!-- judge-rulings --> marker convention for tracking review history, mentioned here only as ordinary narrative text.
+
+<!-- judge-rulings
+- finding_id: M1
+  judge_ruling: sustained
+-->
+
+This trailing narrative paragraph mentions a decoy note, as if a stray judge_ruling: bogus-value token appeared mid-sentence, well within the same lookahead window as the real block above, but wholly outside its own marker region.
+'@
+
+# Third class (judge-flagged as necessary to close the finding fully, not
+# yet reproduced by either prosecution pass): an invalid
+# `judge_ruling:`-shaped token appears at a genuine LINE-START position —
+# so it would pass even a naive `^`-anchored line-start check — but AFTER
+# the survivor's own marker region has already CLOSED (past the `-->` that
+# ends the real block), simulating a second, unrelated mention further
+# down the same comment body. Still within the ~400-char lookahead window.
+# This proves line-anchoring alone is not sufficient to fix the GH-2
+# value-scan: the check must be bounded to the region between the
+# survivor's own head and ITS OWN closer, not just any line-start match
+# anywhere in the raw window. Confirmed: Get-RealJudgeRulingsHeadMatches
+# returns exactly 2 candidates (decoy prose mention + real block).
+# Empirically verified (direct pwsh probe): this fixture IS currently RED
+# too — the raw-window value-scan has no closer-boundary awareness at all,
+# so a post-closer, genuine-line-start decoy token is caught by the same
+# unscoped scan as the M1/M3 classes above. Pinned as a test regardless of
+# today's RED/GREEN status, since the eventual region-scoped fix must
+# handle this class correctly.
+$script:NearDecoyPostCloserLineStartDecoyValueBody = @'
+<!-- plan-issue-822 -->
+
+**Plan Stress-Test** (5-pass `standard` adapter)
+
+This PR uses the standard <!-- judge-rulings --> marker convention for tracking review history, mentioned here only as ordinary narrative text.
+
+<!-- judge-rulings
+- finding_id: M1
+  judge_ruling: sustained
+-->
+
+Some other explanatory note follows here.
+judge_ruling: bogus-value
+'@
+
+#endregion
+
 #region 811-D1 s4: writer-contract round-trip fixtures (skills/plan-authoring/SKILL.md)
 
 # Round-trip fixture: exercises the SKILL's "one entry per merged finding_id"
@@ -2049,6 +2161,45 @@ Describe 'GH-2 (PR #853 review, judge-sustained): near-decoy window-bleed must n
         $result = Get-EmissionGap -Bodies @($script:MalformedRealHeadNoDecoyBody) -Id 819 -Surface 'plan-stress-test'
         $result.ParseStatus | Should -Be 'could-not-verify'
         $result.Reason | Should -Be 'head-corrupt'
+    }
+}
+
+Describe 'GH-2 post-fix follow-up (PR #853 review, judge-sustained M1): the value-scan must not count a block-scalar-interior decoy value as the survivor''s own field' {
+    It 'diagnostic: the decoy and the real block both pass the vocab gate (bleed confirmed, matching the established near-decoy shape)' {
+        $realHeads = Get-RealJudgeRulingsHeadMatches -Body $script:NearDecoyBlockScalarDecoyValueBody
+        $realHeads.Count | Should -Be 2
+    }
+
+    It 'reports Reason decoy-ambiguous, not head-corrupt, when the only invalid judge_ruling value lives inside the survivor''s own disposition_rationale block scalar (RED today — currently reports head-corrupt)' {
+        $result = Get-EmissionGap -Bodies @($script:NearDecoyBlockScalarDecoyValueBody) -Id 820 -Surface 'plan-stress-test'
+        $result.Reason | Should -Be 'decoy-ambiguous'
+        $result.Reason | Should -Not -Be 'head-corrupt'
+    }
+}
+
+Describe 'GH-2 post-fix follow-up (PR #853 review, judge-sustained M3): the value-scan must not count trailing-prose decoy content as the survivor''s own field' {
+    It 'diagnostic: the decoy and the real block both pass the vocab gate (bleed confirmed, matching the established near-decoy shape)' {
+        $realHeads = Get-RealJudgeRulingsHeadMatches -Body $script:NearDecoyTrailingProseDecoyValueBody
+        $realHeads.Count | Should -Be 2
+    }
+
+    It 'reports Reason decoy-ambiguous, not head-corrupt, when the only invalid judge_ruling value lives in ordinary trailing prose after the survivor''s own real field (RED today — currently reports head-corrupt)' {
+        $result = Get-EmissionGap -Bodies @($script:NearDecoyTrailingProseDecoyValueBody) -Id 821 -Surface 'plan-stress-test'
+        $result.Reason | Should -Be 'decoy-ambiguous'
+        $result.Reason | Should -Not -Be 'head-corrupt'
+    }
+}
+
+Describe 'GH-2 post-fix follow-up (PR #853 review, judge-sustained, third class): the value-scan must not count a post-closer, line-start decoy mention as the survivor''s own field' {
+    It 'diagnostic: the decoy and the real block both pass the vocab gate (bleed confirmed, matching the established near-decoy shape)' {
+        $realHeads = Get-RealJudgeRulingsHeadMatches -Body $script:NearDecoyPostCloserLineStartDecoyValueBody
+        $realHeads.Count | Should -Be 2
+    }
+
+    It 'reports Reason decoy-ambiguous, not head-corrupt, when the only invalid judge_ruling value is a genuine line-start mention positioned after the survivor''s own marker region has closed (pinned regardless of today''s RED/GREEN status; see report for empirical result)' {
+        $result = Get-EmissionGap -Bodies @($script:NearDecoyPostCloserLineStartDecoyValueBody) -Id 822 -Surface 'plan-stress-test'
+        $result.Reason | Should -Be 'decoy-ambiguous'
+        $result.Reason | Should -Not -Be 'head-corrupt'
     }
 }
 
