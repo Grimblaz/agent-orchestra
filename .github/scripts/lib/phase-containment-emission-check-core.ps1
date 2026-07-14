@@ -213,7 +213,122 @@ function script:ConvertFrom-YamlQuotedScalar {
 
 #endregion
 
-#region Get-RealJudgeRulingsHeadMatches (private)
+#region Judge-rulings head detection and duplicate-diagnosis helpers (private)
+
+function script:Get-JudgeRulingsRawWindowEnd {
+    <#
+    .SYNOPSIS
+        Computes the uncapped lookahead-window end position for a single
+        judge-rulings head candidate.
+    .DESCRIPTION
+        Shared by Get-RealJudgeRulingsHeadMatches and
+        Get-JudgeRulingsDuplicateDiagnosis: both start from the identical raw
+        formula (candidate start + candidate length + the configured
+        lookahead window, `$script:JudgeRulingsLookaheadWindow`) before
+        applying their own, DIFFERENT final caps — the former caps only at
+        body length, the latter also truncates at the next candidate's index
+        when one exists. Only that truly-identical raw arithmetic is
+        factored out here; the differing capping logic intentionally stays
+        in each caller rather than being folded into a parameter-heavy
+        wrapper.
+    .PARAMETER Candidate
+        The head-pattern regex Match to compute the window end for.
+    .OUTPUTS
+        [int] — the uncapped window end position (may exceed the body's
+        length; callers are responsible for their own capping).
+    #>
+    param(
+        [Parameter(Mandatory)][System.Text.RegularExpressions.Match]$Candidate
+    )
+    return $Candidate.Index + $Candidate.Length + $script:JudgeRulingsLookaheadWindow
+}
+
+function script:Get-JudgeRulingsRegionEnd {
+    <#
+    .SYNOPSIS
+        Computes the raw region-end position for a single judge-rulings
+        marker region, given the position immediately after its own head
+        (M1/M3/post-closer region-scoping fix, judge-sustained, PR #853
+        post-fix review).
+    .DESCRIPTION
+        Shared by Get-JudgeRulingsIsolatedRegion and
+        Get-JudgeRulingsDuplicateDiagnosis: both need "where does THIS
+        marker region's own content end" — the earlier of the next `-->`
+        (closing the HTML comment) or the next ``` fence (closing the
+        fenced-code-block variant, PR #778) at or after the given start
+        position. Only that raw boundary-selection arithmetic is factored
+        out here; each caller keeps its own, DIFFERENT handling on top of
+        the raw boundary — Get-JudgeRulingsIsolatedRegion additionally
+        applies the M8 false-positive-closer ambiguity walk (protecting
+        against silently DROPPING real trailing content when the first
+        closer found is actually a stray sequence inside genuine prose),
+        while Get-JudgeRulingsDuplicateDiagnosis's narrower value-validation
+        use case deliberately does not reuse that walk (see the
+        value-validation branch's own comment for why) — so this shared
+        helper intentionally stops at the raw boundary and leaves ambiguity
+        handling to the caller rather than folding it into a
+        parameter-heavy wrapper.
+    .PARAMETER Body
+        The raw comment body text to scan.
+    .PARAMETER RegionStart
+        The position immediately after the marker's own head match — the
+        position to start searching for a closer from.
+    .OUTPUTS
+        [int] — the raw region-end position (index of the closer's first
+        character), or -1 if no closer is found at or after RegionStart (an
+        unclosed marker region).
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Body,
+        [Parameter(Mandatory)][int]$RegionStart
+    )
+    $closeCommentIdx = $Body.IndexOf('-->', $RegionStart, [System.StringComparison]::Ordinal)
+    $closeFenceIdx = $Body.IndexOf('```', $RegionStart, [System.StringComparison]::Ordinal)
+    if ($closeCommentIdx -ge 0 -and $closeFenceIdx -ge 0) {
+        return [Math]::Min($closeCommentIdx, $closeFenceIdx)
+    }
+    elseif ($closeCommentIdx -ge 0) {
+        return $closeCommentIdx
+    }
+    elseif ($closeFenceIdx -ge 0) {
+        return $closeFenceIdx
+    }
+    return -1
+}
+
+function script:Test-JudgeRulingValueRecognized {
+    <#
+    .SYNOPSIS
+        Reports whether a judge_ruling: value is a recognized member of the
+        closed 2-value enum (M4 fix, judge-sustained, PR #853 post-fix
+        review).
+    .DESCRIPTION
+        `judge_ruling:` is a closed 2-value enum per
+        skills/review-judgment/SKILL.md:156 ('sustained' or
+        'defense-sustained'); any other value is unrecognized vocabulary.
+        This predicate used to be duplicated inline (`$val -ne 'sustained'
+        -and $val -ne 'defense-sustained'`) in both
+        Get-JudgeRulingsSustainedCountInternal and the value-validation
+        branch Get-JudgeRulingsDuplicateDiagnosis added for GH-2 (PR #853) —
+        a drift risk this single shared predicate now eliminates. Unlike
+        the $keyAnchor literal (which the "Key-anchor pattern" meta-test
+        deliberately pins across several intentionally-separate,
+        by-design-duplicated copies), this enum check had no design reason
+        to stay duplicated, so full consolidation into one shared function
+        is the fix — leaving exactly one copy of the check in the file
+        means no separate byte-identical drift-guard test is warranted here.
+    .PARAMETER Value
+        The already-trimmed candidate value (callers are expected to
+        TrimEnd(',') a trailing-comma artifact before calling, same as both
+        call sites already did before this extraction).
+    .OUTPUTS
+        [bool]
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Value
+    )
+    return ($Value -eq 'sustained' -or $Value -eq 'defense-sustained')
+}
 
 function script:Get-RealJudgeRulingsHeadMatches {
     <#
@@ -256,13 +371,283 @@ function script:Get-RealJudgeRulingsHeadMatches {
         if (Test-IndexInBlockScalarSpan -Index $candidateHead.Index -Spans $blockScalarSpans) {
             continue
         }
-        $windowEnd = [Math]::Min($Body.Length, $candidateHead.Index + $candidateHead.Length + $script:JudgeRulingsLookaheadWindow)
+        $windowEnd = [Math]::Min($Body.Length, (Get-JudgeRulingsRawWindowEnd -Candidate $candidateHead))
         $window = $Body.Substring($candidateHead.Index, $windowEnd - $candidateHead.Index)
         if ([regex]::IsMatch($window, $script:JudgeRulingsVocabGatePattern)) {
             $realHeadMatches.Add($candidateHead)
         }
     }
     return , $realHeadMatches.ToArray()
+}
+
+function script:Get-JudgeRulingsDuplicateDiagnosis {
+    <#
+    .SYNOPSIS
+        Distinguishes a genuine duplicate judge-rulings head from a single
+        real head whose vocab-gate pass was actually "borrowed" via
+        window-bleed from a neighboring decoy (issue #817, near-decoy
+        window-bleed).
+    .DESCRIPTION
+        PRECONDITION: the caller must already know
+        `Get-RealJudgeRulingsHeadMatches -Body $Body` returns 2 or more
+        candidates — the same M1 duplicate-head threshold
+        Get-JudgeRulingsIsolatedRegion applies at its own `.Count -ge 2`
+        check (~L879-882). This helper does not re-verify that count itself
+        and must never be called with fewer than 2 real heads, or a lone
+        corrupt head could be mislabeled 'decoy-ambiguous' instead of the
+        correct 'head-corrupt'.
+
+        Get-RealJudgeRulingsHeadMatches's own vocab gate scans each
+        candidate's bounded lookahead window in isolation, so it cannot tell
+        whether the vocabulary found inside a candidate's window is that
+        candidate's OWN content, or content that actually belongs to the
+        NEXT candidate but still falls inside the current candidate's
+        untruncated 400-char window (a "near-decoy": a harmless mention
+        positioned close enough before a real block that the mention's
+        window bleeds into the real block's own vocabulary and both appear
+        to pass the gate).
+
+        This helper re-runs the same vocab-gate check per candidate, but
+        truncates each non-last candidate's window at the position of the
+        NEXT candidate in encounter order, so a candidate can only "survive"
+        on vocabulary that genuinely precedes the next head. The last
+        candidate keeps its full, untruncated window (there is no next
+        candidate to bleed from), exactly as Get-RealJudgeRulingsHeadMatches
+        already computes it.
+
+        Within each truncated window, a vocab-pattern match that falls
+        inside a block-scalar span (Get-BlockScalarSpans /
+        Test-IndexInBlockScalarSpan) does not count as a survivor-qualifying
+        match — a planted decoy vocabulary token living inside a
+        `disposition_rationale: |` block scalar's string content must not
+        inflate the survivor count (M8).
+
+        Survivor count 1 -> exactly one candidate has genuinely own
+        vocabulary; the other candidate(s) only passed the ungated check by
+        borrowing vocabulary that actually belongs to a different head.
+        Reported as 'window-bleed' (one real block, seen twice) — UNLESS
+        (GH-2, PR #853 review, judge-sustained; region-scoped by the M1/M3/
+        post-closer follow-up fix, PR #853 post-fix review) the survivor's
+        own marker REGION — the text strictly between its own head and its
+        own closer (the next `-->` or ``` fence, computed via the shared
+        Get-JudgeRulingsRegionEnd helper and truncated at the next real
+        candidate's index when one exists, exactly like the survivor window
+        above), excluding any block-scalar-interior match the same way the
+        survivor-determination loop above does — carries a `judge_ruling:`
+        key whose value is not a recognized member of the closed 2-value
+        enum (Test-JudgeRulingValueRecognized; `sustained` |
+        `defense-sustained`). The vocab gate only checks that the KEY is
+        present, never the VALUE that follows, so a lone surviving real
+        block can still be independently corrupt on its own field content.
+        When that happens, 'window-bleed' would wrongly soften an
+        independently-corrupt head to 'decoy-ambiguous' (via
+        Get-EmissionGap's wiring); this helper instead falls through to
+        'genuine-duplicate' so the caller treats it conservatively as
+        'head-corrupt'. Scoping the value-scan to the survivor's own region
+        instead of its raw, untruncated window (the earlier beaef6d fix's
+        approach) keeps decoy content that is NOT the survivor's own field —
+        a block-scalar-interior decoy value, trailing prose after the real
+        field, or a genuine line-start mention positioned after the
+        region's own closer — from wrongly counting toward this check. A
+        survivor region with no `judge_ruling:` key at all (it survived via
+        `disposition`, `verdict`, or `finding_key` instead, none of which
+        have a similarly-documented closed enum in this file) is unaffected
+        and keeps the plain 'window-bleed' verdict.
+
+        Survivor count >= 2 -> at least two candidates each have their own
+        genuine vocabulary; a real duplicate. Reported as
+        'genuine-duplicate'.
+        The candidate set this helper diagnoses is obtained by calling
+        Get-RealJudgeRulingsHeadMatches itself (see the first line of the
+        implementation below) — it is never a raw, independent re-derivation
+        of head matches. This guarantees the >=2-real-heads precondition
+        above is checked against the exact same gated population the caller
+        already inspected, not a second, potentially-divergent scan.
+    .PARAMETER Body
+        The raw comment body text to scan (the same text the caller already
+        passed to Get-RealJudgeRulingsHeadMatches).
+    .OUTPUTS
+        [string] — 'window-bleed' or 'genuine-duplicate'. M1 correction (PR
+        #833 judge-sustained review): the zero-survivor outcome is NOT
+        unreachable. Get-RealJudgeRulingsHeadMatches's own candidacy vocab
+        gate does not apply the block-scalar exclusion to its match, while
+        this helper's survivor check DOES (the M8 hardening) — so a
+        candidate can pass candidacy purely on block-scalar-interior
+        vocabulary yet fail to survive here. When every candidate's only
+        vocabulary lives inside a block scalar this way, 0 survivors is
+        genuinely reachable (see the else branch below, and the direct
+        M10 unit test that pins exactly this case). The implementation
+        conservatively returns the 'genuine-duplicate' fallback for this
+        reachable case rather than throwing, since this file runs under
+        strict mode as part of a warn-only advisory sweep.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Body
+    )
+
+    $candidates = Get-RealJudgeRulingsHeadMatches -Body $Body
+
+    # M4 fix (PR #833 judge-sustained follow-up): defensive backstop only —
+    # this function's own documented precondition (and the caller's existing
+    # `.Count -ge 2` guard) already requires at least 2 real heads before
+    # this helper is ever invoked on the real call path. A direct call with
+    # fewer than 2 candidates has no genuine duplicate to diagnose at all,
+    # so return the conservative 'genuine-duplicate' label immediately
+    # rather than letting a lone candidate's own survival be misread as a
+    # 1-survivor window-bleed case.
+    if ($candidates.Count -lt 2) {
+        return 'genuine-duplicate'
+    }
+
+    $blockScalarSpans = Get-BlockScalarSpans -Text $Body
+    $survivorCount = 0
+    $survivorCandidate = $null
+    $survivorHasNext = $false
+    $survivorNextIndex = -1
+
+    for ($i = 0; $i -lt $candidates.Count; $i++) {
+        $candidate = $candidates[$i]
+        $hasNext = ($i + 1) -lt $candidates.Count
+        $rawWindowEnd = Get-JudgeRulingsRawWindowEnd -Candidate $candidate
+        $windowEnd = if ($hasNext) {
+            [Math]::Min([Math]::Min($rawWindowEnd, $candidates[$i + 1].Index), $Body.Length)
+        }
+        else {
+            [Math]::Min($rawWindowEnd, $Body.Length)
+        }
+        $window = $Body.Substring($candidate.Index, $windowEnd - $candidate.Index)
+
+        $survives = $false
+        foreach ($vocabMatch in [regex]::Matches($window, $script:JudgeRulingsVocabGatePattern)) {
+            # M2 fix (PR #833 judge-sustained follow-up): test the KEYWORD
+            # capture group's own position (Groups[1], the
+            # disposition|judge_ruling|verdict|finding_key token itself),
+            # not the overall match's start. The overall match's Index
+            # includes the vocab pattern's leading `^\s*` prefix, which
+            # (since .NET's `\s` matches newlines) can backtrack across a
+            # preceding block scalar's trailing blank line — a line
+            # Get-BlockScalarSpans counts as part of that block scalar's
+            # span — even when the keyword itself sits just past the
+            # span's end. Anchoring on the keyword's own position keeps
+            # the genuine in-block-scalar-decoy exclusion (M8) intact
+            # while no longer wrongly excluding a genuine field that
+            # merely follows a block scalar's trailing blank line.
+            $absoluteIndex = $candidate.Index + $vocabMatch.Groups[1].Index
+            if (-not (Test-IndexInBlockScalarSpan -Index $absoluteIndex -Spans $blockScalarSpans)) {
+                $survives = $true
+                break
+            }
+        }
+        if ($survives) {
+            $survivorCount++
+            $survivorCandidate = $candidate
+            $survivorHasNext = $hasNext
+            $survivorNextIndex = if ($hasNext) { $candidates[$i + 1].Index } else { -1 }
+        }
+    }
+
+    if ($survivorCount -eq 1) {
+        # GH-2 fix (PR #853 review, judge-sustained): a single surviving
+        # candidate's key-only vocab gate confirms a `judge_ruling:` (or
+        # other vocab-gate) KEY is present in its own window, but never
+        # validates the VALUE that follows. If the survivor's own marker
+        # region carries a `judge_ruling:` key whose value is not a
+        # recognized member of the closed 2-value enum
+        # (Test-JudgeRulingValueRecognized; `sustained` |
+        # `defense-sustained`, per skills/review-judgment/SKILL.md:156 and
+        # the identical validation Get-JudgeRulingsSustainedCountInternal
+        # already applies), that single real block is independently
+        # corrupt regardless of the decoy — do not soften it to
+        # 'window-bleed' (which Get-EmissionGap maps to the friendlier
+        # 'decoy-ambiguous'). Fall through to 'genuine-duplicate' instead,
+        # this file's established "don't trust this, treat conservatively"
+        # signal (see the 0-survivor defensive fallback below, which uses
+        # the same label for a different reason). A region with no
+        # `judge_ruling:` key at all (survived via `disposition`,
+        # `verdict`, or `finding_key` instead) has no enum to validate, so
+        # it keeps the plain 'window-bleed' verdict unchanged.
+        #
+        # M1/M3/post-closer region-scoping fix (judge-sustained, PR #853
+        # post-fix review): the earlier beaef6d fix scanned
+        # $survivorWindow — the raw, untruncated lookahead window — which
+        # over-fired on decoy content that is NOT the survivor's own field:
+        # a block-scalar-interior decoy value, trailing prose after the
+        # survivor's own real field, or a genuine line-start mention
+        # positioned after the survivor's own region has already closed.
+        # Bound the scan to the survivor's own isolated region instead —
+        # from immediately after its own head to its own closer (the next
+        # `-->` or ``` fence, via the shared Get-JudgeRulingsRegionEnd
+        # helper, the SAME region-boundary algorithm
+        # Get-JudgeRulingsIsolatedRegion uses), truncated at the next real
+        # candidate's index when one exists (mirroring the survivor-window
+        # truncation above). This excludes the trailing-prose and
+        # post-closer decoy classes outright since they fall after the
+        # region end; the block-scalar decoy class is excluded the same way
+        # the survivor-determination loop above excludes it — by testing
+        # each match's own ABSOLUTE index (regionStart + the match's
+        # region-relative index) against $blockScalarSpans.
+        #
+        # Get-JudgeRulingsIsolatedRegion additionally applies the M8
+        # false-positive-closer ambiguity walk on top of the raw boundary
+        # (protecting against silently DROPPING real trailing content when
+        # the first closer found is actually a stray sequence inside
+        # genuine prose). That walk is deliberately NOT reused here: this
+        # value-scan is already maximally conservative in the OPPOSITE
+        # direction on ambiguity — if the computed region were ever
+        # truncated a little early, the worst outcome is this check misses
+        # a genuinely-corrupt value and falls through to the softer
+        # 'window-bleed', not a wrong 'head-corrupt' alarm. None of the
+        # three region-scoping regression fixtures (block-scalar,
+        # trailing-prose, post-closer near-decoy classes) require the walk,
+        # so the extra complexity is not earned here.
+        $regionStart = $survivorCandidate.Index + $survivorCandidate.Length
+        $rawRegionEnd = Get-JudgeRulingsRegionEnd -Body $Body -RegionStart $regionStart
+        $regionEnd = if ($rawRegionEnd -lt 0) {
+            if ($survivorHasNext) { [Math]::Min($survivorNextIndex, $Body.Length) } else { $Body.Length }
+        }
+        elseif ($survivorHasNext) {
+            [Math]::Min($rawRegionEnd, $survivorNextIndex)
+        }
+        else {
+            $rawRegionEnd
+        }
+        $regionEnd = [Math]::Max($regionEnd, $regionStart)
+        $region = $Body.Substring($regionStart, $regionEnd - $regionStart)
+
+        $rulingMatches = [regex]::Matches($region, 'judge_ruling\s*:\s*(\S+)')
+        $unrecognized = @($rulingMatches | Where-Object {
+                $absoluteIndex = $regionStart + $_.Groups[1].Index
+                if (Test-IndexInBlockScalarSpan -Index $absoluteIndex -Spans $blockScalarSpans) {
+                    return $false
+                }
+                $val = $_.Groups[1].Value.TrimEnd(',')
+                -not (Test-JudgeRulingValueRecognized -Value $val)
+            })
+        if ($unrecognized.Count -gt 0) {
+            return 'genuine-duplicate'
+        }
+        return 'window-bleed'
+    }
+    elseif ($survivorCount -ge 2) {
+        return 'genuine-duplicate'
+    }
+    else {
+        # M1 correction (PR #833 judge-sustained review): this branch IS
+        # reachable, not merely defensive. Get-RealJudgeRulingsHeadMatches's
+        # own candidacy vocab gate does NOT exclude block-scalar-interior
+        # matches, but this helper's survivor check DOES (the M8
+        # hardening) — so a candidate can become a candidate purely on
+        # vocabulary living inside a block scalar, then lose its only
+        # match here once that same match is block-scalar-excluded. When
+        # every candidate's vocabulary is block-scalar-interior this way,
+        # 0 survivors genuinely occurs (pinned directly by a dedicated
+        # unit test, M10). This file runs under Set-StrictMode -Version
+        # Latest as part of a warn-only advisory sweep; throwing here would
+        # silently abort the whole emission-gap computation, so fail toward
+        # the more conservative 'genuine-duplicate' label instead of
+        # throwing.
+        return 'genuine-duplicate'
+    }
 }
 
 #endregion
@@ -315,7 +700,10 @@ function Test-EmissionMarkerPresent {
         `Reason` field: 'head-missing' when this fallback is what made the
         marker read as present (no real judge-rulings head exists at all);
         'head-corrupt' when a real head IS present elsewhere but failed to
-        parse; 'ok' otherwise. code-review is unaffected by this
+        parse; 'decoy-ambiguous' (issue #817) when a real head IS present
+        but the M1 duplicate-head guard fired only because a harmless
+        nearby mention's vocab-gate window bled into one genuine block's
+        own vocabulary; 'ok' otherwise. code-review is unaffected by this
         plan-stress-test-specific fallback/Reason logic specifically — it
         never reaches the fallback branch above. The duplicate-head guard in
         Get-JudgeRulingsSustainedCountInternal (M1 fix) is vocab-gated and
@@ -757,9 +1145,25 @@ function script:Get-ReviewDispositionsTallyInternal {
     # a phantom entry with attacker-controlled disposition/reviewer_source
     # values. Exclude any boundary match whose start index falls inside a
     # block-scalar span computed over this already-isolated $region.
-    $entryBoundaryPattern = '(?m)^\s*-\s+(?:stable_finding_key|finding_id)\s*:'
+    #
+    # CM1 refinement (issue #817 sibling bug, near-decoy window-bleed): the
+    # block-scalar exclusion check must test the KEYWORD capture group's own
+    # position (Groups[1], the stable_finding_key|finding_id token itself),
+    # not the overall match's start. The overall match's Index includes the
+    # pattern's leading `^\s*` prefix, which (since .NET's `\s` matches
+    # newlines) can backtrack across a preceding block scalar's trailing
+    # blank line — a line Get-BlockScalarSpans counts as part of that block
+    # scalar's span — even when the keyword itself sits just past the span's
+    # end. Anchoring the exclusion check on the keyword's own position keeps
+    # the original CM1 in-block-scalar-decoy protection intact while no
+    # longer wrongly excluding a genuine entry boundary that merely follows a
+    # preceding entry's block scalar plus blank line. Segmentation below
+    # still uses each surviving Match's own `.Index` (the `- ` dash start),
+    # matching the "split ONLY on real dash-item starts" contract above —
+    # only the exclusion test's index changes, not the split boundary.
+    $entryBoundaryPattern = '(?m)^\s*-\s+(stable_finding_key|finding_id)\s*:'
     $blockScalarSpans = Get-BlockScalarSpans -Text $region
-    $entryStarts = @([regex]::Matches($region, $entryBoundaryPattern) | Where-Object { -not (Test-IndexInBlockScalarSpan -Index $_.Index -Spans $blockScalarSpans) })
+    $entryStarts = @([regex]::Matches($region, $entryBoundaryPattern) | Where-Object { -not (Test-IndexInBlockScalarSpan -Index $_.Groups[1].Index -Spans $blockScalarSpans) })
     if ($entryStarts.Count -eq 0) {
         return [PSCustomObject]@{ Entries = @(); ParseStatus = 'could-not-verify' }
     }
@@ -930,19 +1334,14 @@ function script:Get-JudgeRulingsIsolatedRegion {
     $regionStart = $regionIndex + $regionHeadLength
     # The YAML region ends at the next `-->` (closing the HTML comment) or, for
     # the fenced-code-block variant (PR #778), at the closing ``` fence.
-    $closeCommentIdx = $Body.IndexOf('-->', $regionStart, [System.StringComparison]::Ordinal)
-    $closeFenceIdx = $Body.IndexOf('```', $regionStart, [System.StringComparison]::Ordinal)
-
-    $regionEnd = -1
-    if ($closeCommentIdx -ge 0 -and $closeFenceIdx -ge 0) {
-        $regionEnd = [Math]::Min($closeCommentIdx, $closeFenceIdx)
-    }
-    elseif ($closeCommentIdx -ge 0) {
-        $regionEnd = $closeCommentIdx
-    }
-    elseif ($closeFenceIdx -ge 0) {
-        $regionEnd = $closeFenceIdx
-    }
+    # M1/M3/post-closer region-scoping fix (judge-sustained, PR #853
+    # post-fix review): this raw boundary computation is now the single
+    # shared Get-JudgeRulingsRegionEnd helper, reused by
+    # Get-JudgeRulingsDuplicateDiagnosis for its own, narrower
+    # value-validation region — so there is exactly one region-boundary
+    # algorithm in this file, not two. The M8 ambiguity walk immediately
+    # below remains specific to this function.
+    $regionEnd = Get-JudgeRulingsRegionEnd -Body $Body -RegionStart $regionStart
 
     if ($regionEnd -lt 0) {
         # Unclosed marker region — cannot safely isolate content.
@@ -1098,11 +1497,18 @@ function script:Get-JudgeRulingsSustainedCountInternal {
         # (NOT defense-sustained). judge_ruling is a closed 2-value enum per
         # skills/review-judgment/SKILL.md:156 ('sustained' or 'defense-sustained');
         # any other value is unrecognized vocabulary -> could-not-verify (DD3),
-        # never silently treated as "not sustained".
-        $rulingMatches = [regex]::Matches($region, '(?m)judge_ruling\s*:\s*(\S+)')
+        # never silently treated as "not sustained". M4 fix (judge-sustained,
+        # PR #853 post-fix review): the enum-membership check is now the
+        # single shared Test-JudgeRulingValueRecognized predicate, also used
+        # by Get-JudgeRulingsDuplicateDiagnosis's value-validation branch,
+        # instead of a second inline copy of the same comparison. M5 fix
+        # (same review): the `(?m)` flag on this pattern was always inert —
+        # the pattern contains no `^`/`$` anchor for it to affect — so it is
+        # removed here too.
+        $rulingMatches = [regex]::Matches($region, 'judge_ruling\s*:\s*(\S+)')
         $unrecognized = @($rulingMatches | Where-Object {
                 $val = $_.Groups[1].Value.TrimEnd(',')
-                $val -ne 'sustained' -and $val -ne 'defense-sustained'
+                -not (Test-JudgeRulingValueRecognized -Value $val)
             })
         if ($unrecognized.Count -gt 0) {
             return [PSCustomObject]@{ SustainedCount = 0; DefenseSustainedCount = 0; ParseStatus = 'could-not-verify' }
@@ -1226,9 +1632,21 @@ function Get-EmissionGap {
           BlockCount     [int]
           Gap            [int]
           ParseStatus    [string] — 'ok' or 'could-not-verify'
-          Reason         [string] — 'ok', 'head-missing', or 'head-corrupt'
-                          (811-D1, plan-stress-test-relevant detail consumed
-                          by the s2 wrapper render; see below)
+          Reason         [string] — 'ok', 'head-missing', 'head-corrupt', or
+                          'decoy-ambiguous' (811-D1 + issue #817,
+                          plan-stress-test-relevant detail consumed by the s2
+                          wrapper render; see below). Per-body derivation:
+                          a could-not-verify body with no real marker head at
+                          all contributes 'head-missing'; a could-not-verify
+                          body with exactly one real head, or with 2+ real
+                          heads that Get-JudgeRulingsDuplicateDiagnosis calls
+                          'genuine-duplicate', contributes 'head-corrupt'; a
+                          could-not-verify body with 2+ real heads that
+                          diagnosis calls 'window-bleed' contributes
+                          'decoy-ambiguous' instead of 'head-corrupt' for
+                          THAT body (never both for the same body). Cross-body
+                          priority: head-corrupt > decoy-ambiguous >
+                          head-missing > ok.
     #>
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Bodies,
@@ -1248,8 +1666,15 @@ function Get-EmissionGap {
     # (DD3 fail-loud). head-corrupt takes priority when both occur across
     # different bodies in the same aggregation, since "a machine head exists
     # but is broken" is the more actionable/specific diagnosis.
+    # 'decoy-ambiguous' (issue #817): a real head WAS present, but the M1
+    # duplicate-head guard fired only because a harmless nearby mention's
+    # vocab-gate window bled into ONE genuine block's own vocabulary
+    # (Get-JudgeRulingsDuplicateDiagnosis's 'window-bleed' verdict) — a more
+    # honest diagnosis than the generic 'head-corrupt' for this specific
+    # could-not-verify cause.
     $sawFallbackFired = $false
     $sawRealHeadCorrupt = $false
+    $sawDecoyAmbiguous = $false
 
     foreach ($body in $Bodies) {
         $bodyHasMarker = Test-EmissionMarkerPresent -Surface $Surface -Body $body
@@ -1275,18 +1700,52 @@ function Get-EmissionGap {
             # Get-JudgeRulingsSustainedCountInternal both use, so this
             # classification is now actually unable to drift from what a real
             # head means elsewhere in this file.
-            $hasRealHead = if ($Surface -eq 'design-challenge') {
+            $isDesignChallenge = $Surface -eq 'design-challenge'
+            # issue #817: capture the real-head-match set (not just a bool)
+            # for the non-design-challenge branch, so the could-not-verify
+            # path below can tell whether this body hit the M1 duplicate-head
+            # guard's specific >=2-real-heads case (and, if so, run the
+            # window-bleed vs genuine-duplicate diagnosis) without a second,
+            # independent re-scan. design-challenge has no analogous
+            # duplicate-head guard (its head pattern is a single-shot
+            # `^finding_dispositions\s*:\s*$` match, never counted), so it is
+            # not a candidate for this diagnosis at all.
+            $realHeadMatches = if ($isDesignChallenge) { $null } else { Get-RealJudgeRulingsHeadMatches -Body $body }
+            $hasRealHead = if ($isDesignChallenge) {
                 [regex]::IsMatch($body, '(?m)^finding_dispositions\s*:\s*$')
             }
             else {
-                (Get-RealJudgeRulingsHeadMatches -Body $body).Count -gt 0
+                $realHeadMatches.Count -gt 0
             }
 
             $sustainedResult = Get-SustainedFindingCount -Surface $Surface -Body $body
             if ($sustainedResult.ParseStatus -eq 'could-not-verify') {
                 $anyCouldNotVerify = $true
                 if ($hasRealHead) {
-                    $sawRealHeadCorrupt = $true
+                    if (-not $isDesignChallenge -and $realHeadMatches.Count -ge 2) {
+                        # The M1 duplicate-head-guard case: 2+ real heads is
+                        # exactly the condition Get-JudgeRulingsIsolatedRegion
+                        # itself gates on before returning could-not-verify.
+                        # Diagnose whether this is a genuine second block or
+                        # one real block seen twice via window-bleed.
+                        $diagnosis = Get-JudgeRulingsDuplicateDiagnosis -Body $body
+                        if ($diagnosis -eq 'window-bleed') {
+                            $sawDecoyAmbiguous = $true
+                        }
+                        else {
+                            # 'genuine-duplicate' — fall through to the
+                            # existing behavior.
+                            $sawRealHeadCorrupt = $true
+                        }
+                    }
+                    else {
+                        # A real head is present but this could-not-verify
+                        # did not come from the 2+-real-heads duplicate-head
+                        # guard (e.g. exactly 1 real head whose content still
+                        # failed to parse for some other reason) — existing
+                        # behavior, unchanged.
+                        $sawRealHeadCorrupt = $true
+                    }
                 }
                 else {
                     $sawFallbackFired = $true
@@ -1341,14 +1800,30 @@ function Get-EmissionGap {
     $parseStatus = if ($anyCouldNotVerify) { 'could-not-verify' } else { 'ok' }
     $gap = $totalSustained - $totalBlocks
 
-    # 811-D1 (M5): head-corrupt takes priority over head-missing when both
-    # occurred across different bodies (see field notes above); 'ok' when
-    # ParseStatus is 'ok' (no could-not-verify body at all).
+    # 811-D1 (M5) + issue #817: priority order is head-corrupt >
+    # decoy-ambiguous > head-missing > ok. head-corrupt still outranks
+    # decoy-ambiguous when both occur across different bodies in the same
+    # aggregation, since "a machine head exists but is genuinely broken /
+    # a genuine duplicate" is the more actionable diagnosis than "one body
+    # merely had a near-decoy window-bleed." decoy-ambiguous in turn
+    # outranks head-missing: a body with a present-but-ambiguous machine
+    # head (decoy-ambiguous) is more specific/actionable than a body with
+    # no real head detected at all (head-missing) — a present-if-confusing
+    # signal outranks an absent one. 'ok' when ParseStatus is 'ok'
+    # (no could-not-verify body at all). This priority is cross-body only —
+    # the per-body if/elseif classification above (see $hasRealHead handling)
+    # already guarantees a single body sets at most one of
+    # $sawRealHeadCorrupt / $sawDecoyAmbiguous / $sawFallbackFired, never
+    # more than one; the ladder below only ever has to break ties BETWEEN
+    # different bodies in the same aggregation, not within one body.
     $reason = if (-not $anyCouldNotVerify) {
         'ok'
     }
     elseif ($sawRealHeadCorrupt) {
         'head-corrupt'
+    }
+    elseif ($sawDecoyAmbiguous) {
+        'decoy-ambiguous'
     }
     elseif ($sawFallbackFired) {
         'head-missing'
@@ -1360,17 +1835,19 @@ function Get-EmissionGap {
         # site above (inside `if ($bodyHasMarker)`, immediately after
         # Get-SustainedFindingCount returns 'could-not-verify'), and that
         # same site always also sets exactly one of $sawRealHeadCorrupt /
-        # $sawFallbackFired based on $hasRealHead — so by the time this
-        # `else` is reached, at least one of the two preceding `elseif`
-        # branches has already matched. (The previously cited "empty-body
-        # AllowEmptyString could-not-verify" example cannot occur here:
-        # Test-EmissionMarkerPresent returns $false for whitespace/empty
-        # bodies, so $bodyHasMarker gates such a body out of this loop
-        # entirely before Get-SustainedFindingCount is ever called.) This
-        # `else` remains as a safety net against a future code change that
-        # sets $anyCouldNotVerify from a new call site without also setting
-        # one of the two flags; it falls back to the generic 'head-corrupt'
-        # label rather than guessing a plan-stress-test-specific reason.
+        # $sawDecoyAmbiguous / $sawFallbackFired based on $hasRealHead (and,
+        # when $hasRealHead is true, on the Get-JudgeRulingsDuplicateDiagnosis
+        # verdict) — so by the time this `else` is reached, at least one of
+        # the three preceding `elseif` branches has already matched. (The
+        # previously cited "empty-body AllowEmptyString could-not-verify"
+        # example cannot occur here: Test-EmissionMarkerPresent returns
+        # $false for whitespace/empty bodies, so $bodyHasMarker gates such a
+        # body out of this loop entirely before Get-SustainedFindingCount is
+        # ever called.) This `else` remains as a safety net against a future
+        # code change that sets $anyCouldNotVerify from a new call site
+        # without also setting one of the three flags; it falls back to the
+        # generic 'head-corrupt' label rather than guessing a
+        # plan-stress-test-specific reason.
         'head-corrupt'
     }
 
