@@ -1194,7 +1194,11 @@ function script:Get-ReviewDispositionsTallyInternal {
         # review): dequote AFTER stripping a trailing flow-mapping comma, so a
         # quoted value like `stage: "code-review",` still resolves to the
         # bare `code-review` the -eq stage filter compares against.
-        $stage = if ($stageMatch.Success) { ConvertFrom-YamlQuotedScalar -Value ($stageMatch.Groups[1].Value.TrimEnd(',')) } else { 'code-review' }
+        # GH-N1 fix (judge-sustained PR #852 review): also strip trailing
+        # flow-mapping closers `}`/`]`, so a compact flow-style mapping with
+        # no space before the closing delimiter (e.g. `{ stage: code-review}`)
+        # doesn't leak the closer into the dequoted value.
+        $stage = if ($stageMatch.Success) { ConvertFrom-YamlQuotedScalar -Value ($stageMatch.Groups[1].Value.TrimEnd(',', '}', ']')) } else { 'code-review' }
 
         # reviewer_source is matched on its own distinct literal key name, so
         # it can never be confused with the nested ac_cross_check.source
@@ -1203,8 +1207,10 @@ function script:Get-ReviewDispositionsTallyInternal {
         # (single OR double quotes), so a single-quoted value like
         # `reviewer_source: 'copilot'` groups with its bare equivalent instead
         # of forming a phantom distinct per-source row.
+        # GH-N1 fix (judge-sustained PR #852 review): also strip trailing
+        # flow-mapping closers `}`/`]` (see stage fix above for rationale).
         $reviewerSourceMatch = [regex]::Match($entrySpan, "(?m)${keyAnchor}reviewer_source\s*:\s*(\S+)")
-        $reviewerSource = if ($reviewerSourceMatch.Success) { ConvertFrom-YamlQuotedScalar -Value ($reviewerSourceMatch.Groups[1].Value.TrimEnd(',')) } else { $null }
+        $reviewerSource = if ($reviewerSourceMatch.Success) { ConvertFrom-YamlQuotedScalar -Value ($reviewerSourceMatch.Groups[1].Value.TrimEnd(',', '}', ']')) } else { $null }
 
         $entries.Add([PSCustomObject]@{
                 StableFindingKey = $stableFindingKey

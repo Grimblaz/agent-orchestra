@@ -34,7 +34,7 @@ The executor (orchestrator) must supply all of the following before invoking `Re
 | `commitPolicyDisabled` | `bool` | From D12 Commit-Policy read (see `## Commit-Policy Opt-Out`). |
 | `hasFixFiles` | `bool` | `true` if `fixFiles` is non-empty. |
 | `isUpToDate` | `bool` | `true` if the working tree has no staged/unstaged changes after `git add {fixFiles}`. |
-| `nonFastForwardProbe` | `bool` | `true` if `git merge-base --is-ancestor {headRemote}/{branch} HEAD` exits non-zero (after `git fetch {headRemote} {branch}`). **Executor-owned acquisition — NOT computed inside the helper.** |
+| `nonFastForwardProbe` | `bool` | `true` only if `git merge-base --is-ancestor FETCH_HEAD HEAD` exits with status exactly `1` (after `git fetch {headRemote} {branch}`, which populates `FETCH_HEAD`). Any other non-zero exit is a command error that must propagate, not a non-ff signal. **Executor-owned acquisition — NOT computed inside the helper.** |
 
 ## Guard Decision Helper (Resolve-PersistDecision.ps1)
 
@@ -104,7 +104,7 @@ The orchestrating executor is responsible for the following steps in order.
 
 Acquire the following before calling the helper (these involve git I/O and must not be inside the pure helper):
 
-- **`nonFastForwardProbe`**: run `git fetch {headRemote} {branch}` then `git merge-base --is-ancestor {headRemote}/{branch} HEAD`. Non-zero exit = `true` (non-ff) — a non-ff means the remote tip is NOT an ancestor of local HEAD (the branches have diverged), so a plain non-force push would be rejected. **Exception**: if `git fetch` exits non-zero because the remote ref does not exist (unknown ref — branch not yet on the remote), set `nonFastForwardProbe=false`. A branch with no remote tracking ref is not non-fast-forward.
+- **`nonFastForwardProbe`**: run `git fetch {headRemote} {branch}` (this populates `FETCH_HEAD` with the fetched branch tip) then `git merge-base --is-ancestor FETCH_HEAD HEAD`. Set `nonFastForwardProbe=true` only when that command exits with status exactly `1` — a non-ff means the fetched remote tip is NOT an ancestor of local HEAD (the branches have diverged), so a plain non-force push would be rejected. Any other non-zero exit from `git merge-base` (e.g. `128` for a bad/missing ref) is a command error, not a non-ff signal, and must propagate rather than being silently treated as `non-ff`. **Exception**: if `git fetch` exits non-zero because the remote ref does not exist (unknown ref — branch not yet on the remote), set `nonFastForwardProbe=false`. A branch with no remote tracking ref is not non-fast-forward.
 - **`headRemoteWritable`**: attempt a dry-run push (`git push --dry-run {headRemote} HEAD:{branch}`) or use `gh repo view` to confirm write access.
 
 ### Step 2: Call `Resolve-PersistDecision.ps1`
