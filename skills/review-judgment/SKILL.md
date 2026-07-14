@@ -224,15 +224,25 @@ Failing any leg collapses the finding to **routine**. The tier rule from `soluti
 
 Before the gate fires, compute a `stable_finding_key` for each finding. This key must survive re-reviews of the same PR. Use the first available:
 
-1. **GitHub comment ID** — if the finding originated from a GitHub review comment, use its comment ID as the key (format: `gh-{comment_id}`).
-2. **file:line:hash** — normalize the finding title (lowercase, remove punctuation, replace spaces with hyphens), then form `{relative_file}:{line}:{normalized-title-hash[:8]}` where hash is the first 8 hex chars of a deterministic hash of the normalized title.
+1. **GitHub comment ID** — if the finding originated from a GitHub review comment, use its comment ID as the key. A comment that yields a single finding keeps the tier-1 key `gh-{comment_id}` — unchanged, and backward compatible with dispositions persisted before this discriminator existed. When one comment yields multiple distinct findings (the code-review-intake skill's split rule — see `skills/code-review-intake/SKILL.md`), each finding's key becomes `gh-{comment_id}-{normalized-title-hash[:8]}`, reusing tier 2's normalization convention below to disambiguate findings sharing a comment ID.
+2. **file:line:hash** — normalize the finding title (lowercase, remove punctuation, replace spaces with hyphens), then form `{relative_file}:{line}:{normalized-title-hash[:8]}` where hash is the first 8 hex chars of SHA-256 over the UTF-8 normalized title.
 3. **finding_id fallback** — if neither is available, use the sequential `finding_id` (e.g. `F1`) with a `warn:` prefix to signal instability: `warn:F1`.
 
 The `stable_finding_key` is what the resume-read mechanism uses to detect prior dispositions across re-reviews of the same PR (see § Stable-Key Resume below).
 
+### `reviewer_source` Lookup Order (GitHub-Sourced Findings Only)
+
+This lookup order applies only to findings that originated from an external GitHub review comment. Pipeline-native findings (local prosecution/defense/judge findings) never enter this lookup procedure — the disposition-recording sites below write `reviewer_source: local` directly for those findings, without evaluating any of the three tiers.
+
+Both disposition-recording sites below (§ Routine Findings and § Load-Bearing Findings) write a `reviewer_source` field. For GitHub-sourced findings, resolve its value in this order:
+
+1. **In-context intake ledger** — when the session is continuous with the GitHub-intake pass that built the finding, read the `reviewer_source` value the intake skill (`skills/code-review-intake/SKILL.md`) already recorded for this finding.
+2. **`gh api` re-derivation** — otherwise (standalone or resumed judge pass), extract the `comment_id` embedded in the finding's `stable_finding_key` and re-derive the reviewer identity via `gh api`, trying the PR-review-comment, issue-comment, and review endpoints in turn. Parse rule: the `comment_id` is the numeric run immediately after the `gh-` prefix, up to the next `-` or end of string; this covers both the single-finding `gh-{comment_id}` key shape and the multi-finding `gh-{comment_id}-{hash}` key shape identically. Normalize the re-derived login per the canonical `reviewer_source` normalization rule in `skills/code-review-intake/SKILL.md` § GitHub Review Mode (lowercase, `.login`-only, trailing `[bot]` strip, quoted-scalar output, reserved-value/`ext-`-prefix collision escape) — this site does not restate that mechanism.
+3. **`unresolved` sentinel** — on any failure (comment deleted, API error, no comment ID embedded in the key to re-derive from), write the sentinel `unresolved`. Never write `local` on lookup failure — `local` is reserved exclusively for pipeline-native (non-GitHub-sourced) findings, which are written directly per the guard above and never fall through to this sentinel.
+
 ### Routine Findings — Silent Recording
 
-For routine findings, the agent records the disposition silently in the `review-dispositions-{PR}` accumulator without firing an `AskUserQuestion`. Use `schema_version: 3` (current emission format); write `severity`, `stage`, and `reviewer_source` (the reviewer identity or class that produced the finding — use `local` for pipeline-native prosecution/defense/judge findings; external-tool identities are populated once issue #834 ships) for all entries, and include `ac_cross_check` for any `dismiss` or `defer` entry with severity ≥ medium:
+For routine findings, the agent records the disposition silently in the `review-dispositions-{PR}` accumulator without firing an `AskUserQuestion`. Use `schema_version: 3` (current emission format); write `severity`, `stage`, and `reviewer_source` (the reviewer identity or class that produced the finding — use `local` for pipeline-native prosecution/defense/judge findings; external identities are resolved per § `reviewer_source` Lookup Order above) for all entries, and include `ac_cross_check` for any `dismiss` or `defer` entry with severity ≥ medium:
 
 > **Pre-condition**: for any `dismiss` entry with severity ≥ medium, run the AC cross-check (see § AC Cross-Check — Blocking Pre-Condition) before writing this entry.
 
@@ -244,7 +254,7 @@ For routine findings, the agent records the disposition silently in the `review-
   classification: routine
   severity: medium           # v3: required field
   stage: code-review         # v3: required field
-  reviewer_source: local     # v3: required field — local for pipeline-native findings; external identity populated once #834 ships
+  reviewer_source: local     # v3: writer always emits this field (writer obligation); the reader/consumer treats an absent field as local for backward compat with pre-v3 entries (reader-semantics fallback) — local is reserved for pipeline-native findings; external identities resolve per § reviewer_source Lookup Order
   disposition_rationale: "Trivial null-guard already required by the existing type contract; no maintainer choice required."
   artifact_citation: "src/types/index.ts:18 (NonNullable<T> constraint)"
 ```
@@ -280,7 +290,7 @@ Record as (v3 format — include `severity`, `stage`, `reviewer_source`, and `ac
   classification: load-bearing
   severity: high             # v3: required field
   stage: code-review         # v3: required field
-  reviewer_source: local     # v3: required field — local for pipeline-native findings; external identity populated once #834 ships
+  reviewer_source: local     # v3: writer always emits this field (writer obligation); the reader/consumer treats an absent field as local for backward compat with pre-v3 entries (reader-semantics fallback) — local is reserved for pipeline-native findings; external identities resolve per § reviewer_source Lookup Order
   disposition_rationale: "Engineer chose incorporate: the expiry check was confirmed missing and the fix is bounded to one function."
 ```
 
@@ -366,7 +376,7 @@ This enables re-review of a PR without re-asking for findings already dispositio
 
 Write in this order (atomic marker first, engagement-record second):
 
-1. **`<!-- review-dispositions-{PR} -->`** — Post as a PR comment. Payload: `schema_version: 3`, `passes_run: [...]`, `entries: [...]` (all findings, routine and load-bearing, one entry per finding). v2 added per-entry `severity`, `ac_cross_check`, and `stage` fields; v3 adds per-entry `reviewer_source` (the reviewer identity or class — `local` for pipeline-native findings; external identities arrive with issue #834). This is the atomic per-finding record.
+1. **`<!-- review-dispositions-{PR} -->`** — Post as a PR comment. Payload: `schema_version: 3`, `passes_run: [...]`, `entries: [...]` (all findings, routine and load-bearing, one entry per finding). v2 added per-entry `severity`, `ac_cross_check`, and `stage` fields; v3 adds per-entry `reviewer_source` (the reviewer identity or class — `local` for pipeline-native findings; external identities resolve per § `reviewer_source` Lookup Order above). This is the atomic per-finding record.
 
    ````text
    <!-- review-dispositions-{PR} -->
@@ -381,7 +391,7 @@ Write in this order (atomic marker first, engagement-record second):
        classification: routine
        severity: medium
        stage: code-review
-       reviewer_source: local
+       reviewer_source: local   # or an origin-derived value (e.g. "jdoe", resolved per § reviewer_source Lookup Order) when the finding came from an external reviewer
        disposition_rationale: "..."
        ac_cross_check:
          file_arm: false

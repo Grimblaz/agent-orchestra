@@ -1537,6 +1537,80 @@ entries:
 ```
 '@
 
+# GH-8 regression (Codex/ChatGPT PR #852 review): a trailing YAML comment on
+# the reviewer_source line (the documented example shape at
+# skills/review-judgment/SKILL.md:394) must not be captured as part of the
+# extracted value -- the field's own normalization contract guarantees no
+# internal whitespace, so \S+ (mirroring the sibling `stage` field's pattern)
+# must stop at the comment instead of the old greedy (.+) swallowing it.
+$script:ReviewDispositionsReviewerSourceTrailingCommentBody = @'
+<!-- review-dispositions-931 -->
+
+```yaml
+schema_version: 3
+passes_run: [1]
+entries:
+  - stable_finding_key: "k.ps1:1:kkk"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: medium
+    stage: code-review
+    reviewer_source: local   # or an origin-derived value per skills/review-judgment/SKILL.md:394
+    disposition_rationale: "Trailing YAML comment after reviewer_source must not be captured as part of the value."
+```
+'@
+
+# GH-N1 regression (judge-sustained PR #852 review, CodeRabbit comment
+# 3575752482): a compact flow-style YAML mapping with NO SPACE before the
+# closing `}` (e.g. `{ stage: code-review}`) must not leak the closing brace
+# into the dequoted stage value. Pre-fix, `\S+` greedily captured the `}`
+# and `.TrimEnd(',')` only stripped a trailing comma, so the stage filter's
+# `-eq 'code-review'` comparison silently failed.
+$script:ReviewDispositionsFlowStyleStageTrailingBraceBody = @'
+<!-- review-dispositions-940 -->
+
+```yaml
+schema_version: 3
+passes_run: [1]
+entries:
+  - stable_finding_key: "n.ps1:1:nnn"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: medium
+    extra_context: { stage: code-review}
+    reviewer_source: local
+    disposition_rationale: "Compact flow-style mapping with no space before the closing brace must not leak the closer into the dequoted stage value."
+```
+'@
+
+# GH-N1 regression (judge-sustained PR #852 review, CodeRabbit comment
+# 3575752482): a compact flow-style YAML mapping with NO SPACE before the
+# closing `}` (e.g. `{ reviewer_source: local}`) must not leak the closing
+# brace into the dequoted reviewer_source value. The judge's independent
+# verification found this is actually worse for a quoted value, since
+# ConvertFrom-YamlQuotedScalar only strips SYMMETRIC quote pairs -- the
+# asymmetric trailing `}` defeats the dequote entirely -- but this fixture
+# exercises the plain unquoted case per the judge-directed regression scope.
+$script:ReviewDispositionsFlowStyleReviewerSourceTrailingBraceBody = @'
+<!-- review-dispositions-941 -->
+
+```yaml
+schema_version: 3
+passes_run: [1]
+entries:
+  - stable_finding_key: "o.ps1:1:ooo"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: medium
+    stage: code-review
+    extra_context: { reviewer_source: local}
+    disposition_rationale: "Compact flow-style mapping with no space before the closing brace must not leak the closer into the dequoted reviewer_source value."
+```
+'@
+
 # Near-decoy window-bleed regression (issue #817 sibling bug, folded into
 # this PR): the FIRST entry's disposition_rationale is a `|` block scalar
 # immediately followed by a BLANK LINE, and the SECOND entry's real
@@ -3148,6 +3222,29 @@ Describe 'Get-DispositionTally - code-review surface CM7 regression: quoted YAML
         $distinctSources = @($result.Entries.ReviewerSource | Select-Object -Unique)
         $distinctSources.Count | Should -Be 1
         $distinctSources[0] | Should -Be 'copilot'
+    }
+
+    It 'strips a trailing YAML comment from reviewer_source instead of capturing it as part of the value (GH-8)' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsReviewerSourceTrailingCommentBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 1
+        $result.Entries[0].ReviewerSource | Should -Be 'local'
+    }
+
+    It 'strips a trailing flow-mapping closing brace from stage instead of capturing it as part of the value (GH-N1)' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsFlowStyleStageTrailingBraceBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 1
+        $result.Entries[0].Stage | Should -Be 'code-review'
+        $result.Entries[0].Stage | Should -Not -Match '[\}\]]'
+    }
+
+    It 'strips a trailing flow-mapping closing brace from reviewer_source instead of capturing it as part of the value (GH-N1)' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsFlowStyleReviewerSourceTrailingBraceBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 1
+        $result.Entries[0].ReviewerSource | Should -Be 'local'
+        $result.Entries[0].ReviewerSource | Should -Not -Match '[\}\]]'
     }
 }
 

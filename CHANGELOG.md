@@ -2,6 +2,13 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.3.12] — 2026-07-13
+
+### Added
+
+- Reviewer attribution wired end-to-end: GitHub-review findings carry a durable `reviewer_source` from intake ledger through judge disposition, so per-reviewer accept-rate evidence can be compiled for external AI reviewers (#834).
+- Consumer-facing guidance for enabling external AI reviewers (e.g. OpenAI Codex) added to CUSTOMIZATION.md.
+
 ## [3.3.11] — 2026-07-12
 
 ### Added
