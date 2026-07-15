@@ -506,7 +506,48 @@ Describe 'Get-PhaseContainmentRollup — critical severity blocks relaxation eli
         $result = Get-PhaseContainmentRollup -Entries $entries
 
         $stageResult = $result.Stages['plan-stress-test']
-        $stageResult.RelaxationEligible | Should -Not -Be $true
+        $stageResult.RelaxationEligible   | Should -Not -Be $true
+        $stageResult.CriticalFindingCount | Should -Be 1
+        $stageResult.HighFindingCount     | Should -Be 0
+    }
+
+    # Issue #854 M4: prior to this fix, the veto only checked 'critical',
+    # so a sustained 'high'-severity-only window (no criticals) rendered
+    # RelaxationEligible=$true -- the live bug this test guards against.
+    It 'sets RelaxationEligible to $false (not $true) when only a high-severity finding is present (no criticals) (M4)' {
+        $entries = @(
+            script:New-PlanEntry -FindingKey 'plan-stress-test:801:F1' -Severity 'low'
+            script:New-PlanEntry -FindingKey 'plan-stress-test:801:F2' -Severity 'low'
+            script:New-PlanEntry -FindingKey 'plan-stress-test:801:F3' -Severity 'low'
+            script:New-PlanEntry -FindingKey 'plan-stress-test:801:F4' -Severity 'low'
+            script:New-PlanEntry -FindingKey 'plan-stress-test:801:F5' -Severity 'low'
+            script:New-PlanEntry -FindingKey 'plan-stress-test:801:F6' -Severity 'high'
+        )
+
+        $result = Get-PhaseContainmentRollup -Entries $entries
+
+        $stageResult = $result.Stages['plan-stress-test']
+        $stageResult.RelaxationEligible   | Should -Not -Be $true
+        $stageResult.CriticalFindingCount | Should -Be 0
+        $stageResult.HighFindingCount     | Should -Be 1
+    }
+
+    It 'tallies both counts and vetoes eligibility when critical and high findings are both present (M4)' {
+        $entries = @(
+            script:New-PlanEntry -FindingKey 'plan-stress-test:801:F1' -Severity 'low'
+            script:New-PlanEntry -FindingKey 'plan-stress-test:801:F2' -Severity 'low'
+            script:New-PlanEntry -FindingKey 'plan-stress-test:801:F3' -Severity 'critical'
+            script:New-PlanEntry -FindingKey 'plan-stress-test:801:F4' -Severity 'critical'
+            script:New-PlanEntry -FindingKey 'plan-stress-test:801:F5' -Severity 'high'
+            script:New-PlanEntry -FindingKey 'plan-stress-test:801:F6' -Severity 'low'
+        )
+
+        $result = Get-PhaseContainmentRollup -Entries $entries
+
+        $stageResult = $result.Stages['plan-stress-test']
+        $stageResult.RelaxationEligible   | Should -Not -Be $true
+        $stageResult.CriticalFindingCount | Should -Be 2
+        $stageResult.HighFindingCount     | Should -Be 1
     }
 }
 

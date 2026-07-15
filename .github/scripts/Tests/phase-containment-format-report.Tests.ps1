@@ -158,7 +158,7 @@ Describe 'Format-PhaseContainmentReport — production render (AC3/AC4/AC8/AC12)
     }
 
     It 'renders ELIGIBLE as the relaxation signal for the plan-stress-test stage (AC3)' {
-        $script:ReportText.Contains('Relaxation signal:  ELIGIBLE (escape_rate ~0, no critical findings)') | Should -BeTrue -Because (
+        $script:ReportText.Contains('Relaxation signal:  ELIGIBLE (escape_rate ~0, no critical/high findings)') | Should -BeTrue -Because (
             "plan-stress-test is clean (n=6, escape_rate=0, no critical severity).`nActual report:`n$script:ReportText"
         )
     }
@@ -194,6 +194,93 @@ Describe 'Format-PhaseContainmentReport — production render (AC3/AC4/AC8/AC12)
         # catch side above it already short-circuited to WITHHELD (n<5).
         $script:ReportText.Contains('Escape-side (post-review observer):') | Should -BeTrue -Because "Actual report:`n$script:ReportText"
         $script:ReportText.Contains('Coverage:           NOT ASSESSABLE (terminal observation unavailable — escape-side coverage was not measured)') | Should -BeTrue -Because "Actual report:`n$script:ReportText"
+    }
+}
+
+# ---------------------------------------------------------------------------
+# 4b. Catch-side veto render names counts and severity (issue #854 M4) --
+#     judge-sustained finding against the shipped #854 implementation. AC4
+#     requires "critical/high catches render as an explicit veto naming
+#     counts and severity"; the pre-fix render was a bare
+#     "critical severity finding in window" guess with no counts, and the
+#     veto logic itself checked only 'critical', silently letting a
+#     sustained 'high'-only window render ELIGIBLE.
+# ---------------------------------------------------------------------------
+
+Describe 'Format-PhaseContainmentReport — catch-side veto names counts and severity (issue #854 M4)' {
+    BeforeAll {
+        function script:New-PC854PlanEntry {
+            param(
+                [Parameter(Mandatory)][string]$FindingKey,
+                [string]$Severity = 'low'
+            )
+            return @{
+                finding_key       = $FindingKey
+                introduced_phase  = 'plan'
+                catchable_phase   = 'plan'
+                caught_stage      = 'plan-stress-test'
+                escape_distance   = 0
+                severity          = $Severity
+                systemic_fix_type = 'instruction'
+                category          = 'architecture'
+                apparatus_meta    = $false
+            }
+        }
+    }
+
+    Context 'high-only window (no criticals) -- the live bug this fix closes' {
+        BeforeAll {
+            $entries = @(
+                script:New-PC854PlanEntry -FindingKey 'plan-stress-test:854:M4:F1' -Severity 'low'
+                script:New-PC854PlanEntry -FindingKey 'plan-stress-test:854:M4:F2' -Severity 'low'
+                script:New-PC854PlanEntry -FindingKey 'plan-stress-test:854:M4:F3' -Severity 'low'
+                script:New-PC854PlanEntry -FindingKey 'plan-stress-test:854:M4:F4' -Severity 'low'
+                script:New-PC854PlanEntry -FindingKey 'plan-stress-test:854:M4:F5' -Severity 'high'
+            )
+            $script:Rollup     = Get-PhaseContainmentRollup -Entries $entries -WindowLabel '90d'
+            $script:ReportText = (Format-PhaseContainmentReport -Context (New-PC772Context -Rollup $script:Rollup)) -join "`n"
+        }
+
+        It 'blocks eligibility and names 0 critical, 1 high in the veto line' {
+            $script:ReportText.Contains('ELIGIBLE (escape_rate ~0, no critical/high findings)') | Should -BeFalse -Because "Actual report:`n$script:ReportText"
+            $script:ReportText.Contains('Relaxation signal:  NOT ELIGIBLE (0 critical, 1 high severity finding(s) in window)') | Should -BeTrue -Because "Actual report:`n$script:ReportText"
+        }
+    }
+
+    Context 'critical-only window' {
+        BeforeAll {
+            $entries = @(
+                script:New-PC854PlanEntry -FindingKey 'plan-stress-test:854:M4c:F1' -Severity 'low'
+                script:New-PC854PlanEntry -FindingKey 'plan-stress-test:854:M4c:F2' -Severity 'low'
+                script:New-PC854PlanEntry -FindingKey 'plan-stress-test:854:M4c:F3' -Severity 'low'
+                script:New-PC854PlanEntry -FindingKey 'plan-stress-test:854:M4c:F4' -Severity 'low'
+                script:New-PC854PlanEntry -FindingKey 'plan-stress-test:854:M4c:F5' -Severity 'critical'
+            )
+            $script:Rollup     = Get-PhaseContainmentRollup -Entries $entries -WindowLabel '90d'
+            $script:ReportText = (Format-PhaseContainmentReport -Context (New-PC772Context -Rollup $script:Rollup)) -join "`n"
+        }
+
+        It 'blocks eligibility and names 1 critical, 0 high in the veto line' {
+            $script:ReportText.Contains('Relaxation signal:  NOT ELIGIBLE (1 critical, 0 high severity finding(s) in window)') | Should -BeTrue -Because "Actual report:`n$script:ReportText"
+        }
+    }
+
+    Context 'mixed critical and high window' {
+        BeforeAll {
+            $entries = @(
+                script:New-PC854PlanEntry -FindingKey 'plan-stress-test:854:M4m:F1' -Severity 'low'
+                script:New-PC854PlanEntry -FindingKey 'plan-stress-test:854:M4m:F2' -Severity 'critical'
+                script:New-PC854PlanEntry -FindingKey 'plan-stress-test:854:M4m:F3' -Severity 'critical'
+                script:New-PC854PlanEntry -FindingKey 'plan-stress-test:854:M4m:F4' -Severity 'high'
+                script:New-PC854PlanEntry -FindingKey 'plan-stress-test:854:M4m:F5' -Severity 'low'
+            )
+            $script:Rollup     = Get-PhaseContainmentRollup -Entries $entries -WindowLabel '90d'
+            $script:ReportText = (Format-PhaseContainmentReport -Context (New-PC772Context -Rollup $script:Rollup)) -join "`n"
+        }
+
+        It 'blocks eligibility and names 2 critical, 1 high in the veto line' {
+            $script:ReportText.Contains('Relaxation signal:  NOT ELIGIBLE (2 critical, 1 high severity finding(s) in window)') | Should -BeTrue -Because "Actual report:`n$script:ReportText"
+        }
     }
 }
 
@@ -263,7 +350,7 @@ Describe 'Format-PhaseContainmentReport — code-review escape-side arm (issue #
 
         It 'never renders ELIGIBLE for the code-review row' {
             @($script:ReportText -split "`n" | Where-Object { $_ -match '^Stage: code-review' }).Count | Should -Be 1
-            $script:ReportText.Contains('ELIGIBLE (escape_rate ~0, no critical findings)') | Should -BeFalse -Because "Actual report:`n$script:ReportText"
+            $script:ReportText.Contains('ELIGIBLE (escape_rate ~0, no critical/high findings)') | Should -BeFalse -Because "Actual report:`n$script:ReportText"
         }
 
         It 'renders the coverage-insufficient reason at the row level, not the generic critical-severity guess (issue #854 s6, reason-ladder extension)' {
@@ -309,7 +396,7 @@ Describe 'Format-PhaseContainmentReport — code-review escape-side arm (issue #
         }
 
         It 'renders ELIGIBLE at the row level when both arms pass' {
-            $script:ReportText.Contains('Relaxation signal:  ELIGIBLE (escape_rate ~0, no critical findings)') | Should -BeTrue -Because "Actual report:`n$script:ReportText"
+            $script:ReportText.Contains('Relaxation signal:  ELIGIBLE (escape_rate ~0, no critical/high findings)') | Should -BeTrue -Because "Actual report:`n$script:ReportText"
         }
 
         It 'renders the miss count, an assessable unique-catch rate, and the sparse Chapman state with the caveat' {
@@ -443,7 +530,7 @@ Describe 'Format-PhaseContainmentReport — truncated-path render' {
         # plan-stress-test would render "ELIGIBLE (escape_rate ~0, no critical
         # findings)" when not truncated; truncation must not let a clean-
         # looking stage present a relaxation signal either.
-        $script:TruncatedReportText.Contains('ELIGIBLE (escape_rate ~0, no critical findings)') | Should -BeFalse -Because (
+        $script:TruncatedReportText.Contains('ELIGIBLE (escape_rate ~0, no critical/high findings)') | Should -BeFalse -Because (
             "a truncated corpus must never present a clean relaxation signal, even for a stage whose visible data looks clean.`nActual report:`n$script:TruncatedReportText"
         )
     }

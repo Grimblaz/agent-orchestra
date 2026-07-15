@@ -2078,21 +2078,30 @@ function Get-PhaseContainmentRollup {
         }
 
         # Relaxation eligibility
-        $relaxationEligible = $null
+        $relaxationEligible   = $null
+        $criticalFindingCount = 0
+        $highFindingCount     = 0
         if (-not $insufficientData -and -not $denominatorZero -and -not $dataUntrustworthy) {
             # Relaxation-eligible when escape_rate < 0.05 (effectively zero escapes) and no
-            # critical-severity finding in the window. See #762 design notes for the threshold rationale.
+            # critical- OR high-severity finding in the window. See #762 design notes for the
+            # threshold rationale. Issue #854 M4: the catch-side veto previously checked only
+            # 'critical', silently letting a sustained 'high' finding render ELIGIBLE -- AC4
+            # requires the veto to cover critical/high and the render to name both counts and
+            # severity, so both counts are tallied here (not a bare boolean) for the renderer.
 
-            $hasCritical = $false
             foreach ($e in $nonApparatusEntries) {
                 $sev = if ($e -is [hashtable]) { [string]$e['severity'] } else { [string]$e.severity }
                 if ($sev -eq 'critical') {
-                    $hasCritical = $true
-                    break
+                    $criticalFindingCount++
+                }
+                elseif ($sev -eq 'high') {
+                    $highFindingCount++
                 }
             }
 
-            if ($null -ne $escapeRate -and $escapeRate -lt 0.05 -and -not $hasCritical) {
+            $hasSeverityVeto = ($criticalFindingCount -gt 0) -or ($highFindingCount -gt 0)
+
+            if ($null -ne $escapeRate -and $escapeRate -lt 0.05 -and -not $hasSeverityVeto) {
                 $relaxationEligible = $true
             }
             else {
@@ -2323,6 +2332,8 @@ function Get-PhaseContainmentRollup {
             InsufficientData          = $insufficientData
             RelaxationEligible        = $relaxationEligible
             RelaxationEligibleReason  = $relaxationEligibleReason
+            CriticalFindingCount      = $criticalFindingCount
+            HighFindingCount          = $highFindingCount
             DataUntrustworthy         = $dataUntrustworthy
             DataUntrustworthyReason   = $dataUntrustworthyReason
             CoverageK                 = $coverageK
@@ -2460,7 +2471,7 @@ function Format-PhaseContainmentReport {
                 $lines.Add("  Relaxation signal:  WITHHELD")
             }
             elseif ($stage.RelaxationEligible -eq $true) {
-                $lines.Add("  Relaxation signal:  ELIGIBLE (escape_rate ~0, no critical findings)")
+                $lines.Add("  Relaxation signal:  ELIGIBLE (escape_rate ~0, no critical/high findings)")
             }
             elseif ($stage.RelaxationEligibleReason -eq 'fetch truncated') {
                 # P9: checked BEFORE the EscapeRate reason-guess below so a
@@ -2488,7 +2499,12 @@ function Format-PhaseContainmentReport {
                     $lines.Add("  Relaxation signal:  NOT ELIGIBLE (escape_rate > 0)")
                 }
                 else {
-                    $lines.Add("  Relaxation signal:  NOT ELIGIBLE (critical severity finding in window)")
+                    # Issue #854 M4: the catch-side veto now fires for a
+                    # sustained 'high'-severity finding the same as
+                    # 'critical' (AC4), so the render must name both counts
+                    # and the severities that triggered the block instead of
+                    # a bare "critical severity finding in window" guess.
+                    $lines.Add("  Relaxation signal:  NOT ELIGIBLE ($($stage.CriticalFindingCount) critical, $($stage.HighFindingCount) high severity finding(s) in window)")
                 }
             }
         }
