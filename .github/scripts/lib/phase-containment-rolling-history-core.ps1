@@ -133,6 +133,134 @@ function Invoke-PhaseContainmentDedup {
 }
 
 # -------------------------------------------------------------------------
+# Private: Get-PhaseContainmentCommentAuthorLogin
+# Issue #854 s4 (M8): the corpus previously selected only body/createdAt
+# with no author, so any account that could comment could forge a
+# well-formed coverage record. Both GraphQL (`author { login }`, added to
+# all six comments() sites below) and REST (`gh issue/pr view --json
+# comments`, which already returns an `author.login` field on every
+# comment object with no extra selection needed) surface an `author`
+# hashtable with a `login` key; this helper centralizes the null-safe
+# extraction (deleted GitHub accounts return `author: null` from GraphQL)
+# so all eight fetch sites (six GraphQL, two REST) share one path instead
+# of duplicating the ContainsKey/null checks.
+# -------------------------------------------------------------------------
+
+function script:Get-PhaseContainmentCommentAuthorLogin {
+    <#
+    .SYNOPSIS
+        Extracts a comment node's author login, defaulting to '' when the
+        author field is absent or null.
+    .PARAMETER CommentNode
+        A single comment node hashtable (from ConvertFrom-Json -AsHashtable).
+    .OUTPUTS
+        [string] the author's login, or '' when unresolvable.
+    #>
+    param([AllowNull()]$CommentNode)
+
+    if ($null -eq $CommentNode -or $CommentNode -isnot [hashtable]) { return '' }
+    if (-not $CommentNode.ContainsKey('author')) { return '' }
+    $author = $CommentNode['author']
+    if ($null -eq $author -or $author -isnot [hashtable]) { return '' }
+    if (-not $author.ContainsKey('login')) { return '' }
+    return [string]$author['login']
+}
+
+# -------------------------------------------------------------------------
+# Public function: Test-PhaseContainmentCommentAuthoredByJudge
+# Issue #854 s4 (M8) — the comparison primitive future gate consumers use
+# to decide whether a comment's coverage/internal_match data is trustworthy.
+# -------------------------------------------------------------------------
+
+function Test-PhaseContainmentCommentAuthoredByJudge {
+    <#
+    .SYNOPSIS
+        Compares a comment's author login against the judge identity.
+    .DESCRIPTION
+        Any account that can comment on an issue/PR can otherwise post a
+        well-formed `<!-- review-dispositions-{PR} -->` body carrying a
+        forged `external_sources_reconciled` / `internal_match` record and
+        silently unlock ELIGIBLE. Coverage records and internal_match
+        values must be honored ONLY from the body the judge itself posted.
+
+        Normalization mirrors skills/code-review-intake/SKILL.md's
+        reviewer_source rule: lowercase(login) with a trailing `[bot]`
+        suffix stripped, so `github-actions` and `github-actions[bot]`
+        compare equal. This is a DISTINCT axis from reviewer_source (a
+        writer-supplied value inside the body text) — never conflate the
+        two. An empty/unresolvable AuthorLogin (deleted account, or a REST/
+        GraphQL response that omitted author) never matches any judge
+        login — fail-closed by construction.
+    .PARAMETER AuthorLogin
+        The comment's raw author login (may be '' when unresolvable).
+    .PARAMETER JudgeLogin
+        The expected judge identity's login — e.g. the repo's known CI
+        poster identity (`github-actions[bot]`) or the authenticated
+        identity that posted the PR's review-dispositions marker. Caller-
+        supplied; this function does not discover it.
+    .OUTPUTS
+        [bool]
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$AuthorLogin,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$JudgeLogin
+    )
+
+    if ([string]::IsNullOrWhiteSpace($AuthorLogin) -or [string]::IsNullOrWhiteSpace($JudgeLogin)) {
+        return $false
+    }
+
+    $normalized = ($AuthorLogin.ToLowerInvariant() -replace '\[bot\]$', '')
+    $normalizedJudge = ($JudgeLogin.ToLowerInvariant() -replace '\[bot\]$', '')
+    return $normalized -eq $normalizedJudge
+}
+
+# -------------------------------------------------------------------------
+# Public function: Select-PhaseContainmentJudgeAuthoredBodies
+# Issue #854 s4 (M8) — the filtering primitive future gate consumers use so
+# a non-judge-authored body carrying a well-formed dispositions marker
+# contributes ZERO coverage: exclude it BEFORE it ever reaches a parser
+# (Get-DispositionTally), rather than parsing it and trying to discard its
+# output afterward.
+# -------------------------------------------------------------------------
+
+function Select-PhaseContainmentJudgeAuthoredBodies {
+    <#
+    .SYNOPSIS
+        Filters a corpus tuple's Bodies down to those authored by the judge
+        identity.
+    .DESCRIPTION
+        Index-paired with AuthorLogins the same way CreatedAtValues is
+        index-paired with Bodies (Get-PhaseContainmentCommentCorpus's tuple
+        contract). A body with no resolvable author (empty AuthorLogin) is
+        excluded, matching Test-PhaseContainmentCommentAuthoredByJudge's
+        fail-closed default.
+    .PARAMETER Bodies
+        The tuple's Bodies[] array.
+    .PARAMETER AuthorLogins
+        The tuple's AuthorLogins[] array, index-paired with Bodies.
+    .PARAMETER JudgeLogin
+        The expected judge identity's login.
+    .OUTPUTS
+        [string[]] the subset of Bodies authored by the judge, in original order.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Bodies,
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$AuthorLogins,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$JudgeLogin
+    )
+
+    $selected = [System.Collections.Generic.List[string]]::new()
+    for ($i = 0; $i -lt $Bodies.Count; $i++) {
+        $authorLogin = if ($i -lt $AuthorLogins.Count) { $AuthorLogins[$i] } else { '' }
+        if (Test-PhaseContainmentCommentAuthoredByJudge -AuthorLogin $authorLogin -JudgeLogin $JudgeLogin) {
+            $selected.Add($Bodies[$i])
+        }
+    }
+    return , $selected.ToArray()
+}
+
+# -------------------------------------------------------------------------
 # Public helper: Invoke-PhaseContainmentCommentScan
 # Scan an array of comment bodies for phase-containment-{ID} blocks.
 # Exposed so tests can call it with mock data without real API calls.
@@ -359,7 +487,7 @@ function script:Get-SurfaceACorpusGraphQL {
       ... on Issue {
         number
         comments(first: 100) {
-          nodes { body createdAt }
+          nodes { author { login } body createdAt }
           pageInfo { hasNextPage endCursor }
         }
       }
@@ -399,6 +527,7 @@ function script:Get-SurfaceACorpusGraphQL {
                 # Collect all comment bodies from the initial page
                 $commentBodies   = [System.Collections.Generic.List[string]]::new()
                 $commentCreatedAt = [System.Collections.Generic.List[string]]::new()
+                $commentAuthorLogins = [System.Collections.Generic.List[string]]::new()
 
                 $commentBlock = $issueNode['comments']
                 $commentNodes = @($commentBlock['nodes'])
@@ -408,6 +537,7 @@ function script:Get-SurfaceACorpusGraphQL {
                         $commentBodies.Add([string]$cn['body'])
                         $cnCreatedAt = if ($cn.ContainsKey('createdAt')) { [string]$cn['createdAt'] } else { '' }
                         $commentCreatedAt.Add($cnCreatedAt)
+                        $commentAuthorLogins.Add((script:Get-PhaseContainmentCommentAuthorLogin -CommentNode $cn))
                     }
                 }
 
@@ -446,7 +576,7 @@ function script:Get-SurfaceACorpusGraphQL {
   repository(owner: "$Owner", name: "$Repo") {
     issue(number: $issueNum) {
       comments(first: 100, after: "$cursor") {
-        nodes { body createdAt }
+        nodes { author { login } body createdAt }
         pageInfo { hasNextPage endCursor }
       }
     }
@@ -469,6 +599,7 @@ function script:Get-SurfaceACorpusGraphQL {
                                     $commentBodies.Add([string]$cn['body'])
                                     $cnCreatedAtHunt = if ($cn.ContainsKey('createdAt')) { [string]$cn['createdAt'] } else { '' }
                                     $commentCreatedAt.Add($cnCreatedAtHunt)
+                                    $commentAuthorLogins.Add((script:Get-PhaseContainmentCommentAuthorLogin -CommentNode $cn))
                                 }
                             }
                             $huntPi = $huntComments['pageInfo']
@@ -519,7 +650,7 @@ function script:Get-SurfaceACorpusGraphQL {
   repository(owner: "$Owner", name: "$Repo") {
     issue(number: $issueNum) {
       comments(first: 100, after: "$cursor") {
-        nodes { body createdAt }
+        nodes { author { login } body createdAt }
         pageInfo { hasNextPage endCursor }
       }
     }
@@ -550,6 +681,7 @@ function script:Get-SurfaceACorpusGraphQL {
                                 $commentBodies.Add([string]$cn['body'])
                                 $cnCreatedAt2 = if ($cn.ContainsKey('createdAt')) { [string]$cn['createdAt'] } else { '' }
                                 $commentCreatedAt.Add($cnCreatedAt2)
+                                $commentAuthorLogins.Add((script:Get-PhaseContainmentCommentAuthorLogin -CommentNode $cn))
                             }
                         }
                         $pi = $pageComments['pageInfo']
@@ -571,6 +703,7 @@ function script:Get-SurfaceACorpusGraphQL {
                     Surface          = 'issue'
                     Bodies           = $commentBodies.ToArray()
                     CreatedAtValues  = $commentCreatedAt.ToArray()
+                    AuthorLogins     = $commentAuthorLogins.ToArray()
                 })
             }
 
@@ -693,7 +826,7 @@ function script:Get-SurfaceBCorpusGraphQL {
       ... on PullRequest {
         number
         comments(first: 100) {
-          nodes { body createdAt }
+          nodes { author { login } body createdAt }
           pageInfo { hasNextPage endCursor }
         }
       }
@@ -725,6 +858,7 @@ function script:Get-SurfaceBCorpusGraphQL {
 
                 $commentBodies   = [System.Collections.Generic.List[string]]::new()
                 $commentCreatedAt = [System.Collections.Generic.List[string]]::new()
+                $commentAuthorLogins = [System.Collections.Generic.List[string]]::new()
 
                 $commentBlock = $prNode['comments']
                 $commentNodes = @($commentBlock['nodes'])
@@ -734,6 +868,7 @@ function script:Get-SurfaceBCorpusGraphQL {
                         $commentBodies.Add([string]$cn['body'])
                         $cnCreatedAtB = if ($cn.ContainsKey('createdAt')) { [string]$cn['createdAt'] } else { '' }
                         $commentCreatedAt.Add($cnCreatedAtB)
+                        $commentAuthorLogins.Add((script:Get-PhaseContainmentCommentAuthorLogin -CommentNode $cn))
                     }
                 }
 
@@ -772,7 +907,7 @@ function script:Get-SurfaceBCorpusGraphQL {
   repository(owner: "$Owner", name: "$Repo") {
     pullRequest(number: $prNum) {
       comments(first: 100, after: "$cursor") {
-        nodes { body createdAt }
+        nodes { author { login } body createdAt }
         pageInfo { hasNextPage endCursor }
       }
     }
@@ -795,6 +930,7 @@ function script:Get-SurfaceBCorpusGraphQL {
                                     $commentBodies.Add([string]$cn['body'])
                                     $cnCreatedAtBHunt = if ($cn.ContainsKey('createdAt')) { [string]$cn['createdAt'] } else { '' }
                                     $commentCreatedAt.Add($cnCreatedAtBHunt)
+                                    $commentAuthorLogins.Add((script:Get-PhaseContainmentCommentAuthorLogin -CommentNode $cn))
                                 }
                             }
                             $huntPi = $huntComments['pageInfo']
@@ -838,7 +974,7 @@ function script:Get-SurfaceBCorpusGraphQL {
   repository(owner: "$Owner", name: "$Repo") {
     pullRequest(number: $prNum) {
       comments(first: 100, after: "$cursor") {
-        nodes { body createdAt }
+        nodes { author { login } body createdAt }
         pageInfo { hasNextPage endCursor }
       }
     }
@@ -866,6 +1002,7 @@ function script:Get-SurfaceBCorpusGraphQL {
                                 $commentBodies.Add([string]$cn['body'])
                                 $cnCreatedAtB2 = if ($cn.ContainsKey('createdAt')) { [string]$cn['createdAt'] } else { '' }
                                 $commentCreatedAt.Add($cnCreatedAtB2)
+                                $commentAuthorLogins.Add((script:Get-PhaseContainmentCommentAuthorLogin -CommentNode $cn))
                             }
                         }
                         $pi = $pageComments['pageInfo']
@@ -885,6 +1022,7 @@ function script:Get-SurfaceBCorpusGraphQL {
                     Surface          = 'pr'
                     Bodies           = $commentBodies.ToArray()
                     CreatedAtValues  = $commentCreatedAt.ToArray()
+                    AuthorLogins     = $commentAuthorLogins.ToArray()
                 })
             }
 
@@ -1031,15 +1169,25 @@ function script:Get-PhaseContainmentCorpusRest {
                         # index pairing between Bodies and CreatedAtValues.
                         $commentBodies    = [System.Collections.Generic.List[string]]::new()
                         $commentCreatedAt = [System.Collections.Generic.List[string]]::new()
+                        # Issue #854 s4 (M8): `gh issue view --json comments`
+                        # already returns an `author.login` field on every
+                        # comment object with no extra field selection needed
+                        # (empirically confirmed by cost-baseline-harvest.ps1's
+                        # identical `.author.login` read off the same `--json
+                        # comments` shape) — unlike the GraphQL path, no query
+                        # change is required here, only extraction.
+                        $commentAuthorLogins = [System.Collections.Generic.List[string]]::new()
                         foreach ($c in $comments) {
                             if ($null -ne $c) {
                                 $commentBodies.Add([string]$c['body'])
                                 $cCreatedAt = if ($c.ContainsKey('createdAt')) { [string]$c['createdAt'] } else { '' }
                                 $commentCreatedAt.Add($cCreatedAt)
+                                $commentAuthorLogins.Add((script:Get-PhaseContainmentCommentAuthorLogin -CommentNode $c))
                             }
                         }
                         $bodies          = $commentBodies.ToArray()
                         $createdAtValues = $commentCreatedAt.ToArray()
+                        $authorLogins    = $commentAuthorLogins.ToArray()
                         # GH-8 fix: apply the same marker-presence gate the
                         # GraphQL path uses (Get-SurfaceACorpusGraphQL) before
                         # including this issue's tuple in the returned
@@ -1052,7 +1200,7 @@ function script:Get-PhaseContainmentCorpusRest {
                         $hasMarker = ($allBodiesText -match "<!--\s*design-phase-complete-$num\s*-->") -or
                                      ($allBodiesText -match "<!--\s*plan-issue-$num\s*-->")
                         if (-not $hasMarker) { continue }
-                        $tuples.Add(@{ Number = $num; Surface = 'issue'; Bodies = $bodies; CreatedAtValues = $createdAtValues })
+                        $tuples.Add(@{ Number = $num; Surface = 'issue'; Bodies = $bodies; CreatedAtValues = $createdAtValues; AuthorLogins = $authorLogins })
                     }
                     catch {
                         # M2 fix: same rationale as the view-failure branch
@@ -1121,18 +1269,24 @@ function script:Get-PhaseContainmentCorpusRest {
                         # rationale above (identical desync risk applies here).
                         $commentBodies    = [System.Collections.Generic.List[string]]::new()
                         $commentCreatedAt = [System.Collections.Generic.List[string]]::new()
+                        # Issue #854 s4 (M8): see the Surface A REST rationale
+                        # above — `gh pr view --json comments` also already
+                        # returns `author.login` with no extra selection.
+                        $commentAuthorLogins = [System.Collections.Generic.List[string]]::new()
                         foreach ($c in $comments) {
                             if ($null -ne $c) {
                                 $commentBodies.Add([string]$c['body'])
                                 $cCreatedAt = if ($c.ContainsKey('createdAt')) { [string]$c['createdAt'] } else { '' }
                                 $commentCreatedAt.Add($cCreatedAt)
+                                $commentAuthorLogins.Add((script:Get-PhaseContainmentCommentAuthorLogin -CommentNode $c))
                             }
                         }
                         $bodies          = $commentBodies.ToArray()
                         $createdAtValues = $commentCreatedAt.ToArray()
+                        $authorLogins    = $commentAuthorLogins.ToArray()
                         # Only scan PRs that have judge-rulings
                         if (-not (($bodies -join "`n") -match '<!--\s*judge-rulings')) { continue }
-                        $tuples.Add(@{ Number = $num; Surface = 'pr'; Bodies = $bodies; CreatedAtValues = $createdAtValues })
+                        $tuples.Add(@{ Number = $num; Surface = 'pr'; Bodies = $bodies; CreatedAtValues = $createdAtValues; AuthorLogins = $authorLogins })
                     }
                     catch {
                         # M2 fix: see the identical Surface A rationale above.
@@ -1253,6 +1407,20 @@ function Get-PhaseContainmentCommentCorpus {
         CreatedAtValues (e.g. Invoke-PhaseContainmentDedup's latest-wins
         comparison) now get real timestamps under REST fallback too, not
         just under GraphQL.
+
+        Issue #854 s4 (M8): tuples also now carry a per-comment AuthorLogins
+        array, index-paired with Bodies/CreatedAtValues the same way. All six
+        GraphQL comments() query sites (issue base/hunt/page, PR base/hunt/
+        page) select `author { login }` alongside `body createdAt`; both
+        REST fallback surfaces extract the same field from `gh issue/pr view
+        --json comments`, which already returns author.login with no extra
+        selection. This closes the forged-coverage vector: without an author
+        on record, any account that could comment on an issue/PR could post
+        a well-formed dispositions marker and forge a coverage record. See
+        Test-PhaseContainmentCommentAuthoredByJudge and
+        Select-PhaseContainmentJudgeAuthoredBodies (above) for the
+        comparison/filtering primitives future gate consumers use against
+        this field.
     .PARAMETER RepoOwner
         GitHub repository owner (e.g., 'Grimblaz'). Resolved via 'gh repo view' if not supplied.
     .PARAMETER RepoName
@@ -1265,7 +1433,7 @@ function Get-PhaseContainmentCommentCorpus {
         Per-run budget in seconds. Default: 30.
     .OUTPUTS
         [PSCustomObject] with:
-          Tuples    [array]  — each entry: @{ Number; Surface ('issue'|'pr'); Bodies [string[]]; CreatedAtValues [string[]] }
+          Tuples    [array]  — each entry: @{ Number; Surface ('issue'|'pr'); Bodies [string[]]; CreatedAtValues [string[]]; AuthorLogins [string[]] (issue #854 s4; index-paired with Bodies, '' when unresolvable) }
           FetchedAt [datetime]
           Source    [string] — 'graphql' | 'rest' | 'timeout' | 'repo-resolution-failed'
           Truncated [bool]   — issue #772 D1: true when any silent-truncation

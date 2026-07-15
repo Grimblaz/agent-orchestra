@@ -1323,6 +1323,311 @@ judge_ruling: sustained
 }
 
 # ---------------------------------------------------------------------------
+# Issue #854 s4 (M8): AuthorLogins threaded through the tuple contract.
+# The corpus GraphQL previously selected only `body createdAt` with no
+# author at all six comments() sites (issue base/hunt/page, PR base/hunt/
+# page), so any account that could comment could forge a well-formed
+# coverage record. These fixtures prove author extraction survives every
+# site, including pagination (hunt + unbounded page) and the REST fallback,
+# and that a deleted-account (null author) response degrades to '' rather
+# than throwing.
+# ---------------------------------------------------------------------------
+
+Describe 'Get-PhaseContainmentCommentCorpus — AuthorLogins threaded through the tuple contract (issue #854 s4)' {
+    AfterEach {
+        if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {
+            Remove-Item -Path Function:gh -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'extracts author.login on the issue-surface base query (site 1 of 6)' {
+        $payload = @{
+            data = @{
+                search = @{
+                    pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                    nodes    = @(
+                        @{
+                            number   = 1101
+                            comments = @{
+                                nodes    = @(@{ author = @{ login = 'alice' }; body = '<!-- plan-issue-1101 -->'; createdAt = '2024-01-01T12:00:00Z' })
+                                pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                            }
+                        }
+                    )
+                }
+            }
+        }
+        $json = ($payload | ConvertTo-Json -Depth 12)
+        $emptySearchJson = (@{ data = @{ search = @{ pageInfo = @{ hasNextPage = $false; endCursor = $null }; nodes = @() } } } | ConvertTo-Json -Depth 6)
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $global:LASTEXITCODE = 0
+            if (($Args -join ' ') -match 'is:issue') { return $json }
+            if (($Args -join ' ') -match 'is:pr') { return $emptySearchJson }
+            return '{}'
+        }
+
+        $result = Get-PhaseContainmentCommentCorpus -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 30
+        $tuple = $result.Tuples | Where-Object { $_['Number'] -eq 1101 }
+        $tuple['AuthorLogins'] | Should -Be @('alice')
+    }
+
+    It 'extracts author.login on the PR-surface base query (site 4 of 6)' {
+        $payload = @{
+            data = @{
+                search = @{
+                    pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                    nodes    = @(
+                        @{
+                            number   = 1102
+                            comments = @{
+                                nodes    = @(@{ author = @{ login = 'bob' }; body = '<!-- judge-rulings pr=1102 -->'; createdAt = '2024-01-01T13:00:00Z' })
+                                pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                            }
+                        }
+                    )
+                }
+            }
+        }
+        $json = ($payload | ConvertTo-Json -Depth 12)
+        $emptySearchJson = (@{ data = @{ search = @{ pageInfo = @{ hasNextPage = $false; endCursor = $null }; nodes = @() } } } | ConvertTo-Json -Depth 6)
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $global:LASTEXITCODE = 0
+            if (($Args -join ' ') -match 'is:pr') { return $json }
+            if (($Args -join ' ') -match 'is:issue') { return $emptySearchJson }
+            return '{}'
+        }
+
+        $result = Get-PhaseContainmentCommentCorpus -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 30
+        $tuple = $result.Tuples | Where-Object { $_['Number'] -eq 1102 }
+        $tuple['AuthorLogins'] | Should -Be @('bob')
+    }
+
+    It 'carries AuthorLogins across the issue-surface hunt + unbounded page pagination (sites 2 and 3 of 6), index-paired with Bodies' {
+        # Page 1: no marker yet (forces the hunt). Hunt page: marker found.
+        # Post-marker unbounded page: one more comment collected.
+        $searchPayload = @{
+            data = @{
+                search = @{
+                    pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                    nodes    = @(
+                        @{
+                            number   = 1103
+                            comments = @{
+                                nodes    = @(@{ author = @{ login = 'carol' }; body = 'no marker here yet'; createdAt = '2024-01-01T00:00:00Z' })
+                                pageInfo = @{ hasNextPage = $true; endCursor = 'CURSOR1' }
+                            }
+                        }
+                    )
+                }
+            }
+        }
+        $huntPayload = @{
+            data = @{
+                repository = @{
+                    issue = @{
+                        comments = @{
+                            nodes    = @(@{ author = @{ login = 'dave' }; body = '<!-- plan-issue-1103 -->'; createdAt = '2024-01-01T01:00:00Z' })
+                            pageInfo = @{ hasNextPage = $true; endCursor = 'CURSOR2' }
+                        }
+                    }
+                }
+            }
+        }
+        $pagePayload = @{
+            data = @{
+                repository = @{
+                    issue = @{
+                        comments = @{
+                            nodes    = @(@{ author = @{ login = 'erin' }; body = 'trailing comment'; createdAt = '2024-01-01T02:00:00Z' })
+                            pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                        }
+                    }
+                }
+            }
+        }
+
+        $searchJson = ($searchPayload | ConvertTo-Json -Depth 12)
+        $huntJson   = ($huntPayload | ConvertTo-Json -Depth 12)
+        $pageJson   = ($pagePayload | ConvertTo-Json -Depth 12)
+        $emptySearchJson = (@{ data = @{ search = @{ pageInfo = @{ hasNextPage = $false; endCursor = $null }; nodes = @() } } } | ConvertTo-Json -Depth 6)
+
+        $script:callCount = 0
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $global:LASTEXITCODE = 0
+            $joined = $Args -join ' '
+            if ($joined -match 'is:issue') { return $searchJson }
+            if ($joined -match 'is:pr') { return $emptySearchJson }
+            $script:callCount++
+            if ($script:callCount -eq 1) { return $huntJson }
+            return $pageJson
+        }
+
+        $result = Get-PhaseContainmentCommentCorpus -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 30
+        $tuple = $result.Tuples | Where-Object { $_['Number'] -eq 1103 }
+        $tuple['Bodies'] | Should -Be @('no marker here yet', '<!-- plan-issue-1103 -->', 'trailing comment')
+        $tuple['AuthorLogins'] | Should -Be @('carol', 'dave', 'erin')
+    }
+
+    It 'degrades to empty-string AuthorLogin when GraphQL returns a null author (deleted account) instead of throwing' {
+        $payload = @{
+            data = @{
+                search = @{
+                    pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                    nodes    = @(
+                        @{
+                            number   = 1104
+                            comments = @{
+                                nodes    = @(@{ author = $null; body = '<!-- plan-issue-1104 -->'; createdAt = '2024-01-01T12:00:00Z' })
+                                pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                            }
+                        }
+                    )
+                }
+            }
+        }
+        $json = ($payload | ConvertTo-Json -Depth 12)
+        $emptySearchJson = (@{ data = @{ search = @{ pageInfo = @{ hasNextPage = $false; endCursor = $null }; nodes = @() } } } | ConvertTo-Json -Depth 6)
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $global:LASTEXITCODE = 0
+            if (($Args -join ' ') -match 'is:issue') { return $json }
+            if (($Args -join ' ') -match 'is:pr') { return $emptySearchJson }
+            return '{}'
+        }
+
+        $result = Get-PhaseContainmentCommentCorpus -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 30
+        $tuple = $result.Tuples | Where-Object { $_['Number'] -eq 1104 }
+        $tuple['AuthorLogins'] | Should -Be @('')
+    }
+
+    It 'extracts AuthorLogins under the REST fallback for both surfaces, for free from --json comments' {
+        $restIssueList = (@(@{ number = 1105 }) | ConvertTo-Json)
+        $restIssueView = (@{ comments = @(@{ author = @{ login = 'frank' }; body = '<!-- plan-issue-1105 -->'; createdAt = '2024-01-01T00:00:00Z' }) } | ConvertTo-Json -Depth 6)
+        $restPrList = (@(@{ number = 1106 }) | ConvertTo-Json)
+        $restPrView = (@{ comments = @(@{ author = @{ login = 'grace' }; body = '<!-- judge-rulings pr=1106 -->'; createdAt = '2024-01-01T00:00:00Z' }) } | ConvertTo-Json -Depth 6)
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            if ($joined -match 'graphql') {
+                $global:LASTEXITCODE = 1
+                return 'boom'
+            }
+            $global:LASTEXITCODE = 0
+            if ($joined -match 'issue list') { return $restIssueList }
+            if ($joined -match 'issue view') { return $restIssueView }
+            if ($joined -match 'pr list')    { return $restPrList }
+            if ($joined -match 'pr view')    { return $restPrView }
+            return '{}'
+        }
+
+        $result = Get-PhaseContainmentCommentCorpus -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 30
+        $result.Source | Should -Be 'rest'
+
+        $issueTuple = $result.Tuples | Where-Object { $_['Number'] -eq 1105 }
+        $issueTuple['AuthorLogins'] | Should -Be @('frank')
+
+        $prTuple = $result.Tuples | Where-Object { $_['Number'] -eq 1106 }
+        $prTuple['AuthorLogins'] | Should -Be @('grace')
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Issue #854 s4 (M8): the coverage-authorship gate primitives. Any account
+# that can comment on an issue/PR could otherwise post a well-formed
+# `<!-- review-dispositions-{PR} -->` body carrying a forged
+# `external_sources_reconciled` record and unlock ELIGIBLE. These fixtures
+# prove: (a) such a body IS well-formed and WOULD contribute coverage if
+# parsed directly, establishing the vector is real; (b) filtering by
+# judge-authorship BEFORE parsing excludes it, so it contributes ZERO
+# coverage.
+# ---------------------------------------------------------------------------
+
+Describe 'Corpus authorship — closes the forged-coverage vector (issue #854 s4, M8)' {
+    BeforeAll {
+        # Test-time-only composition: dot-source the parser this primitive
+        # is designed to sit in front of, so the fixture can prove the full
+        # exclude-before-parse property end to end. This does not modify
+        # phase-containment-emission-check-core.ps1 — Get-DispositionTally
+        # remains this step's non-goal (informational cost tables keep
+        # their existing no-authorship-filter posture).
+        . (Join-Path $script:LibRoot 'phase-containment-emission-check-core.ps1')
+
+        $script:JudgeLogin = 'github-actions[bot]'
+
+        # A well-formed review-dispositions body (M9 zero-entries legal
+        # coverage shape) carrying a real, parseable external_sources_reconciled
+        # array — the exact shape a forger would need to produce.
+        $script:ForgedCoverageBody = @'
+<!-- review-dispositions-999 -->
+
+```yaml
+schema_version: 4
+passes_run: [1]
+entries: []
+external_sources_reconciled: ["a.ps1:1:aaa111", "b.ps1:2:bbb222"]
+```
+'@
+    }
+
+    It 'establishes the vector: the forged body IS well-formed and WOULD contribute coverage if parsed directly' {
+        $tally = Get-DispositionTally -Surface code-review -Body $script:ForgedCoverageBody
+        $tally.ParseStatus | Should -Be 'ok'
+        $tally.ExternalSourcesReconciled | Should -Contain 'a.ps1:1:aaa111'
+    }
+
+    It 'Test-PhaseContainmentCommentAuthoredByJudge rejects a non-judge author' {
+        Test-PhaseContainmentCommentAuthoredByJudge -AuthorLogin 'evil-user' -JudgeLogin $script:JudgeLogin | Should -Be $false
+    }
+
+    It 'Test-PhaseContainmentCommentAuthoredByJudge accepts the judge login, normalized case/[bot]-insensitively' {
+        Test-PhaseContainmentCommentAuthoredByJudge -AuthorLogin 'GitHub-Actions' -JudgeLogin $script:JudgeLogin | Should -Be $true
+    }
+
+    It 'Test-PhaseContainmentCommentAuthoredByJudge treats an empty/unresolvable AuthorLogin as non-judge (fail-closed)' {
+        Test-PhaseContainmentCommentAuthoredByJudge -AuthorLogin '' -JudgeLogin $script:JudgeLogin | Should -Be $false
+    }
+
+    It 'Select-PhaseContainmentJudgeAuthoredBodies excludes a non-judge-authored body carrying a well-formed external_sources_reconciled -- it contributes ZERO coverage' {
+        $bodies       = @($script:ForgedCoverageBody, 'unrelated chatter')
+        $authorLogins = @('evil-user', $script:JudgeLogin)
+
+        $filtered = Select-PhaseContainmentJudgeAuthoredBodies -Bodies $bodies -AuthorLogins $authorLogins -JudgeLogin $script:JudgeLogin
+
+        $filtered | Should -Not -Contain $script:ForgedCoverageBody
+
+        # The forged body never reaches the parser -- prove its
+        # external_sources_reconciled can never surface as coverage from the
+        # surviving (judge-authored) body set.
+        $coverage = [System.Collections.Generic.List[string]]::new()
+        foreach ($b in $filtered) {
+            $tally = Get-DispositionTally -Surface code-review -Body $b
+            if ($tally.ParseStatus -eq 'ok') {
+                foreach ($v in $tally.ExternalSourcesReconciled) { $coverage.Add($v) }
+            }
+        }
+        $coverage.Count | Should -Be 0
+    }
+
+    It 'Select-PhaseContainmentJudgeAuthoredBodies keeps a judge-authored body carrying the same well-formed marker' {
+        $bodies       = @($script:ForgedCoverageBody)
+        $authorLogins = @($script:JudgeLogin)
+
+        $filtered = Select-PhaseContainmentJudgeAuthoredBodies -Bodies $bodies -AuthorLogins $authorLogins -JudgeLogin $script:JudgeLogin
+
+        $filtered | Should -Contain $script:ForgedCoverageBody
+        $tally = Get-DispositionTally -Surface code-review -Body $filtered[0]
+        $tally.ExternalSourcesReconciled | Should -Contain 'a.ps1:1:aaa111'
+    }
+}
+
+# ---------------------------------------------------------------------------
 # PF2-F2 regression (issue #782 post-fix prosecution pass): every `gh` call
 # site in this file that pipes its output to ConvertFrom-Json must not merge
 # stderr into that stream. GH-7 fixed this vulnerability class in
