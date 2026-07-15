@@ -57,11 +57,15 @@
               "match_status": {
                 "type": "string",
                 "enum": ["duplicate", "novel", "ambiguous"]
+              },
+              "matched_finding_key": {
+                "type": "string",
+                "description": "Optional. The stable_finding_key of the internal finding this entry was matched against when match_status is 'duplicate'."
               }
             },
             "required": ["match_status"],
             "additionalProperties": false,
-            "description": "v4: Optional. Whether this entry's finding was already caught internally (duplicate), was not previously caught (novel), or could not be resolved (ambiguous) relative to an external reviewer's findings. Absent on a resolved-external sustained entry is treated as 'ambiguous' by consumers -- a bookkeeping omission must never manufacture an escape. Uses match_status rather than a bare status key to avoid flat-key collision in the line-regex parser."
+            "description": "v4: Optional. Whether this entry's finding was already caught internally (duplicate), was not previously caught (novel), or could not be resolved (ambiguous) relative to an external reviewer's findings. Absent on a resolved-external sustained entry is treated as 'ambiguous' by consumers -- a bookkeeping omission must never manufacture an escape. Uses match_status rather than a bare status key to avoid flat-key collision in the line-regex parser. matched_finding_key optionally records the internal stable_finding_key this entry corresponds to."
           },
           "disposition_rationale": {
             "type": "string",

@@ -1655,6 +1655,203 @@ entries:
 ```
 '@
 
+# --- issue #854 s3 fixtures: internal_match, external_sources_reconciled,
+# M9 zero-entry legal coverage, head gate ------------------------------------
+
+# Basic internal_match projection: entry 1 carries match_status: duplicate
+# plus matched_finding_key; entry 2 carries match_status: novel with no
+# matched_finding_key (must default to $null); entry 3 carries no
+# internal_match block at all (Seam Specification default: 'ambiguous').
+$script:ReviewDispositionsInternalMatchBody = @'
+<!-- review-dispositions-950 -->
+
+```yaml
+schema_version: 4
+passes_run: [1]
+entries:
+  - stable_finding_key: "p.ps1:1:ppp"
+    pass: 1
+    disposition: dismiss
+    classification: routine
+    internal_match:
+      match_status: duplicate
+      matched_finding_key: "orig.ps1:9:aaa111"
+    severity: medium
+    stage: code-review
+    reviewer_source: local
+    disposition_rationale: "Already caught internally; matches an earlier finding."
+  - stable_finding_key: "p.ps1:2:qqq"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    internal_match:
+      match_status: novel
+    severity: high
+    stage: code-review
+    reviewer_source: gemini
+    disposition_rationale: "Not previously caught internally."
+  - stable_finding_key: "p.ps1:3:rrr"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: low
+    stage: code-review
+    reviewer_source: local
+    disposition_rationale: "No internal_match block at all -- must default to ambiguous."
+```
+'@
+
+# M41 regression: a fake "match_status: duplicate" / "matched_finding_key:"
+# pair embedded in disposition_rationale's block-scalar CONTENT (indented,
+# genuinely inside the span) with NO real internal_match field anywhere else
+# in the entry. Without the block-scalar exclusion check, the house
+# $keyAnchor's leading `^\s*` would match this indented decoy (unlike the
+# strict column-0 external_sources_reconciled reader, this field-extraction
+# site's defense is genuinely load-bearing, not merely redundant with a
+# stricter anchor) and misread it as the real field.
+$script:ReviewDispositionsInternalMatchBlockScalarDecoyBody = @'
+<!-- review-dispositions-954 -->
+
+```yaml
+schema_version: 4
+passes_run: [1]
+entries:
+  - stable_finding_key: "u.ps1:1:uuu"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: medium
+    stage: code-review
+    reviewer_source: local
+    disposition_rationale: |
+      No internal_match block was recorded for this entry. A NOTE for future
+      readers: some legacy tooling used to write inline fragments like
+      match_status: duplicate
+      matched_finding_key: "should-never-be-read"
+      directly in prose; those must never be picked up as real structure.
+```
+'@
+
+# Normal (non-zero-entries) path: one real entry AND a valid PR-level
+# external_sources_reconciled flow-array field co-existing on the same body.
+$script:ReviewDispositionsWithExternalSourcesReconciledBody = @'
+<!-- review-dispositions-955 -->
+
+```yaml
+schema_version: 4
+passes_run: [1]
+entries:
+  - stable_finding_key: "v.ps1:1:vvv"
+    pass: 1
+    disposition: dismiss
+    classification: routine
+    internal_match:
+      match_status: duplicate
+      matched_finding_key: "v.ps1:1:vvv"
+    severity: medium
+    stage: code-review
+    reviewer_source: local
+    disposition_rationale: "Reconciled: this finding matches an external reviewer's finding already caught internally."
+external_sources_reconciled: ["v.ps1:1:vvv"]
+```
+'@
+
+# Block-list (non-flow) style external_sources_reconciled, combined with the
+# M9 zero-entries legal-coverage case, so both value shapes get fixture
+# coverage.
+$script:ExternalSourcesReconciledZeroEntriesLegalBody = @'
+<!-- review-dispositions-951 -->
+
+```yaml
+schema_version: 4
+passes_run: [1]
+entries: []
+external_sources_reconciled: ["a.ps1:1:aaa111", "b.ps1:2:bbb222"]
+```
+'@
+
+$script:ExternalSourcesReconciledZeroEntriesBlockListBody = @'
+<!-- review-dispositions-956 -->
+
+```yaml
+schema_version: 4
+passes_run: [1]
+entries: []
+external_sources_reconciled:
+  - "c.ps1:1:ccc333"
+  - "d.ps1:2:ddd444"
+```
+'@
+
+# M9 contrast: head present, zero entries, but external_sources_reconciled's
+# value is neither a flow array nor a block list (malformed) -- must stay
+# could-not-verify, not fabricate a legal-coverage 'ok'.
+$script:ExternalSourcesReconciledZeroEntriesMalformedBody = @'
+<!-- review-dispositions-957 -->
+
+```yaml
+schema_version: 4
+passes_run: [1]
+entries: []
+external_sources_reconciled: not-an-array
+```
+'@
+
+# M30 regression (fixture ii): external_sources_reconciled written INSIDE an
+# entry (indented under the list item, same indent as the entry's other
+# fields) must NOT be misread as the PR-level field -- the strict column-0
+# anchor excludes it purely by indentation, independent of block-scalar
+# status.
+$script:ExternalSourcesReconciledEntryNestedDecoyBody = @'
+<!-- review-dispositions-952 -->
+
+```yaml
+schema_version: 4
+passes_run: [1]
+entries:
+  - stable_finding_key: "s.ps1:1:sss"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: medium
+    stage: code-review
+    reviewer_source: local
+    external_sources_reconciled: ["decoy.ps1:1:decoy111"]
+    disposition_rationale: "Entry-nested decoy key must not be read as the PR-level field."
+```
+'@
+
+# M41 regression (fixture i): external_sources_reconciled-looking text
+# embedded in disposition_rationale's block-scalar CONTENT (indented, so
+# genuinely part of the span) must not be read as real structure. This text
+# is excluded by the same column-0 anchor as the entry-nested decoy above
+# (block-scalar content is, by construction, always indented relative to its
+# key line, so it can never land at column 0) -- the block-scalar-span
+# exclusion check is implemented on this reader too (M41), as defense in
+# depth, even though it is not the reachable defense for this specific
+# fixture.
+$script:ExternalSourcesReconciledBlockScalarDecoyBody = @'
+<!-- review-dispositions-953 -->
+
+```yaml
+schema_version: 4
+passes_run: [1]
+entries:
+  - stable_finding_key: "t.ps1:1:ttt"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: medium
+    stage: code-review
+    reviewer_source: local
+    disposition_rationale: |
+      Unrelated free-text discussion that happens to quote marker-looking
+      text from a different context:
+      external_sources_reconciled: [forged.ps1:1:forged111]
+      This must never be read as the real PR-level field.
+```
+'@
+
 #endregion
 
 }
@@ -3274,6 +3471,106 @@ Describe 'Get-DispositionTally - code-review surface fail-loud paths (DD3)' {
     It 'returns could-not-verify for an empty body' {
         $result = Get-DispositionTally -Surface 'code-review' -Body ''
         $result.ParseStatus | Should -Be 'could-not-verify'
+    }
+}
+
+# ---------------------------------------------------------------------------
+# issue #854 s3: internal_match per-entry projection, external_sources_reconciled
+# PR-level reader, M9 zero-entry legal coverage, relocated head gate.
+# ---------------------------------------------------------------------------
+
+Describe 'Get-DispositionTally - code-review surface internal_match projection (issue #854 s3)' {
+    It 'reads match_status=duplicate with matched_finding_key on the first entry' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsInternalMatchBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 3
+        $result.Entries[0].MatchStatus | Should -Be 'duplicate'
+        $result.Entries[0].MatchedFindingKey | Should -Be 'orig.ps1:9:aaa111'
+    }
+
+    It 'reads match_status=novel with a null matched_finding_key when the field is absent' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsInternalMatchBody
+        $result.Entries[1].MatchStatus | Should -Be 'novel'
+        $result.Entries[1].MatchedFindingKey | Should -BeNullOrEmpty
+    }
+
+    It 'defaults MatchStatus to ambiguous (Seam Specification) when internal_match is absent entirely' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsInternalMatchBody
+        $result.Entries[2].MatchStatus | Should -Be 'ambiguous'
+        $result.Entries[2].MatchedFindingKey | Should -BeNullOrEmpty
+    }
+
+    It 'M41: does not misread a fake match_status/matched_finding_key embedded in a disposition_rationale block scalar as the real field' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsInternalMatchBlockScalarDecoyBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 1
+        $result.Entries[0].MatchStatus | Should -Be 'ambiguous'
+        $result.Entries[0].MatchedFindingKey | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Get-DispositionTally - code-review surface external_sources_reconciled PR-level reader (issue #854 s3)' {
+    It 'reads a flow-array external_sources_reconciled field alongside real entries' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsWithExternalSourcesReconciledBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 1
+        @($result.ExternalSourcesReconciled) | Should -Be @('v.ps1:1:vvv')
+    }
+
+    It 'M9: a real head with a valid column-0 field but ZERO segmentable entries is a legal ok coverage record (flow-array shape)' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ExternalSourcesReconciledZeroEntriesLegalBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 0
+        @($result.ExternalSourcesReconciled) | Should -Be @('a.ps1:1:aaa111', 'b.ps1:2:bbb222')
+    }
+
+    It 'M9: the same legal-coverage ruling holds for the block-list value shape' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ExternalSourcesReconciledZeroEntriesBlockListBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 0
+        @($result.ExternalSourcesReconciled) | Should -Be @('c.ps1:1:ccc333', 'd.ps1:2:ddd444')
+    }
+
+    It 'M9 contrast: zero entries plus a MALFORMED external_sources_reconciled value stays could-not-verify, never a fabricated ok' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ExternalSourcesReconciledZeroEntriesMalformedBody
+        $result.ParseStatus | Should -Be 'could-not-verify'
+    }
+
+    It 'DD3 regression: zero entries with NO external_sources_reconciled field at all still stays could-not-verify (pre-#854 behavior unchanged)' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsZeroEntriesBody
+        $result.ParseStatus | Should -Be 'could-not-verify'
+    }
+
+    It 'M30: an entry-nested external_sources_reconciled decoy (indented under a list item) is not read as the PR-level field' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ExternalSourcesReconciledEntryNestedDecoyBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 1
+        @($result.ExternalSourcesReconciled) | Should -Be @()
+    }
+
+    It 'M41: an external_sources_reconciled-looking decoy embedded in a disposition_rationale block scalar is not read as real structure' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ExternalSourcesReconciledBlockScalarDecoyBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 1
+        @($result.ExternalSourcesReconciled) | Should -Be @()
+    }
+}
+
+Describe 'Test-ReviewDispositionsHeadPresent - relocated head gate (issue #854 s3, M10)' {
+    It 'returns $true for a real, vocab-gate-passing review-dispositions head' {
+        Test-ReviewDispositionsHeadPresent -Body $script:ReviewDispositionsBasicBody | Should -BeTrue
+    }
+
+    It 'returns $false (skipped, never could-not-verify) when no review-dispositions head is present at all' {
+        Test-ReviewDispositionsHeadPresent -Body $script:ReviewDispositionsNoMarkerBody | Should -BeFalse
+    }
+
+    It 'returns $false for a bare prose mention of the marker convention with no real vocabulary' {
+        Test-ReviewDispositionsHeadPresent -Body $script:ReviewDispositionsProseMentionOnlyBody | Should -BeFalse
+    }
+
+    It 'returns $false for an empty body' {
+        Test-ReviewDispositionsHeadPresent -Body '' | Should -BeFalse
     }
 }
 

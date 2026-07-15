@@ -35,46 +35,18 @@ $script:CostRateInsufficientDataThreshold = 5
 
 #region Private: head-presence detectors (routing, issue #768 s4 M1)
 
-function script:Test-ReviewDispositionsHeadPresent {
-    <#
-    .SYNOPSIS
-        Vocab-gated presence check for the <!-- review-dispositions-{N} -->
-        marker head.
-    .DESCRIPTION
-        Test-EmissionMarkerPresent (phase-containment-emission-check-core.ps1)
-        covers the judge-rulings/finding_dispositions marker heads only — it
-        has no branch for the review-dispositions marker this file also needs
-        to route on. This helper mirrors the SAME technique (bounded
-        lookahead vocab gate after the head substring) so a maintainer's
-        prose sentence merely describing the marker convention is not
-        mistaken for a real block, and so Get-ReviewCostRollup can
-        distinguish "no review-dispositions marker on this body" (ordinary
-        chatter, contributes nothing) from "marker present but unparseable"
-        (a real could-not-verify condition Get-DispositionTally's own
-        Get-ReviewDispositionsTallyInternal reports).
-    .PARAMETER Body
-        The raw comment body text to scan.
-    .OUTPUTS
-        [bool]
-    #>
-    param(
-        [Parameter(Mandatory)][AllowEmptyString()][string]$Body
-    )
-    if ([string]::IsNullOrWhiteSpace($Body)) { return $false }
-
-    $headCandidates = [regex]::Matches($Body, '<!--\s*review-dispositions-\d+\s*-->')
-    if ($headCandidates.Count -eq 0) { return $false }
-
-    $lookaheadWindow = 400
-    foreach ($candidate in $headCandidates) {
-        $windowEnd = [Math]::Min($Body.Length, $candidate.Index + $candidate.Length + $lookaheadWindow)
-        $window = $Body.Substring($candidate.Index, $windowEnd - $candidate.Index)
-        if ([regex]::IsMatch($window, '(?m)^\s*(entries|schema_version|stable_finding_key)\s*:')) {
-            return $true
-        }
-    }
-    return $false
-}
+# Test-ReviewDispositionsHeadPresent (vocab-gated presence check for the
+# <!-- review-dispositions-{N} --> marker head, consumed by
+# Get-ReviewCostRollup below) relocated to
+# phase-containment-emission-check-core.ps1 (issue #854 s3, M10) — it now
+# lives beside Get-DispositionTally and Get-ReviewDispositionsRealHeadMatch,
+# the function it wraps. This file dot-sources that file above and consumes
+# the relocated function directly (same established pattern as
+# Test-JudgeRulingsRealHeadPresent below, which has always delegated to
+# emission-check-core.ps1's Get-RealJudgeRulingsHeadMatches). This retires,
+# rather than extends, the CM17 script:-private cross-file duplication this
+# gate used to carry as its own second copy of the head-detection logic
+# (issue #842 CM11's duplication class).
 
 function script:Test-JudgeRulingsRealHeadPresent {
     <#

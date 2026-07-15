@@ -927,11 +927,14 @@ function Get-DispositionTally {
         review-dispositions marker is the per-finding engineer-disposition
         ledger this function accounts). Returns a joint per-entry projection —
         one tuple per entry, `{StableFindingKey; Disposition; Stage;
-        ReviewerSource}` — so callers can build both the AC1 per-stage
+        ReviewerSource; MatchStatus; MatchedFindingKey}` (issue #854 s3 added
+        the last two, additive) — so callers can build both the AC1 per-stage
         dismiss/defer marginal and the AC2 per-source x disposition joint
         table from the same data. Entries are filtered to `stage ==
         'code-review'` (v1/v2 entries, which predate or omit the `stage`
         field, default to `code-review`); a `stage: ce` entry is excluded.
+        Also returns the PR-level `ExternalSourcesReconciled` field (issue
+        #854 s3) — an empty array when absent/unparseable, never $null.
 
         -Surface design-challenge / plan-stress-test extend the two existing
         script-scoped internals (additive-return only; see
@@ -954,7 +957,10 @@ function Get-DispositionTally {
         [PSCustomObject]. For -Surface code-review:
           Surface     [string] — 'code-review'
           Entries     [PSCustomObject[]] — one per in-scope entry, each with
-                      StableFindingKey, Disposition, Stage, ReviewerSource
+                      StableFindingKey, Disposition, Stage, ReviewerSource,
+                      MatchStatus, MatchedFindingKey
+          ExternalSourcesReconciled [string[]] — PR-level column-0 field
+                      (issue #854 s3); empty array when absent/unparseable
           ParseStatus [string] — 'ok' or 'could-not-verify'
         For -Surface plan-stress-test:
           Surface               [string]
@@ -977,7 +983,7 @@ function Get-DispositionTally {
 
     if ([string]::IsNullOrWhiteSpace($Body)) {
         if ($Surface -eq 'code-review') {
-            return [PSCustomObject]@{ Surface = $Surface; Entries = @(); ParseStatus = 'could-not-verify' }
+            return [PSCustomObject]@{ Surface = $Surface; Entries = @(); ExternalSourcesReconciled = @(); ParseStatus = 'could-not-verify' }
         }
         if ($Surface -eq 'design-challenge') {
             # Additive (issue #768 s4): DismissedCount, see the design-challenge
@@ -1003,10 +1009,11 @@ function Get-DispositionTally {
         if ($inner.ParseStatus -eq 'ok') {
             $hasEmptyKeyEntry = @($filteredEntries | Where-Object { [string]::IsNullOrWhiteSpace($_.StableFindingKey) }).Count -gt 0
             if ($hasEmptyKeyEntry) {
-                return [PSCustomObject]@{ Surface = $Surface; Entries = @(); ParseStatus = 'could-not-verify' }
+                return [PSCustomObject]@{ Surface = $Surface; Entries = @(); ExternalSourcesReconciled = @(); ParseStatus = 'could-not-verify' }
             }
         }
-        return [PSCustomObject]@{ Surface = $Surface; Entries = $filteredEntries; ParseStatus = $inner.ParseStatus }
+        $externalSourcesReconciled = if ($inner.ParseStatus -eq 'ok') { @($inner.ExternalSourcesReconciled) } else { @() }
+        return [PSCustomObject]@{ Surface = $Surface; Entries = $filteredEntries; ExternalSourcesReconciled = $externalSourcesReconciled; ParseStatus = $inner.ParseStatus }
     }
 
     if ($Surface -eq 'design-challenge') {
@@ -1032,17 +1039,194 @@ function Get-DispositionTally {
 
 #endregion
 
+#region Review-dispositions head gate (private, shared with phase-containment-cost-core.ps1)
+
+function script:Get-ReviewDispositionsRealHeadMatch {
+    <#
+    .SYNOPSIS
+        Vocab-gated real-head match for the <!-- review-dispositions-{N} -->
+        marker (issue #854 s3, M10).
+    .DESCRIPTION
+        Single source of truth for "where does the real review-dispositions
+        head start" — same bounded-lookahead vocab-gate technique as
+        Get-RealJudgeRulingsHeadMatches above (a maintainer's prose sentence
+        merely describing the marker convention is not mistaken for a real
+        block). Landed HERE, beside Get-DispositionTally, rather than as a
+        third copy of the head-detection trio (issue #842 CM11) or by
+        extending phase-containment-cost-core.ps1's script:-private reach
+        into this file's internals (issue #842 CM17, the anti-pattern this
+        move retires). phase-containment-cost-core.ps1 dot-sources this file
+        and consumes Test-ReviewDispositionsHeadPresent (below) directly —
+        it no longer carries its own copy.
+    .PARAMETER Body
+        The raw comment body text to scan.
+    .OUTPUTS
+        The [System.Text.RegularExpressions.Match] for the real head, or
+        $null when no vocab-gate-passing head exists.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Body
+    )
+    if ([string]::IsNullOrWhiteSpace($Body)) { return $null }
+
+    $headPattern = '<!--\s*review-dispositions-\d+\s*-->'
+    $headCandidates = [regex]::Matches($Body, $headPattern)
+    if ($headCandidates.Count -eq 0) { return $null }
+
+    $lookaheadWindow = 400
+    foreach ($candidate in $headCandidates) {
+        $windowEnd = [Math]::Min($Body.Length, $candidate.Index + $candidate.Length + $lookaheadWindow)
+        $window = $Body.Substring($candidate.Index, $windowEnd - $candidate.Index)
+        if ([regex]::IsMatch($window, '(?m)^\s*(entries|schema_version|stable_finding_key)\s*:')) {
+            return $candidate
+        }
+    }
+    return $null
+}
+
+function script:Test-ReviewDispositionsHeadPresent {
+    <#
+    .SYNOPSIS
+        Vocab-gated presence check for the <!-- review-dispositions-{N} -->
+        marker head.
+    .DESCRIPTION
+        Bool wrapper around Get-ReviewDispositionsRealHeadMatch, so
+        Get-ReviewCostRollup (phase-containment-cost-core.ps1) can
+        distinguish "no review-dispositions marker on this body" (ordinary
+        chatter, contributes nothing) from "marker present but unparseable"
+        (a real could-not-verify condition Get-DispositionTally's own
+        Get-ReviewDispositionsTallyInternal reports). Relocated here from
+        phase-containment-cost-core.ps1 (issue #854 s3, M10) — the head gate
+        now lives beside Get-DispositionTally in the same file, and
+        phase-containment-cost-core.ps1 consumes it via its existing
+        dot-source of this file rather than keeping a private duplicate.
+    .PARAMETER Body
+        The raw comment body text to scan.
+    .OUTPUTS
+        [bool]
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Body
+    )
+    return ($null -ne (Get-ReviewDispositionsRealHeadMatch -Body $Body))
+}
+
+#endregion
+
+#region Get-ExternalSourcesReconciledFromRegion (private)
+
+function script:Get-ExternalSourcesReconciledFromRegion {
+    <#
+    .SYNOPSIS
+        Column-0-anchored PR-level reader for the review-dispositions v4
+        `external_sources_reconciled` field (issue #854 s3, M30/M41).
+    .DESCRIPTION
+        Deliberately NOT the house $keyAnchor idiom used elsewhere in this
+        file for per-entry fields — that pattern's leading `^\s*`
+        alternative matches at ANY indentation, so an entry-nested
+        `external_sources_reconciled:` decoy line (indented under an
+        entries[] list item) would be misread as the real PR-level field
+        (M30). This reader anchors on true column-0 line-start only:
+        `(?m)^external_sources_reconciled\s*:`.
+
+        Block-scalar exclusion (M41): captures the KEYWORD itself in its own
+        regex capture group and anchors Test-IndexInBlockScalarSpan on THAT
+        group's index, rather than the overall match's index — the same
+        precedent as the entry-boundary pattern above (the only other site
+        in this file with a keyword group), and unlike the existing
+        disposition/stage/reviewer_source extraction sites, which capture
+        only the VALUE and rely on writer field order alone. For a strict
+        column-0 (`^`, no leading `\s*`) pattern, this check can never
+        exclude any match in practice — Get-BlockScalarSpans terminates
+        every block-scalar span at the first non-blank line whose indent is
+        <= the block scalar key's own indent, and 0 (a genuine column-0
+        line) is always <= any non-negative key indent, so a truly-column-0
+        line can never be counted as inside a span. The check is kept
+        anyway, matching the file's established defense-in-depth idiom and
+        guarding against a future weakening of the column-0 anchor.
+    .PARAMETER Region
+        The already-isolated fenced-YAML region text (the same $region
+        Get-ReviewDispositionsTallyInternal computes from the marker's
+        fenced code block).
+    .PARAMETER BlockScalarSpans
+        The Get-BlockScalarSpans result computed over the SAME $Region.
+    .OUTPUTS
+        [PSCustomObject] with:
+          Found  [bool]     — whether a real, non-block-scalar column-0
+                   external_sources_reconciled field was found and parsed
+          Values [string[]] — the dequoted array items (empty array both
+                   when Found is $false and when the field is a genuinely
+                   empty array, e.g. `external_sources_reconciled: []`)
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Region,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$BlockScalarSpans
+    )
+
+    $pattern = '(?m)^(external_sources_reconciled)\s*:[ \t]*([^\r\n]*)'
+    $candidates = [regex]::Matches($Region, $pattern)
+    $survivor = $null
+    foreach ($candidate in $candidates) {
+        if (-not (Test-IndexInBlockScalarSpan -Index $candidate.Groups[1].Index -Spans $BlockScalarSpans)) {
+            $survivor = $candidate
+            break
+        }
+    }
+    if ($null -eq $survivor) {
+        return [PSCustomObject]@{ Found = $false; Values = @() }
+    }
+
+    $rawValue = $survivor.Groups[2].Value.Trim()
+
+    if ($rawValue -match '^\[(.*)\]$') {
+        $inner = $Matches[1].Trim()
+        if ([string]::IsNullOrWhiteSpace($inner)) {
+            return [PSCustomObject]@{ Found = $true; Values = @() }
+        }
+        $items = @($inner -split ',' | ForEach-Object { ConvertFrom-YamlQuotedScalar -Value $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        return [PSCustomObject]@{ Found = $true; Values = $items }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($rawValue)) {
+        # Block-list style (or a bare empty key, treated as an explicit empty
+        # array): scan immediately-following indented `- item` lines only,
+        # stopping at the first line that is not one (a dedented/column-0
+        # next key, a blank line, or the fence close).
+        $keyLineEnd = $Region.IndexOf("`n", $survivor.Index, [System.StringComparison]::Ordinal)
+        $items = [System.Collections.Generic.List[string]]::new()
+        if ($keyLineEnd -ge 0) {
+            $restLines = $Region.Substring($keyLineEnd + 1) -split "`n"
+            foreach ($line in $restLines) {
+                if ($line -match '^[ \t]+-\s+(.+?)\s*\r?$') {
+                    $items.Add((ConvertFrom-YamlQuotedScalar -Value $Matches[1]))
+                }
+                else {
+                    break
+                }
+            }
+        }
+        return [PSCustomObject]@{ Found = $true; Values = $items.ToArray() }
+    }
+
+    # Neither a recognizable flow array nor an empty/block-list shape: a
+    # malformed value. Report not-found rather than fabricating structure.
+    return [PSCustomObject]@{ Found = $false; Values = @() }
+}
+
+#endregion
+
 #region Get-ReviewDispositionsTallyInternal (private)
 
 function script:Get-ReviewDispositionsTallyInternal {
     <#
     .SYNOPSIS
         Per-entry segmented parser for the `<!-- review-dispositions-{PR} -->`
-        marker (issue #768 s3). Private to Get-DispositionTally's code-review
-        branch.
+        marker (issue #768 s3; issue #854 s3 added internal_match and the
+        PR-level external_sources_reconciled reader). Private to
+        Get-DispositionTally's code-review branch.
     .DESCRIPTION
-        Head detection is vocab-gated (same convention as
-        Get-RealJudgeRulingsHeadMatches above): the literal
+        Head detection delegates to Get-ReviewDispositionsRealHeadMatch
+        (above; relocated here issue #854 s3, M10): the literal
         `<!-- review-dispositions-{N} -->` head substring alone is not
         sufficient — a bounded lookahead window after it must also contain
         real field vocabulary (`entries:`/`schema_version:`/
@@ -1057,34 +1241,59 @@ function script:Get-ReviewDispositionsTallyInternal {
         injected-newline field value that happens to contain a bare-looking
         key line on its own line cannot be mistaken for a new entry.
 
-        Within each entry's own bounds, `disposition:` and `reviewer_source:`
-        are read via the FIRST key-anchored match only (same $keyAnchor
-        convention as the judge-rulings/finding_dispositions detectors — real
+        Within each entry's own bounds, `disposition:`, `reviewer_source:`,
+        `match_status:`, and `matched_finding_key:` are read via the FIRST
+        key-anchored, non-block-scalar match only (same $keyAnchor convention
+        as the judge-rulings/finding_dispositions detectors — real
         line-start, dash-item, or flow-mapping key position). Taking only the
-        first match closes the decoy vector where a later
+        first surviving match closes the decoy vector where a later
         `disposition_rationale` block-scalar value, or an injected-newline
-        `reviewer_source` value, happens to contain a second `disposition:`-
-        or `reviewer_source:`-shaped line further down the SAME entry: the
-        real field is always written before those free-text fields per the
-        schema/writer field order, so it always wins the first-match race.
-        `reviewer_source` is matched on its own distinct key name, so it can
-        never be confused with the unrelated nested `ac_cross_check.source`
-        field (different literal key, not merely different position).
+        field value, happens to contain a second matching key line further
+        down the SAME entry: the real field is always written before those
+        free-text fields per the schema/writer field order (internal_match
+        specifically before disposition_rationale, M42), so it always wins
+        the first-match race; the block-scalar exclusion (M41) is defense in
+        depth on top of that ordering guarantee. `reviewer_source` and
+        `match_status`/`matched_finding_key` are each matched on their own
+        distinct key name, so none can ever be confused with the unrelated
+        nested `ac_cross_check.source` field (different literal keys, not
+        merely different position).
+
+        internal_match defaults (Seam Specification, issue #854): absent
+        `internal_match`/`match_status` on an entry defaults MatchStatus to
+        'ambiguous' — a bookkeeping omission must never manufacture an
+        escape. `matched_finding_key` defaults to $null when absent.
+
+        PR-level external_sources_reconciled (issue #854 s3, M9/M30):
+        Get-ExternalSourcesReconciledFromRegion (above) reads the column-0
+        top-level field from the SAME isolated $region, BEFORE the
+        zero-entries early return below — a body with a real head, a clean
+        parse, and a column-0 external_sources_reconciled field but ZERO
+        segmentable entries is a LEGAL coverage record (M9: "coverage means
+        measurement", not "coverage requires findings"), not a
+        could-not-verify. Every other unparseable state — no head, no fenced
+        region, zero entries with no parseable external_sources_reconciled
+        field, or an entry with unrecognized disposition — stays
+        could-not-verify per DD3.
 
         Hand-rolled line-regex only — no ConvertFrom-Yaml / powershell-yaml
         (file-level SECURITY invariant at the top of this file).
 
         Fail-loud (DD3): no recognizable marker head, an unparseable/unclosed
-        fenced region, zero segmentable entries, or an entry whose
-        `disposition:` value is missing/unrecognized all return
-        ParseStatus 'could-not-verify', never a silently empty/zero result.
+        fenced region, zero segmentable entries with no legal M9 coverage
+        fallback, or an entry whose `disposition:` value is missing/
+        unrecognized all return ParseStatus 'could-not-verify', never a
+        silently empty/zero result.
     .PARAMETER Body
         The raw comment body text to scan.
     .OUTPUTS
         [PSCustomObject] with:
-          Entries     [PSCustomObject[]] — one per entry (before the stage
-                      filter Get-DispositionTally applies), each with
-                      StableFindingKey, Disposition, Stage, ReviewerSource
+          Entries                    [PSCustomObject[]] — one per entry
+                      (before the stage filter Get-DispositionTally
+                      applies), each with StableFindingKey, Disposition,
+                      Stage, ReviewerSource, MatchStatus, MatchedFindingKey
+          ExternalSourcesReconciled  [string[]] — PR-level column-0 field
+                      (empty array when absent/unparseable)
           ParseStatus [string] — 'ok' or 'could-not-verify'
     #>
     param(
@@ -1098,22 +1307,7 @@ function script:Get-ReviewDispositionsTallyInternal {
     # 'Key-anchor pattern' drift-guard meta-test in this file's Tests.
     $keyAnchor = '(?:^\s*(?:-\s+)?|[{,]\s*)'
 
-    $headPattern = '<!--\s*review-dispositions-\d+\s*-->'
-    $headCandidates = [regex]::Matches($Body, $headPattern)
-    if ($headCandidates.Count -eq 0) {
-        return [PSCustomObject]@{ Entries = @(); ParseStatus = 'could-not-verify' }
-    }
-
-    $lookaheadWindow = 400
-    $realHead = $null
-    foreach ($candidate in $headCandidates) {
-        $windowEnd = [Math]::Min($Body.Length, $candidate.Index + $candidate.Length + $lookaheadWindow)
-        $window = $Body.Substring($candidate.Index, $windowEnd - $candidate.Index)
-        if ([regex]::IsMatch($window, '(?m)^\s*(entries|schema_version|stable_finding_key)\s*:')) {
-            $realHead = $candidate
-            break
-        }
-    }
+    $realHead = Get-ReviewDispositionsRealHeadMatch -Body $Body
     if ($null -eq $realHead) {
         return [PSCustomObject]@{ Entries = @(); ParseStatus = 'could-not-verify' }
     }
@@ -1164,7 +1358,20 @@ function script:Get-ReviewDispositionsTallyInternal {
     $entryBoundaryPattern = '(?m)^\s*-\s+(stable_finding_key|finding_id)\s*:'
     $blockScalarSpans = Get-BlockScalarSpans -Text $region
     $entryStarts = @([regex]::Matches($region, $entryBoundaryPattern) | Where-Object { -not (Test-IndexInBlockScalarSpan -Index $_.Groups[1].Index -Spans $blockScalarSpans) })
+
+    # M9 (issue #854 s3): read the PR-level external_sources_reconciled field
+    # BEFORE the zero-entries early return below, so a head-present,
+    # cleanly-parsing body carrying a real column-0 external_sources_reconciled
+    # field but ZERO segmentable entries is treated as a LEGAL coverage
+    # record ('ok' with empty Entries) rather than a false could-not-verify —
+    # coverage means measurement, and "measured zero new findings" is a real
+    # measurement outcome, not an absence of one.
+    $externalSourcesResult = Get-ExternalSourcesReconciledFromRegion -Region $region -BlockScalarSpans $blockScalarSpans
+
     if ($entryStarts.Count -eq 0) {
+        if ($externalSourcesResult.Found) {
+            return [PSCustomObject]@{ Entries = @(); ExternalSourcesReconciled = $externalSourcesResult.Values; ParseStatus = 'ok' }
+        }
         return [PSCustomObject]@{ Entries = @(); ParseStatus = 'could-not-verify' }
     }
 
@@ -1212,15 +1419,42 @@ function script:Get-ReviewDispositionsTallyInternal {
         $reviewerSourceMatch = [regex]::Match($entrySpan, "(?m)${keyAnchor}reviewer_source\s*:\s*(\S+)")
         $reviewerSource = if ($reviewerSourceMatch.Success) { ConvertFrom-YamlQuotedScalar -Value ($reviewerSourceMatch.Groups[1].Value.TrimEnd(',', '}', ']')) } else { $null }
 
+        # internal_match.match_status / matched_finding_key (issue #854 s3,
+        # M41): a keyword capture group anchors the block-scalar exclusion
+        # check on the KEYWORD's own position, not the overall match's start
+        # — same precedent as the entry-boundary pattern above, and unlike
+        # the disposition/stage/reviewer_source sites above (which capture
+        # only the value and rely on writer field order, M42, to keep the
+        # real field ahead of any decoy in disposition_rationale). Take the
+        # FIRST match whose keyword position is NOT inside a block-scalar
+        # span, so a rationale block scalar quoting fake internal_match text
+        # can never be misread as the real field even if field order is
+        # ever violated. Seam Specification default: absent internal_match
+        # is 'ambiguous' — a bookkeeping omission must never manufacture an
+        # escape.
+        $matchStatusCandidates = [regex]::Matches($entrySpan, "(?m)${keyAnchor}(match_status)\s*:\s*(duplicate|novel|ambiguous)\b")
+        $matchStatusSurvivor = $matchStatusCandidates | Where-Object {
+            -not (Test-IndexInBlockScalarSpan -Index ($spanStart + $_.Groups[1].Index) -Spans $blockScalarSpans)
+        } | Select-Object -First 1
+        $matchStatus = if ($matchStatusSurvivor) { $matchStatusSurvivor.Groups[2].Value } else { 'ambiguous' }
+
+        $matchedFindingKeyCandidates = [regex]::Matches($entrySpan, "(?m)${keyAnchor}(matched_finding_key)\s*:\s*(.+)")
+        $matchedFindingKeySurvivor = $matchedFindingKeyCandidates | Where-Object {
+            -not (Test-IndexInBlockScalarSpan -Index ($spanStart + $_.Groups[1].Index) -Spans $blockScalarSpans)
+        } | Select-Object -First 1
+        $matchedFindingKey = if ($matchedFindingKeySurvivor) { ConvertFrom-YamlQuotedScalar -Value $matchedFindingKeySurvivor.Groups[2].Value } else { $null }
+
         $entries.Add([PSCustomObject]@{
-                StableFindingKey = $stableFindingKey
-                Disposition      = $disposition
-                Stage            = $stage
-                ReviewerSource   = $reviewerSource
+                StableFindingKey  = $stableFindingKey
+                Disposition       = $disposition
+                Stage             = $stage
+                ReviewerSource    = $reviewerSource
+                MatchStatus       = $matchStatus
+                MatchedFindingKey = $matchedFindingKey
             })
     }
 
-    return [PSCustomObject]@{ Entries = $entries.ToArray(); ParseStatus = 'ok' }
+    return [PSCustomObject]@{ Entries = $entries.ToArray(); ExternalSourcesReconciled = $externalSourcesResult.Values; ParseStatus = 'ok' }
 }
 
 #endregion
