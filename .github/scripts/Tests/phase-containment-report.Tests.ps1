@@ -102,6 +102,17 @@ Describe 'Invoke-PhaseContainmentReportCli' {
         }
 
         It 'still renders the value report AND shows the degradation line when the cost path throws' {
+            # Issue #854 s6 (M2): the corpus fetch is now hoisted above the
+            # rollup call, in its own try/catch. This test is the TDD-
+            # required regression proving the #768 M5/M8 isolation invariant
+            # survives that hoist -- it must stay green via the NEW
+            # mechanism (the captured $corpusError re-thrown as the cost
+            # path try block's first statement) rather than the old one
+            # (the corpus fetch living inside that try block directly). A
+            # fetch failure here also means -TerminalObservation $null was
+            # passed to the rollup (fail-closed), so the code-review row's
+            # escape-side arm must render its own "not assessable" state,
+            # never a clean signal.
             Mock Get-PhaseContainmentCommentCorpus { throw 'simulated corpus fetch failure' }
 
             $output = Invoke-PhaseContainmentReportCli -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 90 -Token ''
@@ -112,6 +123,10 @@ Describe 'Invoke-PhaseContainmentReportCli' {
             $joined | Should -Match 'cost section unavailable: simulated corpus fetch failure'
             # The degraded cost path must not print the normal cost section header.
             $joined | Should -Not -Match 'Review Cost \(presentation-only\)'
+            # Fail-closed (issue #854 s6 M2): a corpus-fetch failure must
+            # never let the escape-side arm present a clean/eligible signal.
+            $joined | Should -Match 'Escape-side \(post-review observer\):'
+            $joined | Should -Match 'Coverage:\s+NOT ASSESSABLE \(terminal observation unavailable'
         }
 
         It 'renders both the value report AND the cost section when the cost path succeeds' {
@@ -175,16 +190,44 @@ Describe 'Invoke-PhaseContainmentReportCli' {
         }
     }
 
-    Context 'AC3: presentation-only value-block byte-identical regression (issue #768 s6, judge-sustained M5 -- load-bearing)' {
+    Context 'AC3: presentation-only value-block byte-identical regression (issue #768 s6, judge-sustained M5; issue #854 s6 M3 re-pin)' {
         BeforeEach {
             Mock Get-PhaseContainmentHistory { New-FixedHistoryResult }
+            # Both runs below share this SAME corpus mock -- issue #854 s6
+            # (M3) rewrites this pin to hold TerminalObservation CONSTANT
+            # across runs, rather than holding the corpus fetch OUTCOME
+            # constant (the pre-#854 pin's approach, which no longer
+            # exercises the right invariant -- see the test body comment).
+            Mock Get-PhaseContainmentCommentCorpus { New-FixedCorpusResult }
         }
 
-        It 'renders a byte-identical value-block region whether the cost path succeeds or is entirely absent, holding FetchedAt and cache mode constant' {
-            # Independently compute the expected value block via the exact
-            # same (mocked, fixed) inputs the CLI function uses -- this is
-            # the pin's ground truth, not a second call to the CLI itself.
-            $expectedRollup = Get-PhaseContainmentRollup -Entries $script:FixedEntries -WindowLabel '90d' -Truncated:$false
+        It 'renders a byte-identical value-block region whether the cost path succeeds or fails during rendering, holding TerminalObservation constant across both runs (issue #854 s6, M3)' {
+            # M3 (judge-sustained, owner-approved `value-block-cost-
+            # dependency-854`): the pre-#854 version of this pin varied the
+            # CORPUS FETCH ITSELF between its two runs (mocking
+            # Get-PhaseContainmentCommentCorpus to succeed in one run and
+            # throw in the other) and asserted the value block never
+            # changed. That is no longer the right way to exercise #768's
+            # isolation invariant: #854 intentionally threads the corpus-
+            # derived TerminalObservation into the value block's code-review
+            # row, so varying the fetch OUTCOME now legitimately varies the
+            # value block too -- that is the documented, owner-ruled
+            # revision, not a regression.
+            #
+            # What #768's invariant actually protects -- a cost-SECTION-
+            # RENDERING failure, occurring AFTER a successful corpus fetch,
+            # must never perturb the value block -- still holds, and is what
+            # this rewritten pin exercises: both runs below share the exact
+            # same (mocked) successful corpus fetch, so TerminalObservation
+            # is identical in both; only the downstream Get-ReviewCostRollup
+            # call is made to fail in run 2.
+
+            # Ground truth: derive TerminalObservation from the SAME fixed
+            # corpus mock and Entries the CLI itself will use, independently
+            # of the CLI call, to build the pin's own reference value block.
+            $groundCorpus = New-FixedCorpusResult
+            $groundTerminalObservation = Get-PhaseContainmentTerminalObservation -Corpus $groundCorpus -Entries $script:FixedEntries -JudgeLogin 'github-actions[bot]' -ValueCacheOk $true
+            $expectedRollup = Get-PhaseContainmentRollup -Entries $script:FixedEntries -WindowLabel '90d' -Truncated:$false -TerminalObservation $groundTerminalObservation
             $expectedContext = @{
                 Rollup            = $expectedRollup
                 Source            = 'graphql'
@@ -197,19 +240,20 @@ Describe 'Invoke-PhaseContainmentReportCli' {
             $n = $expectedValueBlock.Count
             $n | Should -BeGreaterThan 0
 
-            # Run 1: cost path present and succeeding.
-            Mock Get-PhaseContainmentCommentCorpus { New-FixedCorpusResult }
+            # Run 1: cost path present and succeeding end-to-end.
             $withCost = @(Invoke-PhaseContainmentReportCli -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 90 -Token '')
 
-            # Run 2: cost path entirely absent/failing (mocked-absent).
-            Mock Get-PhaseContainmentCommentCorpus { throw 'cost fixture intentionally absent' }
-            $withoutCost = @(Invoke-PhaseContainmentReportCli -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 90 -Token '')
+            # Run 2: the SAME corpus fetch succeeds (TerminalObservation is
+            # therefore identical to run 1's), but cost-section RENDERING
+            # itself fails downstream of that successful fetch.
+            Mock Get-ReviewCostRollup { throw 'simulated cost rendering failure' }
+            $withFailedRendering = @(Invoke-PhaseContainmentReportCli -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 90 -Token '')
 
             $withCost.Count | Should -BeGreaterOrEqual $n
-            $withoutCost.Count | Should -BeGreaterOrEqual $n
+            $withFailedRendering.Count | Should -BeGreaterOrEqual $n
 
             $withCostValueBlock = $withCost[0..($n - 1)]
-            $withoutCostValueBlock = $withoutCost[0..($n - 1)]
+            $withFailedRenderingValueBlock = $withFailedRendering[0..($n - 1)]
 
             # Byte-for-byte (line-for-line) comparison of the value-block
             # region only -- the trailing content legitimately differs (the
@@ -217,18 +261,52 @@ Describe 'Invoke-PhaseContainmentReportCli' {
             # is NOT part of this pin.
             for ($i = 0; $i -lt $n; $i++) {
                 $withCostValueBlock[$i] | Should -BeExactly $expectedValueBlock[$i]
-                $withoutCostValueBlock[$i] | Should -BeExactly $expectedValueBlock[$i]
+                $withFailedRenderingValueBlock[$i] | Should -BeExactly $expectedValueBlock[$i]
             }
         }
+
     }
 }
 
-Describe 'structural guard: RelaxationEligible computation path never receives a cost-related parameter (issue #768 s6)' {
-    It 'the CLI file''s Get-PhaseContainmentRollup call site passes only value-path parameters' {
+Describe 'structural guard: RelaxationEligible computation path never receives a cost-related parameter by an unlisted name (issue #768 s6; issue #854 s6 M15 re-pin)' {
+    It 'the CLI file''s Get-PhaseContainmentRollup call site only ever passes the allow-listed parameter names' {
+        # M15 (judge-sustained): the pre-#854 guard asserted the rollup call
+        # line's TEXT does not contain the substring "cost" (case-
+        # insensitive). Issue #854 s6 threads -TerminalObservation into that
+        # SAME call -- a value that IS cost-corpus-derived -- and that
+        # parameter name passes the old substring check textually while
+        # defeating its actual purpose. A guard that silently stops
+        # guarding is worse than no guard, so this replacement allow-lists
+        # the EXACT parameter names the call may pass and fails if any
+        # OTHER parameter appears -- catching a future maintainer who
+        # threads a second cost-derived value through under some other
+        # name that also happens not to contain "cost".
+        $allowedParameterNames = @('Entries', 'WindowLabel', 'Truncated', 'TerminalObservation')
+
         $cliText = Get-Content -Raw $script:CliPath
         $rollupCallLine = ($cliText -split "`r?`n") | Where-Object { $_ -match 'Get-PhaseContainmentRollup\s+-Entries' }
 
         $rollupCallLine | Should -Not -BeNullOrEmpty
-        $rollupCallLine | Should -Not -Match '(?i)cost'
+
+        # (?<=\s)- requires the dash to be preceded by whitespace, so the
+        # "-PhaseContainmentRollup" substring inside the callee's own name
+        # (Get-PhaseContainmentRollup) is never mistaken for a parameter.
+        $actualParameterNames = @(
+            [regex]::Matches($rollupCallLine, '(?<=\s)-([A-Za-z]+)(?::|\s|$)') | ForEach-Object { $_.Groups[1].Value }
+        )
+        $actualParameterNames.Count | Should -BeGreaterThan 0
+
+        $unexpectedParameterNames = @($actualParameterNames | Where-Object { $_ -notin $allowedParameterNames })
+        $unexpectedParameterNames | Should -BeNullOrEmpty -Because (
+            "the rollup call site must only ever pass $($allowedParameterNames -join ', ') -- found unexpected parameter(s): $($unexpectedParameterNames -join ', '). " +
+            "A future maintainer threading a second cost-derived value through under a name that doesn't literally contain 'cost' must still be caught here."
+        )
+
+        # Also assert every allow-listed name the current call site is
+        # KNOWN to require is actually present, so this guard cannot be
+        # satisfied by silently dropping -TerminalObservation either.
+        foreach ($required in @('Entries', 'WindowLabel', 'Truncated', 'TerminalObservation')) {
+            $actualParameterNames | Should -Contain $required -Because "the rollup call site must pass -$required."
+        }
     }
 }

@@ -41,12 +41,19 @@
 #>
 
 param(
-    [string]$RepoOwner = '',
-    [string]$RepoName  = '',
-    [int]$WindowDays   = 90,
-    [string]$Token     = $env:GH_TOKEN,
+    [string]$RepoOwner  = '',
+    [string]$RepoName   = '',
+    [int]$WindowDays    = 90,
+    [string]$Token      = $env:GH_TOKEN,
     [switch]$NoCache,
-    [switch]$ValueCacheOk
+    [switch]$ValueCacheOk,
+    # Issue #854 s6: the identity a judge-authored review-dispositions/
+    # judge-rulings comment is posted under. Caller-supplied (matches
+    # Test-PhaseContainmentCommentAuthoredByJudge's contract, issue #854
+    # s4 -- that function does not discover the judge identity itself).
+    # Default mirrors the fixture convention Get-DispositionTally's own
+    # Tests use for the repo's known CI poster identity.
+    [string]$JudgeLogin = 'github-actions[bot]'
 )
 
 Set-StrictMode -Version Latest
@@ -57,6 +64,194 @@ $libRoot = Join-Path $PSScriptRoot 'lib'
 . (Join-Path $libRoot 'phase-containment-rolling-history-core.ps1')
 . (Join-Path $libRoot 'phase-containment-emission-check-core.ps1')
 . (Join-Path $libRoot 'phase-containment-cost-core.ps1')
+
+function Get-PhaseContainmentTerminalObservation {
+    <#
+    .SYNOPSIS
+        Derives the -TerminalObservation hashtable for Get-PhaseContainmentRollup
+        from the raw comment corpus (issue #854 s6).
+    .DESCRIPTION
+        Walks the corpus's PR-surface tuples, restricts every read to
+        judge-authored bodies (Test-PhaseContainmentCommentAuthoredByJudge /
+        JudgeLogin -- issue #854 s4, M8: a forged non-judge body must
+        contribute ZERO coverage), and aggregates the Seam Specification's
+        escape-side counts:
+          CoObservedPRCount              N - all PR tuples in the fetched
+                                          corpus window (the same population
+                                          code-review already observes).
+          MeasuredCoveragePRCount        K - PRs with a judge-authored,
+                                          cleanly-parsed review-dispositions
+                                          record (M9: a head-present, clean
+                                          parse with zero entries IS a legal
+                                          coverage record) AND >=1 external
+                                          sustained finding resolved to a
+                                          real identity (M7: reviewer_source
+                                          not 'local'/'unresolved' after the
+                                          Seam Specification's absent->local
+                                          default; an all-unresolved PR
+                                          contributes ZERO coverage).
+          DispositionsNovelExternalCount, ExternalCatchCount (n2),
+          DuplicateCount (m) - tallied from each PR's judge-authored,
+                                latest-wins-per-stable_finding_key merged
+                                entries (mirrors Get-ReviewCostRollup's
+                                per-key dedup in phase-containment-cost-
+                                core.ps1, restricted here to judge-authored
+                                bodies only per the Seam Specification's
+                                "restrict replacement to same-author
+                                (judge) bodies" narrowing) whose MatchStatus
+                                is 'duplicate' or 'novel' respectively;
+                                'ambiguous' entries are excluded from both,
+                                per the Seam Specification.
+          InternalCoObservedCatchCount (n1) - derived from the ALREADY-
+                                VALIDATED value-side $Entries (not the raw
+                                corpus): caught_stage='code-review' AND
+                                catchable_phase='implementation', non-
+                                apparatus_meta, restricted to PR numbers in
+                                the co-observed corpus (Seam Specification
+                                n1 population rule).
+        ObserverEscapeCount is intentionally omitted -- Get-PhaseContainmentRollup
+        defaults it to the observer-block count it derives from $Entries
+        directly.
+    .PARAMETER Corpus
+        The Get-PhaseContainmentCommentCorpus result (Tuples/Source/Truncated).
+    .PARAMETER Entries
+        The value-side Get-PhaseContainmentHistory.Entries array (already
+        validated/deduped phase-containment blocks).
+    .PARAMETER JudgeLogin
+        The expected judge identity's login (issue #854 s4's
+        Test-PhaseContainmentCommentAuthoredByJudge comparison target).
+    .PARAMETER ValueCacheOk
+        Seam Specification -ValueCacheOk coherence rule: $true when the
+        value fetch is same-run-fresh (safe to join to the corpus); $false
+        when the value fetch used a cached population (withholds the
+        escape arm entirely; see Get-PhaseContainmentRollup's ValueCacheOk
+        handling).
+    .OUTPUTS
+        [hashtable] suitable for Get-PhaseContainmentRollup -TerminalObservation.
+    #>
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param(
+        [Parameter(Mandatory)][object]$Corpus,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Entries,
+        [Parameter(Mandatory)][string]$JudgeLogin,
+        [Parameter(Mandatory)][bool]$ValueCacheOk
+    )
+
+    $prTuples = @($Corpus.Tuples | Where-Object { [string]$_.Surface -eq 'pr' })
+
+    $coObservedPrNumbers = [System.Collections.Generic.HashSet[int]]::new()
+    foreach ($t in $prTuples) { $coObservedPrNumbers.Add([int]$t.Number) | Out-Null }
+
+    $measuredCoveragePrNumbers      = [System.Collections.Generic.HashSet[int]]::new()
+    $externalCatchCount             = 0
+    $duplicateCount                 = 0
+    $dispositionsNovelExternalCount = 0
+
+    foreach ($tuple in $prTuples) {
+        $number          = [int]$tuple.Number
+        $bodies          = @($tuple.Bodies)
+        $authorLogins    = @($tuple.AuthorLogins)
+        $createdAtValues = @($tuple.CreatedAtValues)
+
+        $judgeIdx = [System.Collections.Generic.List[int]]::new()
+        for ($i = 0; $i -lt $bodies.Count; $i++) {
+            $authorLogin = if ($i -lt $authorLogins.Count) { [string]$authorLogins[$i] } else { '' }
+            if (Test-PhaseContainmentCommentAuthoredByJudge -AuthorLogin $authorLogin -JudgeLogin $JudgeLogin) {
+                $judgeIdx.Add($i)
+            }
+        }
+        if ($judgeIdx.Count -eq 0) { continue }
+
+        $hadCoverageRecord     = $false
+        $perKeyLatestEntry     = [System.Collections.Generic.Dictionary[string, PSCustomObject]]::new()
+        $perKeyLatestCreatedAt = [System.Collections.Generic.Dictionary[string, datetime]]::new()
+
+        foreach ($i in $judgeIdx) {
+            $body = [string]$bodies[$i]
+            if (-not (Test-ReviewDispositionsHeadPresent -Body $body)) { continue }
+
+            $tally = Get-DispositionTally -Surface 'code-review' -Body $body
+            if ($tally.ParseStatus -ne 'ok') { continue }
+            $hadCoverageRecord = $true
+
+            $createdAtRaw = if ($i -lt $createdAtValues.Count) { [string]$createdAtValues[$i] } else { '' }
+            $createdAtDt = $null
+            if (-not [string]::IsNullOrWhiteSpace($createdAtRaw)) {
+                try { $createdAtDt = [datetime]::Parse($createdAtRaw, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind) } catch { $createdAtDt = $null }
+            }
+
+            foreach ($entry in $tally.Entries) {
+                $key = [string]$entry.StableFindingKey
+                $shouldReplace = $true
+                if ($perKeyLatestEntry.ContainsKey($key)) {
+                    $existingDt = $perKeyLatestCreatedAt.ContainsKey($key) ? $perKeyLatestCreatedAt[$key] : $null
+                    if ($null -ne $existingDt -and $null -ne $createdAtDt) {
+                        $shouldReplace = $createdAtDt -ge $existingDt
+                    }
+                    elseif ($null -eq $createdAtDt) {
+                        $shouldReplace = $true
+                    }
+                }
+                if ($shouldReplace) {
+                    $perKeyLatestEntry[$key] = $entry
+                    if ($null -ne $createdAtDt) {
+                        $perKeyLatestCreatedAt[$key] = $createdAtDt
+                    }
+                    elseif ($perKeyLatestCreatedAt.ContainsKey($key)) {
+                        $perKeyLatestCreatedAt.Remove($key) | Out-Null
+                    }
+                }
+            }
+        }
+
+        if (-not $hadCoverageRecord) { continue }
+
+        $prExternalEntries = @($perKeyLatestEntry.Values | Where-Object {
+                $rs = if ([string]::IsNullOrWhiteSpace($_.ReviewerSource)) { 'local' } else { [string]$_.ReviewerSource }
+                $rs -ne 'local' -and $rs -ne 'unresolved'
+            })
+
+        if ($prExternalEntries.Count -ge 1) {
+            $measuredCoveragePrNumbers.Add($number) | Out-Null
+        }
+
+        foreach ($e in $prExternalEntries) {
+            if ($e.MatchStatus -eq 'duplicate') {
+                $duplicateCount++
+                $externalCatchCount++
+            }
+            elseif ($e.MatchStatus -eq 'novel') {
+                $dispositionsNovelExternalCount++
+                $externalCatchCount++
+            }
+            # 'ambiguous' -> excluded from n2/m per the Seam Specification.
+        }
+    }
+
+    $internalCoObservedCatchCount = 0
+    foreach ($e in $Entries) {
+        $caughtStage    = if ($e -is [hashtable]) { [string]$e['caught_stage'] }    else { [string]$e.caught_stage }
+        $catchablePhase = if ($e -is [hashtable]) { [string]$e['catchable_phase'] } else { [string]$e.catchable_phase }
+        $apparatusMeta  = if ($e -is [hashtable]) { [bool]$e['apparatus_meta'] }    else { [bool]$e.apparatus_meta }
+        $surface        = if ($e -is [hashtable]) { [string]$e['surface'] }        else { [string]$e.surface }
+        $prNumber       = if ($e -is [hashtable]) { [int]$e['issueOrPrNumber'] }   else { [int]$e.issueOrPrNumber }
+
+        if ($caughtStage -eq 'code-review' -and $catchablePhase -eq 'implementation' -and -not $apparatusMeta -and $surface -eq 'pr' -and $coObservedPrNumbers.Contains($prNumber)) {
+            $internalCoObservedCatchCount++
+        }
+    }
+
+    return @{
+        CoObservedPRCount              = $coObservedPrNumbers.Count
+        MeasuredCoveragePRCount        = $measuredCoveragePrNumbers.Count
+        DispositionsNovelExternalCount = $dispositionsNovelExternalCount
+        InternalCoObservedCatchCount   = $internalCoObservedCatchCount
+        ExternalCatchCount             = $externalCatchCount
+        DuplicateCount                 = $duplicateCount
+        ValueCacheOk                   = $ValueCacheOk
+    }
+}
 
 function Invoke-PhaseContainmentReportCli {
     <#
@@ -83,6 +278,28 @@ function Invoke-PhaseContainmentReportCli {
         rendering) can therefore never suppress the value report. On
         exception, a single "cost section unavailable: {reason}" line is
         printed instead of the cost section.
+
+        Fetch hoist (issue #854 s6, M2 — intentionally revises #768's value/
+        cost isolation for the code-review row, owner decision
+        `value-block-cost-dependency-854`): the corpus fetch now happens
+        ONCE, here, BEFORE the rollup call, in its own try/catch that
+        captures any error into $corpusError rather than letting it
+        propagate. Get-PhaseContainmentTerminalObservation derives the
+        code-review escape-side parameter from that same fetched $corpus
+        (never re-fetched) and is passed to Get-PhaseContainmentRollup
+        -TerminalObservation. When the fetch failed, or derivation itself
+        failed for a reason OTHER than the fetch (e.g. a head-gate/parsing
+        bug), $null is passed instead — Get-PhaseContainmentRollup fails
+        closed on a $null TerminalObservation, so the code-review row's
+        escape-side arm downgrades to unavailable rather than fabricating a
+        clean signal. The existing cost-path try/catch below RE-THROWS
+        $corpusError as its very first statement, so the "cost section
+        unavailable: {reason}" degradation line renders byte-for-byte for a
+        corpus-fetch failure exactly as it did before the hoist (issue #768
+        M5/M8 isolation, re-pinned not silently defeated) — this is what
+        makes the hoist safe: a failed fetch both (a) lets the rollup fail
+        closed via -TerminalObservation $null and (b) still shows the
+        cost-unavailable degradation message.
     .PARAMETER RepoOwner
         GitHub repository owner.
     .PARAMETER RepoName
@@ -97,7 +314,15 @@ function Invoke-PhaseContainmentReportCli {
     .PARAMETER ValueCacheOk
         Restores cached-value mode for the value fetch (opting back out of
         the default same-run-fresh coherence behavior). Renders an explicit
-        population-mismatch caveat when it takes effect.
+        population-mismatch caveat when it takes effect. Also threaded into
+        Get-PhaseContainmentTerminalObservation as the Seam Specification's
+        ValueCacheOk coherence flag (issue #854 s6): a cached value fetch
+        withholds the code-review escape arm entirely, since a cached value
+        population cannot be honestly joined to a same-run-fresh corpus.
+    .PARAMETER JudgeLogin
+        The judge identity's login, threaded to
+        Get-PhaseContainmentTerminalObservation (issue #854 s4/s6) so only
+        judge-authored bodies contribute coverage/escape-side data.
     .OUTPUTS
         [string[]] — the full report (value report + cost section, or value
         report + degradation/caveat lines), written via Write-Output.
@@ -109,7 +334,8 @@ function Invoke-PhaseContainmentReportCli {
         [int]$WindowDays,
         [string]$Token,
         [switch]$NoCache,
-        [switch]$ValueCacheOk
+        [switch]$ValueCacheOk,
+        [string]$JudgeLogin = 'github-actions[bot]'
     )
 
     # ---- Fetch coherence (issue #768 s6, judge-sustained M8) ----
@@ -143,9 +369,48 @@ function Invoke-PhaseContainmentReportCli {
     $truncated         = $history.Truncated
     $invalidEntryCount = $history.InvalidEntryCount
 
+    # ---- Corpus fetch, hoisted (issue #854 s6, M2 — see the header for the
+    # full ordering rationale). Fetched exactly ONCE: this same $corpus is
+    # reused by the cost path below, never re-fetched. $corpusError is
+    # captured, not thrown, so a fetch failure cannot suppress the value
+    # report that renders further down.
+    $corpus      = $null
+    $corpusError = $null
+    try {
+        $corpusParams = @{
+            RepoOwner  = $RepoOwner
+            RepoName   = $RepoName
+            WindowDays = $WindowDays
+        }
+        if ($Token) {
+            $corpusParams['Token'] = $Token
+        }
+        $corpus = Get-PhaseContainmentCommentCorpus @corpusParams
+    }
+    catch {
+        $corpusError = $_
+    }
+
+    # ---- Derive terminal-observation (issue #854 s6) ----
+    # Only attempted when the fetch itself succeeded. A failure here is a
+    # DIFFERENT class of problem than a fetch failure (e.g. a head-gate/
+    # parsing bug in the derivation logic) and must not be silently
+    # swallowed as expected degradation -- it is surfaced via Write-Warning
+    # -- but the rollup still fails closed on $null either way.
+    $terminalObservation = $null
+    if ($null -eq $corpusError -and $null -ne $corpus) {
+        try {
+            $terminalObservation = Get-PhaseContainmentTerminalObservation -Corpus $corpus -Entries $entries -JudgeLogin $JudgeLogin -ValueCacheOk $bypassValueCache
+        }
+        catch {
+            Write-Warning "phase-containment-report: terminal-observation derivation failed (not a fetch failure -- a real bug): $_"
+            $terminalObservation = $null
+        }
+    }
+
     # ---- Compute rollup ----
 
-    $rollup = Get-PhaseContainmentRollup -Entries $entries -WindowLabel "${WindowDays}d" -Truncated:$truncated
+    $rollup = Get-PhaseContainmentRollup -Entries $entries -WindowLabel "${WindowDays}d" -Truncated:$truncated -TerminalObservation $terminalObservation
 
     # ---- Render value report ----
     # This MUST happen, and complete, before the cost path's try/catch
@@ -168,20 +433,20 @@ function Invoke-PhaseContainmentReportCli {
         Write-Output 'CAVEAT: -ValueCacheOk was used; the value report above may reflect a cached fetch from an earlier run, while the cost section below (Get-PhaseContainmentCommentCorpus never caches) is same-run fresh. The two halves may describe different underlying comment populations -- do not read them as a single-moment snapshot.'
     }
 
-    # ---- Cost path (issue #768 s6) ----
-    # Wrapped end-to-end (corpus fetch through rendering) in a single
-    # try/catch: on ANY exception here, print one degradation line and stop
-    # -- the value report above has already rendered and is unaffected.
+    # ---- Cost path (issue #768 s6; corpus fetch hoisted above, issue #854
+    # s6 M2) ----
+    # Wrapped end-to-end (through rendering) in a single try/catch: on ANY
+    # exception here, print one degradation line and stop -- the value
+    # report above has already rendered and is unaffected. The FIRST
+    # statement re-throws the corpus fetch's own captured error (if any),
+    # so a corpus-fetch failure still produces the byte-for-byte-identical
+    # "cost section unavailable: {reason}" degradation line it always did,
+    # even though the fetch itself now happens earlier (before the rollup
+    # call, not inside this try block).
     try {
-        $corpusParams = @{
-            RepoOwner  = $RepoOwner
-            RepoName   = $RepoName
-            WindowDays = $WindowDays
+        if ($null -ne $corpusError) {
+            throw $corpusError
         }
-        if ($Token) {
-            $corpusParams['Token'] = $Token
-        }
-        $corpus = Get-PhaseContainmentCommentCorpus @corpusParams
 
         if ($corpus.Truncated -ne $truncated) {
             Write-Output ''
@@ -220,5 +485,5 @@ function Invoke-PhaseContainmentReportCli {
 # load Invoke-PhaseContainmentReportCli (and, transitively, every function
 # above) without triggering a live `gh` fetch.
 if ($MyInvocation.InvocationName -ne '.') {
-    Invoke-PhaseContainmentReportCli -RepoOwner $RepoOwner -RepoName $RepoName -WindowDays $WindowDays -Token $Token -NoCache:$NoCache -ValueCacheOk:$ValueCacheOk
+    Invoke-PhaseContainmentReportCli -RepoOwner $RepoOwner -RepoName $RepoName -WindowDays $WindowDays -Token $Token -NoCache:$NoCache -ValueCacheOk:$ValueCacheOk -JudgeLogin $JudgeLogin
 }

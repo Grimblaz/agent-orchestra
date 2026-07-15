@@ -2397,6 +2397,20 @@ function Format-PhaseContainmentReport {
                 # "NOT ELIGIBLE (escape_rate > 0)" text.
                 $lines.Add("  Relaxation signal:  WITHHELD (fetch truncated)")
             }
+            elseif ($null -ne $stage.RelaxationEligibleReason) {
+                # Issue #854 s6 reason-ladder extension: check the reason
+                # field BEFORE falling through to the two-branch escape-
+                # rate/critical-severity guess below, mirroring the P9
+                # 'fetch truncated' precedent immediately above. Without
+                # this check, a downgrade set by the code-review escape-
+                # side guard in Get-PhaseContainmentRollup (coverage
+                # insufficient, reconciliation failure, unassessable
+                # unique-catch rate) mis-renders as the generic "critical
+                # severity finding in window" guess, since RelaxationEligible
+                # is $false either way and the guess below cannot tell the
+                # two situations apart.
+                $lines.Add("  Relaxation signal:  WITHHELD ($($stage.RelaxationEligibleReason))")
+            }
             else {
                 # Determine reason
                 if ($stage.EscapeRate -ge 0.05) {
@@ -2409,6 +2423,64 @@ function Format-PhaseContainmentReport {
         }
 
         $lines.Add('')
+
+        # -----------------------------------------------------------------
+        # Issue #854 s6 (M21): the code-review row renders an independent
+        # escape-side (post-review-observer) arm, regardless of which
+        # catch-side branch above fired (denominator=0, n<5, data
+        # untrustworthy, or the normal reason-ladder render) — the previous
+        # short-circuit chain returned before ever reaching escape-side
+        # data, so a coverage-insufficient or reconciliation-failed window
+        # was indistinguishable from a genuinely clean one. Upstream stages
+        # (design-challenge, plan-stress-test) have no downstream observer
+        # and are unaffected — this block only ever fires for code-review.
+        # -----------------------------------------------------------------
+        if ($stageName -eq 'code-review') {
+            $lines.Add("  Escape-side (post-review observer):")
+
+            if ($stage.EscapeArmWithheld) {
+                $lines.Add("    Coverage:           NOT ASSESSABLE ($($stage.EscapeArmWithheldReason))")
+            }
+            elseif ($null -eq $stage.CoverageK -or $null -eq $stage.CoverageN) {
+                # Defensive fallback -- should only be reachable if a future
+                # caller supplies a TerminalObservation shape this renderer
+                # does not yet know how to read.
+                $lines.Add("    Coverage:           NOT ASSESSABLE (escape-side data unavailable)")
+            }
+            elseif (-not $stage.CoverageOk) {
+                $lines.Add("    Coverage:           $($stage.CoverageK) of $($stage.CoverageN) co-observed PRs measured (need >=5)")
+                $lines.Add("    Escape-side signal: NOT ASSESSABLE (coverage insufficient)")
+            }
+            else {
+                $lines.Add("    Coverage:           $($stage.CoverageK) of $($stage.CoverageN) co-observed PRs measured")
+
+                if ($stage.ReconciliationOk -eq $false) {
+                    $novelDisplay = if ($null -ne $stage.DispositionsNovelExternalCount) { [string]$stage.DispositionsNovelExternalCount } else { 'unavailable' }
+                    $lines.Add("    Escape-side signal: NOT ASSESSABLE (escape-arm reconciliation failed: $novelDisplay dispositions-recorded novel finding(s) vs $($stage.ObserverBlockCount) emitted observer block(s))")
+                }
+                else {
+                    $lines.Add("    Miss count (observer blocks): $($stage.ObserverBlockCount)")
+
+                    if (-not $stage.UniqueCatchRateAssessable -or $null -eq $stage.UniqueCatchRate) {
+                        $lines.Add("    Unique-catch rate:  NOT ASSESSABLE (no co-observed internal or observer catches)")
+                    }
+                    else {
+                        $lines.Add(("    Unique-catch rate:  {0:P1}" -f $stage.UniqueCatchRate))
+                    }
+
+                    switch ($stage.ChapmanState) {
+                        'estimate' { $lines.Add(("    Chapman (both-missed est.): {0:F1}" -f $stage.ChapmanBothMissedEstimate)) }
+                        'sparse' { $lines.Add("    Chapman (both-missed est.): overlap too sparse") }
+                        'unavailable' { $lines.Add("    Chapman (both-missed est.): estimate unavailable -- overlap exceeds observed population") }
+                        default { $lines.Add("    Chapman (both-missed est.): not computed") }
+                    }
+
+                    $lines.Add("    Caveat: this is a lower-bound, correlated-blind-spot estimate -- both the pipeline and the external reviewer may share systemic blind spots this corpus cannot detect.")
+                }
+            }
+
+            $lines.Add('')
+        }
     }
 
     # ---- Render leakage matrix ----
