@@ -877,109 +877,444 @@ Describe 'Wrapper foreach loops — M7 per-tuple isolation (issue #782 post-revi
 
 # ---------------------------------------------------------------------------
 # 13. Rollup — clean stage with n>=5 → RelaxationEligible=$true
+#
+# REVISED (issue #854 s5, deliberate/owner-approved, mirrors the #768 M3
+# precedent): the pre-#854 assertion that a clean code-review stage with
+# n>=5 and no critical severity was automatically RelaxationEligible=$true
+# is EXACTLY the artifact this issue exists to fix - "0.00 escape rate and
+# ELIGIBLE" on the terminal stage was a measurement of nothing, because
+# there was no downstream observer. The rates (EscapeRate/IrreducibleRate)
+# are catch-side-only and genuinely unchanged by #854; RelaxationEligible
+# for code-review now additionally requires an escape-side measurement
+# (TerminalObservation) per the governing "coverage means measurement, not
+# presence" principle. See the new Describe block below for code-review's
+# post-#854 behavior; this block is re-pinned to a stage design-challenge/
+# plan-stress-test never gate on TerminalObservation, so it keeps testing
+# the same "clean stage -> eligible" invariant it always did.
 # ---------------------------------------------------------------------------
 
-Describe 'Get-PhaseContainmentRollup — clean stage n>=5 sets RelaxationEligible=$true' {
-    It 'returns RelaxationEligible=$true, EscapeRate=0.0, IrreducibleRate=1.0 for a clean code-review stage with 6 entries' {
+Describe 'Get-PhaseContainmentRollup — clean upstream stage n>=5 sets RelaxationEligible=$true' {
+    It 'returns RelaxationEligible=$true, EscapeRate=0.0, IrreducibleRate=1.0 for a clean plan-stress-test stage with 6 entries' {
+        $entries = 1..6 | ForEach-Object {
+            [PSCustomObject]@{
+                finding_key       = "plan-stress-test:803:F$_"
+                introduced_phase  = 'plan'
+                catchable_phase   = 'plan'
+                caught_stage      = 'plan-stress-test'
+                escape_distance   = 0
+                severity          = 'low'
+                systemic_fix_type = 'instruction'
+                category          = 'architecture'
+                apparatus_meta    = $false
+                seed              = $false
+                createdAt         = '2024-01-01T12:00:00Z'
+                surface           = 'issue'
+                issueOrPrNumber   = 803
+            }
+        }
+
+        $result = Get-PhaseContainmentRollup -Entries $entries
+
+        $stageResult = $result.Stages['plan-stress-test']
+        $stageResult.RelaxationEligible | Should -Be $true
+        $stageResult.EscapeRate         | Should -Be 0.0
+        $stageResult.IrreducibleRate    | Should -Be 1.0
+    }
+}
+
+# ---------------------------------------------------------------------------
+# 13a. Rollup — code-review stage's post-#854 escape-side gate (issue #854 s5)
+#
+# The code-review stage is the sole stage with a downstream observer, so its
+# RelaxationEligible now additionally requires an escape-side measurement
+# (TerminalObservation) on top of the catch-side check exercised above.
+# ---------------------------------------------------------------------------
+
+Describe 'Get-PhaseContainmentRollup — code-review escape-side guard (issue #854 s5, M4/M6/M7/M13)' {
+    BeforeAll {
+        function script:New-CleanCodeReviewEntries {
+            param([int]$Count = 6, [int]$PrNumber = 803)
+            return 1..$Count | ForEach-Object {
+                [PSCustomObject]@{
+                    finding_key       = "code-review:${PrNumber}:F$_"
+                    introduced_phase  = 'implementation'
+                    catchable_phase   = 'implementation'
+                    caught_stage      = 'code-review'
+                    escape_distance   = 0
+                    severity          = 'low'
+                    systemic_fix_type = 'none'
+                    category          = 'pattern'
+                    apparatus_meta    = $false
+                    seed              = $false
+                    createdAt         = '2024-01-01T12:00:00Z'
+                    surface           = 'pr'
+                    issueOrPrNumber   = $PrNumber
+                }
+            }
+        }
+    }
+
+    It 'sets RelaxationEligible=$false when TerminalObservation is not supplied, even though catch-side is clean (no-observer-corpus regression: rates stay unchanged)' {
+        $entries = script:New-CleanCodeReviewEntries
+
+        $result = Get-PhaseContainmentRollup -Entries $entries
+
+        $stage = $result.Stages['code-review']
+        $stage.EscapeRate                | Should -Be 0.0
+        $stage.IrreducibleRate           | Should -Be 1.0
+        $stage.RelaxationEligible        | Should -Be $false
+        $stage.RelaxationEligibleReason  | Should -Match 'terminal observation unavailable'
+        $stage.EscapeArmWithheld         | Should -Be $true
+    }
+
+    It 'leaves design-challenge and plan-stress-test RelaxationEligible/rates unchanged on a no-observer corpus (regression guard)' {
+        $codeReviewEntries = script:New-CleanCodeReviewEntries
+        $designEntries = 1..6 | ForEach-Object {
+            [PSCustomObject]@{
+                finding_key = "design-challenge:850:F$_"; introduced_phase = 'design'; catchable_phase = 'design'
+                caught_stage = 'design-challenge'; escape_distance = 0; severity = 'low'
+                systemic_fix_type = 'skill'; category = 'architecture'; apparatus_meta = $false; seed = $false
+                createdAt = '2024-01-01T12:00:00Z'; surface = 'issue'; issueOrPrNumber = 850
+            }
+        }
+        $planEntries = 1..6 | ForEach-Object {
+            [PSCustomObject]@{
+                finding_key = "plan-stress-test:851:F$_"; introduced_phase = 'plan'; catchable_phase = 'plan'
+                caught_stage = 'plan-stress-test'; escape_distance = 0; severity = 'low'
+                systemic_fix_type = 'instruction'; category = 'architecture'; apparatus_meta = $false; seed = $false
+                createdAt = '2024-01-01T12:00:00Z'; surface = 'issue'; issueOrPrNumber = 851
+            }
+        }
+
+        $result = Get-PhaseContainmentRollup -Entries ($codeReviewEntries + $designEntries + $planEntries)
+
+        $result.Stages['design-challenge'].EscapeRate            | Should -Be 0.0
+        $result.Stages['design-challenge'].IrreducibleRate       | Should -Be 1.0
+        $result.Stages['design-challenge'].RelaxationEligible    | Should -Be $true
+        $result.Stages['plan-stress-test'].EscapeRate            | Should -Be 0.0
+        $result.Stages['plan-stress-test'].IrreducibleRate       | Should -Be 1.0
+        $result.Stages['plan-stress-test'].RelaxationEligible    | Should -Be $true
+        $result.Stages['code-review'].EscapeRate                 | Should -Be 0.0
+        $result.Stages['code-review'].IrreducibleRate            | Should -Be 1.0
+    }
+
+    It 'sets RelaxationEligible=$true when TerminalObservation is fully supplied and clean (positive path)' {
+        $entries = script:New-CleanCodeReviewEntries
+
+        $terminalObservation = @{
+            CoObservedPRCount              = 7
+            MeasuredCoveragePRCount        = 6
+            DispositionsNovelExternalCount = 0
+            InternalCoObservedCatchCount   = 20
+            ExternalCatchCount             = 3
+            DuplicateCount                 = 2
+            ObserverEscapeCount            = 0
+        }
+
+        $result = Get-PhaseContainmentRollup -Entries $entries -TerminalObservation $terminalObservation
+
+        $stage = $result.Stages['code-review']
+        $stage.RelaxationEligible       | Should -Be $true
+        $stage.RelaxationEligibleReason | Should -BeNullOrEmpty
+        $stage.CoverageK                | Should -Be 6
+        $stage.CoverageN                | Should -Be 7
+        $stage.CoverageOk               | Should -Be $true
+        $stage.ReconciliationOk         | Should -Be $true
+        $stage.UniqueCatchRate          | Should -Be 0.0
+        $stage.UniqueCatchRateAssessable | Should -Be $true
+    }
+
+    It 'sets RelaxationEligible=$false with a coverage reason (K of N) when all external findings on the co-observed PRs are unresolved (M7 — all-unresolved coverage contributes ZERO)' {
+        $entries = script:New-CleanCodeReviewEntries
+
+        # M7: five PRs whose external findings are ALL 'unresolved' must not
+        # count toward K — the caller (s6) is responsible for that exclusion
+        # when building MeasuredCoveragePRCount; this test proves the guard
+        # fails closed on the resulting K=0 rather than trusting CoObservedPRCount.
+        $terminalObservation = @{
+            CoObservedPRCount              = 5
+            MeasuredCoveragePRCount        = 0
+            DispositionsNovelExternalCount = 0
+        }
+
+        $result = Get-PhaseContainmentRollup -Entries $entries -TerminalObservation $terminalObservation
+
+        $stage = $result.Stages['code-review']
+        $stage.RelaxationEligible       | Should -Be $false
+        $stage.RelaxationEligibleReason | Should -Match '0 of 5'
+        $stage.CoverageOk               | Should -Be $false
+    }
+
+    It 'sets RelaxationEligible=$false when the dispositions-recorded novel count disagrees with emitted observer blocks (M13 escape-arm reconciliation, "0 misses" != "0 blocks emitted")' {
+        $entries = script:New-CleanCodeReviewEntries
+
+        $terminalObservation = @{
+            CoObservedPRCount              = 6
+            MeasuredCoveragePRCount        = 6
+            DispositionsNovelExternalCount = 2
+            # No post-review-observer entries are present in $entries, so the
+            # emitted-block count this function derives is 0 -- a real
+            # reconciliation mismatch (2 dispositions-recorded vs 0 emitted).
+        }
+
+        $result = Get-PhaseContainmentRollup -Entries $entries -TerminalObservation $terminalObservation
+
+        $stage = $result.Stages['code-review']
+        $stage.RelaxationEligible       | Should -Be $false
+        $stage.RelaxationEligibleReason | Should -Match 'reconciliation failed'
+        $stage.ReconciliationOk         | Should -Be $false
+    }
+
+    It 'sets RelaxationEligible=$true and reconciliation passes when dispositions-recorded novel count matches emitted observer blocks (both zero — the "0 misses" case)' {
+        $entries = script:New-CleanCodeReviewEntries
+
+        $terminalObservation = @{
+            CoObservedPRCount              = 6
+            MeasuredCoveragePRCount        = 6
+            DispositionsNovelExternalCount = 0
+            InternalCoObservedCatchCount   = 4
+            ObserverEscapeCount            = 0
+        }
+
+        $result = Get-PhaseContainmentRollup -Entries $entries -TerminalObservation $terminalObservation
+
+        $stage = $result.Stages['code-review']
+        $stage.ReconciliationOk   | Should -Be $true
+        $stage.ObserverBlockCount | Should -Be 0
+        $stage.RelaxationEligible | Should -Be $true
+    }
+
+    It 'returns UniqueCatchRate=$null (never [double]::NaN) and rejects eligibility when the unique-catch denominator is 0/0 (M6)' {
+        $entries = script:New-CleanCodeReviewEntries
+
+        $terminalObservation = @{
+            CoObservedPRCount              = 6
+            MeasuredCoveragePRCount        = 6
+            DispositionsNovelExternalCount = 0
+            InternalCoObservedCatchCount   = 0
+            ObserverEscapeCount            = 0
+        }
+
+        $result = Get-PhaseContainmentRollup -Entries $entries -TerminalObservation $terminalObservation
+
+        $stage = $result.Stages['code-review']
+        $stage.UniqueCatchRate           | Should -Be $null
+        $stage.UniqueCatchRateAssessable | Should -Be $false
+        [double]::IsNaN(0.0)             | Should -Be $false # sanity: literal 0.0 is not NaN
+        $stage.RelaxationEligible        | Should -Be $false
+        $stage.RelaxationEligibleReason  | Should -Match 'not assessable'
+    }
+
+    It 'withholds the escape arm and fails closed when ValueCacheOk=$false (Seam Specification -ValueCacheOk coherence — cached value cannot join a same-run corpus)' {
+        $entries = script:New-CleanCodeReviewEntries
+
+        $terminalObservation = @{
+            CoObservedPRCount       = 7
+            MeasuredCoveragePRCount = 6
+            ValueCacheOk            = $false
+        }
+
+        $result = Get-PhaseContainmentRollup -Entries $entries -TerminalObservation $terminalObservation
+
+        $stage = $result.Stages['code-review']
+        $stage.EscapeArmWithheld         | Should -Be $true
+        $stage.EscapeArmWithheldReason   | Should -Match 'escape arm withheld'
+        $stage.RelaxationEligible        | Should -Be $false
+        $stage.RelaxationEligibleReason  | Should -Match 'escape arm withheld'
+    }
+
+    It 'renders a Chapman both-missed estimate as N-hat minus (n1+n2-m), not the raw total-population N-hat (M11)' {
+        $entries = script:New-CleanCodeReviewEntries
+
+        # n1=9, n2=4, m=2 -> N-hat=((10*5)/3)-1=15.667; both-missed = 15.667-(9+4-2)=4.667
+        $terminalObservation = @{
+            CoObservedPRCount              = 6
+            MeasuredCoveragePRCount        = 6
+            DispositionsNovelExternalCount = 0
+            InternalCoObservedCatchCount   = 9
+            ExternalCatchCount             = 4
+            DuplicateCount                 = 2
+            ObserverEscapeCount            = 0
+        }
+
+        $result = Get-PhaseContainmentRollup -Entries $entries -TerminalObservation $terminalObservation
+
+        $stage = $result.Stages['code-review']
+        $stage.ChapmanState              | Should -Be 'estimate'
+        [Math]::Round($stage.ChapmanBothMissedEstimate, 2) | Should -Be 4.67
+    }
+
+    It 'renders Chapman as unavailable (not a bad number) when m exceeds min(n1,n2) (M14)' {
+        $entries = script:New-CleanCodeReviewEntries
+
+        $terminalObservation = @{
+            CoObservedPRCount              = 6
+            MeasuredCoveragePRCount        = 6
+            DispositionsNovelExternalCount = 0
+            InternalCoObservedCatchCount   = 3
+            ExternalCatchCount             = 2
+            DuplicateCount                 = 3
+            ObserverEscapeCount            = 0
+        }
+
+        $result = Get-PhaseContainmentRollup -Entries $entries -TerminalObservation $terminalObservation
+
+        $stage = $result.Stages['code-review']
+        $stage.ChapmanState              | Should -Be 'unavailable'
+        $stage.ChapmanBothMissedEstimate | Should -Be $null
+    }
+
+    It 'renders Chapman as sparse (not an estimate) when m=0 (overlap too sparse)' {
+        $entries = script:New-CleanCodeReviewEntries
+
+        $terminalObservation = @{
+            CoObservedPRCount              = 6
+            MeasuredCoveragePRCount        = 6
+            DispositionsNovelExternalCount = 0
+            InternalCoObservedCatchCount   = 5
+            ExternalCatchCount             = 3
+            DuplicateCount                 = 0
+            ObserverEscapeCount            = 0
+        }
+
+        $result = Get-PhaseContainmentRollup -Entries $entries -TerminalObservation $terminalObservation
+
+        $stage = $result.Stages['code-review']
+        $stage.ChapmanState              | Should -Be 'sparse'
+        $stage.ChapmanBothMissedEstimate | Should -Be $null
+    }
+}
+
+# ---------------------------------------------------------------------------
+# 13b. Rollup — AC7 upstream-enrichment regression (issue #854 s5)
+#
+# post-review-observer entries with catchable_phase design|plan must route
+# to the existing design-challenge/plan-stress-test buckets via the
+# unchanged catchable_phase routing logic, and can only ADD escapes, never
+# irreducibles.
+# ---------------------------------------------------------------------------
+
+Describe 'Get-PhaseContainmentRollup — AC7 observer entries only ever add escapes to upstream buckets (issue #854 s5)' {
+    It 'routes a post-review-observer/catchable_phase=design entry into the design-challenge escape count, never irreducible' {
         $entries = @(
             [PSCustomObject]@{
-                finding_key       = 'code-review:803:F1'
-                introduced_phase  = 'implementation'
-                catchable_phase   = 'implementation'
-                caught_stage      = 'code-review'
-                escape_distance   = 0
-                severity          = 'low'
-                systemic_fix_type = 'none'
-                category          = 'pattern'
-                apparatus_meta    = $false
-                seed              = $false
-                createdAt         = '2024-01-01T12:00:00Z'
-                surface           = 'pr'
-                issueOrPrNumber   = 803
+                finding_key = 'post-review-observer:860:X1'; introduced_phase = 'design'; catchable_phase = 'design'
+                caught_stage = 'post-review-observer'; escape_distance = 3; severity = 'medium'
+                systemic_fix_type = 'none'; category = 'pattern'; apparatus_meta = $false; seed = $false
+                createdAt = '2024-01-01T12:00:00Z'; surface = 'pr'; issueOrPrNumber = 860
             }
+        ) + (1..4 | ForEach-Object {
             [PSCustomObject]@{
-                finding_key       = 'code-review:803:F2'
-                introduced_phase  = 'implementation'
-                catchable_phase   = 'implementation'
-                caught_stage      = 'code-review'
-                escape_distance   = 0
-                severity          = 'low'
-                systemic_fix_type = 'none'
-                category          = 'pattern'
-                apparatus_meta    = $false
-                seed              = $false
-                createdAt         = '2024-01-01T12:00:00Z'
-                surface           = 'pr'
-                issueOrPrNumber   = 803
+                finding_key = "design-challenge:860:F$_"; introduced_phase = 'design'; catchable_phase = 'design'
+                caught_stage = 'design-challenge'; escape_distance = 0; severity = 'low'
+                systemic_fix_type = 'skill'; category = 'architecture'; apparatus_meta = $false; seed = $false
+                createdAt = '2024-01-01T12:00:00Z'; surface = 'issue'; issueOrPrNumber = 860
             }
+        })
+
+        $result = Get-PhaseContainmentRollup -Entries $entries
+
+        $stage = $result.Stages['design-challenge']
+        $stage.N          | Should -Be 5
+        $stage.EscapeRate | Should -Be 0.2
+    }
+
+    It 'routes a post-review-observer/catchable_phase=plan entry into the plan-stress-test escape count, never irreducible' {
+        $entries = @(
             [PSCustomObject]@{
-                finding_key       = 'code-review:803:F3'
-                introduced_phase  = 'implementation'
-                catchable_phase   = 'implementation'
-                caught_stage      = 'code-review'
-                escape_distance   = 0
-                severity          = 'low'
-                systemic_fix_type = 'none'
-                category          = 'pattern'
-                apparatus_meta    = $false
-                seed              = $false
-                createdAt         = '2024-01-01T12:00:00Z'
-                surface           = 'pr'
-                issueOrPrNumber   = 803
+                finding_key = 'post-review-observer:861:X1'; introduced_phase = 'plan'; catchable_phase = 'plan'
+                caught_stage = 'post-review-observer'; escape_distance = 2; severity = 'medium'
+                systemic_fix_type = 'none'; category = 'pattern'; apparatus_meta = $false; seed = $false
+                createdAt = '2024-01-01T12:00:00Z'; surface = 'pr'; issueOrPrNumber = 861
             }
+        ) + (1..4 | ForEach-Object {
             [PSCustomObject]@{
-                finding_key       = 'code-review:803:F4'
-                introduced_phase  = 'implementation'
-                catchable_phase   = 'implementation'
-                caught_stage      = 'code-review'
-                escape_distance   = 0
-                severity          = 'low'
-                systemic_fix_type = 'none'
-                category          = 'pattern'
-                apparatus_meta    = $false
-                seed              = $false
-                createdAt         = '2024-01-01T12:00:00Z'
-                surface           = 'pr'
-                issueOrPrNumber   = 803
+                finding_key = "plan-stress-test:861:F$_"; introduced_phase = 'plan'; catchable_phase = 'plan'
+                caught_stage = 'plan-stress-test'; escape_distance = 0; severity = 'low'
+                systemic_fix_type = 'instruction'; category = 'architecture'; apparatus_meta = $false; seed = $false
+                createdAt = '2024-01-01T12:00:00Z'; surface = 'issue'; issueOrPrNumber = 861
             }
+        })
+
+        $result = Get-PhaseContainmentRollup -Entries $entries
+
+        $stage = $result.Stages['plan-stress-test']
+        $stage.N          | Should -Be 5
+        $stage.EscapeRate | Should -Be 0.2
+    }
+
+    It 'excludes a post-review-observer/catchable_phase=experience entry from every bucket (belongs to no bucket)' {
+        $entries = @(
             [PSCustomObject]@{
-                finding_key       = 'code-review:803:F5'
-                introduced_phase  = 'implementation'
-                catchable_phase   = 'implementation'
-                caught_stage      = 'code-review'
-                escape_distance   = 0
-                severity          = 'low'
-                systemic_fix_type = 'none'
-                category          = 'pattern'
-                apparatus_meta    = $false
-                seed              = $false
-                createdAt         = '2024-01-01T12:00:00Z'
-                surface           = 'pr'
-                issueOrPrNumber   = 803
-            }
-            [PSCustomObject]@{
-                finding_key       = 'code-review:803:F6'
-                introduced_phase  = 'implementation'
-                catchable_phase   = 'implementation'
-                caught_stage      = 'code-review'
-                escape_distance   = 0
-                severity          = 'low'
-                systemic_fix_type = 'none'
-                category          = 'pattern'
-                apparatus_meta    = $false
-                seed              = $false
-                createdAt         = '2024-01-01T12:00:00Z'
-                surface           = 'pr'
-                issueOrPrNumber   = 803
+                finding_key = 'post-review-observer:862:X1'; introduced_phase = 'experience'; catchable_phase = 'experience'
+                caught_stage = 'post-review-observer'; escape_distance = 4; severity = 'medium'
+                systemic_fix_type = 'none'; category = 'pattern'; apparatus_meta = $false; seed = $false
+                createdAt = '2024-01-01T12:00:00Z'; surface = 'pr'; issueOrPrNumber = 862
             }
         )
 
         $result = Get-PhaseContainmentRollup -Entries $entries
 
-        $stageResult = $result.Stages['code-review']
-        $stageResult.RelaxationEligible | Should -Be $true
-        $stageResult.EscapeRate         | Should -Be 0.0
-        $stageResult.IrreducibleRate    | Should -Be 1.0
+        $result.Stages['design-challenge'].N | Should -Be 0
+        $result.Stages['plan-stress-test'].N | Should -Be 0
+        $result.Stages['code-review'].N      | Should -Be 0
+    }
+}
+
+# ---------------------------------------------------------------------------
+# 13c. Rollup — M36: SustainedCounts reconciliation excludes observer-caught
+# entries (issue #854 s5)
+# ---------------------------------------------------------------------------
+
+Describe 'Get-PhaseContainmentRollup — M36 SustainedCounts reconciliation excludes observer-caught entries' {
+    It 'does not spuriously mark DataUntrustworthy when an observer-caught entry inflates N beyond a pre-observer SustainedCounts expectation' {
+        $entries = (1..3 | ForEach-Object {
+            [PSCustomObject]@{
+                finding_key = "code-review:863:F$_"; introduced_phase = 'implementation'; catchable_phase = 'implementation'
+                caught_stage = 'code-review'; escape_distance = 0; severity = 'low'
+                systemic_fix_type = 'none'; category = 'pattern'; apparatus_meta = $false; seed = $false
+                createdAt = '2024-01-01T12:00:00Z'; surface = 'pr'; issueOrPrNumber = 863
+            }
+        }) + @(
+            [PSCustomObject]@{
+                finding_key = 'post-review-observer:863:X1'; introduced_phase = 'implementation'; catchable_phase = 'implementation'
+                caught_stage = 'post-review-observer'; escape_distance = 1; severity = 'medium'
+                systemic_fix_type = 'none'; category = 'pattern'; apparatus_meta = $false; seed = $false
+                createdAt = '2024-01-01T12:00:00Z'; surface = 'pr'; issueOrPrNumber = 863
+            }
+        )
+
+        # SustainedCounts expects 3 (the pre-observer judge-sustained count);
+        # N is 4 (3 code-review + 1 observer). Excluding the observer-caught
+        # entry brings the comparison back to 3 == 3.
+        $result = Get-PhaseContainmentRollup -Entries $entries -SustainedCounts @{ 'code-review' = 3 }
+
+        $result.Stages['code-review'].DataUntrustworthy | Should -Be $false
+    }
+
+    It 'still marks DataUntrustworthy when the non-observer count genuinely disagrees with SustainedCounts' {
+        $entries = (1..2 | ForEach-Object {
+            [PSCustomObject]@{
+                finding_key = "code-review:864:F$_"; introduced_phase = 'implementation'; catchable_phase = 'implementation'
+                caught_stage = 'code-review'; escape_distance = 0; severity = 'low'
+                systemic_fix_type = 'none'; category = 'pattern'; apparatus_meta = $false; seed = $false
+                createdAt = '2024-01-01T12:00:00Z'; surface = 'pr'; issueOrPrNumber = 864
+            }
+        }) + @(
+            [PSCustomObject]@{
+                finding_key = 'post-review-observer:864:X1'; introduced_phase = 'implementation'; catchable_phase = 'implementation'
+                caught_stage = 'post-review-observer'; escape_distance = 1; severity = 'medium'
+                systemic_fix_type = 'none'; category = 'pattern'; apparatus_meta = $false; seed = $false
+                createdAt = '2024-01-01T12:00:00Z'; surface = 'pr'; issueOrPrNumber = 864
+            }
+        )
+
+        # SustainedCounts expects 3, non-observer N is 2 (a genuine mismatch
+        # even after excluding the 1 observer-caught entry).
+        $result = Get-PhaseContainmentRollup -Entries $entries -SustainedCounts @{ 'code-review' = 3 }
+
+        $result.Stages['code-review'].DataUntrustworthy       | Should -Be $true
+        $result.Stages['code-review'].DataUntrustworthyReason | Should -Match 'excluding 1 observer-caught entry'
     }
 }
 
@@ -2957,11 +3292,18 @@ Describe 'Get-PhaseContainmentRollup — Truncated forces RelaxationEligible=$fa
     }
 
     It 'does not set RelaxationEligibleReason when -Truncated is not supplied (regression guard)' {
-        $entries = 1..6 | ForEach-Object { script:New-TruncatedRollupEntry -FindingKey "code-review:901:F$_" }
+        # Issue #854 s5: uses plan-stress-test rather than code-review here —
+        # code-review now additionally requires -TerminalObservation to reach
+        # RelaxationEligible=$true (see the dedicated code-review escape-side
+        # guard Describe block), so exercising this specific "-Truncated not
+        # supplied -> no stray reason" invariant on an unaffected upstream
+        # stage keeps the assertion meaningful without conflating it with
+        # coverage gating.
+        $entries = 1..6 | ForEach-Object { script:New-TruncatedRollupEntry -FindingKey "plan-stress-test:901:F$_" -Stage 'plan-stress-test' -CatchablePhase 'plan' }
 
         $result = Get-PhaseContainmentRollup -Entries $entries
 
-        $stage = $result.Stages['code-review']
+        $stage = $result.Stages['plan-stress-test']
         $stage.RelaxationEligible       | Should -Be $true
         $stage.RelaxationEligibleReason | Should -BeNullOrEmpty
     }

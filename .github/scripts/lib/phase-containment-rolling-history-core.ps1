@@ -1844,6 +1844,54 @@ function Get-PhaseContainmentRollup {
         Optional hashtable @{ 'design-challenge'=N; 'plan-stress-test'=N; 'code-review'=N }
         specifying expected count of sustained (non-apparatus_meta) findings per surface.
         When provided, actual count mismatch marks DataUntrustworthy=$true for that stage.
+        Issue #854 M36: entries with caught_stage='post-review-observer' are excluded from
+        the observed count before comparison, so a caller that has not yet started supplying
+        observer-inclusive expectations does not spuriously fail closed once observer entries
+        start appearing in the corpus.
+    .PARAMETER TerminalObservation
+        Optional hashtable, mirroring the $SustainedCounts idiom (optional, $null default,
+        ContainsKey-guarded per key), carrying the pre-aggregated escape-side (post-review-
+        observer) measurement for the code-review stage only. Issue #854 (governing principle:
+        "coverage means measurement, not presence") - when $null, or when any contained guard
+        fails, the code-review stage's RelaxationEligible is forced to $false (never upgraded
+        by this parameter, only ever downgraded) whenever the catch-side computation above
+        would otherwise have set it to $true. Design-challenge and plan-stress-test are
+        unaffected; they have no downstream observer.
+
+        All keys are optional; a missing key defaults as noted. Scoping rules below are the
+        Seam Specification (binding on s3/s5/s6/s7) and are the CALLER's responsibility to
+        honor when building this hashtable - this function consumes already-scoped counts,
+        it does not re-derive them from raw finding records.
+
+          CoObservedPRCount              [int]  N - total PRs in the co-observed corpus for
+                                                 the window. Default 0.
+          MeasuredCoveragePRCount        [int]  K - PRs counting toward coverage: a judge-
+                                                 authored coverage record AND >=1 external
+                                                 sustained finding resolved to a real identity
+                                                 (M7 - an all-unresolved PR contributes ZERO
+                                                 coverage). Default 0.
+          DispositionsNovelExternalCount [int]  Dispositions-recorded external findings with
+                                                 internal_match.match_status='novel', compared
+                                                 against the emitted post-review-observer
+                                                 blocks this function counts directly from
+                                                 $Entries (M13 escape-arm reconciliation).
+                                                 Omitted -> reconciliation cannot be verified
+                                                 and fails closed.
+          InternalCoObservedCatchCount   [int]  n1 - caught_stage='code-review' AND
+                                                 catchable_phase='implementation' entries,
+                                                 restricted to the co-observed PR set. Default 0.
+          ExternalCatchCount             [int]  n2 - external sustained findings on co-observed
+                                                 PRs, excluding match_status 'ambiguous' and
+                                                 'unresolved'. Default 0.
+          DuplicateCount                 [int]  m - external sustained findings with
+                                                 match_status 'duplicate' (the catch/escape
+                                                 overlap). Default 0.
+          ObserverEscapeCount            [int]  Numerator for the unique-catch rate. Defaults
+                                                 to the observer-block count this function
+                                                 derives from $Entries when omitted.
+          ValueCacheOk                   [bool] Seam Specification -ValueCacheOk coherence
+                                                 rule - $false withholds the escape arm
+                                                 entirely. Default $true.
     .PARAMETER WindowLabel
         Optional label for the window (for display purposes only).
     .PARAMETER Truncated
@@ -1864,6 +1912,7 @@ function Get-PhaseContainmentRollup {
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Entries,
         [hashtable]$SustainedCounts = $null,
+        [hashtable]$TerminalObservation = $null,
         [string]$WindowLabel = '',
         [switch]$Truncated
     )
@@ -1947,13 +1996,36 @@ function Get-PhaseContainmentRollup {
         $insufficientData  = $denominatorZero -or ($n -lt 5)
 
         # Completeness reconciliation (fail-closed, P14)
+        # M36 (issue #854 s5): observer-caught entries (caught_stage=
+        # 'post-review-observer') are excluded from the observed count
+        # before comparing against $SustainedCounts. Those expectations are
+        # derived from judge-rulings sustained counts that predate the
+        # observer surface, so leaving them in would spuriously fail
+        # closed for every caller that has not yet started supplying
+        # observer-inclusive expectations.
+        $observerCaughtCount = 0
+        foreach ($e in $nonApparatusEntries) {
+            $eCaughtStage = if ($e -is [hashtable]) { [string]$e['caught_stage'] } else { [string]$e.caught_stage }
+            if ($eCaughtStage -eq 'post-review-observer') { $observerCaughtCount++ }
+        }
+        $nExcludingObserver = $n - $observerCaughtCount
+
         $dataUntrustworthy       = $false
         $dataUntrustworthyReason = $null
         if ($null -ne $SustainedCounts -and $SustainedCounts.ContainsKey($stage)) {
             $expectedCount = [int]$SustainedCounts[$stage]
-            if ($n -ne $expectedCount) {
+            if ($nExcludingObserver -ne $expectedCount) {
                 $dataUntrustworthy       = $true
-                $dataUntrustworthyReason = "Entry count mismatch: expected $expectedCount sustained findings for '$stage', observed $n."
+                # Byte-identical to the pre-#854 message when no observer
+                # entries are present (phase-containment-format-report.Tests.ps1
+                # pins the exact "expected N sustained findings for 'stage',
+                # observed M." wording); the observer-exclusion note is only
+                # appended when it actually changed the observed count.
+                $dataUntrustworthyReason = "Entry count mismatch: expected $expectedCount sustained findings for '$stage', observed $nExcludingObserver."
+                if ($observerCaughtCount -gt 0) {
+                    $entryWord = if ($observerCaughtCount -eq 1) { 'entry' } else { 'entries' }
+                    $dataUntrustworthyReason = "Entry count mismatch: expected $expectedCount sustained findings for '$stage', observed $nExcludingObserver (excluding $observerCaughtCount observer-caught $entryWord)."
+                }
             }
         }
 
@@ -2003,6 +2075,169 @@ function Get-PhaseContainmentRollup {
         # data-untrustworthy state, matching the design intent that no known
         # silent-degradation path can present a wrong number as clean.
         $relaxationEligibleReason = $null
+
+        # ---------------------------------------------------------------
+        # Issue #854 s5: terminal-observation escape-side guard (M4/M7/M13).
+        # INSERTION POINT IS EXACT: this runs AFTER the reason reset directly
+        # above and BEFORE the C11 truncation override directly below.
+        # Inserting it earlier would let this block's own reason be nulled
+        # by the reset; inserting it later (inside/after C11) would let a
+        # truncation override silently swallow an escape-side finding.
+        #
+        # Applies only to the code-review stage - the sole stage with a
+        # downstream observer. "Coverage means measurement" (governing
+        # principle): the escape-side stats below are computed and exposed
+        # on the Stage object regardless of the catch-side verdict, so a
+        # WITHHELD/NOT-ELIGIBLE catch side can still render an honest
+        # escape-side arm (CE Gate S1/S3). The RelaxationEligible flag
+        # itself is only ever DOWNGRADED here, never upgraded: catch-side
+        # $true is a precondition of, never a consequence of, the escape
+        # side passing (M10 precedence - both arms required for ELIGIBLE).
+        # ---------------------------------------------------------------
+        $coverageK                     = $null
+        $coverageN                     = $null
+        $coverageOk                    = $null
+        $reconciliationOk              = $null
+        $observerBlockCount            = $null
+        $dispositionsNovelCount        = $null
+        $uniqueCatchRate               = $null
+        $uniqueCatchRateAssessable     = $false
+        $chapmanBothMissedEstimate     = $null
+        $chapmanState                  = $null
+        $escapeArmWithheld             = $false
+        $escapeArmWithheldReason       = $null
+
+        if ($stage -eq 'code-review') {
+            if ($null -eq $TerminalObservation) {
+                $escapeArmWithheld       = $true
+                $escapeArmWithheldReason = 'terminal observation unavailable — escape-side coverage was not measured'
+                if ($relaxationEligible -eq $true) {
+                    $relaxationEligible       = $false
+                    $relaxationEligibleReason = $escapeArmWithheldReason
+                }
+            }
+            elseif ($TerminalObservation.ContainsKey('ValueCacheOk') -and -not [bool]$TerminalObservation['ValueCacheOk']) {
+                $escapeArmWithheld       = $true
+                $escapeArmWithheldReason = 'escape arm withheld — cached value population cannot be joined to a same-run corpus'
+                if ($relaxationEligible -eq $true) {
+                    $relaxationEligible       = $false
+                    $relaxationEligibleReason = $escapeArmWithheldReason
+                }
+            }
+            else {
+                $coverageN  = if ($TerminalObservation.ContainsKey('CoObservedPRCount'))      { [int]$TerminalObservation['CoObservedPRCount'] }      else { 0 }
+                $coverageK  = if ($TerminalObservation.ContainsKey('MeasuredCoveragePRCount')) { [int]$TerminalObservation['MeasuredCoveragePRCount'] } else { 0 }
+                $coverageOk = ($coverageK -ge 5)
+
+                if (-not $coverageOk) {
+                    if ($relaxationEligible -eq $true) {
+                        $relaxationEligible       = $false
+                        $relaxationEligibleReason = "coverage insufficient: $coverageK of $coverageN co-observed PRs measured (need >=5)"
+                    }
+                }
+                else {
+                    # Escape-arm reconciliation (M13): the dispositions-
+                    # recorded novel-external count is caller-supplied
+                    # (dispositions data lives outside this ledger); the
+                    # emitted observer-block count is counted directly from
+                    # $Entries, which already carries any post-review-
+                    # observer blocks fetched for this window. Comparing
+                    # both explicitly - never inferring one from the other -
+                    # is what keeps "0 misses" distinguishable from "0
+                    # blocks emitted".
+                    $dispositionsNovelCount = if ($TerminalObservation.ContainsKey('DispositionsNovelExternalCount')) { [int]$TerminalObservation['DispositionsNovelExternalCount'] } else { $null }
+
+                    $observerBlockCount = 0
+                    foreach ($e in $Entries) {
+                        $eCaughtStage    = if ($e -is [hashtable]) { [string]$e['caught_stage'] }    else { [string]$e.caught_stage }
+                        $eCatchablePhase = if ($e -is [hashtable]) { [string]$e['catchable_phase'] }  else { [string]$e.catchable_phase }
+                        if ($eCaughtStage -eq 'post-review-observer' -and $eCatchablePhase -eq 'implementation') {
+                            $observerBlockCount++
+                        }
+                    }
+
+                    if ($null -eq $dispositionsNovelCount) {
+                        $reconciliationOk = $false
+                        if ($relaxationEligible -eq $true) {
+                            $relaxationEligible       = $false
+                            $relaxationEligibleReason = 'terminal observation incomplete — dispositions-recorded novel count unavailable for reconciliation'
+                        }
+                    }
+                    elseif ($dispositionsNovelCount -ne $observerBlockCount) {
+                        $reconciliationOk = $false
+                        if ($relaxationEligible -eq $true) {
+                            $relaxationEligible       = $false
+                            $relaxationEligibleReason = "escape-arm reconciliation failed: $dispositionsNovelCount dispositions-recorded novel finding(s) vs $observerBlockCount emitted observer block(s)"
+                        }
+                    }
+                    else {
+                        $reconciliationOk = $true
+
+                        # Unique-catch rate (M6, NaN-guarded): observer
+                        # escapes / (internal co-observed catches + observer
+                        # escapes). Denominator 0 -> $null, NEVER
+                        # [double]::NaN - a naive division by zero returns
+                        # NaN, and NaN satisfies neither -lt nor -ge, so a
+                        # downstream "-not ($rate -ge 0.05)" check would read
+                        # NaN as ELIGIBLE (verified live: `$nan -lt 0.05` and
+                        # `$nan -ge 0.05` are both $false in PowerShell).
+                        # Rejecting $null/IsNaN BEFORE any comparison is
+                        # mandatory, not optional.
+                        $n1              = if ($TerminalObservation.ContainsKey('InternalCoObservedCatchCount')) { [int]$TerminalObservation['InternalCoObservedCatchCount'] } else { 0 }
+                        $observerEscapes = if ($TerminalObservation.ContainsKey('ObserverEscapeCount'))          { [int]$TerminalObservation['ObserverEscapeCount'] }          else { $observerBlockCount }
+                        $uniqueCatchDenominator = $n1 + $observerEscapes
+
+                        if ($uniqueCatchDenominator -eq 0) {
+                            $uniqueCatchRate           = $null
+                            $uniqueCatchRateAssessable = $false
+                        }
+                        else {
+                            $uniqueCatchRate           = [double]$observerEscapes / [double]$uniqueCatchDenominator
+                            $uniqueCatchRateAssessable = -not [double]::IsNaN($uniqueCatchRate)
+                        }
+
+                        if ((-not $uniqueCatchRateAssessable) -or ($null -eq $uniqueCatchRate)) {
+                            $uniqueCatchRate           = $null
+                            $uniqueCatchRateAssessable = $false
+                            if ($relaxationEligible -eq $true) {
+                                $relaxationEligible       = $false
+                                $relaxationEligibleReason = 'escape-side unique-catch rate not assessable (no co-observed internal or observer catches)'
+                            }
+                        }
+                        elseif ($uniqueCatchRate -ge 0.05) {
+                            if ($relaxationEligible -eq $true) {
+                                $relaxationEligible       = $false
+                                $relaxationEligibleReason = "escape-side unique-catch rate too high ({0:P1} >= 5%)" -f $uniqueCatchRate
+                            }
+                        }
+                        # else: escape side is clean; $relaxationEligible stands (unchanged).
+
+                        # Chapman estimator (M11/M14) - informational, does
+                        # NOT gate RelaxationEligible. Renders N-hat MINUS
+                        # (n1+n2-m) under the "both missed" label - N-hat
+                        # alone is the TOTAL population estimate, not what
+                        # both reviewers missed. n2/m are caller-scoped per
+                        # the Seam Specification (n2 excludes ambiguous and
+                        # unresolved; m counts duplicate only).
+                        $n2 = if ($TerminalObservation.ContainsKey('ExternalCatchCount')) { [int]$TerminalObservation['ExternalCatchCount'] } else { 0 }
+                        $m  = if ($TerminalObservation.ContainsKey('DuplicateCount'))      { [int]$TerminalObservation['DuplicateCount'] }      else { 0 }
+
+                        if ($m -lt 1) {
+                            $chapmanState = 'sparse'
+                        }
+                        elseif ($m -gt [Math]::Min($n1, $n2)) {
+                            $chapmanState = 'unavailable'
+                        }
+                        else {
+                            $nHat = ((([double]$n1 + 1) * ([double]$n2 + 1)) / ([double]$m + 1)) - 1
+                            $chapmanBothMissedEstimate = $nHat - ([double]$n1 + [double]$n2 - [double]$m)
+                            $chapmanState              = 'estimate'
+                        }
+                    }
+                }
+            }
+        }
+
         if ($Truncated) {
             $relaxationEligible       = $false
             $relaxationEligibleReason = 'fetch truncated'
@@ -2020,6 +2255,18 @@ function Get-PhaseContainmentRollup {
             RelaxationEligibleReason  = $relaxationEligibleReason
             DataUntrustworthy         = $dataUntrustworthy
             DataUntrustworthyReason   = $dataUntrustworthyReason
+            CoverageK                 = $coverageK
+            CoverageN                 = $coverageN
+            CoverageOk                = $coverageOk
+            ReconciliationOk          = $reconciliationOk
+            DispositionsNovelExternalCount = $dispositionsNovelCount
+            ObserverBlockCount        = $observerBlockCount
+            UniqueCatchRate           = $uniqueCatchRate
+            UniqueCatchRateAssessable = $uniqueCatchRateAssessable
+            ChapmanBothMissedEstimate = $chapmanBothMissedEstimate
+            ChapmanState              = $chapmanState
+            EscapeArmWithheld         = $escapeArmWithheld
+            EscapeArmWithheldReason   = $escapeArmWithheldReason
         }
     }
 
