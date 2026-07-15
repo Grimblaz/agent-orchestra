@@ -10,7 +10,7 @@ When a PR's Cost Pattern block shows a null or `—` USD cell, or the rendered n
 Note names an unknown model, use this flow:
 
 1. Open the PR's Cost Pattern Note. When the walker cannot price an event, the Note names
-   the exact model(s) responsible, verbatim and provider-qualified — for example
+   the exact model(s) responsible (sanitized for safe display), provider-qualified — for example
    `` `claude/some-new-model` `` or `` `copilot/some-new-model` ``.
 2. **The printed `{provider}/{model}` string is NOT the JSON key to use.** The lookup key
    the walker actually builds at runtime is `(provider, model)`, resolved from each rate
@@ -55,8 +55,8 @@ of the two JSON shapes to use.
 
 `cache_creation_per_mtok` is set to **2× the input rate** — the published 1-hour cache-write
 rate — rather than the 1.25× rate that applies to 5-minute cache writes. This project's
-sessions are dominated by 1-hour-TTL cache writes, so the 1-hour rate is the representative
-default for every entry in this table.
+sessions are dominated by cache writes using a 1-hour time to live (TTL), so the 1-hour rate
+is the representative default for every entry in this table.
 
 **Falsifier**: if 5-minute cache writes become a significant share of usage, this
 single-rate convention understates or overstates cost depending on the real TTL mix. At
@@ -66,8 +66,8 @@ per-TTL breakdown from the usage event instead of applying one aggregate rate.
 
 ## Standard-vs-introductory rate choice
 
-`claude-sonnet-5` is priced at its **standard** rate (3.00 / 15.00 input/output per MTok),
-not the temporary introductory rate. The introductory rate silently expires on
+`claude-sonnet-5` is priced at its **standard** rate (3.00 / 15.00 input/output per million
+tokens (MTok)), not the temporary introductory rate. The introductory rate silently expires on
 **2026-08-31**; pricing the table at that rate would re-stale it on that date with no
 signal to any maintainer that a change occurred. Pricing at the standard rate keeps the
 table correct on both sides of the expiry with zero maintenance.
@@ -78,10 +78,11 @@ until the discount expires.
 
 ## Provider-extension procedure
 
-The schema is already provider-aware: any rate entry may carry a `provider` field, which
-defaults to `claude` when absent. Adding a new provider's model (for example, a future
-GPT/Codex entry) requires no code changes — it is just a new keyed entry with its own four
-rate fields, following the pattern already used by the `copilot-*` entries:
+The rate-table *schema* is already provider-aware: any rate entry may carry a `provider`
+field, which defaults to `claude` when absent. Adding a rate row for a new provider's model
+(for example, a future GPT/Codex entry) requires no *schema* change — it is just a new keyed
+entry with its own four rate fields, following the pattern already used by the `copilot-*`
+entries:
 
 ```json
 "some-provider-model-id": {
@@ -95,6 +96,18 @@ rate fields, following the pattern already used by the `copilot-*` entries:
   "rate_note": "optional context, e.g. why a rate is null"
 }
 ```
+
+Adding the rate row alone is not enough to make that provider's events actually resolve,
+though. `Get-EventProvider` (`cost-attribution.ps1:253-272`) only accepts providers listed in
+`$script:CostAttributionKnownEventProviders` (currently `@('claude', 'copilot')`, defined at
+`cost-attribution.ps1:54`); an event whose provider is not on that allowlist falls through to
+the `claude` default before the `(provider, model)` lookup ever runs, so a rate row for an
+unrecognized provider would never resolve no matter how it is keyed. Making a genuinely new
+provider's events resolve requires two real code changes in addition to the rate row:
+
+1. An event-collection path that populates the event's `provider` field for that provider.
+2. Adding the provider name to `$script:CostAttributionKnownEventProviders` in
+   `cost-attribution.ps1`.
 
 The JSON object key only has to be unique within `rates` — it is not itself the lookup key
 the walker matches against. The actual runtime lookup key is built from the `provider` and

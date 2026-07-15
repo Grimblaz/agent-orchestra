@@ -1232,6 +1232,54 @@ Describe 'unknown_models cap, overflow suffix, and round-trip (issue #487 s3)' {
         $yaml | Should -Not -Match '\+1 more'
     }
 
+    It 'duplicate and sanitizer-colliding raw unknown_models below the 10 cap render no "+N more" suffix (issue #487 F4)' {
+        # 12 raw strings that collapse to only 4 unique sanitized identifiers:
+        # repeated raw strings for the same model (repeated events), plus a
+        # comma-vs-control-char pair that sanitizes to the identical string.
+        # The true unique-and-sanitized count (4) is well under the 10-entry
+        # cap, so no overflow suffix should ever appear. Before the fix, the
+        # overflow count was raw-array-length minus sanitized-count (12 - 4 =
+        # 8), producing a phantom "+8 more" even though every model is shown.
+        $unknownModels = @(
+            'claude/model-a', 'claude/model-a', 'claude/model-a',
+            'claude/model-b', 'claude/model-b',
+            'claude/model-c,x', "claude/model-c`u{0001}x",
+            'claude/model-d', 'claude/model-d', 'claude/model-d', 'claude/model-d'
+        )
+
+        $attribution = script:New-Cap5Attribution
+        $attribution['ports']['experience']['null_cost_events'] = $unknownModels.Count
+        $attribution['unknown_models'] = $unknownModels
+        $attribution['null_cost_events_by_reason'] = @{ unknown_key = $unknownModels.Count; rate_unavailable = 0; empty_model = 0 }
+        $completeness = script:New-Cap5Completeness
+
+        $note = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
+        $yaml = Format-CostPatternYaml -Attribution $attribution -Completeness $completeness
+
+        $note | Should -Not -Match '\+\d+ more'
+        $yaml | Should -Not -Match '\+\d+ more'
+    }
+
+    It 'duplicate raw malformed_rate_models below the 10 cap render no "+N more" suffix (issue #487 F4, mirrored block)' {
+        # Same phantom-overflow scenario as the unknown_key test above, but
+        # exercising the mirrored malformed-rate-models clause, which has its
+        # own independent overflow computation.
+        $malformedModels = @('claude/bad-model', 'claude/bad-model', 'claude/bad-model')
+
+        $attribution = script:New-Cap5Attribution
+        $attribution['ports']['experience']['null_cost_events'] = $malformedModels.Count
+        $attribution['unknown_models'] = @()
+        $attribution['malformed_rate_models'] = $malformedModels
+        $attribution['null_cost_events_by_reason'] = @{ unknown_key = 0; rate_unavailable = $malformedModels.Count; rate_unavailable_malformed = $malformedModels.Count; empty_model = 0 }
+        $completeness = script:New-Cap5Completeness
+
+        $note = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
+        $yaml = Format-CostPatternYaml -Attribution $attribution -Completeness $completeness
+
+        $note | Should -Not -Match '\+\d+ more'
+        $yaml | Should -Not -Match '\+\d+ more'
+    }
+
     It 'emits malformed_rate_models and rate_unavailable_malformed in the YAML block (issue #487 CE-F2)' {
         $attribution = script:New-Cap5Attribution
         $attribution['ports']['experience']['null_cost_events'] = 1

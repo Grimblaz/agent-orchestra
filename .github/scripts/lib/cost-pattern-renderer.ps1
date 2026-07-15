@@ -218,13 +218,15 @@ function script:Format-CostRendererSanitizedModelString {
     return $sanitized
 }
 
-function script:Get-CostRendererSanitizedUnknownModels {
+function script:Get-CostRendererDedupedSanitizedModels {
     <#
     .SYNOPSIS
-        Sanitizes, dedups, re-sorts, and caps the unknown_models list at 10
-        entries — the shared cap between the Note and the YAML array (plan
-        finding M12: the Note-only "+N more" overflow suffix must never enter
-        the machine-read array).
+        Sanitizes, dedups, and re-sorts the unknown_models list, WITHOUT
+        capping it at 10. Callers that need the shared 10-entry cap should
+        use Get-CostRendererSanitizedUnknownModels; callers that need to know
+        whether genuine overflow exists (as opposed to a phantom count
+        inflated by pre-sanitization duplicates/collisions — issue #487 F4)
+        should use this uncapped form to compute the true unique count first.
     .DESCRIPTION
         Dedup and sort happen AFTER sanitization, not before (code-review
         findings M4/M9): the raw list is deduped and sorted on the
@@ -239,7 +241,21 @@ function script:Get-CostRendererSanitizedUnknownModels {
     param([AllowEmptyCollection()][object[]]$UnknownModels)
 
     $sanitized = @($UnknownModels | ForEach-Object { script:Format-CostRendererSanitizedModelString -Model ([string]$_) })
-    $dedupedSorted = @($sanitized | Select-Object -Unique | Sort-Object)
+    return , @($sanitized | Select-Object -Unique | Sort-Object)
+}
+
+function script:Get-CostRendererSanitizedUnknownModels {
+    <#
+    .SYNOPSIS
+        Sanitizes, dedups, re-sorts, and caps the unknown_models list at 10
+        entries — the shared cap between the Note and the YAML array (plan
+        finding M12: the Note-only "+N more" overflow suffix must never enter
+        the machine-read array).
+    #>
+    [OutputType([string[]])]
+    param([AllowEmptyCollection()][object[]]$UnknownModels)
+
+    $dedupedSorted = script:Get-CostRendererDedupedSanitizedModels -UnknownModels $UnknownModels
     return , @($dedupedSorted | Select-Object -First 10)
 }
 
@@ -648,9 +664,16 @@ function script:Build-CostRendererNullEventNote {
     $clauses = [System.Collections.Generic.List[string]]::new()
 
     if ($unknownKeyCount -gt 0) {
-        $sanitizedModels = script:Get-CostRendererSanitizedUnknownModels -UnknownModels $unknownModels
+        # Issue #487 F4: overflow is computed from the deduped-and-sanitized
+        # identifier count, not the raw pre-sanitization array length —
+        # sanitization can collapse distinct raw strings (or repeated raw
+        # strings for the same unknown model) onto the same output, which
+        # would otherwise inflate the raw count and produce a phantom
+        # "+N more" suffix for models that are already fully shown.
+        $dedupedModels = script:Get-CostRendererDedupedSanitizedModels -UnknownModels $unknownModels
+        $sanitizedModels = @($dedupedModels | Select-Object -First 10)
         $modelList = ($sanitizedModels | ForEach-Object { '`' + $_ + '`' }) -join ', '
-        $overflow = $unknownModels.Count - $sanitizedModels.Count
+        $overflow = [Math]::Max(0, $dedupedModels.Count - 10)
         if ($overflow -gt 0) {
             $modelList += ", +$overflow more"
         }
@@ -667,9 +690,12 @@ function script:Build-CostRendererNullEventNote {
         # named (reusing the same sanitize/dedup/sort/cap pipeline as unknown_key) and the
         # wording avoids the word "intentional".
         $malformedModels = @($Attribution['malformed_rate_models'])
-        $sanitizedMalformedModels = script:Get-CostRendererSanitizedUnknownModels -UnknownModels $malformedModels
+        # Issue #487 F4: same fix as the unknown_key clause above — compute
+        # overflow from the deduped-and-sanitized count, not raw length.
+        $dedupedMalformedModels = script:Get-CostRendererDedupedSanitizedModels -UnknownModels $malformedModels
+        $sanitizedMalformedModels = @($dedupedMalformedModels | Select-Object -First 10)
         $malformedModelList = ($sanitizedMalformedModels | ForEach-Object { '`' + $_ + '`' }) -join ', '
-        $malformedOverflow = $malformedModels.Count - $sanitizedMalformedModels.Count
+        $malformedOverflow = [Math]::Max(0, $dedupedMalformedModels.Count - 10)
         if ($malformedOverflow -gt 0) {
             $malformedModelList += ", +$malformedOverflow more"
         }
