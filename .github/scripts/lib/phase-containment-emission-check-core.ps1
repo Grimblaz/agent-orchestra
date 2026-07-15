@@ -974,6 +974,17 @@ function Get-DispositionTally {
                       MatchStatus, MatchedFindingKey
           ExternalSourcesReconciled [string[]] — PR-level column-0 field
                       (issue #854 s3); empty array when absent/unparseable
+          ExternalSourcesFound [bool] — post-fix batch 4 (issue #854 s6):
+                      $true only when a REAL PR-level external_sources_
+                      reconciled field was found and parsed this body,
+                      independent of whether ParseStatus 'ok' came from
+                      entries alone. This is the coverage-purposes signal
+                      callers (e.g. Get-PhaseContainmentTerminalObservation's
+                      MeasuredCoveragePRCount/K derivation) must use instead
+                      of ParseStatus -eq 'ok' alone -- a purely internal-only
+                      marker (real entries, no external reconciliation ever
+                      attempted this pass) sets this $false even though
+                      ParseStatus stays 'ok' for its entry data.
           ParseStatus [string] — 'ok' or 'could-not-verify'
         For -Surface plan-stress-test:
           Surface               [string]
@@ -1013,7 +1024,7 @@ function Get-DispositionTally {
 
     if ([string]::IsNullOrWhiteSpace($Body)) {
         if ($Surface -eq 'code-review') {
-            return [PSCustomObject]@{ Surface = $Surface; Entries = @(); ExternalSourcesReconciled = @(); ParseStatus = 'could-not-verify' }
+            return [PSCustomObject]@{ Surface = $Surface; Entries = @(); ExternalSourcesReconciled = @(); ExternalSourcesFound = $false; ParseStatus = 'could-not-verify' }
         }
         if ($Surface -eq 'design-challenge') {
             # Additive (issue #768 s4): DismissedCount, see the design-challenge
@@ -1041,11 +1052,16 @@ function Get-DispositionTally {
         if ($inner.ParseStatus -eq 'ok') {
             $hasEmptyKeyEntry = @($filteredEntries | Where-Object { [string]::IsNullOrWhiteSpace($_.StableFindingKey) }).Count -gt 0
             if ($hasEmptyKeyEntry) {
-                return [PSCustomObject]@{ Surface = $Surface; Entries = @(); ExternalSourcesReconciled = @(); ParseStatus = 'could-not-verify' }
+                return [PSCustomObject]@{ Surface = $Surface; Entries = @(); ExternalSourcesReconciled = @(); ExternalSourcesFound = $false; ParseStatus = 'could-not-verify' }
             }
         }
         $externalSourcesReconciled = if ($inner.ParseStatus -eq 'ok') { @($inner.ExternalSourcesReconciled) } else { @() }
-        return [PSCustomObject]@{ Surface = $Surface; Entries = $filteredEntries; ExternalSourcesReconciled = $externalSourcesReconciled; ParseStatus = $inner.ParseStatus }
+        # Post-fix batch 4 (issue #854 s6): propagate the internal parser's
+        # honest ExternalSourcesFound signal unchanged -- never re-derive it
+        # from ParseStatus or Entries.Count here, that is exactly the bug
+        # this fix closes.
+        $externalSourcesFound = if ($inner.ParseStatus -eq 'ok') { [bool]$inner.ExternalSourcesFound } else { $false }
+        return [PSCustomObject]@{ Surface = $Surface; Entries = $filteredEntries; ExternalSourcesReconciled = $externalSourcesReconciled; ExternalSourcesFound = $externalSourcesFound; ParseStatus = $inner.ParseStatus }
     }
 
     if ($Surface -eq 'design-challenge') {
@@ -1356,6 +1372,22 @@ function script:Get-ReviewDispositionsTallyInternal {
                       Stage, ReviewerSource, MatchStatus, MatchedFindingKey
           ExternalSourcesReconciled  [string[]] — PR-level column-0 field
                       (empty array when absent/unparseable)
+          ExternalSourcesFound       [bool] — post-fix batch 4 (issue #854
+                      s6): whether a REAL column-0 external_sources_reconciled
+                      field was actually found and parsed on this body
+                      (Get-ExternalSourcesReconciledFromRegion's own .Found),
+                      independent of whether any entries segmented. This is
+                      the coverage-purposes signal: ParseStatus stays 'ok'
+                      whenever entries themselves parse cleanly (so callers
+                      that tally per-entry dispositions regardless of
+                      external reconciliation, e.g. the review-cost rollup,
+                      keep working on internal-only markers) — but a purely
+                      internal-only marker (entries present, no PR-level
+                      external_sources_reconciled field ever written because
+                      no external review was reconciled this pass) must never
+                      be mistaken for a genuinely measured co-observed PR.
+                      Only present (meaningfully) when ParseStatus is 'ok';
+                      $false on every could-not-verify return.
           ParseStatus [string] — 'ok' or 'could-not-verify'
     #>
     param(
@@ -1432,7 +1464,7 @@ function script:Get-ReviewDispositionsTallyInternal {
 
     if ($entryStarts.Count -eq 0) {
         if ($externalSourcesResult.Found) {
-            return [PSCustomObject]@{ Entries = @(); ExternalSourcesReconciled = $externalSourcesResult.Values; ParseStatus = 'ok' }
+            return [PSCustomObject]@{ Entries = @(); ExternalSourcesReconciled = $externalSourcesResult.Values; ExternalSourcesFound = $true; ParseStatus = 'ok' }
         }
         return [PSCustomObject]@{ Entries = @(); ParseStatus = 'could-not-verify' }
     }
@@ -1516,7 +1548,20 @@ function script:Get-ReviewDispositionsTallyInternal {
             })
     }
 
-    return [PSCustomObject]@{ Entries = $entries.ToArray(); ExternalSourcesReconciled = $externalSourcesResult.Values; ParseStatus = 'ok' }
+    # Post-fix batch 4 (issue #854 s6): ParseStatus stays 'ok' unconditionally
+    # here -- the entries themselves parsed cleanly, and callers that tally
+    # per-entry dispositions regardless of external reconciliation (e.g. the
+    # review-cost rollup's internal dismiss-rate accounting) must keep
+    # working on a purely internal-only marker. ExternalSourcesFound is the
+    # SEPARATE, honest signal for coverage-purposes callers: $true only when
+    # a real PR-level external_sources_reconciled field was actually found
+    # (Get-ExternalSourcesReconciledFromRegion's own .Found) -- never
+    # inferred from ParseStatus or from entries merely being present. Before
+    # this fix, the with-entries path never gated on .Found at all, so a
+    # purely internal-only marker (real entries, no PR-level field ever
+    # written because no external review was reconciled this pass) was
+    # indistinguishable from a genuinely measured co-observed PR downstream.
+    return [PSCustomObject]@{ Entries = $entries.ToArray(); ExternalSourcesReconciled = $externalSourcesResult.Values; ExternalSourcesFound = $externalSourcesResult.Found; ParseStatus = 'ok' }
 }
 
 #endregion

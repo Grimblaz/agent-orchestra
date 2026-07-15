@@ -3713,6 +3713,62 @@ Describe 'Get-DispositionTally - code-review surface external_sources_reconciled
     }
 }
 
+# ---------------------------------------------------------------------------
+# Post-fix batch 4 (issue #854 s6): the with-entries parser path used to
+# return ParseStatus='ok' unconditionally, NEVER gating on whether a real
+# PR-level external_sources_reconciled field was actually found -- so a
+# purely internal-only marker (real entries, no external reconciliation ever
+# attempted) was indistinguishable from a genuinely measured co-observed PR.
+# ExternalSourcesFound is the new, separate coverage-purposes signal: it must
+# mirror Get-ExternalSourcesReconciledFromRegion's own .Found honestly on the
+# with-entries path, exactly the way the zero-entries path (M9) already did.
+# ---------------------------------------------------------------------------
+
+Describe 'Get-DispositionTally - code-review surface ExternalSourcesFound coverage-purposes signal (post-fix batch 4, issue #854 s6)' {
+    It 'sets ExternalSourcesFound=$false on a with-entries body carrying NO external_sources_reconciled field at all (internal-only marker) even though ParseStatus stays ok' {
+        # $script:ReviewDispositionsBasicBody has real entries (including an
+        # external reviewer_source: gemini entry) but NEVER writes the
+        # PR-level external_sources_reconciled field -- exactly the
+        # reachable internal-only-pass shape.
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsBasicBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -BeGreaterThan 0
+        $result.ExternalSourcesFound | Should -Be $false
+    }
+
+    It 'sets ExternalSourcesFound=$true on a with-entries body carrying a REAL PR-level external_sources_reconciled field' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsWithExternalSourcesReconciledBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.ExternalSourcesFound | Should -Be $true
+    }
+
+    It 'sets ExternalSourcesFound=$true on the M9 zero-entries legal-coverage record (flow-array shape)' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ExternalSourcesReconciledZeroEntriesLegalBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.ExternalSourcesFound | Should -Be $true
+    }
+
+    It 'sets ExternalSourcesFound=$false when the only external_sources_reconciled-looking text is an entry-nested decoy (M30) -- entries still parse ok' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ExternalSourcesReconciledEntryNestedDecoyBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 1
+        $result.ExternalSourcesFound | Should -Be $false
+    }
+
+    It 'sets ExternalSourcesFound=$false when the only external_sources_reconciled-looking text is a block-scalar decoy (M41) -- entries still parse ok' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ExternalSourcesReconciledBlockScalarDecoyBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 1
+        $result.ExternalSourcesFound | Should -Be $false
+    }
+
+    It 'sets ExternalSourcesFound=$false on a could-not-verify result (empty-body shape)' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body ''
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.ExternalSourcesFound | Should -Be $false
+    }
+}
+
 Describe 'Test-ReviewDispositionsHeadPresent - relocated head gate (issue #854 s3, M10)' {
     It 'returns $true for a real, vocab-gate-passing review-dispositions head' {
         Test-ReviewDispositionsHeadPresent -Body $script:ReviewDispositionsBasicBody | Should -BeTrue

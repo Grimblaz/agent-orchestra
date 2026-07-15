@@ -366,7 +366,17 @@ Describe 'Get-PhaseContainmentTerminalObservation (issue #854 code-review escape
             param(
                 [Parameter(Mandatory)][int]$Pr,
                 [string[]]$Entries = @(),
-                [string]$ExternalSourcesReconciled = '[]',
+                # Post-fix batch 4 (issue #854 s6) fix: [object], not
+                # [string]. A [string]-typed parameter coerces an explicitly
+                # passed $null argument to '' (empty string) during
+                # PowerShell parameter binding, NOT $null -- so
+                # `-ExternalSourcesReconciled $null` never actually reached
+                # the omission branch below despite this function's own
+                # docstring promising it did. [object] preserves the caller's
+                # literal $null, making the documented "$null OMITS the field
+                # entirely" contract true for the first time (no prior test
+                # exercised this call shape).
+                [object]$ExternalSourcesReconciled = '[]',
                 [int]$SchemaVersion = 4
             )
             $fence = '{0}{0}{0}' -f [char]96
@@ -698,6 +708,121 @@ Describe 'Get-PhaseContainmentTerminalObservation (issue #854 code-review escape
             $result.CorpusTruncated | Should -Be $false
         }
     }
+
+    Context 'Post-fix batch 4 (issue #854 s6): internal-only markers must not inflate K (MeasuredCoveragePRCount)' {
+        It 'does NOT count a with-entries, judge-authored marker that never wrote external_sources_reconciled (internal-only pass) toward K' {
+            $entry = New-RdEntry -Key 'local-only-1' -Disposition 'incorporate' -ReviewerSource 'local' -MatchStatus $null
+            $body  = New-RdBody -Pr 3000 -Entries @($entry) -ExternalSourcesReconciled $null
+            $tuple = New-PrTuple -Number 3000 -Bodies @($body) -AuthorLogins @($script:JudgeLogin)
+            $corpus = [PSCustomObject]@{ Tuples = @($tuple); Truncated = $false }
+
+            $result = Get-PhaseContainmentTerminalObservation -Corpus $corpus -Entries @() -JudgeLogin $script:JudgeLogin -ValueCacheOk $true
+
+            $result.CoObservedPRCount       | Should -Be 1
+            # Before the fix, this counted toward K (ParseStatus was
+            # unconditionally 'ok' for any with-entries body) -- the exact
+            # false-clean coverage vector this fix closes.
+            $result.MeasuredCoveragePRCount | Should -Be 0
+        }
+
+        It 'DOES count a with-entries, judge-authored marker that carries a real external_sources_reconciled field toward K (regression: genuine coverage still works)' {
+            $entry = New-RdEntry -Key 'gh-real' -Disposition 'incorporate' -ReviewerSource 'alice' -MatchStatus 'duplicate'
+            $body  = New-RdBody -Pr 3001 -Entries @($entry) -ExternalSourcesReconciled '["gh-real"]'
+            $tuple = New-PrTuple -Number 3001 -Bodies @($body) -AuthorLogins @($script:JudgeLogin)
+            $corpus = [PSCustomObject]@{ Tuples = @($tuple); Truncated = $false }
+
+            $result = Get-PhaseContainmentTerminalObservation -Corpus $corpus -Entries @() -JudgeLogin $script:JudgeLogin -ValueCacheOk $true
+
+            $result.MeasuredCoveragePRCount | Should -Be 1
+        }
+    }
+
+    # -----------------------------------------------------------------------
+    # Post-fix batch 4 (issue #854 s6) — the single most important test in
+    # this batch: an end-to-end reproduction of the exact reachable failure
+    # the post-fix defense pass traced. Before this fix, a window with >=5
+    # internal-only review-dispositions markers (real entries, but the writer
+    # never reconciled an external review -- the M5-over-correction path,
+    # DISTINCT from the original M9 ambiguous-default-matching vector) plus
+    # <5 genuine external reconciliations, at least one real internal
+    # co-observed catch (n1>=1), and zero observer escapes computed
+    # unique-catch rate = 0/n1 = 0.0 < 0.05 -> escape arm CLEAN ->
+    # RelaxationEligible=TRUE. That is a measured-looking zero that was never
+    # actually measured: K was inflated entirely by markers that never
+    # attempted external reconciliation. This test proves the fix renders the
+    # rollup's escape-side gate correctly NOT eligible (coverage-insufficient)
+    # instead. Nested in this Describe (not a standalone one) because it
+    # depends on the script:-scoped New-RdEntry/New-RdBody/New-PrTuple/
+    # New-CodeReviewValueEntry helpers and $script:JudgeLogin defined in this
+    # Describe's own BeforeAll.
+    # -----------------------------------------------------------------------
+    Context 'Post-fix batch 4: reachable false-clean-via-internal-only-markers scenario no longer renders RelaxationEligible' {
+    It 'sets RelaxationEligible != $true (coverage insufficient) when 5 internal-only markers would have inflated K past the 5-PR threshold, genuine external reconciliations number fewer than 5, n1 is at least 1, and there are 0 observer escapes' {
+        # 5 internal-only PRs: real entries (reviewer_source: local), but the
+        # PR-level external_sources_reconciled field is OMITTED entirely --
+        # no external review was ever reconciled on these passes. This is
+        # the normal, expected shape for a plain /orchestra:review pass.
+        $internalOnlyTuples = 3100..3104 | ForEach-Object {
+            $entry = New-RdEntry -Key "local-$_" -Disposition 'incorporate' -ReviewerSource 'local' -MatchStatus $null
+            $body  = New-RdBody -Pr $_ -Entries @($entry) -ExternalSourcesReconciled $null
+            New-PrTuple -Number $_ -Bodies @($body) -AuthorLogins @($script:JudgeLogin)
+        }
+
+        # 2 genuinely-measured PRs (< 5): zero entries, but the PR-level
+        # external_sources_reconciled field IS present -- the M9 legal
+        # zero-finding coverage record. These are the ONLY PRs that should
+        # count toward K after the fix.
+        $genuineTuples = 3200, 3201 | ForEach-Object {
+            $body = New-RdBody -Pr $_ -Entries @() -ExternalSourcesReconciled '[]'
+            New-PrTuple -Number $_ -Bodies @($body) -AuthorLogins @($script:JudgeLogin)
+        }
+
+        $corpus = [PSCustomObject]@{ Tuples = @($internalOnlyTuples + $genuineTuples); Truncated = $false }
+
+        # Value-side entries: 6 unrelated code-review/implementation catches
+        # (independent catch-side N>=5 clean baseline for the overall
+        # code-review escape rate) plus ONE genuine internal co-observed
+        # catch on PR 3200 -- a PR that IS genuinely measured under BOTH the
+        # old and the new logic, so this isolates the coverage-count
+        # regression (K) as the only variable that changes; n1 is identical
+        # before and after the fix.
+        $catchSideEntries = 900..905 | ForEach-Object { New-CodeReviewValueEntry -PrNumber $_ }
+        $n1Entry          = New-CodeReviewValueEntry -PrNumber 3200
+        $valueEntries     = @($catchSideEntries) + @($n1Entry)
+
+        $terminal = Get-PhaseContainmentTerminalObservation -Corpus $corpus -Entries $valueEntries -JudgeLogin $script:JudgeLogin -ValueCacheOk $true
+
+        # Reader-fix assertion: only the 2 genuinely-measured PRs count
+        # toward K -- the 5 internal-only markers must NOT inflate it.
+        $terminal.MeasuredCoveragePRCount        | Should -Be 2
+        $terminal.CoObservedPRCount              | Should -Be 7
+        $terminal.InternalCoObservedCatchCount   | Should -Be 1
+        $terminal.DispositionsNovelExternalCount | Should -Be 0
+
+        $terminalObservationHash = @{
+            CoObservedPRCount              = $terminal.CoObservedPRCount
+            MeasuredCoveragePRCount        = $terminal.MeasuredCoveragePRCount
+            DispositionsNovelExternalCount = $terminal.DispositionsNovelExternalCount
+            InternalCoObservedCatchCount   = $terminal.InternalCoObservedCatchCount
+            ExternalCatchCount             = $terminal.ExternalCatchCount
+            DuplicateCount                 = $terminal.DuplicateCount
+            ObserverEscapeCount            = 0
+        }
+
+        $rollup = Get-PhaseContainmentRollup -Entries $valueEntries -TerminalObservation $terminalObservationHash
+        $stage  = $rollup.Stages['code-review']
+
+        # The single most important assertion in this batch: with K=2 (<5),
+        # the escape-side gate must fail closed on insufficient coverage --
+        # it must never render ELIGIBLE off a K that was manufactured
+        # entirely from internal-only markers that never reconciled against
+        # an external review.
+        $stage.RelaxationEligible       | Should -Not -Be $true
+        $stage.RelaxationEligibleReason | Should -Match 'coverage insufficient'
+        $stage.CoverageK                | Should -Be 2
+        $stage.CoverageOk               | Should -Be $false
+    }
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -732,5 +857,58 @@ Describe 'M1: review-judgment SKILL.md documents the internal_match/external_sou
         $script:SkillText | Should -Match 'Use `schema_version: 4` \(current emission format\)'
         $script:SkillText | Should -Match '(?m)^   schema_version: 4$'
         $script:SkillText | Should -Not -Match 'Use `schema_version: 3` \(current emission format\)'
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Post-fix batch 4 (issue #854 s6): the M5 correction over-corrected --
+# instructing the judge to ALWAYS emit external_sources_reconciled
+# reconstituted the exact false-clean coverage bug #854 exists to eliminate,
+# just via internal-only reviews instead of ambiguous-default matching (a
+# purely internal /orchestra:review pass with real entries but no external
+# reconciliation attempt was indistinguishable from a genuinely measured
+# co-observed PR). This is a documentation-only fix (same posture as M1
+# above): a content assertion pinning that the writer instruction is now
+# correctly SCOPED to GitHub Review Mode passes, and that the field must be
+# OMITTED (not emitted as []) on a purely internal-only pass.
+# ---------------------------------------------------------------------------
+
+Describe 'Post-fix batch 4: review-judgment SKILL.md scopes external_sources_reconciled emission to GitHub Review Mode (issue #854 s6)' {
+    BeforeAll {
+        $script:SkillPath = Join-Path $PSScriptRoot '..' '..' '..' 'skills' 'review-judgment' 'SKILL.md'
+        $script:SkillText = Get-Content -Raw $script:SkillPath
+    }
+
+    It 'the SKILL.md file exists at the expected path' {
+        Test-Path $script:SkillPath | Should -BeTrue
+    }
+
+    It 'references the existing GitHub Review Mode convention (skills/code-review-intake/SKILL.md) rather than inventing new terminology' {
+        $script:SkillText | Should -Match 'GitHub Review Mode \(Proxy Prosecution Pipeline\)'
+        $script:SkillText | Should -Match 'skills/code-review-intake/SKILL\.md.{0,40}GitHub Review Mode'
+    }
+
+    It 'scopes external_sources_reconciled emission to GitHub Review Mode passes, not every posted marker' {
+        $script:SkillText | Should -Match 'only when this pass is GitHub Review Mode'
+        $script:SkillText | Should -Match 'only on a GitHub Review Mode pass'
+        # The old unconditional instruction must be gone -- this exact phrase
+        # was the over-correction: "always emitted once per posted marker".
+        $script:SkillText | Should -Not -Match 'is always emitted once per posted marker'
+    }
+
+    It 'instructs OMITTING the field entirely (not emitting external_sources_reconciled: []) on a purely internal-only pass' {
+        $script:SkillText | Should -Match 'omit the field entirely'
+        $script:SkillText | Should -Match 'Never emit the field on an internal-only pass, even as `\[\]`'
+    }
+
+    It 'no longer self-contradicts by pairing "always emit" with "an absent field is unmeasured" in the same breath' {
+        # Before this fix, the v4-requirements paragraph said the field was
+        # "always emitted once per posted marker" in one sentence, then
+        # treated an absent field as a meaningful ("unmeasured PR") state in
+        # the next -- an impossible branch if the field is truly always
+        # emitted. The corrected text must tie "absent" to a real, reachable
+        # writer behavior (an internal-only pass that never emits it).
+        $script:SkillText | Should -Match 'An absent field means this pass never attempted external reconciliation'
+        $script:SkillText | Should -Match 'the normal, expected state for a plain internal-only `/orchestra:review` pass'
     }
 }

@@ -190,7 +190,19 @@ function Get-PhaseContainmentTerminalObservation {
 
             $tally = Get-DispositionTally -Surface 'code-review' -Body $body
             if ($tally.ParseStatus -ne 'ok') { continue }
-            $hadCoverageRecord = $true
+            # Post-fix batch 4 (issue #854 s6): gate the coverage/K signal on
+            # ExternalSourcesFound, NOT on ParseStatus -eq 'ok' alone.
+            # ParseStatus 'ok' only means this body's entries (if any) parsed
+            # cleanly -- a purely internal-only review-dispositions marker
+            # (e.g. a plain /orchestra:review pass, no GitHub-sourced review
+            # ever reconciled against) also parses 'ok' when it carries real
+            # entries, but it never attempted external reconciliation and
+            # must NOT be counted as a measured co-observed PR. Before this
+            # fix, ANY successful entries-parse inflated K, reconstituting
+            # the exact false-clean coverage vector issue #854 exists to
+            # eliminate (internal-only markers standing in for measurement
+            # that was never actually taken).
+            if ($tally.ExternalSourcesFound) { $hadCoverageRecord = $true }
 
             $createdAtRaw = if ($i -lt $createdAtValues.Count) { [string]$createdAtValues[$i] } else { '' }
             $createdAtDt = $null
@@ -234,16 +246,23 @@ function Get-PhaseContainmentTerminalObservation {
 
         if (-not $hadCoverageRecord) { continue }
 
-        # M5 fix: a judge-authored, cleanly-parsed coverage record counts
-        # toward K regardless of whether the review found anything -- the
-        # earlier ">=1 resolved-external-finding" gate below zeroed out a
-        # legitimate M9 zero-finding measurement. $hadCoverageRecord is
-        # already the correct predicate (ParseStatus 'ok': either the PR-
-        # level ExternalSourcesReconciled field parsed, or at least one
-        # entry parsed), so this PR is ALWAYS added once the `continue`
-        # above has been passed. This is also DD3's "co-observed" set (M2/
-        # M12): the n1 scoping below uses THIS set, not $coObservedPrNumbers
-        # (the whole-window population).
+        # M5 fix (refined, post-fix batch 4 / issue #854 s6): a judge-
+        # authored coverage record counts toward K regardless of whether the
+        # review found anything -- the original ">=1 resolved-external-
+        # finding" gate zeroed out a legitimate M9 zero-finding measurement.
+        # $hadCoverageRecord is now the CORRECTED predicate: it is set above
+        # only when $tally.ExternalSourcesFound was $true for at least one
+        # judge comment on this PR -- i.e. a REAL PR-level
+        # external_sources_reconciled field was found and parsed (M9's
+        # "measured zero" legal-coverage case, or a non-empty reconciled
+        # list), never merely "some entries parsed". A purely internal-only
+        # marker (real entries, ParseStatus 'ok', but no external
+        # reconciliation ever attempted) never sets $hadCoverageRecord, so it
+        # is never added here. This PR is ALWAYS added once the `continue`
+        # above has been passed, because $hadCoverageRecord already encodes
+        # the genuine-measurement predicate. This is also DD3's "co-observed"
+        # set (M2/M12): the n1 scoping below uses THIS set, not
+        # $coObservedPrNumbers (the whole-window population).
         $measuredCoveragePrNumbers.Add($number) | Out-Null
 
         $prExternalEntries = @($perKeyLatestEntry.Values | Where-Object {
