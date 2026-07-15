@@ -731,7 +731,10 @@ function Test-EmissionMarkerPresent {
         mention with no such follow-on content is treated as ordinary prose,
         not a real marker.
     .PARAMETER Surface
-        One of: code-review, design-challenge, plan-stress-test
+        One of: code-review, design-challenge, plan-stress-test,
+        post-review-observer (M16 fix: this docstring previously omitted
+        the fourth ValidateSet member even though the parameter attribute
+        already accepted it).
     .PARAMETER Body
         The raw comment body text to scan.
     .OUTPUTS
@@ -857,7 +860,10 @@ function Get-SustainedFindingCount {
         never treated as zero. Zero sustained findings (marker present, no
         sustained entries) returns 0 with ParseStatus 'ok'.
     .PARAMETER Surface
-        One of: code-review, design-challenge, plan-stress-test
+        One of: code-review, design-challenge, plan-stress-test,
+        post-review-observer (M16 fix: this docstring previously omitted
+        the fourth ValidateSet member even though the parameter attribute
+        already accepted it).
     .PARAMETER Body
         The raw comment body text to scan.
     .OUTPUTS
@@ -952,7 +958,12 @@ function Get-DispositionTally {
         body, or an unrecognized/absent marker head, is a could-not-verify
         condition, never treated as zero.
     .PARAMETER Surface
-        One of: code-review, design-challenge, plan-stress-test
+        One of: code-review, design-challenge, plan-stress-test,
+        post-review-observer (M16 fix: this docstring previously omitted
+        the fourth ValidateSet member even though the parameter attribute
+        already accepted it -- see M17, above, for why this function
+        actually rejects that fourth value at runtime rather than handling
+        it).
     .PARAMETER Body
         The raw comment body text to scan.
     .OUTPUTS
@@ -983,6 +994,23 @@ function Get-DispositionTally {
         [Parameter(Mandatory)][AllowEmptyString()][string]$Body
     )
 
+    # M17 fix (post-fix judge-sustained review): -Surface's ValidateSet
+    # accepts 'post-review-observer', but no branch below has a defined
+    # shape for it -- the code below used to fall through to the
+    # plan-stress-test-shaped default for ANY surface that isn't
+    # code-review/design-challenge, silently mislabeling a wrong-shaped
+    # result ({SustainedCount; DefenseSustainedCount}, not code-review's
+    # {Entries; ExternalSourcesReconciled}) with Surface='post-review-observer'.
+    # No live caller passes this value today (Get-EmissionGap's
+    # post-review-observer handling goes through
+    # Get-ExternalSourceNovelSustainedCount instead, never this function),
+    # so this is defensive hardening against a future caller passing the
+    # value the ValidateSet already accepts -- fail loud rather than
+    # silently returning a wrong-shaped result.
+    if ($Surface -eq 'post-review-observer') {
+        throw "Get-DispositionTally: -Surface 'post-review-observer' is not supported. This function has no defined per-entry/tally shape for that surface -- Get-EmissionGap resolves post-review-observer's expected count via Get-ExternalSourceNovelSustainedCount instead. Pass 'code-review', 'design-challenge', or 'plan-stress-test'."
+    }
+
     if ([string]::IsNullOrWhiteSpace($Body)) {
         if ($Surface -eq 'code-review') {
             return [PSCustomObject]@{ Surface = $Surface; Entries = @(); ExternalSourcesReconciled = @(); ParseStatus = 'could-not-verify' }
@@ -992,6 +1020,8 @@ function Get-DispositionTally {
             # branch below and Get-DesignChallengeSustainedCountInternal.
             return [PSCustomObject]@{ Surface = $Surface; SustainedCount = 0; DefenseSustainedCount = 0; DismissedCount = 0; ParseStatus = 'could-not-verify' }
         }
+        # plan-stress-test (the only ValidateSet member remaining after the
+        # post-review-observer throw above).
         return [PSCustomObject]@{ Surface = $Surface; SustainedCount = 0; DefenseSustainedCount = 0; ParseStatus = 'could-not-verify' }
     }
 
@@ -1029,7 +1059,9 @@ function Get-DispositionTally {
         }
     }
 
-    # plan-stress-test
+    # plan-stress-test (the only ValidateSet member remaining after the
+    # post-review-observer throw and the code-review/design-challenge
+    # branches above -- M17 fix).
     $inner = Get-JudgeRulingsSustainedCountInternal -Body $Body
     return [PSCustomObject]@{
         Surface               = $Surface
@@ -1071,7 +1103,10 @@ function script:Get-ReviewDispositionsRealHeadMatch {
     )
     if ([string]::IsNullOrWhiteSpace($Body)) { return $null }
 
-    $headPattern = '<!--\s*review-dispositions-\d+\s*-->'
+    # Capture group 1 (the marker's own {N}) lets Test-ReviewDispositionsHeadPresent's
+    # optional -ExpectedNumber check (M13 fix) read the matched marker's own
+    # number directly off the returned Match, with no second regex pass.
+    $headPattern = '<!--\s*review-dispositions-(\d+)\s*-->'
     $headCandidates = [regex]::Matches($Body, $headPattern)
     if ($headCandidates.Count -eq 0) { return $null }
 
@@ -1102,15 +1137,40 @@ function script:Test-ReviewDispositionsHeadPresent {
         now lives beside Get-DispositionTally in the same file, and
         phase-containment-cost-core.ps1 consumes it via its existing
         dot-source of this file rather than keeping a private duplicate.
+
+        M13 fix (post-fix judge-sustained review): the marker head literal
+        (<!-- review-dispositions-{N} -->) carries its own PR number, but
+        this check never verified that {N} matches the PR/issue whose tuple
+        is actually being tallied. Without that check, a judge-authored
+        comment on PR X that happens to quote another PR Y's
+        review-dispositions block (e.g. cross-referencing a related PR in
+        prose) contributed to X's coverage/tallies even though the block's
+        own {N} says Y. The optional -ExpectedNumber parameter closes this:
+        when supplied, a real head whose captured {N} does not equal
+        -ExpectedNumber is treated the same as no marker head at all (the
+        caller's existing "skip, don't count" branch), never a
+        could-not-verify. Callers that omit -ExpectedNumber (e.g.
+        phase-containment-cost-core.ps1's existing call site) are unchanged.
     .PARAMETER Body
         The raw comment body text to scan.
+    .PARAMETER ExpectedNumber
+        Optional. When supplied, the marker is reported present only if its
+        own captured {N} equals this value; a real head with a mismatched
+        {N} is reported as NOT present (M13 fix).
     .OUTPUTS
         [bool]
     #>
     param(
-        [Parameter(Mandatory)][AllowEmptyString()][string]$Body
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Body,
+        [Parameter()][Nullable[int]]$ExpectedNumber
     )
-    return ($null -ne (Get-ReviewDispositionsRealHeadMatch -Body $Body))
+    $headMatch = Get-ReviewDispositionsRealHeadMatch -Body $Body
+    if ($null -eq $headMatch) { return $false }
+    if ($null -ne $ExpectedNumber) {
+        $markerNumber = [int]$headMatch.Groups[1].Value
+        if ($markerNumber -ne $ExpectedNumber) { return $false }
+    }
+    return $true
 }
 
 #endregion
@@ -1846,18 +1906,29 @@ function script:Get-ExternalSourceNovelSustainedCount {
         entry:
           - reviewer_source -eq 'local' (M40 exact-equality — 'ext-local' is
             a resolved external identity and must not match) -> pipeline-
-            native, expects a standard code-review block. Excluded here.
+            native, expects a standard code-review block. Excluded from
+            BOTH counts below.
           - resolved external identity (reviewer_source not 'local', not
             'unresolved', not null/empty) AND internal_match.match_status
             'novel' AND sustained (disposition -ne 'dismiss') -> expects an
-            OBSERVER block INSTEAD of a code-review block. Counted here.
+            OBSERVER block INSTEAD of a code-review block. Counted in Count
+            (and, being non-local, also counted in AllExternalCount).
           - match_status 'duplicate' or 'ambiguous', or reviewer_source
-            'unresolved' -> expects NEITHER block type. Excluded from this
-            count (never subtracted from code-review's expected total), so
-            these entries stay inside code-review's subtrahend complement
-            rather than falling into a gap no surface can ever satisfy.
+            'unresolved' -> expects NEITHER block type (skills/review-judgment/SKILL.md's
+            DD1 trinary, third leg). M7 fix (post-fix
+            judge-sustained review, DD5 "external-source sustained findings
+            no longer produce code-review blocks," unrestricted to
+            novel-only): these entries are absent from BOTH surfaces'
+            expected counts, matching what a SKILL-conformant judge actually
+            emits (nothing). They are excluded from Count (never trigger an
+            observer-block expectation) but ARE counted in AllExternalCount
+            (subtracted from code-review's expected total too) — the prior
+            behavior of leaving them inside code-review's subtrahend
+            complement was the bug: it kept demanding a code-review block
+            the SKILL forbids that judge from ever emitting.
         A dismissed entry (disposition: dismiss) is never sustained and is
-        always excluded regardless of reviewer_source/match_status.
+        always excluded from both counts regardless of reviewer_source/
+        match_status.
 
         Gated per body by Test-ReviewDispositionsHeadPresent, the same
         vocab-gated head check Get-ReviewCostRollup uses, so ordinary PR
@@ -1868,16 +1939,30 @@ function script:Get-ExternalSourceNovelSustainedCount {
         Array of raw comment body text (the same corpus Get-EmissionGap scans).
     .OUTPUTS
         [PSCustomObject] with:
-          Count       [int]    — sustained, resolved-external, novel entries
-          ParseStatus [string] — 'ok', or 'could-not-verify' when a body
-                       carries a real review-dispositions head that
-                       Get-DispositionTally could not parse (DD3 fail-loud)
+          Count            [int]    — sustained, resolved-external,
+                            novel-matched entries only. Added to
+                            post-review-observer's expected total (an
+                            observer block is expected INSTEAD of a
+                            code-review block for exactly this population).
+          AllExternalCount [int]    — every sustained, non-local entry
+                            (resolved external identity OR the 'unresolved'
+                            sentinel), regardless of match_status. Subtracted
+                            from code-review's expected total (M7/DD5 fix) —
+                            the superset Count is drawn from, since a
+                            SKILL-conformant judge never emits a code-review
+                            block for ANY non-local sustained entry, not just
+                            novel-matched ones.
+          ParseStatus      [string] — 'ok', or 'could-not-verify' when a body
+                            carries a real review-dispositions head that
+                            Get-DispositionTally could not parse (DD3
+                            fail-loud)
     #>
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Bodies
     )
 
     $count = 0
+    $allExternalCount = 0
     $anyCouldNotVerify = $false
 
     foreach ($body in $Bodies) {
@@ -1893,6 +1978,15 @@ function script:Get-ExternalSourceNovelSustainedCount {
             if ($entry.Disposition -eq 'dismiss') { continue }
             if ([string]::IsNullOrWhiteSpace($entry.ReviewerSource)) { continue }
             if ($entry.ReviewerSource -eq 'local') { continue }
+            # M7 fix: every sustained, non-local entry is absent from
+            # code-review's expected block count regardless of match_status
+            # (DD5) — a duplicate/ambiguous-matched or reviewer_source-
+            # unresolved entry never produces a code-review block from a
+            # SKILL-conformant judge, so it must be subtracted from
+            # code-review's expected total via AllExternalCount just like a
+            # novel-matched entry, even though it does NOT expect an
+            # observer block (Count stays novel-only, below).
+            $allExternalCount++
             if ($entry.ReviewerSource -eq 'unresolved') { continue }
             if ($entry.MatchStatus -ne 'novel') { continue }
             $count++
@@ -1900,8 +1994,9 @@ function script:Get-ExternalSourceNovelSustainedCount {
     }
 
     return [PSCustomObject]@{
-        Count       = $count
-        ParseStatus = if ($anyCouldNotVerify) { 'could-not-verify' } else { 'ok' }
+        Count            = $count
+        AllExternalCount = $allExternalCount
+        ParseStatus      = if ($anyCouldNotVerify) { 'could-not-verify' } else { 'ok' }
     }
 }
 
@@ -1949,10 +2044,17 @@ function Get-EmissionGap {
         One of: code-review, design-challenge, plan-stress-test,
         post-review-observer. For code-review and post-review-observer, the
         CR-8 seam (Get-ExternalSourceNovelSustainedCount, below) adjusts
-        SustainedCount after the per-body loop: code-review's total has
-        resolved-external, novel-matched, sustained review-dispositions
-        entries subtracted out (they expect an observer block instead), and
-        post-review-observer's total IS that subtracted count.
+        SustainedCount after the per-body loop. M7 fix (post-fix
+        judge-sustained review, DD5): code-review's total has ALL sustained,
+        non-local review-dispositions entries subtracted out —
+        AllExternalCount, not just the novel-matched subset — since a
+        duplicate/ambiguous-matched or reviewer_source-unresolved entry
+        never produces a code-review block from a SKILL-conformant judge
+        either. post-review-observer's total is the narrower novel-matched-
+        only Count (an observer block is expected INSTEAD of a code-review
+        block only for that population; duplicate/ambiguous/unresolved
+        entries expect NEITHER block type, so they must not inflate
+        post-review-observer's expected total).
     .OUTPUTS
         [PSCustomObject] with:
           SustainedCount [int]
@@ -2131,22 +2233,34 @@ function Get-EmissionGap {
     # pinned function) separately reads the review-dispositions marker's
     # ReviewerSource/internal_match fields Get-DispositionTally exposes. A
     # resolved-external, novel-matched, sustained entry expects an OBSERVER
-    # block INSTEAD of a code-review block, so it is subtracted from
-    # code-review's expected count and becomes post-review-observer's whole
-    # expected count. Per the Seam Specification, duplicate/ambiguous-matched
-    # entries and the reviewer_source 'unresolved' sentinel expect NEITHER
-    # block type and are excluded from this helper's count entirely — they
-    # stay inside code-review's subtrahend complement (still expected as a
-    # code-review block) rather than being subtracted, so they never produce
-    # a false gap on either surface (see Get-ExternalSourceNovelSustainedCount
-    # for the full DD1-trinary derivation).
+    # block INSTEAD of a code-review block, so it becomes post-review-
+    # observer's whole expected count (Count, the novel-only subset).
+    #
+    # M7 fix (post-fix judge-sustained review): code-review's subtraction
+    # uses AllExternalCount, the BROADER non-local-regardless-of-match-status
+    # count — not Count. review-judgment SKILL.md's DD1 trinary (skills/
+    # review-judgment/SKILL.md, "Novel-gating is a trinary, not a two-way
+    # rule") and DD5 ("external-source sustained findings no longer produce
+    # code-review blocks," unrestricted to novel-only) both say a duplicate/
+    # ambiguous-matched entry, or one whose reviewer_source is the
+    # 'unresolved' sentinel, expects NEITHER block type from a
+    # SKILL-conformant judge — not a code-review block either. The prior
+    # version of this seam left those entries inside code-review's
+    # subtrahend complement (still counted as an expected code-review
+    # block), which is exactly the bug: it kept demanding a block the SKILL
+    # forbids the judge from ever emitting. AllExternalCount is the
+    # superset that correctly removes them from code-review's expected
+    # total too, while Count (the narrower novel-only subset) still governs
+    # post-review-observer's expected total unchanged (see
+    # Get-ExternalSourceNovelSustainedCount for the full DD1-trinary
+    # derivation of both counts).
     if ($Surface -eq 'code-review' -or $Surface -eq 'post-review-observer') {
         $externalNovel = Get-ExternalSourceNovelSustainedCount -Bodies $Bodies
         if ($externalNovel.ParseStatus -eq 'could-not-verify') {
             $anyCouldNotVerify = $true
         }
         if ($Surface -eq 'code-review') {
-            $totalSustained = $totalSustained - $externalNovel.Count
+            $totalSustained = $totalSustained - $externalNovel.AllExternalCount
         }
         else {
             # post-review-observer: the per-body loop above reused

@@ -1852,6 +1852,39 @@ entries:
 ```
 '@
 
+# M15 (post-fix judge-sustained review): combined-attack fixture -- BOTH the
+# M30 entry-nested external_sources_reconciled decoy AND the M41
+# disposition_rationale block-scalar decoy on the SAME entry, simultaneously.
+# Before this fixture, no test exercised the two independent defenses
+# together, only in isolation (the two fixtures above); this proves neither
+# defense depends on the OTHER decoy being absent -- the column-0 anchor
+# excludes the entry-nested decoy by indentation regardless of the
+# block-scalar decoy's presence, and the block-scalar-span exclusion (defense
+# in depth) independently excludes the rationale-embedded decoy regardless of
+# the entry-nested decoy's presence.
+$script:ExternalSourcesReconciledCombinedDecoyBody = @'
+<!-- review-dispositions-954 -->
+
+```yaml
+schema_version: 4
+passes_run: [1]
+entries:
+  - stable_finding_key: "u.ps1:1:uuu"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: medium
+    stage: code-review
+    reviewer_source: local
+    external_sources_reconciled: ["decoy.ps1:1:decoy222"]
+    disposition_rationale: |
+      Unrelated free-text discussion that happens to quote marker-looking
+      text from a different context:
+      external_sources_reconciled: [forged.ps1:1:forged222]
+      This must never be read as the real PR-level field.
+```
+'@
+
 #endregion
 
 #region Fixtures: issue #854 s7 CR-8/M26 seam (post-review-observer surface)
@@ -3664,6 +3697,20 @@ Describe 'Get-DispositionTally - code-review surface external_sources_reconciled
         $result.Entries.Count | Should -Be 1
         @($result.ExternalSourcesReconciled) | Should -Be @()
     }
+
+    It 'M15: both the M30 entry-nested decoy AND the M41 block-scalar decoy hold simultaneously on the same entry (combined-attack fixture, issue #854 post-fix judge-sustained review)' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ExternalSourcesReconciledCombinedDecoyBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 1
+        # Neither decoy is read as the real PR-level field, even with both
+        # present on the same entry at once.
+        @($result.ExternalSourcesReconciled) | Should -Be @()
+        # The entry's own real fields still parse correctly despite both
+        # decoys sitting directly alongside/inside them.
+        $result.Entries[0].StableFindingKey | Should -Be 'u.ps1:1:uuu'
+        $result.Entries[0].Disposition | Should -Be 'incorporate'
+        $result.Entries[0].ReviewerSource | Should -Be 'local'
+    }
 }
 
 Describe 'Test-ReviewDispositionsHeadPresent - relocated head gate (issue #854 s3, M10)' {
@@ -3711,6 +3758,30 @@ Describe 'Get-DispositionTally - plan-stress-test surface (sustained, defense-su
     It 'returns could-not-verify for an unrecognized/malformed body, never a confident zero' {
         $result = Get-DispositionTally -Surface 'plan-stress-test' -Body $script:MalformedBody
         $result.ParseStatus | Should -Be 'could-not-verify'
+    }
+}
+
+Describe 'Get-DispositionTally - M17 hardening: -Surface post-review-observer is explicitly unsupported' {
+    # M17 (post-fix judge-sustained review): -Surface accepts
+    # 'post-review-observer' per the ValidateSet, but this function's own
+    # branches only ever handled code-review, design-challenge, and a
+    # fall-through plan-stress-test-shaped default for anything else --
+    # including post-review-observer, which used to silently return the
+    # WRONG shape ({SustainedCount; DefenseSustainedCount}, not the
+    # code-review shape {Entries; ExternalSourcesReconciled}) mislabeled
+    # with Surface='post-review-observer'. Verified unreachable from any
+    # live caller today (grep across .github/scripts finds no
+    # `Get-DispositionTally -Surface 'post-review-observer'` call site;
+    # Get-EmissionGap's post-review-observer handling goes through
+    # Get-ExternalSourceNovelSustainedCount instead, never this function) --
+    # this is defensive hardening against a future caller passing the value
+    # the ValidateSet already accepts, not a fix for a live bug.
+    It 'throws an explicit unsupported-surface error instead of silently returning a wrong-shaped result' {
+        { Get-DispositionTally -Surface 'post-review-observer' -Body $script:PlanStressTestBody } | Should -Throw
+    }
+
+    It 'throws even for an empty body (the IsNullOrWhiteSpace early-return path must not silently default either)' {
+        { Get-DispositionTally -Surface 'post-review-observer' -Body '' } | Should -Throw
     }
 }
 
@@ -3775,6 +3846,10 @@ Describe 'Get-ExternalSourceNovelSustainedCount - CR-8 seam helper (issue #854 s
         # entry[1]: reviewer_source=gemini, match_status=novel, disposition=incorporate
         $result.ParseStatus | Should -Be 'ok'
         $result.Count | Should -Be 1
+        # M7 fix: a novel-matched entry is also part of the broader
+        # all-external subtrahend (it is ALSO absent from code-review's
+        # expected count, same as every other non-local sustained entry).
+        $result.AllExternalCount | Should -Be 1
     }
 
     It 'excludes a local reviewer_source entry even when sustained (M40 exact-equality: local is pipeline-native)' {
@@ -3800,18 +3875,33 @@ entries:
         $result = Get-ExternalSourceNovelSustainedCount -Bodies @($body)
         $result.ParseStatus | Should -Be 'ok'
         $result.Count | Should -Be 0
+        # M7 fix: reviewer_source: local is excluded from AllExternalCount
+        # too -- it is exactly the entry that DOES expect a code-review
+        # block, so it must never be subtracted.
+        $result.AllExternalCount | Should -Be 0
     }
 
-    It 'excludes an ambiguous-matched external entry (Seam Specification: neither block, not subtracted)' {
+    It 'excludes an ambiguous-matched external entry from Count, but INCLUDES it in AllExternalCount (M7/DD5 fix: subtracted from code-review even though it is not novel)' {
         $result = Get-ExternalSourceNovelSustainedCount -Bodies @($script:CR8ReviewDispositionsAmbiguousExternalBody)
         $result.ParseStatus | Should -Be 'ok'
+        # Never expects an observer block -- Count (novel-only) stays 0.
         $result.Count | Should -Be 0
+        # DD5 ("external-source sustained findings no longer produce
+        # code-review blocks," unrestricted to novel-only): a duplicate/
+        # ambiguous-matched external entry never produces a code-review
+        # block either from a SKILL-conformant judge, so it must be
+        # subtracted from code-review's expected count -- AllExternalCount
+        # is the broader subtrahend that captures this.
+        $result.AllExternalCount | Should -Be 1
     }
 
-    It 'excludes a reviewer_source=unresolved entry even when match_status is novel (reviewer_source gate is independent of match_status)' {
+    It 'excludes a reviewer_source=unresolved entry from Count, but INCLUDES it in AllExternalCount (M7/DD5 fix: reviewer_source gate is independent of match_status on both counts)' {
         $result = Get-ExternalSourceNovelSustainedCount -Bodies @($script:CR8ReviewDispositionsUnresolvedExternalNovelBody)
         $result.ParseStatus | Should -Be 'ok'
         $result.Count | Should -Be 0
+        # reviewer_source: unresolved never expects a code-review block
+        # either (SKILL trinary case 3), so it too is subtracted.
+        $result.AllExternalCount | Should -Be 1
     }
 
     It 'excludes a dismissed entry regardless of reviewer_source/match_status' {
@@ -3836,12 +3926,16 @@ entries:
 '@
         $result = Get-ExternalSourceNovelSustainedCount -Bodies @($body)
         $result.Count | Should -Be 0
+        # M7 fix: a dismissed entry was never sustained, so it must not
+        # inflate AllExternalCount either.
+        $result.AllExternalCount | Should -Be 0
     }
 
     It 'skips a marker-less body entirely (ordinary chatter contributes nothing)' {
         $result = Get-ExternalSourceNovelSustainedCount -Bodies @($script:MalformedBody)
         $result.ParseStatus | Should -Be 'ok'
         $result.Count | Should -Be 0
+        $result.AllExternalCount | Should -Be 0
     }
 
     It 'returns could-not-verify when a real review-dispositions head is present but unparseable (DD3 fail-loud)' {
@@ -3890,18 +3984,26 @@ Describe 'Get-EmissionGap - CR-8 seam: code-review/post-review-observer reconcil
         $observerResult.Gap | Should -Be 0
     }
 
-    It 'FIXTURE (c): an ambiguous-matched external finding expects NEITHER block type and produces no false gap on either surface when a real code-review block satisfies it' {
-        $codeReviewBlock = script:New-ValidPhaseContainmentBlockText -Id '960' -Surface 'code-review' -FindingSuffix 'F1'
-        $judgeRulingsBodyWithBlock = $script:CR8JudgeRulings960Body + "`n$codeReviewBlock"
-        $bodies = @($judgeRulingsBodyWithBlock, $script:CR8ReviewDispositionsAmbiguousExternalBody)
+    It 'FIXTURE (c): an ambiguous-matched external finding expects NEITHER block type and produces no false gap on either surface, WITHOUT a hand-supplied code-review block (M7/DD5 fix: a SKILL-conformant judge never emits one for this match status)' {
+        # M7 fix: the earlier version of this fixture hand-supplied a
+        # code-review block for the ambiguous-matched finding, which is
+        # exactly the shape review-judgment SKILL.md's DD1 trinary forbids
+        # (duplicate/ambiguous/unresolved external findings expect NEITHER
+        # block type) -- that decoy block was masking the M7 bug by making
+        # the pre-fix "not subtracted from code-review" behavior look
+        # correct. No code-review block is posted here; DD5 says a
+        # SKILL-conformant judge never posts one for this match status, so
+        # 0 expected == 0 posted is the correct clean state.
+        $bodies = @($script:CR8JudgeRulings960Body, $script:CR8ReviewDispositionsAmbiguousExternalBody)
 
         $codeReviewResult = Get-EmissionGap -Bodies $bodies -Id 960 -Surface 'code-review'
         $observerResult = Get-EmissionGap -Bodies $bodies -Id 960 -Surface 'post-review-observer'
 
-        # Ambiguous match is NOT subtracted -- it stays inside code-review's
-        # expected total, and the real code-review block satisfies it.
-        $codeReviewResult.SustainedCount | Should -Be 1
-        $codeReviewResult.BlockCount | Should -Be 1
+        # DD5 (unrestricted to novel-only): the ambiguous match IS subtracted
+        # from code-review's expected total -- 1 judge-rulings-sustained
+        # finding minus 1 all-external-sustained finding = 0 expected.
+        $codeReviewResult.SustainedCount | Should -Be 0
+        $codeReviewResult.BlockCount | Should -Be 0
         $codeReviewResult.Gap | Should -Be 0
 
         # No observer block is ever expected for an ambiguous match -- the
@@ -3911,14 +4013,14 @@ Describe 'Get-EmissionGap - CR-8 seam: code-review/post-review-observer reconcil
         $observerResult.Gap | Should -Be 0
     }
 
-    It 'FIXTURE (c) variant: an unresolved-reviewer_source external finding (novel match_status) also produces no false gap on either surface' {
-        $codeReviewBlock = script:New-ValidPhaseContainmentBlockText -Id '961' -Surface 'code-review' -FindingSuffix 'F1'
-        $judgeRulingsBodyWithBlock = $script:CR8JudgeRulings961Body + "`n$codeReviewBlock"
-        $bodies = @($judgeRulingsBodyWithBlock, $script:CR8ReviewDispositionsUnresolvedExternalNovelBody)
+    It 'FIXTURE (c) variant: an unresolved-reviewer_source external finding (novel match_status) also produces no false gap on either surface, WITHOUT a hand-supplied code-review block (M7/DD5 fix)' {
+        $bodies = @($script:CR8JudgeRulings961Body, $script:CR8ReviewDispositionsUnresolvedExternalNovelBody)
 
         $codeReviewResult = Get-EmissionGap -Bodies $bodies -Id 961 -Surface 'code-review'
         $observerResult = Get-EmissionGap -Bodies $bodies -Id 961 -Surface 'post-review-observer'
 
+        $codeReviewResult.SustainedCount | Should -Be 0
+        $codeReviewResult.BlockCount | Should -Be 0
         $codeReviewResult.Gap | Should -Be 0
         $observerResult.SustainedCount | Should -Be 0
         $observerResult.Gap | Should -Be 0

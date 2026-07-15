@@ -182,7 +182,11 @@ function Get-PhaseContainmentTerminalObservation {
 
         foreach ($i in $judgeIdx) {
             $body = [string]$bodies[$i]
-            if (-not (Test-ReviewDispositionsHeadPresent -Body $body)) { continue }
+            # M13 fix: gate on the marker's OWN {N} matching this tuple's PR
+            # number, so a judge-authored comment on this PR that happens to
+            # quote a DIFFERENT PR's review-dispositions block is skipped
+            # (not counted) rather than contributing to this PR's tallies.
+            if (-not (Test-ReviewDispositionsHeadPresent -Body $body -ExpectedNumber $number)) { continue }
 
             $tally = Get-DispositionTally -Surface 'code-review' -Body $body
             if ($tally.ParseStatus -ne 'ok') { continue }
@@ -202,8 +206,18 @@ function Get-PhaseContainmentTerminalObservation {
                     if ($null -ne $existingDt -and $null -ne $createdAtDt) {
                         $shouldReplace = $createdAtDt -ge $existingDt
                     }
-                    elseif ($null -eq $createdAtDt) {
-                        $shouldReplace = $true
+                    elseif ($null -eq $createdAtDt -and $null -ne $existingDt) {
+                        # M11 fix (judge-sustained post-fix review): an
+                        # undated candidate (unparseable/missing createdAt)
+                        # must never unconditionally displace an
+                        # already-dated existing entry -- comment ordering on
+                        # GitHub is not guaranteed chronological, so array
+                        # order alone is not a safe tiebreaker once one side
+                        # carries real timestamp evidence. $shouldReplace
+                        # stays $true (its initial value) only when BOTH
+                        # sides are undated (array order wins) or the
+                        # existing entry doesn't exist yet.
+                        $shouldReplace = $false
                     }
                 }
                 if ($shouldReplace) {

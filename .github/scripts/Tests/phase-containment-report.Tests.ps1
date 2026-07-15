@@ -566,6 +566,33 @@ Describe 'Get-PhaseContainmentTerminalObservation (issue #854 code-review escape
         }
     }
 
+    Context 'M13: a review-dispositions marker whose {N} does not match the tuple''s own PR number is skipped, not counted' {
+        It 'excludes a body whose review-dispositions marker number mismatches the tuple''s own PR number (a judge-authored comment on PR 2600 that happens to quote PR 9999''s block)' {
+            $entry = New-RdEntry -Key 'gh-wrong-pr' -ReviewerSource 'alice' -MatchStatus 'novel'
+            $body = New-RdBody -Pr 9999 -Entries @($entry) -ExternalSourcesReconciled '["gh-wrong-pr"]'
+            $tuple = New-PrTuple -Number 2600 -Bodies @($body) -AuthorLogins @($script:JudgeLogin)
+            $corpus = [PSCustomObject]@{ Tuples = @($tuple); Truncated = $false }
+
+            $result = Get-PhaseContainmentTerminalObservation -Corpus $corpus -Entries @() -JudgeLogin $script:JudgeLogin -ValueCacheOk $true
+
+            $result.MeasuredCoveragePRCount        | Should -Be 0
+            $result.DispositionsNovelExternalCount | Should -Be 0
+            $result.ExternalCatchCount             | Should -Be 0
+        }
+
+        It 'still counts a body whose review-dispositions marker number matches the tuple''s own PR number' {
+            $entry = New-RdEntry -Key 'gh-right-pr' -ReviewerSource 'alice' -MatchStatus 'novel'
+            $body = New-RdBody -Pr 2601 -Entries @($entry) -ExternalSourcesReconciled '["gh-right-pr"]'
+            $tuple = New-PrTuple -Number 2601 -Bodies @($body) -AuthorLogins @($script:JudgeLogin)
+            $corpus = [PSCustomObject]@{ Tuples = @($tuple); Truncated = $false }
+
+            $result = Get-PhaseContainmentTerminalObservation -Corpus $corpus -Entries @() -JudgeLogin $script:JudgeLogin -ValueCacheOk $true
+
+            $result.MeasuredCoveragePRCount        | Should -Be 1
+            $result.DispositionsNovelExternalCount | Should -Be 1
+        }
+    }
+
     Context 'dated createdAt latest-wins merge across two judge bodies on the same PR' {
         It 'keeps the LATER-createdAt body''s match_status for a repeated stable_finding_key' {
             $earlier = New-RdEntry -Key 'gh-samekey' -ReviewerSource 'alice' -MatchStatus 'ambiguous'
@@ -582,6 +609,28 @@ Describe 'Get-PhaseContainmentTerminalObservation (issue #854 code-review escape
             $result = Get-PhaseContainmentTerminalObservation -Corpus $corpus -Entries @() -JudgeLogin $script:JudgeLogin -ValueCacheOk $true
 
             # The later body's 'novel' verdict wins over the earlier 'ambiguous' one.
+            $result.DispositionsNovelExternalCount | Should -Be 1
+            $result.ExternalCatchCount             | Should -Be 1
+        }
+
+        It 'does NOT let an undated later body overwrite an already-dated earlier body''s match_status for the same key (M11 fix: an undated candidate must never unconditionally displace a dated entry)' {
+            $dated   = New-RdEntry -Key 'gh-samekey' -ReviewerSource 'alice' -MatchStatus 'novel'
+            $undated = New-RdEntry -Key 'gh-samekey' -ReviewerSource 'alice' -MatchStatus 'ambiguous'
+            $datedBody   = New-RdBody -Pr 2402 -Entries @($dated) -ExternalSourcesReconciled '["gh-samekey"]'
+            $undatedBody = New-RdBody -Pr 2402 -Entries @($undated) -ExternalSourcesReconciled '[]'
+
+            $tuple = New-PrTuple -Number 2402 `
+                -Bodies @($datedBody, $undatedBody) `
+                -AuthorLogins @($script:JudgeLogin, $script:JudgeLogin) `
+                -CreatedAtValues @('2026-01-01T00:00:00Z', '')
+            $corpus = [PSCustomObject]@{ Tuples = @($tuple); Truncated = $false }
+
+            $result = Get-PhaseContainmentTerminalObservation -Corpus $corpus -Entries @() -JudgeLogin $script:JudgeLogin -ValueCacheOk $true
+
+            # The dated body's 'novel' verdict must survive -- comment
+            # ordering on GitHub is not guaranteed chronological, so an
+            # undated (unparseable createdAt) later body must not win
+            # against an already-dated entry for the same key.
             $result.DispositionsNovelExternalCount | Should -Be 1
             $result.ExternalCatchCount             | Should -Be 1
         }

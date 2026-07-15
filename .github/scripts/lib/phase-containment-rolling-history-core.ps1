@@ -2266,7 +2266,18 @@ function Get-PhaseContainmentRollup {
                         $observerEscapes = if ($TerminalObservation.ContainsKey('ObserverEscapeCount'))          { [int]$TerminalObservation['ObserverEscapeCount'] }          else { $observerBlockCount }
                         $uniqueCatchDenominator = $n1 + $observerEscapes
 
-                        if ($uniqueCatchDenominator -eq 0) {
+                        # M18 fix (post-fix judge-sustained review): widened
+                        # from -eq 0 to -le 0 as defensive hardening. Not
+                        # reachable from the current shipped caller (n1 and
+                        # observerEscapes are both structurally non-negative
+                        # int counts, so their sum can never be negative
+                        # here), but this file's own doctrine elsewhere
+                        # treats a denominator guard as mandatory, not
+                        # optional, and -eq 0 alone would silently let a
+                        # future negative-denominator regression divide
+                        # through instead of routing to the not-assessable
+                        # branch below.
+                        if ($uniqueCatchDenominator -le 0) {
                             $uniqueCatchRate           = $null
                             $uniqueCatchRateAssessable = $false
                         }
