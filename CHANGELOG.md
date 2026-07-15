@@ -2,6 +2,17 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.3.13] — 2026-07-15
+
+### Added
+
+- Rate-table refresh (issue #487): 6 new rate-table keys for models not previously in `cost-rate-table.json`, a new unknown-model Cost Pattern Note giving a per-reason breakdown (`unknown_key` / `rate_unavailable` / `empty_model`) instead of a single opaque count, and two new additive `cost-pattern-data` YAML fields (`unknown_models`, `null_cost_events_by_reason`) so the breakdown round-trips through the rolling baseline.
+
+### Fixed
+
+- Corrected the `claude-opus-4-7` rate-table entry, which was priced at roughly 3x the correct rate (issue #487).
+- Fixed the frame-spine template in `skills/plan-authoring/SKILL.md` (`### Plan-markdown template`): the example `<!-- frame-spine ... -->` block was authored at 3-space/6-space indentation, but `frame-spine-core.ps1`'s parser requires exactly 2-space/4-space and returns `$null` silently on any mismatch. Every plan authored from the prior template carried a dead spine.
+
 ## [3.3.12] — 2026-07-13
 
 ### Added

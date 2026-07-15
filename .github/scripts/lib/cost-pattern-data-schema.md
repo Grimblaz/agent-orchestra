@@ -28,6 +28,9 @@ This document defines the schema for the `<!-- cost-pattern-data ... -->` YAML b
 | `capture_point` | string | Additive post-#824 field sourced from `Resolve-BaselineEligibility`'s eligibility result. One of `pr-creation-mid-session` (populated capture taken while the PR was still open), `end-of-session` (capture taken after the session completed), or `n/a` (excluded from rolling-baseline aggregation). Missing v1 values default to `n/a`. |
 | `session_id` | string | Additive post-#824 field: the capture-time session identity. Used by the s4 next-session harvest to verify the originating transcript is present on the harvesting machine before selecting a mid-session capture for upgrade. Empty when the capturing run has no session identity to persist. |
 | `head_ref` | string | Additive post-#824 field: the capture-time git head_ref. Used by the s4 next-session harvest as the walk key to re-walk and upgrade a mid-session capture to `end-of-session`. Empty when the capturing run has no head_ref to persist. |
+| `unknown_models` | array of strings | Additive post-#487 field. Sanitized, provider-qualified `{provider}/{model}` strings for events that failed rate lookup. Capped at 10 entries; there is no overflow sentinel in this array — a `+N more` suffix appears only in the human-readable Cost Pattern Note, never here. Write-only disclosure field with no current reader. |
+| `malformed_rate_models` | array of strings | Additive post-#487 CE-F2 field. Sanitized, provider-qualified `{provider}/{model}` strings for events whose rate-table row was partially null (some rate fields populated, at least one left null — typically an editing mistake), as opposed to a fully-null by-design row (e.g. Copilot's intentionally unpublished rates). Uses the same sanitize/dedup/sort/cap pipeline and 10-entry cap as `unknown_models`; no overflow sentinel here either. Write-only disclosure field with no current reader. |
+| `null_cost_events_by_reason` | object | Additive post-#487 field. Integer counters breaking down why a cost event priced null: `unknown_key` (model not found in the rate table), `rate_unavailable` (model found but priced null — a union total covering both by-design unpublished-rate rows and malformed rows; see `rate_unavailable_malformed`), `rate_unavailable_malformed` (additive post-#487 CE-F2 subset of `rate_unavailable`: count of those events whose rate-table row was partially null/malformed rather than fully-null by-design; always ≤ `rate_unavailable`, defaults to `0` for pre-CE-F2 payloads so `rate_unavailable` alone still reads as the correct total), `empty_model` (event carried no model identifier at all). |
 
 ## `ports` — Per-Port Token and Cost Breakdown
 
@@ -46,7 +49,7 @@ Each port entry:
 | `tokens.output` | integer | Total output tokens produced by this port. |
 | `tokens.cache_creation` | integer | Tokens written to prompt cache for this port. |
 | `tokens.cache_read` | integer | Tokens read from prompt cache for this port. |
-| `model` | string | Model identifier used for dispatches on this port (e.g., `"claude-sonnet-4-x"`). When mixed models were used, `mixed_regime` is `true`. |
+| `model` | string | Model identifier used for dispatches on this port (e.g., `"claude-opus-4-8"`). When mixed models were used, `mixed_regime` is `true`. |
 | `cost_estimate_usd` | number | Estimated cost in USD for this port, derived from `cost-rate-table.json`. |
 | `dispatch_count` | integer | Number of subagent dispatches attributed to this port. |
 | `null_cost_events` | integer | Number of events where cost could not be computed (e.g., unknown model). |

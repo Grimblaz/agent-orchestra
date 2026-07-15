@@ -615,6 +615,235 @@ Describe 'Format-CostPatternMarkdown' {
             $designLine | Should -Match ' — '
         }
     }
+
+    Context 'null-event Note per-reason breakdown (issue #487 s3)' {
+        It 'names unknown models verbatim, provider-qualified, and code-span-wrapped (AC2 core case)' {
+            $attribution = script:New-MinimalAttribution -PortNames @('experience')
+            $attribution['ports']['experience']['null_cost_events'] = 2
+            $attribution['unknown_models'] = @('claude/claude-unknown-future-model', 'copilot/gpt-4o-mini')
+            $attribution['null_cost_events_by_reason'] = @{ unknown_key = 2; rate_unavailable = 0; empty_model = 0 }
+            $completeness = script:New-Completeness
+
+            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
+
+            $result | Should -Match '`claude/claude-unknown-future-model`'
+            $result | Should -Match '`copilot/gpt-4o-mini`'
+            $result | Should -Match '2 event\(s\) from models missing from the rate table'
+        }
+
+        It 'omits zero-count clauses, rendering only the unknown_key clause when the other two reasons are zero' {
+            $attribution = script:New-MinimalAttribution -PortNames @('experience')
+            $attribution['ports']['experience']['null_cost_events'] = 1
+            $attribution['unknown_models'] = @('claude/claude-unknown-future-model')
+            $attribution['null_cost_events_by_reason'] = @{ unknown_key = 1; rate_unavailable = 0; empty_model = 0 }
+            $completeness = script:New-Completeness
+
+            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
+
+            $result | Should -Match 'models missing from the rate table'
+            $result | Should -Not -Match 'intentionally unpublished rates'
+            $result | Should -Not -Match 'had no model identifier'
+        }
+
+        It 'renders all three per-reason clauses when unknown_key, rate_unavailable, and empty_model are all nonzero' {
+            $attribution = script:New-MinimalAttribution -PortNames @('experience')
+            $attribution['ports']['experience']['null_cost_events'] = 6
+            $attribution['unknown_models'] = @('claude/claude-unknown-future-model')
+            $attribution['null_cost_events_by_reason'] = @{ unknown_key = 1; rate_unavailable = 2; empty_model = 3 }
+            $completeness = script:New-Completeness
+
+            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
+
+            $result | Should -Match '1 event\(s\) from models missing from the rate table:.*— add rows to `cost-rate-table\.json` \(see `cost-rate-table\.md` for the exact row format\)\.'
+            $result | Should -Match '2 event\(s\) from models with intentionally unpublished rates\.'
+            $result | Should -Match '3 event\(s\) had no model identifier\.'
+        }
+
+        It 'includes the cost-rate-table.md pointer in the unknown_key clause (CE-F1)' {
+            $attribution = script:New-MinimalAttribution -PortNames @('experience')
+            $attribution['ports']['experience']['null_cost_events'] = 1
+            $attribution['unknown_models'] = @('claude/claude-unknown-future-model')
+            $attribution['null_cost_events_by_reason'] = @{ unknown_key = 1; rate_unavailable = 0; empty_model = 0 }
+            $completeness = script:New-Completeness
+
+            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
+
+            $result | Should -Match '\(see `cost-rate-table\.md` for the exact row format\)'
+        }
+
+        It 'renders the by-design "intentionally unpublished" clause count-only, with no model named, for an all-four-null Copilot-shaped row (CE-F2)' {
+            $attribution = script:New-MinimalAttribution -PortNames @('experience')
+            $attribution['ports']['experience']['null_cost_events'] = 2
+            $attribution['unknown_models'] = @()
+            $attribution['malformed_rate_models'] = @()
+            $attribution['null_cost_events_by_reason'] = @{ unknown_key = 0; rate_unavailable = 2; rate_unavailable_malformed = 0; empty_model = 0 }
+            $completeness = script:New-Completeness
+
+            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
+
+            $result | Should -Match '2 event\(s\) from models with intentionally unpublished rates\.'
+            $result | Should -Not -Match 'incomplete rate-table row'
+            $result | Should -Not -Match 'copilot/'
+            $result | Should -Not -Match 'claude/'
+        }
+
+        It 'renders the neutral, model-naming clause for a partial-null (malformed) rate row, without claiming it is intentional (CE-F2)' {
+            $attribution = script:New-MinimalAttribution -PortNames @('experience')
+            $attribution['ports']['experience']['null_cost_events'] = 1
+            $attribution['unknown_models'] = @()
+            $attribution['malformed_rate_models'] = @('claude/claude-fatfingered-model')
+            $attribution['null_cost_events_by_reason'] = @{ unknown_key = 0; rate_unavailable = 1; rate_unavailable_malformed = 1; empty_model = 0 }
+            $completeness = script:New-Completeness
+
+            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
+
+            $result | Should -Match '1 event\(s\) from models with an incomplete rate-table row \(some rate fields are null\): `claude/claude-fatfingered-model` — check `cost-rate-table\.json`\.'
+            $result | Should -Not -Match 'intentionally unpublished'
+        }
+
+        It 'renders all four clauses cleanly separated when unknown_key, by-design rate_unavailable, malformed rate_unavailable, and empty_model are all nonzero (CE-F2 mixed fixture)' {
+            $attribution = script:New-MinimalAttribution -PortNames @('experience')
+            $attribution['ports']['experience']['null_cost_events'] = 7
+            $attribution['unknown_models'] = @('claude/claude-unknown-future-model')
+            $attribution['malformed_rate_models'] = @('claude/claude-fatfingered-model')
+            $attribution['null_cost_events_by_reason'] = @{ unknown_key = 1; rate_unavailable = 2; rate_unavailable_malformed = 1; empty_model = 3 }
+            $completeness = script:New-Completeness
+
+            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
+
+            $result | Should -Match '1 event\(s\) from models missing from the rate table: `claude/claude-unknown-future-model` — add rows to `cost-rate-table\.json` \(see `cost-rate-table\.md` for the exact row format\)\.'
+            $result | Should -Match '1 event\(s\) from models with intentionally unpublished rates\.' -Because 'rate_unavailable (2) minus rate_unavailable_malformed (1) leaves 1 by-design event'
+            $result | Should -Match '1 event\(s\) from models with an incomplete rate-table row \(some rate fields are null\): `claude/claude-fatfingered-model` — check `cost-rate-table\.json`\.'
+            $result | Should -Match '3 event\(s\) had no model identifier\.'
+        }
+
+        It 'defaults rate_unavailable_malformed to 0 and preserves the original count-only clause when the field is absent (backwards compatibility)' {
+            $attribution = script:New-MinimalAttribution -PortNames @('experience')
+            $attribution['ports']['experience']['null_cost_events'] = 2
+            $attribution['unknown_models'] = @()
+            $attribution['null_cost_events_by_reason'] = @{ unknown_key = 0; rate_unavailable = 2; empty_model = 0 }
+            $completeness = script:New-Completeness
+
+            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
+
+            $result | Should -Match '2 event\(s\) from models with intentionally unpublished rates\.'
+            $result | Should -Not -Match 'incomplete rate-table row'
+        }
+
+        Context 'sanitizer neutralizes dangerous characters in the Note (plan findings M2/M10/M11/M13)' {
+            It 'neutralizes an embedded newline, preventing a forged top-level field' {
+                $attribution = script:New-MinimalAttribution -PortNames @('experience')
+                $attribution['ports']['experience']['null_cost_events'] = 1
+                $attribution['unknown_models'] = @("claude/evil`nsession_id: hijacked")
+                $attribution['null_cost_events_by_reason'] = @{ unknown_key = 1; rate_unavailable = 0; empty_model = 0 }
+                $completeness = script:New-Completeness
+
+                $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
+
+                $result | Should -Not -Match "evil`nsession_id"
+                ($result -split "`n" | Where-Object { $_ -match '^session_id:' }) | Should -BeNullOrEmpty
+            }
+
+            It 'neutralizes an embedded comma, preventing the model list from splitting into an extra entry' {
+                $attribution = script:New-MinimalAttribution -PortNames @('experience')
+                $attribution['ports']['experience']['null_cost_events'] = 1
+                $attribution['unknown_models'] = @('claude/evil,injected-model')
+                $attribution['null_cost_events_by_reason'] = @{ unknown_key = 1; rate_unavailable = 0; empty_model = 0 }
+                $completeness = script:New-Completeness
+
+                $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
+
+                $result | Should -Not -Match 'claude/evil,injected-model'
+                $result | Should -Match 'claude/evil injected-model'
+            }
+
+            It 'round-trips a literal quote without corrupting the rendered Note' {
+                $attribution = script:New-MinimalAttribution -PortNames @('experience')
+                $attribution['ports']['experience']['null_cost_events'] = 1
+                $attribution['unknown_models'] = @('claude/evil"quoted')
+                $attribution['null_cost_events_by_reason'] = @{ unknown_key = 1; rate_unavailable = 0; empty_model = 0 }
+                $completeness = script:New-Completeness
+
+                $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
+
+                $result | Should -Match '`claude/evil"quoted`'
+            }
+
+            It 'neutralizes an embedded <!-- comment-open marker' {
+                $attribution = script:New-MinimalAttribution -PortNames @('experience')
+                $attribution['ports']['experience']['null_cost_events'] = 1
+                $attribution['unknown_models'] = @('claude/evil<!--forged')
+                $attribution['null_cost_events_by_reason'] = @{ unknown_key = 1; rate_unavailable = 0; empty_model = 0 }
+                $completeness = script:New-Completeness
+
+                $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
+
+                $result | Should -Not -Match '<!--forged'
+                $result | Should -Match '\(comment-open\)forged'
+            }
+
+            It 'neutralizes an embedded --> comment-close marker' {
+                $attribution = script:New-MinimalAttribution -PortNames @('experience')
+                $attribution['ports']['experience']['null_cost_events'] = 1
+                $attribution['unknown_models'] = @('claude/evil-->forged')
+                $attribution['null_cost_events_by_reason'] = @{ unknown_key = 1; rate_unavailable = 0; empty_model = 0 }
+                $completeness = script:New-Completeness
+
+                $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
+
+                $result | Should -Not -Match 'evil-->forged'
+                $result | Should -Match 'evil\(comment-close\)forged'
+            }
+
+            It 'neutralizes an embedded backtick, preventing a Markdown link from escaping the code span (plan finding M1)' {
+                $attribution = script:New-MinimalAttribution -PortNames @('experience')
+                $attribution['ports']['experience']['null_cost_events'] = 1
+                $attribution['unknown_models'] = @('claude/evil`[click me](http://evil.example)')
+                $attribution['null_cost_events_by_reason'] = @{ unknown_key = 1; rate_unavailable = 0; empty_model = 0 }
+                $completeness = script:New-Completeness
+
+                $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
+
+                # The backtick is neutralized to a placeholder, so no unescaped
+                # backtick reaches the Note — the enclosing code span cannot be
+                # closed early and the link text stays inert (not a live anchor).
+                $result | Should -Not -Match '`\[click me\]\(http://evil\.example\)`'
+                $result | Should -Match '\(backtick\)\[click me\]\(http://evil\.example\)'
+                # The whole sanitized entry is wrapped in exactly one backtick
+                # pair (the Note's own wrapping), confirming no unescaped
+                # backtick from the payload survives inside that span.
+                $result | Should -Match '`claude/evil\(backtick\)\[click me\]\(http://evil\.example\)`'
+            }
+        }
+
+        It 'covers a Copilot-origin unknown string alongside a transcript-origin string (plan finding M19)' {
+            $attribution = script:New-MinimalAttribution -PortNames @('experience')
+            $attribution['ports']['experience']['null_cost_events'] = 2
+            # Copilot-origin shape: cost-walker-copilot.ps1 lifts gen_ai.response.model
+            # verbatim, which for OpenAI-family models contains dots (this exact shape),
+            # unlike Claude's hyphen-only model names.
+            $attribution['unknown_models'] = @('claude/claude-unknown-future-model', 'copilot/gpt-4o-mini-2024-07-18')
+            $attribution['null_cost_events_by_reason'] = @{ unknown_key = 2; rate_unavailable = 0; empty_model = 0 }
+            $completeness = script:New-Completeness
+
+            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
+
+            $result | Should -Match '`claude/claude-unknown-future-model`'
+            $result | Should -Match '`copilot/gpt-4o-mini-2024-07-18`'
+        }
+
+        It 'renders the old count-only Note when unknown_models / null_cost_events_by_reason are absent (backwards compatibility)' {
+            $attribution = script:New-MinimalAttribution -PortNames @('experience')
+            $attribution['ports']['experience']['null_cost_events'] = 3
+            $completeness = script:New-Completeness
+
+            { Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness } | Should -Not -Throw
+
+            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
+            $result | Should -Match '3 cost event\(s\) had unknown models not present in `cost-rate-table\.json`'
+            $result | Should -Not -Match 'models missing from the rate table:'
+        }
+    }
 }
 
 Describe 'Format-CostPatternYaml' {
@@ -864,13 +1093,217 @@ Describe 'Format-CostPatternYaml' {
     }
 }
 
+Describe 'Format-CostRendererSanitizedModelString (issue #487 s3)' {
+    BeforeAll {
+        $script:LibPath = Join-Path $PSScriptRoot '../lib/cost-pattern-renderer.ps1'
+        if (Test-Path $script:LibPath) {
+            . $script:LibPath
+        }
+    }
+
+    It 'truncates a 200-character model string to 128 characters without severing a comment-marker replacement (truncate-then-neutralize ordering, plan finding M13)' {
+        # Marker straddles the 128-char cut: 127 'a' chars (indices 0-126) + '-->' + 70 'b' chars.
+        # Substring(0,128) keeps indices 0-127: all 127 'a's plus only the first
+        # character ('-') of the marker — the marker itself never survives intact
+        # into the neutralization pass.
+        $raw = ('a' * 127) + '-->' + ('b' * 70)
+        $raw.Length | Should -Be 200
+
+        $correct = script:Format-CostRendererSanitizedModelString -Model $raw
+
+        # Correct (truncate-first) behavior: length capped at 128, and no raw or
+        # partially-neutralized marker text appears — the neutralization pass
+        # never fired because only a lone '-' survived truncation.
+        $correct.Length | Should -Be 128
+        $correct | Should -Not -Match '-->'
+        $correct | Should -Not -Match '\(comment-close'
+
+        # Contrast with the WRONG order (neutralize-then-truncate) to prove why
+        # ordering matters: neutralizing the full 200-char string first replaces
+        # the complete marker with the 15-char '(comment-close)' placeholder
+        # (127 'a's + 15-char placeholder + 70 'b's = 212 chars); THEN truncating
+        # to 128 chars cuts mid-placeholder, leaving a dangling partial-replacement
+        # artifact right at the boundary.
+        $wrongOrderNeutralized = $raw -replace '[\x00-\x1F\x7F]', ' ' -replace ',', ' ' -replace '<!--', '(comment-open)' -replace '-->', '(comment-close)'
+        $wrongOrderTruncated = $wrongOrderNeutralized.Substring(0, 128)
+        $wrongOrderTruncated | Should -Match '\($'
+        $wrongOrderTruncated | Should -Not -Match '\(comment-close\)'
+        $wrongOrderTruncated | Should -Not -Be $correct
+    }
+
+    It 'backs the truncation cut up by one when a naive 128-char cut would bisect a UTF-16 surrogate pair (plan finding M7)' {
+        # 127 'a' chars (indices 0-126) + an astral-plane emoji (a 2-code-unit
+        # surrogate pair at indices 127-128) + 70 'b' chars. A naive
+        # Substring(0, 128) keeps only the high surrogate at index 127 and
+        # drops its low-surrogate partner at index 128, leaving an unpaired
+        # surrogate at the very end of the truncated string.
+        $emoji = [char]::ConvertFromUtf32(0x1F600)
+        $raw = ('a' * 127) + $emoji + ('b' * 70)
+
+        # Prove the naive cut is genuinely dangerous before asserting the fix.
+        [char]::IsHighSurrogate($raw[127]) | Should -BeTrue
+        $naiveCut = $raw.Substring(0, 128)
+        [char]::IsHighSurrogate($naiveCut[$naiveCut.Length - 1]) | Should -BeTrue
+        [char]::IsLowSurrogate($naiveCut[$naiveCut.Length - 1]) | Should -BeFalse
+
+        $result = script:Format-CostRendererSanitizedModelString -Model $raw
+
+        # The fix backs the cut up to 127, dropping the whole emoji rather
+        # than bisecting it — no unpaired surrogate survives.
+        $result.Length | Should -Be 127
+        $result | Should -Be ('a' * 127)
+        for ($i = 0; $i -lt $result.Length; $i++) {
+            if ([char]::IsHighSurrogate($result[$i])) {
+                $i + 1 | Should -BeLessThan $result.Length
+                [char]::IsLowSurrogate($result[$i + 1]) | Should -BeTrue
+            }
+            if ([char]::IsLowSurrogate($result[$i])) {
+                $i | Should -BeGreaterThan 0
+                [char]::IsHighSurrogate($result[$i - 1]) | Should -BeTrue
+            }
+        }
+    }
+}
+
+Describe 'unknown_models cap, overflow suffix, and round-trip (issue #487 s3)' {
+    BeforeAll {
+        $script:LibPath = Join-Path $PSScriptRoot '../lib/cost-pattern-renderer.ps1'
+        if (Test-Path $script:LibPath) {
+            . $script:LibPath
+        }
+        $script:RollingHistoryLibPath = Join-Path $PSScriptRoot '../lib/cost-rolling-history.ps1'
+        if (Test-Path $script:RollingHistoryLibPath) {
+            . $script:RollingHistoryLibPath
+        }
+
+        function script:New-Cap5Attribution {
+            return @{
+                ports                 = @{
+                    experience = @{
+                        tokens               = @{ input = 1234; output = 567; cache_creation = 89; cache_read = 456 }
+                        dispatch_count       = 2
+                        cost_estimate_usd    = 0.0123
+                        cache_read_hit_ratio = 0.617
+                        mixed_regime         = $false
+                        null_cost_events     = 0
+                    }
+                }
+                orchestrator_overhead = @{
+                    tokens               = @{ input = 890; output = 234; cache_creation = 45; cache_read = 123 }
+                    cost_estimate_usd    = 0.0045
+                    cache_read_hit_ratio = 0.115
+                }
+                dispatches            = @{ general_purpose_count = 1; unattributed_count = 0 }
+                totals                = @{
+                    tokens            = @{ input = 2124; output = 801; cache_creation = 134; cache_read = 579 }
+                    cost_estimate_usd = 0.0168
+                }
+            }
+        }
+
+        function script:New-Cap5Completeness {
+            return @{
+                completeness                   = 'complete'
+                stop_reason                    = 'end_turn'
+                excluded_from_rolling_baseline = $false
+                exclude_reason                 = ''
+            }
+        }
+    }
+
+    It '11 distinct unknown models: Note renders "+1 more", YAML array carries exactly 10 entries with no overflow suffix (plan finding M12)' {
+        $unknownModels = @(1..11 | ForEach-Object { "claude/model-$_" }) | Sort-Object
+
+        $attribution = script:New-Cap5Attribution
+        $attribution['ports']['experience']['null_cost_events'] = 11
+        $attribution['unknown_models'] = $unknownModels
+        $attribution['null_cost_events_by_reason'] = @{ unknown_key = 11; rate_unavailable = 0; empty_model = 0 }
+        $completeness = script:New-Cap5Completeness
+
+        $note = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
+        $yaml = Format-CostPatternYaml -Attribution $attribution -Completeness $completeness
+
+        $note | Should -Match '\+1 more'
+
+        $yaml -match '(?m)^unknown_models: (\[.*\])$' | Should -BeTrue
+        $yamlArrayText = $Matches[1]
+        $yamlModels = script:ConvertFrom-CostPatternYamlArray -Value $yamlArrayText
+        $yamlModels.Count | Should -Be 10
+        $yaml | Should -Not -Match '\+1 more'
+    }
+
+    It 'emits malformed_rate_models and rate_unavailable_malformed in the YAML block (issue #487 CE-F2)' {
+        $attribution = script:New-Cap5Attribution
+        $attribution['ports']['experience']['null_cost_events'] = 1
+        $attribution['unknown_models'] = @()
+        $attribution['malformed_rate_models'] = @('claude/claude-fatfingered-model')
+        $attribution['null_cost_events_by_reason'] = @{ unknown_key = 0; rate_unavailable = 1; rate_unavailable_malformed = 1; empty_model = 0 }
+        $completeness = script:New-Cap5Completeness
+
+        $yaml = Format-CostPatternYaml -Attribution $attribution -Completeness $completeness
+
+        $yaml -match '(?m)^malformed_rate_models: (\[.*\])$' | Should -BeTrue
+        $yamlModels = script:ConvertFrom-CostPatternYamlArray -Value $Matches[1]
+        $yamlModels | Should -Be @('claude/claude-fatfingered-model')
+
+        $yaml | Should -Match '(?m)^  rate_unavailable_malformed: 1$'
+        $yaml | Should -Match '(?m)^  rate_unavailable: 1$'
+    }
+
+    It 'dedups post-sanitization duplicates and re-sorts the result (plan findings M4/M9)' {
+        # 'claude/a,b' and "claude/a`x01b" are distinct raw strings, but the
+        # sanitizer maps both the comma and the control char to a single
+        # space, so they collapse to the identical sanitized output
+        # 'claude/a b'. Deduping on the raw string (pre-sanitization, the old
+        # behavior) would keep both as visible duplicates; deduping
+        # post-sanitization collapses them to one entry. The raw list is also
+        # intentionally out of sorted order to prove the re-sort runs after
+        # dedup, not before.
+        $rawUnknownModels = @('claude/z-model', "claude/a`u{0001}b", 'claude/a,b')
+
+        $deduped = script:Get-CostRendererSanitizedUnknownModels -UnknownModels $rawUnknownModels
+
+        $deduped.Count | Should -Be 2
+        $deduped | Should -Be @('claude/a b', 'claude/z-model')
+    }
+
+    It 'round-trips a rendered block carrying hostile-but-sanitized unknown_models, keeping ports: intact (plan findings M2/M16)' {
+        $hostileModels = @(
+            "claude/evil`nsession_id: hijacked",
+            'claude/evil,injected-model',
+            'claude/evil"quoted',
+            'claude/evil<!--forged',
+            'claude/evil-->forged'
+        ) | Sort-Object
+
+        $attribution = script:New-Cap5Attribution
+        $attribution['ports']['experience']['null_cost_events'] = 5
+        $attribution['unknown_models'] = $hostileModels
+        $attribution['null_cost_events_by_reason'] = @{ unknown_key = 5; rate_unavailable = 0; empty_model = 0 }
+        $completeness = script:New-Cap5Completeness
+
+        $yaml = Format-CostPatternYaml -Attribution $attribution -Completeness $completeness -Pr 487 -Branch 'feature/issue-487-rate-table-refresh'
+
+        # Format-CostPatternYaml already returns the complete <!-- cost-pattern-data ... --> block.
+        $extracted = script:Get-CostPatternDataFromComment -Body $yaml
+        $extracted | Should -Not -BeNullOrEmpty
+
+        $parsed = script:ConvertFrom-CostPatternYaml -Yaml $extracted
+        $parsed | Should -Not -BeNullOrEmpty
+        $parsed['ports'] | Should -Not -BeNullOrEmpty
+        $parsed['ports'].ContainsKey('experience') | Should -Be $true
+        $parsed['ports']['experience']['name'] | Should -Be 'experience'
+        $parsed['ports']['experience']['dispatch_count'] | Should -Be 2
+    }
+}
+
 Describe 'cost-pattern-data schema documentation' {
     It 'documents the post-#488 additive YAML fields' {
         $schemaPath = Join-Path $PSScriptRoot '../lib/cost-pattern-data-schema.md'
         $schemaPath | Should -Exist
         $schema = Get-Content -LiteralPath $schemaPath -Raw
 
-        foreach ($field in @('provider_support', 'coverage', 'install_status', 'providers', 'unmapped_session_count', 'phase_scope', 'capture_point', 'session_id', 'head_ref')) {
+        foreach ($field in @('provider_support', 'coverage', 'install_status', 'providers', 'unmapped_session_count', 'phase_scope', 'capture_point', 'session_id', 'head_ref', 'unknown_models', 'null_cost_events_by_reason', 'malformed_rate_models', 'rate_unavailable_malformed')) {
             $schema | Should -Match "``$field``"
         }
     }

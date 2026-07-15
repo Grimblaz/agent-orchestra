@@ -45,6 +45,14 @@ $script:CostAttributionPortMap.Add('GitHub Copilot Chat', 'orchestrator-overhead
 $script:CostAttributionPortMap.Add('general-purpose', 'dispatches.general_purpose')
 $script:CostAttributionPortMap.Add('claude-code-guide', 'orchestrator-overhead')
 
+# Providers trusted to appear in the explicit 'provider' field of a raw event (issue #487
+# AC7, code-review finding M2). Add a new entry here only when a new event-collection
+# path is wired up for that provider (see the "Provider-extension procedure" in
+# cost-rate-table.md for why this is independent of adding new rate-table rows: rate-table
+# entries are maintainer-authored JSON, not untrusted event data, and are unaffected
+# by this allowlist). Get-EventProvider is the sole read site for this field.
+$script:CostAttributionKnownEventProviders = [string[]]@('claude', 'copilot')
+
 function Get-NormalizedCostProvider {
     [CmdletBinding()]
     [OutputType([string])]
@@ -209,6 +217,33 @@ function Get-EventModel {
 }
 
 function Get-EventProvider {
+    <#
+    .SYNOPSIS
+        Extracts and validates the provider identity from an untrusted event.
+    .DESCRIPTION
+        The explicit `provider` field on a transcript/OTEL event is adversary-controlled
+        (issue #487 AC7, code-review finding M2): it becomes a provider-bucket hashtable
+        key that reaches a raw, unsanitized YAML mapping key in the renderer
+        (the `providers:` block in cost-pattern-renderer.ps1) and a component of the
+        attribution rate-lookup key (Get-CostRateLookupKey), so it cannot be trusted
+        verbatim the way the lowercasing-only normalization in Get-NormalizedCostProvider
+        previously allowed.
+
+        Fix is an allowlist, not a sanitizer: a value is accepted only if it normalizes
+        to a known provider (script:CostAttributionKnownEventProviders). This is a
+        structural-position fix (mapping key / lookup-key component), where even a
+        "safe" substitute character could still collide with a real provider name or be
+        illegal at that position — unlike the sibling `model` field, which only needed a
+        display-string sanitizer.
+
+        An unrecognized explicit value is treated the same as a missing one: it falls
+        through to the structural cwd/agentType heuristics below (and ultimately the
+        'claude' default), so the cost/token data for the event is still attributed — never
+        dropped — just not to an attacker-chosen bucket name. This does not affect the
+        cost-rate-table.json provider-extension procedure (cost-rate-table.md), which
+        reads maintainer-authored JSON directly via New-CostRateTableEntry, never
+        through this function.
+    #>
     [CmdletBinding()]
     [OutputType([string])]
     param(
@@ -217,7 +252,11 @@ function Get-EventProvider {
 
     $provider = $Evt['provider']
     if ($null -ne $provider -and -not [string]::IsNullOrWhiteSpace([string]$provider)) {
-        return Get-NormalizedCostProvider -Provider $provider
+        $normalizedProvider = Get-NormalizedCostProvider -Provider $provider
+        if ($script:CostAttributionKnownEventProviders -contains $normalizedProvider) {
+            return $normalizedProvider
+        }
+        # Unrecognized/malformed provider string — fall through rather than trust it.
     }
 
     $cwd = $Evt['cwd']
@@ -384,6 +423,36 @@ function Get-CostEstimateFromUsage {
     ) / 1000000.0
 }
 
+function Test-CostRateRowPartiallyNull {
+    <#
+    .SYNOPSIS
+        Distinguishes a by-design fully-unpublished rate row (all four rate
+        fields null — e.g. the intentionally unpublished per-token pricing
+        for Copilot) from a malformed row (some fields populated, at least one
+        left null — typically an editing mistake made while following the
+        rate-table update procedure). Issue #487 CE-F2: only the malformed
+        case should be named and described as non-intentional in the
+        rendered Note; the by-design case must keep the existing
+        "intentionally unpublished" wording.
+    .OUTPUTS
+        [bool] $true when 1-3 of the four rate fields are null (malformed);
+        $false when the row is fully populated (0 null) or fully null
+        (4 null, by-design).
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)][hashtable]$Rates
+    )
+
+    $nullFieldCount = 0
+    foreach ($field in @('input_per_mtok', 'output_per_mtok', 'cache_creation_per_mtok', 'cache_read_per_mtok')) {
+        if ($null -eq $Rates[$field]) { $nullFieldCount++ }
+    }
+
+    return ($nullFieldCount -gt 0 -and $nullFieldCount -lt 4)
+}
+
 function Add-CostAttributionWarning {
     param(
         [Parameter(Mandatory)][string]$Message,
@@ -445,6 +514,47 @@ function Write-CostAttributionWarningRecord {
     }
 }
 
+function Add-NullCostEventReason {
+    <#
+    .SYNOPSIS
+        Increments a per-reason null-cost-event counter on the shared tracker and, for
+        unknown-key and malformed-rate events, records the provider-qualified model string.
+    .DESCRIPTION
+        No-ops when NullCostEventTracker is null, mirroring the null-safety pattern in
+        Add-CostAttributionWarning so callers that do not care about the breakdown pay no cost.
+
+        Issue #487 CE-F2: -MalformedRateRow is an additive sub-classification of the
+        'rate_unavailable' reason, not a fourth ValidateSet value. The base 'rate_unavailable'
+        counter is always incremented for both the by-design (fully-null, e.g. Copilot) and
+        malformed (partially-null) cases, preserving the existing meaning of the counter as the
+        union total for any pre-CE-F2 reader. When -MalformedRateRow is set, a second,
+        purely-additive 'rate_unavailable_malformed' counter is also incremented and the
+        model is recorded (mirroring the unknown_key naming path) so the rendered Note can
+        name the affected model instead of the generic "intentionally unpublished" claim.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][ValidateSet('unknown_key', 'rate_unavailable', 'empty_model')][string]$Reason,
+        [AllowNull()][string]$Model = $null,
+        [string]$Provider = 'claude',
+        [bool]$MalformedRateRow = $false,
+        [AllowNull()][hashtable]$NullCostEventTracker = $null
+    )
+
+    if ($null -eq $NullCostEventTracker) { return }
+
+    $NullCostEventTracker['ReasonCounts'][$Reason] += 1
+
+    if ($Reason -eq 'unknown_key') {
+        $NullCostEventTracker['UnknownModels'].Add("$Provider/$Model") | Out-Null
+    }
+
+    if ($Reason -eq 'rate_unavailable' -and $MalformedRateRow) {
+        $NullCostEventTracker['ReasonCounts']['rate_unavailable_malformed'] += 1
+        $NullCostEventTracker['MalformedRateModels'].Add("$Provider/$Model") | Out-Null
+    }
+}
+
 function Add-CostToBucket {
     <#
     .SYNOPSIS
@@ -458,24 +568,29 @@ function Add-CostToBucket {
         [AllowNull()][string]$Model,
         [string]$Provider = 'claude',
         [Parameter(Mandatory)][hashtable]$RatesByProviderModel,
-        [AllowNull()][System.Collections.Generic.List[string]]$WarningMessages = $null
+        [AllowNull()][System.Collections.Generic.List[string]]$WarningMessages = $null,
+        [AllowNull()][hashtable]$NullCostEventTracker = $null
     )
 
     if ($null -eq $Model -or [string]::IsNullOrWhiteSpace($Model)) {
-        Add-NullCostEventToBucket -Bucket $Bucket -Message "cost-attribution: unknown model '$Model' for provider '$Provider' — cost contribution is null; incrementing null_cost_events" -WarningMessages $WarningMessages
+        Add-NullCostEventToBucket -Bucket $Bucket -Message "cost-attribution: no model identifier present for provider '$Provider' — cost contribution is null; incrementing null_cost_events" -WarningMessages $WarningMessages
+        Add-NullCostEventReason -Reason 'empty_model' -Model $Model -Provider $Provider -NullCostEventTracker $NullCostEventTracker
         return
     }
 
     $lookupKey = Get-CostRateLookupKey -Provider $Provider -Model $Model
     if (-not $RatesByProviderModel.ContainsKey($lookupKey)) {
         Add-NullCostEventToBucket -Bucket $Bucket -Message "cost-attribution: unknown model '$Model' for provider '$Provider' — cost contribution is null; incrementing null_cost_events" -WarningMessages $WarningMessages
+        Add-NullCostEventReason -Reason 'unknown_key' -Model $Model -Provider $Provider -NullCostEventTracker $NullCostEventTracker
         return
     }
 
     $rates = $RatesByProviderModel[$lookupKey]
     $costEstimate = Get-CostEstimateFromUsage -Usage $Usage -Rates $rates
     if ($null -eq $costEstimate) {
+        $malformedRateRow = Test-CostRateRowPartiallyNull -Rates $rates
         Add-NullCostEventToBucket -Bucket $Bucket -Message "cost-attribution: rate unavailable for provider '$Provider' model '$Model' — cost contribution is null; incrementing null_cost_events" -WarningMessages $WarningMessages
+        Add-NullCostEventReason -Reason 'rate_unavailable' -Model $Model -Provider $Provider -MalformedRateRow:$malformedRateRow -NullCostEventTracker $NullCostEventTracker
         return
     }
 
@@ -695,6 +810,11 @@ function Get-CostAttribution {
         cost_estimate_usd = 0.0
     }
     $costAttributionWarnings = [System.Collections.Generic.List[string]]::new()
+    $nullCostEventTracker = @{
+        UnknownModels       = [System.Collections.Generic.HashSet[string]]::new()
+        MalformedRateModels = [System.Collections.Generic.HashSet[string]]::new()
+        ReasonCounts        = @{ unknown_key = 0; rate_unavailable = 0; empty_model = 0; rate_unavailable_malformed = 0 }
+    }
 
     # The cost-walker inserts subagent events immediately after the parent event that
     # triggered them. We track the "current context bucket" as we iterate: after a parent
@@ -763,14 +883,14 @@ function Get-CostAttribution {
                         $ports[$phaseMarkerTarget] = New-PortBucket
                     }
                     Add-TokensToAccumulator -Accumulator $ports[$phaseMarkerTarget]['tokens'] -Usage $usage
-                    Add-CostToBucket -Bucket $ports[$phaseMarkerTarget] -Usage $usage -Model $model -Provider $provider -RatesByProviderModel $ratesByProviderModel -WarningMessages $costAttributionWarnings
+                    Add-CostToBucket -Bucket $ports[$phaseMarkerTarget] -Usage $usage -Model $model -Provider $provider -RatesByProviderModel $ratesByProviderModel -WarningMessages $costAttributionWarnings -NullCostEventTracker $nullCostEventTracker
                     Add-ProviderContributionToPortBucket -Bucket $ports[$phaseMarkerTarget] -Usage $usage -Model $model -Provider $provider -CacheMetricUnavailable:$cacheMetricUnavailable -RatesByProviderModel $ratesByProviderModel
                     $currentSubagentBuckets = @($ports[$phaseMarkerTarget])
                 }
                 else {
                     # No dispatch — orchestrator-overhead unless a phase marker maps elsewhere
                     Add-TokensToAccumulator -Accumulator $overhead['tokens'] -Usage $usage
-                    Add-CostToBucket -Bucket $overhead -Usage $usage -Model $model -Provider $provider -RatesByProviderModel $ratesByProviderModel -WarningMessages $costAttributionWarnings
+                    Add-CostToBucket -Bucket $overhead -Usage $usage -Model $model -Provider $provider -RatesByProviderModel $ratesByProviderModel -WarningMessages $costAttributionWarnings -NullCostEventTracker $nullCostEventTracker
                     $currentSubagentBuckets = @($overhead)
                 }
             }
@@ -851,7 +971,7 @@ function Get-CostAttribution {
                         $ports[$primaryPort] = New-PortBucket
                     }
                     Add-TokensToAccumulator -Accumulator $ports[$primaryPort]['tokens'] -Usage $usage
-                    Add-CostToBucket -Bucket $ports[$primaryPort] -Usage $usage -Model $model -Provider $provider -RatesByProviderModel $ratesByProviderModel -WarningMessages $costAttributionWarnings
+                    Add-CostToBucket -Bucket $ports[$primaryPort] -Usage $usage -Model $model -Provider $provider -RatesByProviderModel $ratesByProviderModel -WarningMessages $costAttributionWarnings -NullCostEventTracker $nullCostEventTracker
                     $primaryDispatchCount = if ($portDispatchCounts.ContainsKey($primaryPort)) { [int]$portDispatchCounts[$primaryPort] } else { 0 }
                     $primaryPromptChars = if ($portPromptChars.ContainsKey($primaryPort)) { [int]$portPromptChars[$primaryPort] } else { 0 }
                     Add-ProviderContributionToPortBucket -Bucket $ports[$primaryPort] -Usage $usage -Model $model -Provider $provider -CacheMetricUnavailable:$cacheMetricUnavailable -DispatchCount $primaryDispatchCount -PromptSizeChars $primaryPromptChars -MixedRegime:($ports[$primaryPort]['mixed_regime'] -eq $true) -RatesByProviderModel $ratesByProviderModel
@@ -863,13 +983,13 @@ function Get-CostAttribution {
                         $ports['dispatches.general_purpose'] = New-PortBucket
                     }
                     Add-TokensToAccumulator -Accumulator $ports['dispatches.general_purpose']['tokens'] -Usage $usage
-                    Add-CostToBucket -Bucket $ports['dispatches.general_purpose'] -Usage $usage -Model $model -Provider $provider -RatesByProviderModel $ratesByProviderModel -WarningMessages $costAttributionWarnings
+                    Add-CostToBucket -Bucket $ports['dispatches.general_purpose'] -Usage $usage -Model $model -Provider $provider -RatesByProviderModel $ratesByProviderModel -WarningMessages $costAttributionWarnings -NullCostEventTracker $nullCostEventTracker
                     $currentSubagentBuckets = @($ports['dispatches.general_purpose'])
                 }
                 else {
                     # All dispatches were to unattributed-dispatch — use overhead for parent tokens
                     Add-TokensToAccumulator -Accumulator $overhead['tokens'] -Usage $usage
-                    Add-CostToBucket -Bucket $overhead -Usage $usage -Model $model -Provider $provider -RatesByProviderModel $ratesByProviderModel -WarningMessages $costAttributionWarnings
+                    Add-CostToBucket -Bucket $overhead -Usage $usage -Model $model -Provider $provider -RatesByProviderModel $ratesByProviderModel -WarningMessages $costAttributionWarnings -NullCostEventTracker $nullCostEventTracker
                     $currentSubagentBuckets = @($overhead)
                 }
             }
@@ -880,7 +1000,7 @@ function Get-CostAttribution {
                 # Attribute subagent tokens to the primary port bucket from parent's context
                 $targetBucket = $currentSubagentBuckets[0]
                 Add-TokensToAccumulator -Accumulator $targetBucket['tokens'] -Usage $usage
-                Add-CostToBucket -Bucket $targetBucket -Usage $usage -Model $model -Provider $provider -RatesByProviderModel $ratesByProviderModel -WarningMessages $costAttributionWarnings
+                Add-CostToBucket -Bucket $targetBucket -Usage $usage -Model $model -Provider $provider -RatesByProviderModel $ratesByProviderModel -WarningMessages $costAttributionWarnings -NullCostEventTracker $nullCostEventTracker
                 if ($targetBucket.ContainsKey('prompt_size_chars')) {
                     Add-ProviderContributionToPortBucket -Bucket $targetBucket -Usage $usage -Model $model -Provider $provider -CacheMetricUnavailable:$cacheMetricUnavailable -RatesByProviderModel $ratesByProviderModel
                 }
@@ -888,7 +1008,7 @@ function Get-CostAttribution {
             else {
                 # No context established — attribute to overhead
                 Add-TokensToAccumulator -Accumulator $overhead['tokens'] -Usage $usage
-                Add-CostToBucket -Bucket $overhead -Usage $usage -Model $model -Provider $provider -RatesByProviderModel $ratesByProviderModel -WarningMessages $costAttributionWarnings
+                Add-CostToBucket -Bucket $overhead -Usage $usage -Model $model -Provider $provider -RatesByProviderModel $ratesByProviderModel -WarningMessages $costAttributionWarnings -NullCostEventTracker $nullCostEventTracker
             }
         }
 
@@ -921,9 +1041,12 @@ function Get-CostAttribution {
     Write-CostAttributionWarningRecord -WarningMessages $costAttributionWarnings -WarningVariableName $warningVariableName
 
     return @{
-        ports                 = $ports
-        orchestrator_overhead = $overhead
-        dispatches            = $dispatches
-        totals                = $totals
+        ports                      = $ports
+        orchestrator_overhead      = $overhead
+        dispatches                 = $dispatches
+        totals                     = $totals
+        unknown_models             = @($nullCostEventTracker['UnknownModels'] | Sort-Object)
+        malformed_rate_models      = @($nullCostEventTracker['MalformedRateModels'] | Sort-Object)
+        null_cost_events_by_reason = $nullCostEventTracker['ReasonCounts']
     }
 }

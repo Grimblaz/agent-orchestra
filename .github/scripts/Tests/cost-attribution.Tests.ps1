@@ -6,6 +6,7 @@ Describe 'Get-CostAttribution' {
         $script:LibPath = Join-Path $PSScriptRoot '../lib/cost-attribution.ps1'
         $script:RendererPath = Join-Path $PSScriptRoot '../lib/cost-pattern-renderer.ps1'
         $script:RateTablePath = Join-Path $PSScriptRoot '../lib/cost-rate-table.json'
+        $script:RollingHistoryLibPath = Join-Path $PSScriptRoot '../lib/cost-rolling-history.ps1'
 
         if (Test-Path $script:LibPath) {
             . $script:LibPath
@@ -13,13 +14,16 @@ Describe 'Get-CostAttribution' {
         if (Test-Path $script:RendererPath) {
             . $script:RendererPath
         }
+        if (Test-Path $script:RollingHistoryLibPath) {
+            . $script:RollingHistoryLibPath
+        }
 
         # Helper: build a minimal parent assistant event (has cwd to distinguish from subagent events)
         function script:New-AssistantEvent {
             param(
                 [string]$Uuid = [System.Guid]::NewGuid().ToString(),
                 [string]$Timestamp = '2026-01-01T00:00:00Z',
-                [string]$Model = 'claude-sonnet-4-x',
+                [string]$Model = 'claude-sonnet-4-6',
                 [int]$InputTokens = 100,
                 [int]$OutputTokens = 50,
                 [int]$CacheCreation = 0,
@@ -99,7 +103,7 @@ Describe 'Get-CostAttribution' {
             param(
                 [string]$Uuid = [System.Guid]::NewGuid().ToString(),
                 [string]$Timestamp = '2026-01-01T00:01:00Z',
-                [string]$Model = 'claude-sonnet-4-x',
+                [string]$Model = 'claude-sonnet-4-6',
                 [int]$InputTokens = 200,
                 [int]$OutputTokens = 80,
                 [int]$CacheCreation = 0,
@@ -120,14 +124,6 @@ Describe 'Get-CostAttribution' {
                     content = @()
                 }
             }
-        }
-
-        # Sonnet-4-x rates for cost calculation verification
-        $script:SonnetRates = @{
-            input_per_mtok          = 3.00
-            output_per_mtok         = 15.00
-            cache_creation_per_mtok = 3.75
-            cache_read_per_mtok     = 0.30
         }
     }
 
@@ -259,7 +255,7 @@ Describe 'Get-CostAttribution' {
         It 'computes cost_estimate_usd from rate table' {
             $dispatch = script:New-AgentDispatch -SubagentType 'code-smith'
             # 1000 input, 500 output, 0 cache — easy math with sonnet rates
-            $parentEvent = script:New-AssistantEvent -Content @($dispatch) -Model 'claude-sonnet-4-x' -InputTokens 1000 -OutputTokens 500
+            $parentEvent = script:New-AssistantEvent -Content @($dispatch) -Model 'claude-sonnet-4-6' -InputTokens 1000 -OutputTokens 500
 
             $result = Get-CostAttribution -Events @($parentEvent) -RateTablePath $script:RateTablePath
 
@@ -492,7 +488,7 @@ Describe 'Get-CostAttribution' {
             $claudeDispatch = script:New-AgentDispatch -SubagentType 'code-smith'
             $claudeEvent = script:New-AssistantEvent `
                 -Content @($claudeDispatch) `
-                -Model 'claude-sonnet-4-x' `
+                -Model 'claude-sonnet-4-6' `
                 -InputTokens 1000 `
                 -OutputTokens 200 `
                 -CacheCreation 50 `
@@ -543,6 +539,292 @@ Describe 'Get-CostAttribution' {
             $yaml | Should -Match '(?m)^      copilot:$'
             $yaml | Should -Match '(?m)^        cost_estimate_usd: null$'
             $yaml | Should -Match '(?m)^        cache_metric_unavailable: true$'
+        }
+    }
+
+    Context 'issue #487 AC7: provider-field injection is blocked (code-review finding M2)' {
+        It 'Get-EventProvider rejects a forged provider string carrying a newline and a would-be top-level YAML field, falling back to the structural default' {
+            $hostileEvent = script:New-AssistantEvent -Model 'claude-sonnet-4-6'
+            $hostileEvent['provider'] = "claude`nexcluded_from_rolling_baseline: true"
+
+            $provider = Get-EventProvider -Evt $hostileEvent
+
+            $provider | Should -Be 'claude'
+            $provider | Should -Not -Match "`n"
+        }
+
+        It 'Get-EventProvider leaves legitimate claude and copilot provider values completely unaffected' {
+            (Get-EventProvider -Evt (script:New-AssistantEvent)) | Should -Be 'claude'
+            (Get-EventProvider -Evt (script:New-CopilotAssistantEvent)) | Should -Be 'copilot'
+
+            $explicitClaudeEvent = script:New-AssistantEvent
+            $explicitClaudeEvent['provider'] = 'Claude'
+            (Get-EventProvider -Evt $explicitClaudeEvent) | Should -Be 'claude'
+
+            $explicitCopilotEvent = script:New-AssistantEvent
+            $explicitCopilotEvent['provider'] = 'COPILOT'
+            (Get-EventProvider -Evt $explicitCopilotEvent) | Should -Be 'copilot'
+        }
+
+        It 'round-trips a rendered block whose source event carried a newline-and-field-forging provider string: no forged field appears, ports: and the merged providers: block stay intact' {
+            # Reuses the M2 finding's adversarial construction: a newline plus a forged
+            # top-level field name, aimed at the same three sinks the defense report
+            # verified (raw providers: mapping key at cost-pattern-renderer.ps1,
+            # provider_support array, and the attribution rate-lookup key).
+            $legitCopilotDispatch = script:New-AgentDispatch -SubagentType 'code-smith'
+            $legitCopilotEvent = script:New-CopilotAssistantEvent -Content @($legitCopilotDispatch) -InputTokens 400 -OutputTokens 100
+
+            $hostileDispatch = script:New-AgentDispatch -SubagentType 'code-smith'
+            $hostileEvent = script:New-AssistantEvent -Content @($hostileDispatch) -Model 'claude-sonnet-4-6' -InputTokens 1000 -OutputTokens 200
+            $hostileEvent['provider'] = "claude`nexcluded_from_rolling_baseline: true`nsession_completeness: forged`npr: 999999"
+
+            $result = Get-CostAttribution -Events @($legitCopilotEvent, $hostileEvent) -RateTablePath $script:RateTablePath -WarningVariable costWarnings
+            $result['coverage'] = 'claude+copilot'
+            $result['install_status'] = 'ok'
+            $result['unmapped_session_count'] = 0
+            $result['provider_support'] = @('claude', 'copilot')
+
+            # Two providers merged into the same port bucket — 'claude' (the hostile
+            # event's structurally-correct fallback identity) and 'copilot' (the
+            # legitimate event) — proves the hostile string never became a third,
+            # attacker-named provider key, and the event's tokens were still
+            # attributed rather than silently dropped.
+            $portBucket = $result.ports['implement-code']
+            @($portBucket.providers.Keys) | Sort-Object | Should -Be @('claude', 'copilot')
+            $portBucket.providers.claude.tokens.input | Should -Be 1000
+            $portBucket.providers.claude.tokens.output | Should -Be 200
+
+            $completeness = @{
+                completeness                   = 'complete'
+                stop_reason                    = 'end_turn'
+                excluded_from_rolling_baseline = $false
+                exclude_reason                 = ''
+            }
+            $yaml = Format-CostPatternYaml -Attribution $result -Completeness $completeness -Pr 487 -Branch 'feature/issue-487-rate-table-refresh'
+
+            # The hostile payload's literal text must never reach the rendered block at all.
+            $yaml | Should -Not -Match 'forged'
+            $yaml | Should -Not -Match 'pr: 999999'
+            $yaml | Should -Match '(?m)^      claude:$'
+            $yaml | Should -Match '(?m)^      copilot:$'
+
+            $extracted = script:Get-CostPatternDataFromComment -Body $yaml
+            $extracted | Should -Not -BeNullOrEmpty
+
+            $parsed = script:ConvertFrom-CostPatternYaml -Yaml $extracted
+            $parsed | Should -Not -BeNullOrEmpty
+            $parsed['pr'] | Should -Be '487'
+            $parsed['excluded_from_rolling_baseline'] | Should -Be 'false'
+            $parsed['session_completeness'] | Should -Be 'complete'
+            $parsed['ports'] | Should -Not -BeNullOrEmpty
+            $parsed['ports'].ContainsKey('implement-code') | Should -Be $true
+            $parsed['ports']['implement-code']['name'] | Should -Be 'implement-code'
+        }
+    }
+
+    Context 'issue #487 AC2: unknown-model collection and per-reason event counts' {
+        It 'populates unknown_models and increments unknown_key for an unknown-key event' {
+            $dispatch = script:New-AgentDispatch -SubagentType 'code-smith'
+            $parentEvent = script:New-AssistantEvent -Content @($dispatch) -Model 'claude-unknown-future-model' -InputTokens 100 -OutputTokens 50
+
+            $result = Get-CostAttribution -Events @($parentEvent) -RateTablePath $script:RateTablePath -WarningVariable wv
+
+            $result.unknown_models | Should -Be @('claude/claude-unknown-future-model')
+            $result.null_cost_events_by_reason.unknown_key | Should -Be 1
+            $result.null_cost_events_by_reason.rate_unavailable | Should -Be 0
+            $result.null_cost_events_by_reason.empty_model | Should -Be 0
+        }
+
+        It 'leaves unknown_models empty while incrementing rate_unavailable for a Copilot known-key event' {
+            $dispatch = script:New-AgentDispatch -SubagentType 'code-smith'
+            $copilotEvent = script:New-CopilotAssistantEvent -Content @($dispatch) -Model 'gpt-4o-mini-2024-07-18' -InputTokens 300 -OutputTokens 90
+
+            $result = Get-CostAttribution -Events @($copilotEvent) -RateTablePath $script:RateTablePath -WarningVariable wv
+
+            $result.unknown_models | Should -BeNullOrEmpty -Because 'gpt-4o-mini-2024-07-18/copilot is a known key with an intentionally-null rate, not an unknown key'
+            $result.null_cost_events_by_reason.rate_unavailable | Should -Be 1
+            $result.null_cost_events_by_reason.unknown_key | Should -Be 0
+        }
+
+        It 'increments empty_model and names nothing in unknown_models for a null/empty-model event' {
+            $dispatch = script:New-AgentDispatch -SubagentType 'code-smith'
+            $parentEvent = script:New-AssistantEvent -Content @($dispatch) -Model '' -InputTokens 100 -OutputTokens 50
+
+            $result = Get-CostAttribution -Events @($parentEvent) -RateTablePath $script:RateTablePath -WarningVariable wv
+
+            $result.unknown_models | Should -BeNullOrEmpty
+            $result.null_cost_events_by_reason.empty_model | Should -Be 1
+            $result.null_cost_events_by_reason.unknown_key | Should -Be 0
+            $result.null_cost_events_by_reason.rate_unavailable | Should -Be 0
+        }
+
+        It 'threads the tracker through the orchestrator-overhead branch (no-dispatch parent turn)' {
+            $noDispatchEvent = script:New-AssistantEvent -Content @() -Model 'claude-unknown-future-model' -InputTokens 40 -OutputTokens 15
+
+            $result = Get-CostAttribution -Events @($noDispatchEvent) -RateTablePath $script:RateTablePath -WarningVariable wv
+
+            $result.unknown_models | Should -Be @('claude/claude-unknown-future-model')
+            $result.null_cost_events_by_reason.unknown_key | Should -Be 1
+            $result.orchestrator_overhead.null_cost_events | Should -Be 1
+        }
+
+        It 'threads the tracker through the phase-marker branch (inline no-dispatch phase-marker turn)' {
+            $noDispatchEvent = script:New-AssistantEvent -Content @() -Model 'claude-unknown-future-model' -InputTokens 40 -OutputTokens 15
+            $noDispatchEvent['_phase_marker_port'] = 'design'
+
+            $result = Get-CostAttribution -Events @($noDispatchEvent) -RateTablePath $script:RateTablePath -WarningVariable wv
+
+            $result.unknown_models | Should -Be @('claude/claude-unknown-future-model')
+            $result.null_cost_events_by_reason.unknown_key | Should -Be 1
+            $result.ports['design'].null_cost_events | Should -Be 1
+        }
+
+        It 'threads the tracker through the general-purpose dispatch branch' {
+            $dispatch = script:New-AgentDispatch -SubagentType 'general-purpose'
+            $parentEvent = script:New-AssistantEvent -Content @($dispatch) -Model 'claude-unknown-future-model' -InputTokens 100 -OutputTokens 50
+
+            $result = Get-CostAttribution -Events @($parentEvent) -RateTablePath $script:RateTablePath -WarningVariable wv
+
+            $result.unknown_models | Should -Be @('claude/claude-unknown-future-model')
+            $result.null_cost_events_by_reason.unknown_key | Should -Be 1
+            $result.ports['dispatches.general_purpose'].null_cost_events | Should -Be 1
+        }
+
+        It 'threads the tracker through the subagent-inherited branch' {
+            $dispatch = script:New-AgentDispatch -SubagentType 'code-smith'
+            $parentEvent = script:New-AssistantEvent -Content @($dispatch) -Model 'claude-sonnet-4-6' -InputTokens 100 -OutputTokens 50
+            $subEvent = script:New-SubagentEvent -Model 'claude-unknown-future-model' -InputTokens 200 -OutputTokens 80
+
+            $result = Get-CostAttribution -Events @($parentEvent, $subEvent) -RateTablePath $script:RateTablePath -WarningVariable wv
+
+            $result.unknown_models | Should -Be @('claude/claude-unknown-future-model')
+            $result.null_cost_events_by_reason.unknown_key | Should -Be 1
+            $result.ports['implement-code'].null_cost_events | Should -Be 1
+        }
+
+        It 'dedups unknown_models by (provider, model) across multiple events' {
+            $dispatch1 = script:New-AgentDispatch -SubagentType 'code-smith'
+            $event1 = script:New-AssistantEvent -Content @($dispatch1) -Model 'claude-unknown-future-model' -InputTokens 100 -OutputTokens 50
+            $dispatch2 = script:New-AgentDispatch -SubagentType 'code-smith'
+            $event2 = script:New-AssistantEvent -Content @($dispatch2) -Model 'claude-unknown-future-model' -InputTokens 60 -OutputTokens 20
+
+            $result = Get-CostAttribution -Events @($event1, $event2) -RateTablePath $script:RateTablePath -WarningVariable wv
+
+            $result.unknown_models | Should -Be @('claude/claude-unknown-future-model')
+            $result.null_cost_events_by_reason.unknown_key | Should -Be 2
+        }
+    }
+
+    Context 'issue #487 CE-F2: rate_unavailable_malformed vs by-design classification' {
+        It 'does not increment rate_unavailable_malformed and leaves malformed_rate_models empty for a fully-null (by-design) Copilot row' {
+            $dispatch = script:New-AgentDispatch -SubagentType 'code-smith'
+            $copilotEvent = script:New-CopilotAssistantEvent -Content @($dispatch) -Model 'gpt-4o-mini-2024-07-18' -InputTokens 300 -OutputTokens 90
+
+            $result = Get-CostAttribution -Events @($copilotEvent) -RateTablePath $script:RateTablePath -WarningVariable wv
+
+            $result.null_cost_events_by_reason.rate_unavailable | Should -Be 1
+            $result.null_cost_events_by_reason.rate_unavailable_malformed | Should -Be 0
+            $result.malformed_rate_models | Should -BeNullOrEmpty
+        }
+
+        It 'increments rate_unavailable_malformed and names the model for a partially-null rate-table row' {
+            $tmpRateTable = Join-Path $TestDrive "malformed-rate-table-$([System.Guid]::NewGuid().ToString('N')).json"
+            @'
+{
+    "version": "1",
+    "rates_as_of": "2026-07-14",
+    "rate_source_url": "https://example.test/rates",
+    "fallback_behavior": "warn-and-null",
+    "rates": {
+        "claude-fatfingered-model": {
+            "input_per_mtok": 3.00,
+            "output_per_mtok": 15.00,
+            "cache_creation_per_mtok": 6.00,
+            "cache_read_per_mtok": null
+        }
+    }
+}
+'@ | Set-Content -Path $tmpRateTable -Encoding UTF8
+
+            $dispatch = script:New-AgentDispatch -SubagentType 'code-smith'
+            $parentEvent = script:New-AssistantEvent -Content @($dispatch) -Model 'claude-fatfingered-model' -InputTokens 100 -OutputTokens 50
+
+            $result = Get-CostAttribution -Events @($parentEvent) -RateTablePath $tmpRateTable -WarningVariable wv
+
+            $result.null_cost_events_by_reason.rate_unavailable | Should -Be 1 -Because 'rate_unavailable stays the union total for pre-CE-F2 readers'
+            $result.null_cost_events_by_reason.rate_unavailable_malformed | Should -Be 1
+            $result.malformed_rate_models | Should -Be @('claude/claude-fatfingered-model')
+            $result.unknown_models | Should -BeNullOrEmpty -Because 'the model resolved a known rate-table row; this is not an unknown-key event'
+        }
+
+        It 'keeps rate_unavailable as the union total across one by-design and one malformed event in the same run' {
+            $tmpRateTable = Join-Path $TestDrive "mixed-rate-table-$([System.Guid]::NewGuid().ToString('N')).json"
+            @'
+{
+    "version": "1",
+    "rates_as_of": "2026-07-14",
+    "rate_source_url": "https://example.test/rates",
+    "fallback_behavior": "warn-and-null",
+    "rates": {
+        "claude-fatfingered-model": {
+            "input_per_mtok": 3.00,
+            "output_per_mtok": 15.00,
+            "cache_creation_per_mtok": 6.00,
+            "cache_read_per_mtok": null
+        },
+        "copilot-model-x": {
+            "model": "model-x",
+            "provider": "copilot",
+            "input_per_mtok": null,
+            "output_per_mtok": null,
+            "cache_creation_per_mtok": null,
+            "cache_read_per_mtok": null
+        }
+    }
+}
+'@ | Set-Content -Path $tmpRateTable -Encoding UTF8
+
+            $dispatch = script:New-AgentDispatch -SubagentType 'code-smith'
+            $malformedEvent = script:New-AssistantEvent -Content @($dispatch) -Model 'claude-fatfingered-model' -InputTokens 100 -OutputTokens 50
+            $byDesignEvent = script:New-CopilotAssistantEvent -Model 'model-x' -InputTokens 300 -OutputTokens 90
+
+            $result = Get-CostAttribution -Events @($malformedEvent, $byDesignEvent) -RateTablePath $tmpRateTable -WarningVariable wv
+
+            $result.null_cost_events_by_reason.rate_unavailable | Should -Be 2
+            $result.null_cost_events_by_reason.rate_unavailable_malformed | Should -Be 1
+            $result.malformed_rate_models | Should -Be @('claude/claude-fatfingered-model')
+        }
+    }
+
+    Context 'issue #487 AC1: #813-shaped fixture' {
+        It 'produces null_cost_events == 0 across every bucket for a #813-shaped mix of the six new rate-table keys' {
+            # Cache-read-heavy events attributed to orchestrator_overhead (no Agent dispatch —
+            # mirrors #813's recorded mix, where ~97% of cache reads landed on orchestrator-overhead turns).
+            $overheadEvents = @(
+                script:New-AssistantEvent -Model 'claude-fable-5' -InputTokens 200 -OutputTokens 20 -CacheCreation 500 -CacheRead 40000
+                script:New-AssistantEvent -Model 'claude-opus-4-8' -InputTokens 200 -OutputTokens 20 -CacheCreation 500 -CacheRead 35000
+                script:New-AssistantEvent -Model 'claude-sonnet-5' -InputTokens 200 -OutputTokens 20 -CacheCreation 500 -CacheRead 30000
+            )
+
+            # Output-heavy events attributed to a review-style dispatch (agent-orchestra:Code-Critic maps to the 'review' port).
+            $reviewModels = @('claude-sonnet-4-6', 'claude-haiku-4-5', 'claude-haiku-4-5-20251001')
+            $reviewEvents = foreach ($model in $reviewModels) {
+                $dispatch = script:New-AgentDispatch -SubagentType 'agent-orchestra:Code-Critic'
+                script:New-AssistantEvent -Content @($dispatch) -Model $model -InputTokens 300 -OutputTokens 6000 -CacheCreation 0 -CacheRead 0
+            }
+
+            $events = @($overheadEvents) + @($reviewEvents)
+            $result = Get-CostAttribution -Events $events -RateTablePath $script:RateTablePath -WarningVariable wv
+
+            $result.orchestrator_overhead.null_cost_events | Should -Be 0 -Because 'all three cache-read-heavy models (claude-fable-5, claude-opus-4-8, claude-sonnet-5) must resolve against the refreshed rate table'
+            $result.ports.ContainsKey('review') | Should -BeTrue
+            $result.ports['review'].null_cost_events | Should -Be 0 -Because 'all three output-heavy models (claude-sonnet-4-6, claude-haiku-4-5, claude-haiku-4-5-20251001) must resolve against the refreshed rate table'
+
+            foreach ($portName in $result.ports.Keys) {
+                $result.ports[$portName].null_cost_events | Should -Be 0 -Because "port '$portName' should have zero null-cost events once all six new rate-table keys are present"
+            }
+
+            $wv | Should -BeNullOrEmpty -Because 'no unknown-model or rate-unavailable warnings should fire once the rate table covers every model in the fixture'
         }
     }
 }

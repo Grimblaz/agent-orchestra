@@ -535,7 +535,7 @@ integrity_checks:
                     cwd       = $env:FCL_TEST_REPO_ROOT
                     gitBranch = $env:FCL_TEST_COST_BRANCH
                     message   = @{
-                        model       = 'claude-sonnet-4-x'
+                        model       = 'claude-sonnet-4-6'
                         stop_reason = 'end_turn'
                         usage       = @{
                             input_tokens                = 100
