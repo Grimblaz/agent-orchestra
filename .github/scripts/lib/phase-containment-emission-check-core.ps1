@@ -50,18 +50,20 @@ $script:JudgeRulingsVocabGatePattern = '(?m)(?:^\s*(?:-\s+)?|[{,]\s*)(dispositio
 #region Valid surfaces / id-domain mapping
 
 # -Surface uses the core's stage names exactly (StageProjections keys):
-# 'code-review', 'design-challenge', 'plan-stress-test' — see the three
-# [ValidateSet('code-review', 'design-challenge', 'plan-stress-test')]
+# 'code-review', 'design-challenge', 'plan-stress-test', 'post-review-observer'
+# — see the four
+# [ValidateSet('code-review', 'design-challenge', 'plan-stress-test', 'post-review-observer')]
 # parameter attributes in this file for the single source of truth (M11:
 # removed the redundant, never-referenced $script:ValidEmissionCheckSurfaces
 # array — PowerShell's ValidateSet attribute requires compile-time constant
 # values, so it cannot reference a script-scoped variable as a dynamic
 # source without a custom IValidateSetValuesGenerator class, which is more
-# machinery than three inline literal lists warrant here).
+# machinery than four inline literal lists warrant here).
 # id-domain per surface:
 #   code-review                -> Id = PR number,    blocks live on PR comments
 #   design-challenge            -> Id = issue number, blocks live on issue comments (design-phase-complete-{ID})
 #   plan-stress-test            -> Id = issue number, blocks live on issue comments (plan-issue-{ID})
+#   post-review-observer        -> Id = PR number,    blocks live on PR comments (same domain as code-review)
 # Callers must pass the matching domain; this module does not verify it.
 
 #endregion
@@ -736,7 +738,7 @@ function Test-EmissionMarkerPresent {
         [bool] $true when a recognizable marker head is present, else $false.
     #>
     param(
-        [Parameter(Mandatory)][ValidateSet('code-review', 'design-challenge', 'plan-stress-test')][string]$Surface,
+        [Parameter(Mandatory)][ValidateSet('code-review', 'design-challenge', 'plan-stress-test', 'post-review-observer')][string]$Surface,
         [Parameter(Mandatory)][AllowEmptyString()][string]$Body
     )
 
@@ -864,7 +866,7 @@ function Get-SustainedFindingCount {
           ParseStatus    [string] — 'ok' or 'could-not-verify'
     #>
     param(
-        [Parameter(Mandatory)][ValidateSet('code-review', 'design-challenge', 'plan-stress-test')][string]$Surface,
+        [Parameter(Mandatory)][ValidateSet('code-review', 'design-challenge', 'plan-stress-test', 'post-review-observer')][string]$Surface,
         [Parameter(Mandatory)][AllowEmptyString()][string]$Body
     )
 
@@ -977,7 +979,7 @@ function Get-DispositionTally {
           ParseStatus           [string] — 'ok' or 'could-not-verify'
     #>
     param(
-        [Parameter(Mandatory)][ValidateSet('code-review', 'design-challenge', 'plan-stress-test')][string]$Surface,
+        [Parameter(Mandatory)][ValidateSet('code-review', 'design-challenge', 'plan-stress-test', 'post-review-observer')][string]$Surface,
         [Parameter(Mandatory)][AllowEmptyString()][string]$Body
     )
 
@@ -1826,6 +1828,85 @@ function script:Get-DesignChallengeSustainedCountInternal {
 
 #endregion
 
+#region Get-ExternalSourceNovelSustainedCount (private, CR-8 seam)
+
+function script:Get-ExternalSourceNovelSustainedCount {
+    <#
+    .SYNOPSIS
+        Counts sustained, resolved-external, novel-matched review-dispositions
+        entries across a comment corpus (issue #854 s7, CR-8/M26 seam).
+    .DESCRIPTION
+        817-D1 aggregation-seam precedent (the same precedent that added
+        DismissedCount to Get-DesignChallengeSustainedCountInternal): this
+        helper extends the UNPINNED sibling Get-DispositionTally, never
+        Get-SustainedFindingCount (AC8-pinned byte-identical output). Called
+        only from Get-EmissionGap.
+
+        DD1 trinary (Seam Specification, issue #854), per review-dispositions
+        entry:
+          - reviewer_source -eq 'local' (M40 exact-equality — 'ext-local' is
+            a resolved external identity and must not match) -> pipeline-
+            native, expects a standard code-review block. Excluded here.
+          - resolved external identity (reviewer_source not 'local', not
+            'unresolved', not null/empty) AND internal_match.match_status
+            'novel' AND sustained (disposition -ne 'dismiss') -> expects an
+            OBSERVER block INSTEAD of a code-review block. Counted here.
+          - match_status 'duplicate' or 'ambiguous', or reviewer_source
+            'unresolved' -> expects NEITHER block type. Excluded from this
+            count (never subtracted from code-review's expected total), so
+            these entries stay inside code-review's subtrahend complement
+            rather than falling into a gap no surface can ever satisfy.
+        A dismissed entry (disposition: dismiss) is never sustained and is
+        always excluded regardless of reviewer_source/match_status.
+
+        Gated per body by Test-ReviewDispositionsHeadPresent, the same
+        vocab-gated head check Get-ReviewCostRollup uses, so ordinary PR
+        chatter with no real review-dispositions marker contributes nothing
+        rather than poisoning the aggregate (mirrors Get-EmissionGap's own
+        Test-EmissionMarkerPresent gating for the judge-rulings surfaces).
+    .PARAMETER Bodies
+        Array of raw comment body text (the same corpus Get-EmissionGap scans).
+    .OUTPUTS
+        [PSCustomObject] with:
+          Count       [int]    — sustained, resolved-external, novel entries
+          ParseStatus [string] — 'ok', or 'could-not-verify' when a body
+                       carries a real review-dispositions head that
+                       Get-DispositionTally could not parse (DD3 fail-loud)
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Bodies
+    )
+
+    $count = 0
+    $anyCouldNotVerify = $false
+
+    foreach ($body in $Bodies) {
+        if (-not (Test-ReviewDispositionsHeadPresent -Body $body)) {
+            continue
+        }
+        $tally = Get-DispositionTally -Surface 'code-review' -Body $body
+        if ($tally.ParseStatus -eq 'could-not-verify') {
+            $anyCouldNotVerify = $true
+            continue
+        }
+        foreach ($entry in $tally.Entries) {
+            if ($entry.Disposition -eq 'dismiss') { continue }
+            if ([string]::IsNullOrWhiteSpace($entry.ReviewerSource)) { continue }
+            if ($entry.ReviewerSource -eq 'local') { continue }
+            if ($entry.ReviewerSource -eq 'unresolved') { continue }
+            if ($entry.MatchStatus -ne 'novel') { continue }
+            $count++
+        }
+    }
+
+    return [PSCustomObject]@{
+        Count       = $count
+        ParseStatus = if ($anyCouldNotVerify) { 'could-not-verify' } else { 'ok' }
+    }
+}
+
+#endregion
+
 #region Get-EmissionGap
 
 function Get-EmissionGap {
@@ -1865,7 +1946,13 @@ function Get-EmissionGap {
     .PARAMETER Id
         PR number (code-review) or issue number (design-challenge, plan-stress-test).
     .PARAMETER Surface
-        One of: code-review, design-challenge, plan-stress-test
+        One of: code-review, design-challenge, plan-stress-test,
+        post-review-observer. For code-review and post-review-observer, the
+        CR-8 seam (Get-ExternalSourceNovelSustainedCount, below) adjusts
+        SustainedCount after the per-body loop: code-review's total has
+        resolved-external, novel-matched, sustained review-dispositions
+        entries subtracted out (they expect an observer block instead), and
+        post-review-observer's total IS that subtracted count.
     .OUTPUTS
         [PSCustomObject] with:
           SustainedCount [int]
@@ -1891,7 +1978,7 @@ function Get-EmissionGap {
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Bodies,
         [Parameter(Mandatory)][int]$Id,
-        [Parameter(Mandatory)][ValidateSet('code-review', 'design-challenge', 'plan-stress-test')][string]$Surface
+        [Parameter(Mandatory)][ValidateSet('code-review', 'design-challenge', 'plan-stress-test', 'post-review-observer')][string]$Surface
     )
 
     $totalSustained = 0
@@ -2035,6 +2122,41 @@ function Get-EmissionGap {
         # (if any) do not count either. A bare phase-containment block with
         # no accompanying authoritative marker on the same body is exactly
         # the pure-chatter-with-injected-blocks vector M4 closes.
+    }
+
+    # CR-8 seam (issue #854 s7): sustained code-review count above came from
+    # Get-SustainedFindingCount, the AC8-pinned judge-rulings reader — never
+    # modified here. Get-ExternalSourceNovelSustainedCount (817-D1
+    # aggregation-seam precedent: extend the unpinned sibling, never the
+    # pinned function) separately reads the review-dispositions marker's
+    # ReviewerSource/internal_match fields Get-DispositionTally exposes. A
+    # resolved-external, novel-matched, sustained entry expects an OBSERVER
+    # block INSTEAD of a code-review block, so it is subtracted from
+    # code-review's expected count and becomes post-review-observer's whole
+    # expected count. Per the Seam Specification, duplicate/ambiguous-matched
+    # entries and the reviewer_source 'unresolved' sentinel expect NEITHER
+    # block type and are excluded from this helper's count entirely — they
+    # stay inside code-review's subtrahend complement (still expected as a
+    # code-review block) rather than being subtracted, so they never produce
+    # a false gap on either surface (see Get-ExternalSourceNovelSustainedCount
+    # for the full DD1-trinary derivation).
+    if ($Surface -eq 'code-review' -or $Surface -eq 'post-review-observer') {
+        $externalNovel = Get-ExternalSourceNovelSustainedCount -Bodies $Bodies
+        if ($externalNovel.ParseStatus -eq 'could-not-verify') {
+            $anyCouldNotVerify = $true
+        }
+        if ($Surface -eq 'code-review') {
+            $totalSustained = $totalSustained - $externalNovel.Count
+        }
+        else {
+            # post-review-observer: the per-body loop above reused
+            # Get-SustainedFindingCount's generic judge-rulings shape (the
+            # same shape code-review reads) purely so ValidateSet/M5 wiring
+            # is uniform across surfaces — that raw count is not the right
+            # number for this surface and is discarded here. The seam's
+            # external+novel+sustained count IS the whole expected total.
+            $totalSustained = $externalNovel.Count
+        }
     }
 
     $parseStatus = if ($anyCouldNotVerify) { 'could-not-verify' } else { 'ok' }

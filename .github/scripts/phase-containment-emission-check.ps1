@@ -326,7 +326,7 @@ function Invoke-PhaseContainmentEmissionCheckSingleTarget {
     $lines.Add('Warn-only maintainer advisory (DD1-secondary framing) -- comment authorship is not filtered.')
     $lines.Add('')
 
-    $surfacesToCheck = if ($isPr) { @('code-review') } else { @('design-challenge', 'plan-stress-test') }
+    $surfacesToCheck = if ($isPr) { @('code-review', 'post-review-observer') } else { @('design-challenge', 'plan-stress-test') }
     $scannedCount = 0
     $sustainedTotal = 0
     $blocksTotal = 0
@@ -429,7 +429,7 @@ function Invoke-PhaseContainmentEmissionCheckCorpus {
         $surfaceKind = [string]$tuple['Surface']
         $bodies = @($tuple['Bodies'])
 
-        $surfacesToCheck = if ($surfaceKind -eq 'pr') { @('code-review') } else { @('design-challenge', 'plan-stress-test') }
+        $surfacesToCheck = if ($surfaceKind -eq 'pr') { @('code-review', 'post-review-observer') } else { @('design-challenge', 'plan-stress-test') }
 
         foreach ($surface in $surfacesToCheck) {
             $gap = Get-EmissionGap -Bodies $bodies -Id $number -Surface $surface

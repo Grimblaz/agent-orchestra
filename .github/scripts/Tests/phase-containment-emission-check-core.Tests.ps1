@@ -1854,6 +1854,116 @@ entries:
 
 #endregion
 
+#region Fixtures: issue #854 s7 CR-8/M26 seam (post-review-observer surface)
+
+# Judge-rulings marker, id 950, exactly one sustained finding. Paired with
+# $script:ReviewDispositionsInternalMatchBody (already id 950 above), whose
+# entry[1] is reviewer_source=gemini, match_status=novel, disposition=
+# incorporate -- a resolved-external, novel-matched, sustained entry that
+# expects an observer block INSTEAD of a code-review block.
+$script:CR8JudgeRulings950Body = @'
+```yaml
+<!-- judge-rulings pr=950 -->
+- id: F1
+  judge_ruling: sustained
+  judge_confidence: high
+  points_awarded: P+5
+-->
+```
+'@
+
+# Judge-rulings marker, id 960, exactly one sustained finding. Paired with
+# $script:CR8ReviewDispositionsAmbiguousExternalBody below.
+$script:CR8JudgeRulings960Body = @'
+```yaml
+<!-- judge-rulings pr=960 -->
+- id: F1
+  judge_ruling: sustained
+  judge_confidence: high
+  points_awarded: P+5
+-->
+```
+'@
+
+# One sustained, resolved-external (reviewer_source: gemini) entry whose
+# internal_match.match_status is 'ambiguous'. Per the Seam Specification this
+# expects NEITHER an observer block NOR a code-review-count subtraction -- it
+# must stay inside code-review's subtrahend complement (still expected as a
+# code-review block).
+$script:CR8ReviewDispositionsAmbiguousExternalBody = @'
+<!-- review-dispositions-960 -->
+
+```yaml
+schema_version: 4
+passes_run: [1]
+entries:
+  - stable_finding_key: "amb.ps1:1:amb111"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    internal_match:
+      match_status: ambiguous
+    severity: medium
+    stage: code-review
+    reviewer_source: gemini
+    disposition_rationale: "External finding could not be reconciled against internal findings; ambiguous match."
+```
+'@
+
+# Judge-rulings marker, id 961, exactly one sustained finding. Paired with
+# $script:CR8ReviewDispositionsUnresolvedExternalNovelBody below.
+$script:CR8JudgeRulings961Body = @'
+```yaml
+<!-- judge-rulings pr=961 -->
+- id: F1
+  judge_ruling: sustained
+  judge_confidence: high
+  points_awarded: P+5
+-->
+```
+'@
+
+# One sustained entry whose reviewer_source is the 'unresolved' sentinel
+# (review-judgment SKILL.md's tier-3 lookup-failure sentinel) even though its
+# match_status is 'novel'. reviewer_source: unresolved is NOT a resolved
+# external identity, so this must be excluded from the CR-8 seam's count
+# regardless of match_status -- defense-in-depth proof that the exclusion
+# checks reviewer_source independently of match_status.
+$script:CR8ReviewDispositionsUnresolvedExternalNovelBody = @'
+<!-- review-dispositions-961 -->
+
+```yaml
+schema_version: 4
+passes_run: [1]
+entries:
+  - stable_finding_key: "unr.ps1:1:unr111"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    internal_match:
+      match_status: novel
+    severity: medium
+    stage: code-review
+    reviewer_source: unresolved
+    disposition_rationale: "GitHub comment lookup failed; reviewer identity sentinel is unresolved per review-judgment SKILL.md lookup-order tier 3."
+```
+'@
+
+# Zero-sustained judge-rulings marker, id 970, for the M26 wrong-prefix
+# fixture below (isolates BlockCount behavior from SustainedCount).
+$script:CR8JudgeRulings970ZeroSustainedBody = @'
+```yaml
+<!-- judge-rulings pr=970 -->
+- id: X1
+  judge_ruling: defense-sustained
+  judge_confidence: high
+  points_awarded: D+0
+-->
+```
+'@
+
+#endregion
+
 }
 
 Describe 'Get-SustainedFindingCount - code-review surface (live fixtures)' {
@@ -3651,5 +3761,185 @@ Describe 'Get-BlockScalarSpans - EXT-F1 regression: CRLF-terminated key line is 
         $spans = Get-BlockScalarSpans -Text $text
 
         $spans.Count | Should -Be 1
+    }
+}
+
+# -----------------------------------------------------------------------
+# Issue #854 s7: post-review-observer fourth surface -- CR-8 expected-count
+# seam and M26 finding_key-prefix attribution.
+# -----------------------------------------------------------------------
+
+Describe 'Get-ExternalSourceNovelSustainedCount - CR-8 seam helper (issue #854 s7)' {
+    It 'counts a sustained, resolved-external, novel-matched entry' {
+        $result = Get-ExternalSourceNovelSustainedCount -Bodies @($script:ReviewDispositionsInternalMatchBody)
+        # entry[1]: reviewer_source=gemini, match_status=novel, disposition=incorporate
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Count | Should -Be 1
+    }
+
+    It 'excludes a local reviewer_source entry even when sustained (M40 exact-equality: local is pipeline-native)' {
+        $body = @'
+<!-- review-dispositions-962 -->
+
+```yaml
+schema_version: 4
+passes_run: [1]
+entries:
+  - stable_finding_key: "loc.ps1:1:loc111"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    internal_match:
+      match_status: novel
+    severity: medium
+    stage: code-review
+    reviewer_source: local
+    disposition_rationale: "Pipeline-native finding, never enters the external lookup."
+```
+'@
+        $result = Get-ExternalSourceNovelSustainedCount -Bodies @($body)
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Count | Should -Be 0
+    }
+
+    It 'excludes an ambiguous-matched external entry (Seam Specification: neither block, not subtracted)' {
+        $result = Get-ExternalSourceNovelSustainedCount -Bodies @($script:CR8ReviewDispositionsAmbiguousExternalBody)
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Count | Should -Be 0
+    }
+
+    It 'excludes a reviewer_source=unresolved entry even when match_status is novel (reviewer_source gate is independent of match_status)' {
+        $result = Get-ExternalSourceNovelSustainedCount -Bodies @($script:CR8ReviewDispositionsUnresolvedExternalNovelBody)
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Count | Should -Be 0
+    }
+
+    It 'excludes a dismissed entry regardless of reviewer_source/match_status' {
+        $body = @'
+<!-- review-dispositions-963 -->
+
+```yaml
+schema_version: 4
+passes_run: [1]
+entries:
+  - stable_finding_key: "dis.ps1:1:dis111"
+    pass: 1
+    disposition: dismiss
+    classification: routine
+    internal_match:
+      match_status: novel
+    severity: low
+    stage: code-review
+    reviewer_source: gemini
+    disposition_rationale: "Dismissed; never sustained."
+```
+'@
+        $result = Get-ExternalSourceNovelSustainedCount -Bodies @($body)
+        $result.Count | Should -Be 0
+    }
+
+    It 'skips a marker-less body entirely (ordinary chatter contributes nothing)' {
+        $result = Get-ExternalSourceNovelSustainedCount -Bodies @($script:MalformedBody)
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Count | Should -Be 0
+    }
+
+    It 'returns could-not-verify when a real review-dispositions head is present but unparseable (DD3 fail-loud)' {
+        $result = Get-ExternalSourceNovelSustainedCount -Bodies @($script:ReviewDispositionsZeroEntriesBody)
+        $result.ParseStatus | Should -Be 'could-not-verify'
+    }
+}
+
+Describe 'Get-EmissionGap - CR-8 seam: code-review/post-review-observer reconciliation (issue #854 s7)' {
+    It 'FIXTURE (b): a resolved-external, novel-matched, sustained finding expects an observer block and explicitly NOT a code-review block' {
+        $bodies = @($script:CR8JudgeRulings950Body, $script:ReviewDispositionsInternalMatchBody)
+
+        $codeReviewResult = Get-EmissionGap -Bodies $bodies -Id 950 -Surface 'code-review'
+        $observerResult = Get-EmissionGap -Bodies $bodies -Id 950 -Surface 'post-review-observer'
+
+        # code-review: 1 judge-rulings-sustained finding, minus 1 external-
+        # novel-sustained finding (subtracted) = 0 expected code-review blocks.
+        $codeReviewResult.SustainedCount | Should -Be 0
+        $codeReviewResult.BlockCount | Should -Be 0
+        $codeReviewResult.Gap | Should -Be 0
+        $codeReviewResult.ParseStatus | Should -Be 'ok'
+
+        # post-review-observer: the subtracted finding IS the whole expected
+        # total -- no observer block posted yet, so this is a real GAP.
+        $observerResult.SustainedCount | Should -Be 1
+        $observerResult.BlockCount | Should -Be 0
+        $observerResult.Gap | Should -Be 1
+        $observerResult.ParseStatus | Should -Be 'ok'
+    }
+
+    It 'FIXTURE (b) continued: posting a correctly-prefixed observer block closes the gap without disturbing the (already-clean) code-review surface' {
+        # Fix A (M4) co-location gate: a block only counts when its OWN body
+        # also carries the surface's authoritative marker head, so the
+        # observer block must be appended to the judge-rulings body, not
+        # passed as an isolated body.
+        $observerBlock = script:New-ValidPhaseContainmentBlockText -Id '950' -Surface 'post-review-observer' -FindingSuffix 'F1' -CaughtStage 'post-review-observer' -EscapeDistance 1
+        $judgeRulingsBodyWithBlock = $script:CR8JudgeRulings950Body + "`n$observerBlock"
+        $bodies = @($judgeRulingsBodyWithBlock, $script:ReviewDispositionsInternalMatchBody)
+
+        $codeReviewResult = Get-EmissionGap -Bodies $bodies -Id 950 -Surface 'code-review'
+        $observerResult = Get-EmissionGap -Bodies $bodies -Id 950 -Surface 'post-review-observer'
+
+        $codeReviewResult.Gap | Should -Be 0
+        $observerResult.SustainedCount | Should -Be 1
+        $observerResult.BlockCount | Should -Be 1
+        $observerResult.Gap | Should -Be 0
+    }
+
+    It 'FIXTURE (c): an ambiguous-matched external finding expects NEITHER block type and produces no false gap on either surface when a real code-review block satisfies it' {
+        $codeReviewBlock = script:New-ValidPhaseContainmentBlockText -Id '960' -Surface 'code-review' -FindingSuffix 'F1'
+        $judgeRulingsBodyWithBlock = $script:CR8JudgeRulings960Body + "`n$codeReviewBlock"
+        $bodies = @($judgeRulingsBodyWithBlock, $script:CR8ReviewDispositionsAmbiguousExternalBody)
+
+        $codeReviewResult = Get-EmissionGap -Bodies $bodies -Id 960 -Surface 'code-review'
+        $observerResult = Get-EmissionGap -Bodies $bodies -Id 960 -Surface 'post-review-observer'
+
+        # Ambiguous match is NOT subtracted -- it stays inside code-review's
+        # expected total, and the real code-review block satisfies it.
+        $codeReviewResult.SustainedCount | Should -Be 1
+        $codeReviewResult.BlockCount | Should -Be 1
+        $codeReviewResult.Gap | Should -Be 0
+
+        # No observer block is ever expected for an ambiguous match -- the
+        # observer surface must NOT phantom-demand one.
+        $observerResult.SustainedCount | Should -Be 0
+        $observerResult.BlockCount | Should -Be 0
+        $observerResult.Gap | Should -Be 0
+    }
+
+    It 'FIXTURE (c) variant: an unresolved-reviewer_source external finding (novel match_status) also produces no false gap on either surface' {
+        $codeReviewBlock = script:New-ValidPhaseContainmentBlockText -Id '961' -Surface 'code-review' -FindingSuffix 'F1'
+        $judgeRulingsBodyWithBlock = $script:CR8JudgeRulings961Body + "`n$codeReviewBlock"
+        $bodies = @($judgeRulingsBodyWithBlock, $script:CR8ReviewDispositionsUnresolvedExternalNovelBody)
+
+        $codeReviewResult = Get-EmissionGap -Bodies $bodies -Id 961 -Surface 'code-review'
+        $observerResult = Get-EmissionGap -Bodies $bodies -Id 961 -Surface 'post-review-observer'
+
+        $codeReviewResult.Gap | Should -Be 0
+        $observerResult.SustainedCount | Should -Be 0
+        $observerResult.Gap | Should -Be 0
+    }
+
+    It 'FIXTURE (d) - M26: a wrong-prefix block (finding_key prefixed code-review: but caught_stage: post-review-observer) is invisible to the post-review-observer surface check and is instead miscounted toward code-review' {
+        # A hypothetical writer bug: the block's own caught_stage says
+        # post-review-observer, but its finding_key keeps the code-review
+        # prefix. Get-EmissionGap attributes blocks by finding_key PREFIX
+        # only (M26) -- caught_stage never overrides that attribution.
+        $wrongPrefixBlock = script:New-ValidPhaseContainmentBlockText -Id '970' -Surface 'code-review' -FindingSuffix 'F1' -CaughtStage 'post-review-observer' -EscapeDistance 1
+        $judgeRulingsBodyWithBlock = $script:CR8JudgeRulings970ZeroSustainedBody + "`n$wrongPrefixBlock"
+        $bodies = @($judgeRulingsBodyWithBlock)
+
+        $observerResult = Get-EmissionGap -Bodies $bodies -Id 970 -Surface 'post-review-observer'
+        $codeReviewResult = Get-EmissionGap -Bodies $bodies -Id 970 -Surface 'code-review'
+
+        # Invisible to the surface its caught_stage actually names.
+        $observerResult.BlockCount | Should -Be 0
+        # Miscounted toward the surface its finding_key prefix names instead
+        # -- exactly the M26 attribution hazard the assertion below guards.
+        $codeReviewResult.BlockCount | Should -Be 1
     }
 }
