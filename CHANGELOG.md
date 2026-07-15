@@ -2,6 +2,12 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.3.13] — 2026-07-15
+
+### Added
+
+Add a checklist item to implementation-discipline requiring authors to audit multi-cause explanatory text (Notes/warnings) for cause-conflation and missing companion-doc cross-references, per issue #487's CE Gate Track 2 finding.
+
 ## [3.3.12] — 2026-07-13
 
 ### Added
