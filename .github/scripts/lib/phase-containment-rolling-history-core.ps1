@@ -1863,23 +1863,46 @@ function Get-PhaseContainmentRollup {
         honor when building this hashtable - this function consumes already-scoped counts,
         it does not re-derive them from raw finding records.
 
-          CoObservedPRCount              [int]  N - total PRs in the co-observed corpus for
-                                                 the window. Default 0.
-          MeasuredCoveragePRCount        [int]  K - PRs counting toward coverage: a judge-
-                                                 authored coverage record AND >=1 external
-                                                 sustained finding resolved to a real identity
-                                                 (M7 - an all-unresolved PR contributes ZERO
-                                                 coverage). Default 0.
+          CoObservedPRCount              [int]  N - total PR tuples observed in the code-review
+                                                 window (every PR code-review already covers,
+                                                 whether or not a review-dispositions record was
+                                                 ever posted for it). This is NOT DD3's narrower
+                                                 "co-observed" population (M12 fix) -- it is used
+                                                 only as the denominator for the K-of-N coverage-
+                                                 ratio display below. Default 0.
+          MeasuredCoveragePRCount        [int]  K - PRs counting toward coverage AND DD3's
+                                                 actual "co-observed" population: those with a
+                                                 judge-authored, cleanly-parsed review-
+                                                 dispositions record carrying an
+                                                 ExternalSourcesReconciled coverage record (M9 -
+                                                 a head-present, clean parse with zero entries IS
+                                                 a legal coverage record; coverage means
+                                                 measurement, not >=1 finding -- M5 fix removed
+                                                 the earlier >=1-resolved-finding requirement).
+                                                 InternalCoObservedCatchCount (n1) and the
+                                                 Chapman estimator's n2/m are scoped to THIS
+                                                 population, never to CoObservedPRCount's whole-
+                                                 window N (M2/M12 fix). Default 0.
           DispositionsNovelExternalCount [int]  Dispositions-recorded external findings with
                                                  internal_match.match_status='novel', compared
                                                  against the emitted post-review-observer
                                                  blocks this function counts directly from
-                                                 $Entries (M13 escape-arm reconciliation).
-                                                 Omitted -> reconciliation cannot be verified
-                                                 and fails closed.
+                                                 $Entries (M13 escape-arm reconciliation). The
+                                                 review-dispositions record carries no
+                                                 catchable_phase field, so this count spans ALL
+                                                 catchable_phase values; the reconciliation
+                                                 comparison below counts observer blocks the same
+                                                 catchable_phase-blind way (M6 fix) -- only the
+                                                 unique-catch-rate numerator stays scoped to
+                                                 catchable_phase='implementation' per the Seam
+                                                 Specification. Omitted -> reconciliation cannot
+                                                 be verified and fails closed.
           InternalCoObservedCatchCount   [int]  n1 - caught_stage='code-review' AND
                                                  catchable_phase='implementation' entries,
-                                                 restricted to the co-observed PR set. Default 0.
+                                                 restricted to MeasuredCoveragePRCount's PR set
+                                                 (DD3's co-observed population), not
+                                                 CoObservedPRCount's whole-window population
+                                                 (M2/M12 fix). Default 0.
           ExternalCatchCount             [int]  n2 - external sustained findings on co-observed
                                                  PRs, excluding match_status 'ambiguous' and
                                                  'unresolved'. Default 0.
@@ -1888,10 +1911,19 @@ function Get-PhaseContainmentRollup {
                                                  overlap). Default 0.
           ObserverEscapeCount            [int]  Numerator for the unique-catch rate. Defaults
                                                  to the observer-block count this function
-                                                 derives from $Entries when omitted.
+                                                 derives from $Entries when omitted, scoped to
+                                                 catchable_phase='implementation' per the Seam
+                                                 Specification.
           ValueCacheOk                   [bool] Seam Specification -ValueCacheOk coherence
                                                  rule - $false withholds the escape arm
                                                  entirely. Default $true.
+          CorpusTruncated                [bool] M8 fix: whether the review-cost comment CORPUS
+                                                 fetch (distinct from the -Truncated switch
+                                                 below, which reflects the separate VALUE fetch)
+                                                 truncated. $true withholds the escape arm --
+                                                 novel-carrying PRs may have silently dropped
+                                                 from this derivation while K still reads >=5.
+                                                 Default $false.
     .PARAMETER WindowLabel
         Optional label for the window (for display purposes only).
     .PARAMETER Truncated
@@ -2099,6 +2131,7 @@ function Get-PhaseContainmentRollup {
         $coverageOk                    = $null
         $reconciliationOk              = $null
         $observerBlockCount            = $null
+        $observerBlockCountAllPhases   = $null
         $dispositionsNovelCount        = $null
         $uniqueCatchRate               = $null
         $uniqueCatchRateAssessable     = $false
@@ -2119,6 +2152,21 @@ function Get-PhaseContainmentRollup {
             elseif ($TerminalObservation.ContainsKey('ValueCacheOk') -and -not [bool]$TerminalObservation['ValueCacheOk']) {
                 $escapeArmWithheld       = $true
                 $escapeArmWithheldReason = 'escape arm withheld — cached value population cannot be joined to a same-run corpus'
+                if ($relaxationEligible -eq $true) {
+                    $relaxationEligible       = $false
+                    $relaxationEligibleReason = $escapeArmWithheldReason
+                }
+            }
+            elseif ($TerminalObservation.ContainsKey('CorpusTruncated') -and [bool]$TerminalObservation['CorpusTruncated']) {
+                # M8 fix: the review-cost comment CORPUS fetch truncated --
+                # a DIFFERENT, independent fetch from the value fetch this
+                # rollup's own -Truncated switch already gates on. A
+                # truncated corpus can silently drop novel-carrying PRs
+                # while K still reads >=5, undercounting misses toward a
+                # false ELIGIBLE. Fail the escape arm closed here rather
+                # than rely on a non-gating prose warning elsewhere.
+                $escapeArmWithheld       = $true
+                $escapeArmWithheldReason = 'escape arm withheld — the review-cost comment corpus fetch was truncated, so novel-carrying PRs may have silently dropped'
                 if ($relaxationEligible -eq $true) {
                     $relaxationEligible       = $false
                     $relaxationEligibleReason = $escapeArmWithheldReason
@@ -2147,12 +2195,34 @@ function Get-PhaseContainmentRollup {
                     # blocks emitted".
                     $dispositionsNovelCount = if ($TerminalObservation.ContainsKey('DispositionsNovelExternalCount')) { [int]$TerminalObservation['DispositionsNovelExternalCount'] } else { $null }
 
-                    $observerBlockCount = 0
+                    # M6 fix: the review-dispositions record carries no
+                    # catchable_phase field at all, so DispositionsNovelExternalCount
+                    # (above) is inherently catchable_phase-blind -- it counts every
+                    # novel external finding the judge recorded, regardless of which
+                    # bucket (design-challenge/plan-stress-test/code-review) the
+                    # resulting observer block eventually routes to (AC7: observer
+                    # entries route by catchable_phase and only ever ADD escapes to
+                    # design/plan buckets, conservative, never irreducible).
+                    # Reconciliation must compare the SAME population on both sides,
+                    # so $observerBlockCountAllPhases (below) counts every emitted
+                    # post-review-observer block regardless of catchable_phase. This
+                    # is intentionally a DIFFERENT, wider count than $observerBlockCount
+                    # (implementation-scoped, used below ONLY as the unique-catch-rate
+                    # numerator default per the Seam Specification's "observer escapes
+                    # in the numerator are scoped to catchable_phase: implementation"
+                    # rule) -- a design/plan-catchable novel finding must not be
+                    # misread as a reconciliation mismatch just because it is outside
+                    # the unique-catch-rate's own, narrower scope.
+                    $observerBlockCount          = 0
+                    $observerBlockCountAllPhases = 0
                     foreach ($e in $Entries) {
                         $eCaughtStage    = if ($e -is [hashtable]) { [string]$e['caught_stage'] }    else { [string]$e.caught_stage }
                         $eCatchablePhase = if ($e -is [hashtable]) { [string]$e['catchable_phase'] }  else { [string]$e.catchable_phase }
-                        if ($eCaughtStage -eq 'post-review-observer' -and $eCatchablePhase -eq 'implementation') {
-                            $observerBlockCount++
+                        if ($eCaughtStage -eq 'post-review-observer') {
+                            $observerBlockCountAllPhases++
+                            if ($eCatchablePhase -eq 'implementation') {
+                                $observerBlockCount++
+                            }
                         }
                     }
 
@@ -2163,11 +2233,11 @@ function Get-PhaseContainmentRollup {
                             $relaxationEligibleReason = 'terminal observation incomplete — dispositions-recorded novel count unavailable for reconciliation'
                         }
                     }
-                    elseif ($dispositionsNovelCount -ne $observerBlockCount) {
+                    elseif ($dispositionsNovelCount -ne $observerBlockCountAllPhases) {
                         $reconciliationOk = $false
                         if ($relaxationEligible -eq $true) {
                             $relaxationEligible       = $false
-                            $relaxationEligibleReason = "escape-arm reconciliation failed: $dispositionsNovelCount dispositions-recorded novel finding(s) vs $observerBlockCount emitted observer block(s)"
+                            $relaxationEligibleReason = "escape-arm reconciliation failed: $dispositionsNovelCount dispositions-recorded novel finding(s) vs $observerBlockCountAllPhases emitted observer block(s)"
                         }
                     }
                     else {
@@ -2261,6 +2331,7 @@ function Get-PhaseContainmentRollup {
             ReconciliationOk          = $reconciliationOk
             DispositionsNovelExternalCount = $dispositionsNovelCount
             ObserverBlockCount        = $observerBlockCount
+            ObserverBlockCountAllPhases = $observerBlockCountAllPhases
             UniqueCatchRate           = $uniqueCatchRate
             UniqueCatchRateAssessable = $uniqueCatchRateAssessable
             ChapmanBothMissedEstimate = $chapmanBothMissedEstimate
@@ -2456,7 +2527,15 @@ function Format-PhaseContainmentReport {
 
                 if ($stage.ReconciliationOk -eq $false) {
                     $novelDisplay = if ($null -ne $stage.DispositionsNovelExternalCount) { [string]$stage.DispositionsNovelExternalCount } else { 'unavailable' }
-                    $lines.Add("    Escape-side signal: NOT ASSESSABLE (escape-arm reconciliation failed: $novelDisplay dispositions-recorded novel finding(s) vs $($stage.ObserverBlockCount) emitted observer block(s))")
+                    # M6 fix: render the SAME catchable_phase-blind count the
+                    # reconciliation check actually compared against
+                    # ($ObserverBlockCountAllPhases), not the narrower
+                    # catchable_phase=implementation-only $ObserverBlockCount
+                    # (that field is reserved for the unique-catch-rate's own
+                    # miss-count display below) -- otherwise the rendered
+                    # numbers would not match the comparison that actually
+                    # failed.
+                    $lines.Add("    Escape-side signal: NOT ASSESSABLE (escape-arm reconciliation failed: $novelDisplay dispositions-recorded novel finding(s) vs $($stage.ObserverBlockCountAllPhases) emitted observer block(s))")
                 }
                 else {
                     $lines.Add("    Miss count (observer blocks): $($stage.ObserverBlockCount)")

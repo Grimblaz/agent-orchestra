@@ -79,17 +79,30 @@ function Get-PhaseContainmentTerminalObservation {
           CoObservedPRCount              N - all PR tuples in the fetched
                                           corpus window (the same population
                                           code-review already observes).
+                                          NOT DD3's "co-observed" population
+                                          (see MeasuredCoveragePRCount below)
+                                          -- used only as the denominator for
+                                          the K-of-N coverage-ratio display
+                                          (M12 fix).
           MeasuredCoveragePRCount        K - PRs with a judge-authored,
                                           cleanly-parsed review-dispositions
+                                          record carrying an
+                                          ExternalSourcesReconciled coverage
                                           record (M9: a head-present, clean
                                           parse with zero entries IS a legal
-                                          coverage record) AND >=1 external
-                                          sustained finding resolved to a
-                                          real identity (M7: reviewer_source
-                                          not 'local'/'unresolved' after the
-                                          Seam Specification's absent->local
-                                          default; an all-unresolved PR
-                                          contributes ZERO coverage).
+                                          coverage record -- coverage means
+                                          measurement, not >=1 finding; M5
+                                          review fix: the earlier
+                                          >=1-resolved-finding requirement
+                                          wrongly zeroed out a legitimate
+                                          zero-finding measurement and has
+                                          been removed). This is also DD3's
+                                          "co-observed" population -- n1
+                                          (InternalCoObservedCatchCount) is
+                                          scoped to PR numbers in THIS set,
+                                          not to CoObservedPRCount's
+                                          whole-window population (M2/M12
+                                          fix).
           DispositionsNovelExternalCount, ExternalCatchCount (n2),
           DuplicateCount (m) - tallied from each PR's judge-authored,
                                 latest-wins-per-stable_finding_key merged
@@ -207,16 +220,29 @@ function Get-PhaseContainmentTerminalObservation {
 
         if (-not $hadCoverageRecord) { continue }
 
+        # M5 fix: a judge-authored, cleanly-parsed coverage record counts
+        # toward K regardless of whether the review found anything -- the
+        # earlier ">=1 resolved-external-finding" gate below zeroed out a
+        # legitimate M9 zero-finding measurement. $hadCoverageRecord is
+        # already the correct predicate (ParseStatus 'ok': either the PR-
+        # level ExternalSourcesReconciled field parsed, or at least one
+        # entry parsed), so this PR is ALWAYS added once the `continue`
+        # above has been passed. This is also DD3's "co-observed" set (M2/
+        # M12): the n1 scoping below uses THIS set, not $coObservedPrNumbers
+        # (the whole-window population).
+        $measuredCoveragePrNumbers.Add($number) | Out-Null
+
         $prExternalEntries = @($perKeyLatestEntry.Values | Where-Object {
                 $rs = if ([string]::IsNullOrWhiteSpace($_.ReviewerSource)) { 'local' } else { [string]$_.ReviewerSource }
                 $rs -ne 'local' -and $rs -ne 'unresolved'
             })
 
-        if ($prExternalEntries.Count -ge 1) {
-            $measuredCoveragePrNumbers.Add($number) | Out-Null
-        }
-
         foreach ($e in $prExternalEntries) {
+            # M3 fix: mirror Get-ExternalSourceNovelSustainedCount's dismiss
+            # exclusion (phase-containment-emission-check-core.ps1) -- a
+            # dismissed finding was never sustained and must never count
+            # toward K/novel/n2/m regardless of MatchStatus.
+            if ($e.Disposition -eq 'dismiss') { continue }
             if ($e.MatchStatus -eq 'duplicate') {
                 $duplicateCount++
                 $externalCatchCount++
@@ -229,6 +255,12 @@ function Get-PhaseContainmentTerminalObservation {
         }
     }
 
+    # M2/M12 fix: n1's population is DD3's actual "co-observed" set --
+    # PRs whose dispositions actually carry a reconciled coverage record
+    # ($measuredCoveragePrNumbers, built above) -- NOT $coObservedPrNumbers
+    # (every PR tuple in the whole fetched window, unfiltered). Pooling n1
+    # against the whole window dilutes the miss rate the estimators exist
+    # to guard against.
     $internalCoObservedCatchCount = 0
     foreach ($e in $Entries) {
         $caughtStage    = if ($e -is [hashtable]) { [string]$e['caught_stage'] }    else { [string]$e.caught_stage }
@@ -237,7 +269,7 @@ function Get-PhaseContainmentTerminalObservation {
         $surface        = if ($e -is [hashtable]) { [string]$e['surface'] }        else { [string]$e.surface }
         $prNumber       = if ($e -is [hashtable]) { [int]$e['issueOrPrNumber'] }   else { [int]$e.issueOrPrNumber }
 
-        if ($caughtStage -eq 'code-review' -and $catchablePhase -eq 'implementation' -and -not $apparatusMeta -and $surface -eq 'pr' -and $coObservedPrNumbers.Contains($prNumber)) {
+        if ($caughtStage -eq 'code-review' -and $catchablePhase -eq 'implementation' -and -not $apparatusMeta -and $surface -eq 'pr' -and $measuredCoveragePrNumbers.Contains($prNumber)) {
             $internalCoObservedCatchCount++
         }
     }
@@ -250,6 +282,14 @@ function Get-PhaseContainmentTerminalObservation {
         ExternalCatchCount             = $externalCatchCount
         DuplicateCount                 = $duplicateCount
         ValueCacheOk                   = $ValueCacheOk
+        # M8 fix: thread the CORPUS fetch's own Truncated flag through --
+        # distinct from the value fetch's $Truncated (a separate,
+        # independent fetch Get-PhaseContainmentRollup already receives via
+        # its own -Truncated switch). When the corpus truncates, novel-
+        # carrying PRs can silently drop from this derivation while K stays
+        # >=5, so the escape arm must fail closed on this signal too, not
+        # just render a non-gating warning.
+        CorpusTruncated                = [bool]$Corpus.Truncated
     }
 }
 

@@ -1183,6 +1183,141 @@ Describe 'Get-PhaseContainmentRollup — code-review escape-side guard (issue #8
         $stage.ChapmanState              | Should -Be 'sparse'
         $stage.ChapmanBothMissedEstimate | Should -Be $null
     }
+
+    It 'reconciles against ALL catchable_phase observer blocks, not just catchable_phase=implementation (M6 -- AC7 upstream-enrichment must not spuriously fail reconciliation)' {
+        # The dispositions record carries no catchable_phase field at all, so
+        # DispositionsNovelExternalCount is inherently catchable_phase-blind
+        # -- it counts the one novel external finding the judge recorded,
+        # regardless of which bucket it eventually routes to. Here that
+        # finding is legitimately design-catchable (AC7's upstream-
+        # enrichment case) and is emitted as a post-review-observer entry
+        # with catchable_phase='design', NOT 'implementation'.
+        $entries = @(script:New-CleanCodeReviewEntries) + @(
+            [PSCustomObject]@{
+                finding_key = 'post-review-observer:803:X1'; introduced_phase = 'design'; catchable_phase = 'design'
+                caught_stage = 'post-review-observer'; escape_distance = 3; severity = 'medium'
+                systemic_fix_type = 'none'; category = 'architecture'; apparatus_meta = $false; seed = $false
+                createdAt = '2024-01-01T12:00:00Z'; surface = 'pr'; issueOrPrNumber = 803
+            }
+        )
+
+        $terminalObservation = @{
+            CoObservedPRCount              = 6
+            MeasuredCoveragePRCount        = 6
+            DispositionsNovelExternalCount = 1
+            InternalCoObservedCatchCount   = 5
+            ObserverEscapeCount            = 0
+        }
+
+        $result = Get-PhaseContainmentRollup -Entries $entries -TerminalObservation $terminalObservation
+
+        $stage = $result.Stages['code-review']
+        # Before the M6 fix, ObserverBlockCount (used for BOTH the
+        # reconciliation compare AND the unique-catch numerator) counted
+        # ONLY catchable_phase='implementation' blocks (0 here), mismatching
+        # DispositionsNovelExternalCount (1) and spuriously failing
+        # reconciliation even though the finding was legitimately emitted
+        # as a design-catchable observer block.
+        $stage.ObserverBlockCountAllPhases | Should -Be 1
+        $stage.ObserverBlockCount          | Should -Be 0
+        $stage.ReconciliationOk            | Should -Be $true
+        $stage.RelaxationEligible          | Should -Be $true
+        $stage.RelaxationEligibleReason    | Should -BeNullOrEmpty
+    }
+
+    It 'still fails reconciliation on a genuine catchable_phase-blind mismatch after the M6 fix (regression guard)' {
+        $entries = @(script:New-CleanCodeReviewEntries) + @(
+            [PSCustomObject]@{
+                finding_key = 'post-review-observer:803:X1'; introduced_phase = 'design'; catchable_phase = 'design'
+                caught_stage = 'post-review-observer'; escape_distance = 3; severity = 'medium'
+                systemic_fix_type = 'none'; category = 'architecture'; apparatus_meta = $false; seed = $false
+                createdAt = '2024-01-01T12:00:00Z'; surface = 'pr'; issueOrPrNumber = 803
+            }
+        )
+
+        $terminalObservation = @{
+            CoObservedPRCount              = 6
+            MeasuredCoveragePRCount        = 6
+            DispositionsNovelExternalCount = 2   # judge recorded TWO novel findings, only ONE observer block was emitted -- a real mismatch
+            InternalCoObservedCatchCount   = 5
+            ObserverEscapeCount            = 0
+        }
+
+        $result = Get-PhaseContainmentRollup -Entries $entries -TerminalObservation $terminalObservation
+
+        $stage = $result.Stages['code-review']
+        $stage.ObserverBlockCountAllPhases | Should -Be 1
+        $stage.ReconciliationOk            | Should -Be $false
+        $stage.RelaxationEligible          | Should -Be $false
+        $stage.RelaxationEligibleReason    | Should -Match 'reconciliation failed'
+    }
+
+    It 'withholds the escape arm and fails closed when the review-cost comment corpus fetch was truncated (M8 -- distinct from the value-fetch -Truncated switch)' {
+        $entries = script:New-CleanCodeReviewEntries
+
+        $terminalObservation = @{
+            CoObservedPRCount              = 7
+            MeasuredCoveragePRCount        = 6
+            DispositionsNovelExternalCount = 0
+            InternalCoObservedCatchCount   = 20
+            ExternalCatchCount             = 3
+            DuplicateCount                 = 2
+            ObserverEscapeCount            = 0
+            CorpusTruncated                = $true
+        }
+
+        # -Truncated is deliberately NOT supplied (or $false): this proves
+        # the withholding comes from the CorpusTruncated key inside
+        # -TerminalObservation, a genuinely different, independent fetch
+        # from the value-fetch -Truncated switch (issue #772 C11).
+        $result = Get-PhaseContainmentRollup -Entries $entries -TerminalObservation $terminalObservation
+
+        $stage = $result.Stages['code-review']
+        $stage.EscapeArmWithheld        | Should -Be $true
+        $stage.EscapeArmWithheldReason  | Should -Match 'corpus fetch was truncated'
+        $stage.RelaxationEligible       | Should -Be $false
+        $stage.RelaxationEligibleReason | Should -Match 'corpus fetch was truncated'
+    }
+
+    It 'does not withhold the escape arm when CorpusTruncated is absent or $false (M8 regression guard -- otherwise-clean window stays eligible)' {
+        $entries = script:New-CleanCodeReviewEntries
+
+        $terminalObservation = @{
+            CoObservedPRCount              = 7
+            MeasuredCoveragePRCount        = 6
+            DispositionsNovelExternalCount = 0
+            InternalCoObservedCatchCount   = 20
+            ExternalCatchCount             = 3
+            DuplicateCount                 = 2
+            ObserverEscapeCount            = 0
+            CorpusTruncated                = $false
+        }
+
+        $result = Get-PhaseContainmentRollup -Entries $entries -TerminalObservation $terminalObservation
+
+        $stage = $result.Stages['code-review']
+        $stage.EscapeArmWithheld  | Should -Be $false
+        $stage.RelaxationEligible | Should -Be $true
+    }
+}
+
+Describe 'M12: CoObservedPRCount docstring no longer claims to BE DD3''s narrower "co-observed" population (issue #854 code-review escape-detection fix pass)' {
+    BeforeAll {
+        $script:CoreLibText = Get-Content -Raw (Join-Path $script:LibRoot 'phase-containment-rolling-history-core.ps1')
+    }
+
+    It 'no longer documents CoObservedPRCount as "total PRs in the co-observed corpus" (the wrong, too-broad M12 definition)' {
+        $script:CoreLibText | Should -Not -Match 'N - total PRs in the co-observed corpus for'
+    }
+
+    It 'documents CoObservedPRCount as the whole-window population, explicitly NOT DD3''s co-observed population' {
+        $script:CoreLibText | Should -Match 'CoObservedPRCount\s+\[int\]\s+N - total PR tuples observed'
+        $script:CoreLibText | Should -Match "This is NOT DD3's narrower\s*\r?\n\s+`"co-observed`" population \(M12 fix\)"
+    }
+
+    It 'documents MeasuredCoveragePRCount as DD3''s actual co-observed population that n1/Chapman are scoped to' {
+        $script:CoreLibText | Should -Match "K - PRs counting toward coverage AND DD3's\s*\r?\n\s+actual `"co-observed`" population"
+    }
 }
 
 # ---------------------------------------------------------------------------

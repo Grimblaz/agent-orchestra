@@ -261,9 +261,23 @@ Both disposition-recording sites below (§ Routine Findings and § Load-Bearing 
 2. **`gh api` re-derivation** — otherwise (standalone or resumed judge pass), extract the `comment_id` embedded in the finding's `stable_finding_key` and re-derive the reviewer identity via `gh api`, trying the PR-review-comment, issue-comment, and review endpoints in turn. Parse rule: the `comment_id` is the numeric run immediately after the `gh-` prefix, up to the next `-` or end of string; this covers both the single-finding `gh-{comment_id}` key shape and the multi-finding `gh-{comment_id}-{hash}` key shape identically. Normalize the re-derived login per the canonical `reviewer_source` normalization rule in `skills/code-review-intake/SKILL.md` § GitHub Review Mode (lowercase, `.login`-only, trailing `[bot]` strip, quoted-scalar output, reserved-value/`ext-`-prefix collision escape) — this site does not restate that mechanism.
 3. **`unresolved` sentinel** — on any failure (comment deleted, API error, no comment ID embedded in the key to re-derive from), write the sentinel `unresolved`. Never write `local` on lookup failure — `local` is reserved exclusively for pipeline-native (non-GitHub-sourced) findings, which are written directly per the guard above and never fall through to this sentinel.
 
+### `internal_match` Writer Rule (GitHub-Sourced Findings Only, DD2)
+
+`internal_match.match_status` and the PR-level `external_sources_reconciled` field are **written by the judge**, not merely consumed — § Observer emission variant (above) only ever reads the already-resolved value; this section is the writer contract those readers depend on.
+
+At reconciliation time — with **both** the internal prosecution ledger (this PR's own pipeline-native findings) and the external review's findings in context simultaneously, per design decision DD2 — the judge sets `internal_match.match_status` on **every** external-source disposition entry (any entry whose `reviewer_source` resolved to a value other than `local`):
+
+- **`duplicate`** — the external finding describes the same defect as an already-caught internal finding. Also write `matched_finding_key` with that internal finding's `stable_finding_key`.
+- **`novel`** — the external finding has no matching internal finding; the pipeline missed it. This is what the observer emission variant later turns into a `post-review-observer` escape block.
+- **`ambiguous`** — the judge cannot confidently resolve a match either way after verification. Excluded from `n₂`/`m`/coverage math downstream (Seam Specification) — an honest "could not resolve" must never be forced into `duplicate` or `novel`.
+
+`reviewer_source: local` entries (pipeline-native findings) never carry `internal_match` — the field only applies to external-source entries. Field order matters: `internal_match` is written **before** `disposition_rationale` (M42) so a `disposition_rationale` block-scalar's free text can never be mistaken for the real field by a downstream line-regex parser.
+
+In the same posted marker, the judge also emits the **PR-level** `external_sources_reconciled` field once — the list of external-source entries' `stable_finding_key` values the judge reconciled this pass. Emit it **even when empty** (`external_sources_reconciled: []`): a genuinely zero-finding external review is a legal, required coverage record (M9 — "coverage means measurement, not presence"), and omitting the field entirely is indistinguishable downstream from "this PR was never measured at all." Never skip emitting this field because there was nothing to reconcile.
+
 ### Routine Findings — Silent Recording
 
-For routine findings, the agent records the disposition silently in the `review-dispositions-{PR}` accumulator without firing an `AskUserQuestion`. Use `schema_version: 3` (current emission format); write `severity`, `stage`, and `reviewer_source` (the reviewer identity or class that produced the finding — use `local` for pipeline-native prosecution/defense/judge findings; external identities are resolved per § `reviewer_source` Lookup Order above) for all entries, and include `ac_cross_check` for any `dismiss` or `defer` entry with severity ≥ medium:
+For routine findings, the agent records the disposition silently in the `review-dispositions-{PR}` accumulator without firing an `AskUserQuestion`. Use `schema_version: 4` (current emission format); write `severity`, `stage`, and `reviewer_source` (the reviewer identity or class that produced the finding — use `local` for pipeline-native prosecution/defense/judge findings; external identities are resolved per § `reviewer_source` Lookup Order above) for all entries, `internal_match` for external-source entries (§ `internal_match` Writer Rule above), and include `ac_cross_check` for any `dismiss` or `defer` entry with severity ≥ medium. Remember the PR-level `external_sources_reconciled` field once per posted marker (§ `internal_match` Writer Rule above; § Persistence — Ordering below shows the full marker shape):
 
 > **Pre-condition**: for any `dismiss` entry with severity ≥ medium, run the AC cross-check (see § AC Cross-Check — Blocking Pre-Condition) before writing this entry.
 
@@ -301,7 +315,7 @@ Capture the engineer's choice verbatim.
 
 > **Pre-condition**: if the engineer chooses `dismiss` with severity ≥ medium, run the AC cross-check (see § AC Cross-Check — Blocking Pre-Condition) before writing this entry.
 
-Record as (v3 format — include `severity`, `stage`, `reviewer_source`, and `ac_cross_check` for dismiss/defer entries with severity ≥ medium):
+Record as (v4 format — include `severity`, `stage`, `reviewer_source`, `internal_match` for external-source entries (§ `internal_match` Writer Rule above), and `ac_cross_check` for dismiss/defer entries with severity ≥ medium):
 
 ```yaml
 - stable_finding_key: "src/auth/session.ts:88:token-expiry-not-checked-b7c1a2f3"
@@ -314,6 +328,8 @@ Record as (v3 format — include `severity`, `stage`, `reviewer_source`, and `ac
   reviewer_source: local     # v3: writer always emits this field (writer obligation); the reader/consumer treats an absent field as local for backward compat with pre-v3 entries (reader-semantics fallback) — local is reserved for pipeline-native findings; external identities resolve per § reviewer_source Lookup Order
   disposition_rationale: "Engineer chose incorporate: the expiry check was confirmed missing and the fix is bounded to one function."
 ```
+
+This example's `reviewer_source: local` means no `internal_match` is written (pipeline-native). For a load-bearing finding whose `reviewer_source` resolved to an external identity, add `internal_match: { match_status: ... }` before `disposition_rationale`, same shape as the routine external-source example above.
 
 ### Escalate Semantics
 
@@ -397,13 +413,13 @@ This enables re-review of a PR without re-asking for findings already dispositio
 
 Write in this order (atomic marker first, engagement-record second):
 
-1. **`<!-- review-dispositions-{PR} -->`** — Post as a PR comment. Payload: `schema_version: 3`, `passes_run: [...]`, `entries: [...]` (all findings, routine and load-bearing, one entry per finding). v2 added per-entry `severity`, `ac_cross_check`, and `stage` fields; v3 adds per-entry `reviewer_source` (the reviewer identity or class — `local` for pipeline-native findings; external identities resolve per § `reviewer_source` Lookup Order above). This is the atomic per-finding record.
+1. **`<!-- review-dispositions-{PR} -->`** — Post as a PR comment. Payload: `schema_version: 4`, `passes_run: [...]`, `entries: [...]` (all findings, routine and load-bearing, one entry per finding), plus the PR-level `external_sources_reconciled` field. v2 added per-entry `severity`, `ac_cross_check`, and `stage` fields; v3 added per-entry `reviewer_source` (the reviewer identity or class — `local` for pipeline-native findings; external identities resolve per § `reviewer_source` Lookup Order above); v4 adds per-entry `internal_match` and the PR-level `external_sources_reconciled` field (see § `internal_match` Writer Rule below). This is the atomic per-finding record.
 
    ````text
    <!-- review-dispositions-{PR} -->
 
    ```yaml
-   schema_version: 3
+   schema_version: 4
    passes_run: [1, 2, 3, 4, 5]
    entries:
      - stable_finding_key: "..."
@@ -412,7 +428,7 @@ Write in this order (atomic marker first, engagement-record second):
        classification: routine
        severity: medium
        stage: code-review
-       reviewer_source: local   # or an origin-derived value (e.g. "jdoe", resolved per § reviewer_source Lookup Order) when the finding came from an external reviewer
+       reviewer_source: local   # pipeline-native finding: no internal_match (see below)
        disposition_rationale: "..."
        ac_cross_check:
          file_arm: false
@@ -421,14 +437,27 @@ Write in this order (atomic marker first, engagement-record second):
          ac_ref: "- the AC line that matched"
          source: issue
          routed: force-accept
+     - stable_finding_key: "gh-123456789"
+       pass: 1
+       disposition: incorporate
+       classification: routine
+       severity: medium
+       stage: code-review
+       reviewer_source: jdoe    # external identity, resolved per § reviewer_source Lookup Order
+       internal_match:          # written BEFORE disposition_rationale (M42 field order)
+         match_status: novel    # duplicate | novel | ambiguous — see § internal_match Writer Rule
+       disposition_rationale: "..."
+   external_sources_reconciled: ["gh-123456789"]   # PR-level; [] is a legal, required zero-finding coverage record, never an omission
    ```
    ````
 
    > **v3 per-entry requirements** (carried over unchanged from v2): For entries with `disposition: dismiss` or `disposition: defer` and `severity` ≥ medium, `ac_cross_check` is required. The `ac_cross_check` object records which arms ran (`file_arm`, `term_arm`), the result tier (`matched-high | matched-ambiguous | no-match`), the matched AC reference if any, the source, and the routing outcome. Legacy `schema_version: 1` entries are exempt from this check. `artifact_citation` covers non-AC inherited artifacts; `ac_cross_check.ac_ref` is the AC-specific channel.
    >
+   > **v4 requirements** (additive on top of v3): every external-source entry (`reviewer_source` not `local`) carries `internal_match.match_status`, written per § `internal_match` Writer Rule below. The PR-level `external_sources_reconciled` field is always emitted once per posted marker — including as `external_sources_reconciled: []` when the external review found nothing to reconcile; an absent field is an unmeasured PR, while an empty array is a measured, legal zero-finding coverage record (M9). `reviewer_source` stays required on every entry, same as v3.
+   >
    > **`stage` field values**: The `stage` field records which pipeline stage produced this entry: `code-review` for the post-judge disposition gate, `ce` for CE Gate defect deferral. Both stages use the same `ac_cross_check` pre-condition at severity ≥ medium.
    >
-   > **In-session schema audit (before posting)**: Before posting the `review-dispositions-{PR}` comment to the PR, run a warn-only schema check using `.github/scripts/lib/review-dispositions-validator-core.ps1 -PullRequestNumber {PR} -InMemoryMarkers @($rawMarkerText)`. Surface any `findings` as warnings. This catches v3 schema violations (e.g., missing `ac_cross_check` on dismiss/defer entries at severity ≥ medium) before the marker is committed to the PR timeline. The validator is warn-only and never blocks posting.
+   > **In-session schema audit (before posting)**: Before posting the `review-dispositions-{PR}` comment to the PR, run a warn-only schema check using `.github/scripts/lib/review-dispositions-validator-core.ps1 -PullRequestNumber {PR} -InMemoryMarkers @($rawMarkerText)`. Surface any `findings` as warnings. This catches v4 schema violations (e.g., missing `ac_cross_check` on dismiss/defer entries at severity ≥ medium, or a missing `reviewer_source`) before the marker is committed to the PR timeline. The validator is warn-only and never blocks posting.
 
 2. **`<!-- engagement-record-review-{PR} -->`** — Post as a separate PR comment (not the same comment as review-dispositions). Payload follows `skills/engagement-record-emission/SKILL.md` shape at `schema_version: 4`, `phase: review`. Load-bearing findings that fired `AskUserQuestion` appear in `load_bearing_decisions[]` with their `engineer_choice` and `audit_rationale`. Routine findings do not appear in the engagement-record.
 

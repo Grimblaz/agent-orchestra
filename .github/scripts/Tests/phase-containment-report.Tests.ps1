@@ -310,3 +310,378 @@ Describe 'structural guard: RelaxationEligible computation path never receives a
         }
     }
 }
+
+# ---------------------------------------------------------------------------
+# Get-PhaseContainmentTerminalObservation harness (issue #854 code-review
+# escape-detection fix pass, M9). Before this harness, the ONLY existing
+# invocation of this function anywhere in the suite (the AC3 byte-identical
+# pin above) used a `Tuples = @()` fixture, so every per-tuple branch inside
+# the derivation was dead code under test. This harness builds REAL Tuples:
+# judge-authored and non-judge-authored bodies, dated and undated
+# createdAt, v3 (reviewer_source only) and v4 (reviewer_source +
+# internal_match) markers, zero-finding coverage records, and entries
+# spanning every Disposition and internal_match.match_status value.
+# ---------------------------------------------------------------------------
+
+Describe 'Get-PhaseContainmentTerminalObservation (issue #854 code-review escape-detection fix pass, M9 harness)' {
+    BeforeAll {
+        $script:JudgeLogin = 'github-actions[bot]'
+
+        # Builds a single per-entry YAML block for a review-dispositions
+        # marker. -MatchStatus $null omits internal_match entirely (v3-
+        # style marker; the Seam Specification defaults an absent
+        # internal_match to 'ambiguous').
+        function script:New-RdEntry {
+            param(
+                [Parameter(Mandatory)][string]$Key,
+                [string]$Disposition = 'incorporate',
+                [string]$ReviewerSource = 'local',
+                [string]$MatchStatus = $null
+            )
+            $lines = [System.Collections.Generic.List[string]]::new()
+            $lines.Add("  - stable_finding_key: `"$Key`"")
+            $lines.Add('    pass: 1')
+            $lines.Add("    disposition: $Disposition")
+            $lines.Add('    classification: routine')
+            $lines.Add('    severity: medium')
+            $lines.Add('    stage: code-review')
+            $lines.Add("    reviewer_source: $ReviewerSource")
+            if ($null -ne $MatchStatus) {
+                # v4 shape: internal_match written before disposition_rationale (M42).
+                $lines.Add('    internal_match:')
+                $lines.Add("      match_status: $MatchStatus")
+            }
+            $lines.Add('    disposition_rationale: "fixture entry"')
+            return ($lines -join "`n")
+        }
+
+        # Builds a single <!-- review-dispositions-{Pr} --> comment body.
+        #   -Entries: an array of already-formatted YAML entry blocks (see
+        #     script:New-RdEntry), or @() for a zero-entry marker.
+        #   -ExternalSourcesReconciled: the PR-level field's raw YAML value
+        #     (e.g. '[]' or '["gh-1"]'); $null OMITS the field entirely --
+        #     distinct from a genuinely empty list (the M9 zero-finding
+        #     legal-coverage case uses '[]', never $null).
+        function script:New-RdBody {
+            param(
+                [Parameter(Mandatory)][int]$Pr,
+                [string[]]$Entries = @(),
+                [string]$ExternalSourcesReconciled = '[]',
+                [int]$SchemaVersion = 4
+            )
+            $fence = '{0}{0}{0}' -f [char]96
+            $lines = [System.Collections.Generic.List[string]]::new()
+            $lines.Add("<!-- review-dispositions-$Pr -->")
+            $lines.Add('')
+            $lines.Add("${fence}yaml")
+            $lines.Add("schema_version: $SchemaVersion")
+            $lines.Add('passes_run: [1]')
+            $lines.Add('entries:')
+            foreach ($e in $Entries) { $lines.Add($e) }
+            if ($null -ne $ExternalSourcesReconciled) {
+                $lines.Add("external_sources_reconciled: $ExternalSourcesReconciled")
+            }
+            $lines.Add($fence)
+            return ($lines -join "`n")
+        }
+
+        # Builds a single PR-surface corpus tuple (the contract Get-
+        # PhaseContainmentCommentCorpus produces: Number/Surface/Bodies/
+        # AuthorLogins/CreatedAtValues, index-paired across the last three).
+        function script:New-PrTuple {
+            param(
+                [Parameter(Mandatory)][int]$Number,
+                [Parameter(Mandatory)][string[]]$Bodies,
+                [Parameter(Mandatory)][string[]]$AuthorLogins,
+                [string[]]$CreatedAtValues = $null
+            )
+            if ($null -eq $CreatedAtValues) {
+                # Default: every body dated, one day apart, so latest-wins
+                # ordering is deterministic when a test does not care about it.
+                $CreatedAtValues = 1..$Bodies.Count | ForEach-Object { "2026-0$_-01T00:00:00Z" }
+            }
+            return @{
+                Number          = $Number
+                Surface         = 'pr'
+                Bodies          = $Bodies
+                AuthorLogins    = $AuthorLogins
+                CreatedAtValues = $CreatedAtValues
+            }
+        }
+
+        function script:New-CodeReviewValueEntry {
+            param([int]$PrNumber, [bool]$ApparatusMeta = $false)
+            return @{
+                finding_key      = "code-review:${PrNumber}:internal-catch"
+                introduced_phase = 'implementation'
+                catchable_phase  = 'implementation'
+                caught_stage     = 'code-review'
+                escape_distance  = 0
+                severity         = 'low'
+                systemic_fix_type = 'none'
+                category         = 'implementation-clarity'
+                apparatus_meta   = $ApparatusMeta
+                surface          = 'pr'
+                issueOrPrNumber  = $PrNumber
+                createdAt        = '2026-01-01T00:00:00Z'
+            }
+        }
+    }
+
+    Context 'M9: zero-finding coverage records are legal measurements' {
+        It 'counts a judge-authored, cleanly-parsed, ZERO-entry review-dispositions record as legal coverage toward K' {
+            $body = New-RdBody -Pr 1000 -Entries @() -ExternalSourcesReconciled '[]'
+            $tuple = New-PrTuple -Number 1000 -Bodies @($body) -AuthorLogins @($script:JudgeLogin)
+            $corpus = [PSCustomObject]@{ Tuples = @($tuple); Truncated = $false }
+
+            $result = Get-PhaseContainmentTerminalObservation -Corpus $corpus -Entries @() -JudgeLogin $script:JudgeLogin -ValueCacheOk $true
+
+            $result.CoObservedPRCount       | Should -Be 1
+            $result.MeasuredCoveragePRCount | Should -Be 1
+        }
+
+        It 'does NOT count a PR with no review-dispositions marker head at all (distinguishing "measured zero" from "never measured")' {
+            $body = "Just an ordinary PR comment, no review-dispositions marker at all."
+            $tuple = New-PrTuple -Number 1001 -Bodies @($body) -AuthorLogins @($script:JudgeLogin)
+            $corpus = [PSCustomObject]@{ Tuples = @($tuple); Truncated = $false }
+
+            $result = Get-PhaseContainmentTerminalObservation -Corpus $corpus -Entries @() -JudgeLogin $script:JudgeLogin -ValueCacheOk $true
+
+            $result.CoObservedPRCount       | Should -Be 1
+            $result.MeasuredCoveragePRCount | Should -Be 0
+        }
+    }
+
+    Context 'M5: coverage no longer requires >=1 resolved-external finding' {
+        It 'counts a PR toward K even when its only external entry resolves to reviewer_source unresolved (all-unresolved no longer zeroes coverage)' {
+            $entry = New-RdEntry -Key 'gh-1' -Disposition 'incorporate' -ReviewerSource 'unresolved' -MatchStatus $null
+            $body = New-RdBody -Pr 2000 -Entries @($entry) -ExternalSourcesReconciled '[]'
+            $tuple = New-PrTuple -Number 2000 -Bodies @($body) -AuthorLogins @($script:JudgeLogin)
+            $corpus = [PSCustomObject]@{ Tuples = @($tuple); Truncated = $false }
+
+            $result = Get-PhaseContainmentTerminalObservation -Corpus $corpus -Entries @() -JudgeLogin $script:JudgeLogin -ValueCacheOk $true
+
+            $result.MeasuredCoveragePRCount        | Should -Be 1
+            $result.ExternalCatchCount             | Should -Be 0
+            $result.DuplicateCount                 | Should -Be 0
+            $result.DispositionsNovelExternalCount | Should -Be 0
+        }
+
+        It 'counts a PR toward K carrying only a "local" (pipeline-native) entry, same as an empty external review (regression: local-only was never gated by the old >=1 rule either)' {
+            $entry = New-RdEntry -Key 'local-1' -Disposition 'incorporate' -ReviewerSource 'local' -MatchStatus $null
+            $body = New-RdBody -Pr 2001 -Entries @($entry) -ExternalSourcesReconciled '[]'
+            $tuple = New-PrTuple -Number 2001 -Bodies @($body) -AuthorLogins @($script:JudgeLogin)
+            $corpus = [PSCustomObject]@{ Tuples = @($tuple); Truncated = $false }
+
+            $result = Get-PhaseContainmentTerminalObservation -Corpus $corpus -Entries @() -JudgeLogin $script:JudgeLogin -ValueCacheOk $true
+
+            $result.MeasuredCoveragePRCount | Should -Be 1
+        }
+    }
+
+    Context 'M3: dismissed external-source entries never count toward K-affecting tallies' {
+        It 'excludes a dismissed novel-matched entry from DispositionsNovelExternalCount and ExternalCatchCount' {
+            $entry = New-RdEntry -Key 'gh-dismissed' -Disposition 'dismiss' -ReviewerSource 'jdoe' -MatchStatus 'novel'
+            $body = New-RdBody -Pr 2100 -Entries @($entry) -ExternalSourcesReconciled '["gh-dismissed"]'
+            $tuple = New-PrTuple -Number 2100 -Bodies @($body) -AuthorLogins @($script:JudgeLogin)
+            $corpus = [PSCustomObject]@{ Tuples = @($tuple); Truncated = $false }
+
+            $result = Get-PhaseContainmentTerminalObservation -Corpus $corpus -Entries @() -JudgeLogin $script:JudgeLogin -ValueCacheOk $true
+
+            $result.DispositionsNovelExternalCount | Should -Be 0
+            $result.ExternalCatchCount             | Should -Be 0
+            # Coverage itself is unaffected by disposition (M5/M9) -- the PR
+            # still had a judge-authored, cleanly-parsed coverage record.
+            $result.MeasuredCoveragePRCount        | Should -Be 1
+        }
+
+        It 'excludes a dismissed duplicate-matched entry from DuplicateCount and ExternalCatchCount' {
+            $entry = New-RdEntry -Key 'gh-dismissed-dup' -Disposition 'dismiss' -ReviewerSource 'jdoe' -MatchStatus 'duplicate'
+            $body = New-RdBody -Pr 2101 -Entries @($entry) -ExternalSourcesReconciled '["gh-dismissed-dup"]'
+            $tuple = New-PrTuple -Number 2101 -Bodies @($body) -AuthorLogins @($script:JudgeLogin)
+            $corpus = [PSCustomObject]@{ Tuples = @($tuple); Truncated = $false }
+
+            $result = Get-PhaseContainmentTerminalObservation -Corpus $corpus -Entries @() -JudgeLogin $script:JudgeLogin -ValueCacheOk $true
+
+            $result.DuplicateCount     | Should -Be 0
+            $result.ExternalCatchCount | Should -Be 0
+        }
+
+        It 'counts non-dismissed sustained dispositions (incorporate, escalate, defer) toward the novel/duplicate tallies (only dismiss is excluded)' {
+            $entries = @(
+                (New-RdEntry -Key 'gh-incorporate' -Disposition 'incorporate' -ReviewerSource 'alice' -MatchStatus 'novel'),
+                (New-RdEntry -Key 'gh-escalate' -Disposition 'escalate' -ReviewerSource 'bob' -MatchStatus 'novel'),
+                (New-RdEntry -Key 'gh-defer' -Disposition 'defer' -ReviewerSource 'carol' -MatchStatus 'novel')
+            )
+            $body = New-RdBody -Pr 2102 -Entries $entries -ExternalSourcesReconciled '["gh-incorporate","gh-escalate","gh-defer"]'
+            $tuple = New-PrTuple -Number 2102 -Bodies @($body) -AuthorLogins @($script:JudgeLogin)
+            $corpus = [PSCustomObject]@{ Tuples = @($tuple); Truncated = $false }
+
+            $result = Get-PhaseContainmentTerminalObservation -Corpus $corpus -Entries @() -JudgeLogin $script:JudgeLogin -ValueCacheOk $true
+
+            $result.DispositionsNovelExternalCount | Should -Be 3
+            $result.ExternalCatchCount             | Should -Be 3
+        }
+    }
+
+    Context 'internal_match.match_status coverage: duplicate / novel / ambiguous / absent (v3 vs v4 markers)' {
+        It 'tallies duplicate, novel, and ambiguous entries into the correct buckets, and defaults an absent internal_match (v3 marker) to ambiguous' {
+            $entries = @(
+                (New-RdEntry -Key 'gh-dup' -ReviewerSource 'alice' -MatchStatus 'duplicate'),
+                (New-RdEntry -Key 'gh-novel' -ReviewerSource 'bob' -MatchStatus 'novel'),
+                (New-RdEntry -Key 'gh-ambiguous' -ReviewerSource 'carol' -MatchStatus 'ambiguous'),
+                # v3-style entry: no internal_match block at all.
+                (New-RdEntry -Key 'gh-v3-absent' -ReviewerSource 'dave' -MatchStatus $null)
+            )
+            $body = New-RdBody -Pr 2200 -Entries $entries -ExternalSourcesReconciled '["gh-dup","gh-novel"]' -SchemaVersion 3
+
+            $tuple = New-PrTuple -Number 2200 -Bodies @($body) -AuthorLogins @($script:JudgeLogin)
+            $corpus = [PSCustomObject]@{ Tuples = @($tuple); Truncated = $false }
+
+            $result = Get-PhaseContainmentTerminalObservation -Corpus $corpus -Entries @() -JudgeLogin $script:JudgeLogin -ValueCacheOk $true
+
+            $result.DuplicateCount                 | Should -Be 1
+            $result.DispositionsNovelExternalCount | Should -Be 1
+            # ambiguous AND the absent-internal_match entry (defaults to
+            # ambiguous) are both excluded from n2/m -- only duplicate(1) +
+            # novel(1) = 2 count toward ExternalCatchCount.
+            $result.ExternalCatchCount             | Should -Be 2
+        }
+    }
+
+    Context 'judge-authored vs non-judge-authored bodies (forged-coverage vector, issue #854 s4/M8)' {
+        It 'contributes ZERO coverage/catch data from a well-formed but non-judge-authored body' {
+            $forgedEntry = New-RdEntry -Key 'gh-forged' -ReviewerSource 'mallory' -MatchStatus 'novel'
+            $forgedBody = New-RdBody -Pr 2300 -Entries @($forgedEntry) -ExternalSourcesReconciled '["gh-forged"]'
+            $tuple = New-PrTuple -Number 2300 -Bodies @($forgedBody) -AuthorLogins @('random-attacker')
+            $corpus = [PSCustomObject]@{ Tuples = @($tuple); Truncated = $false }
+
+            $result = Get-PhaseContainmentTerminalObservation -Corpus $corpus -Entries @() -JudgeLogin $script:JudgeLogin -ValueCacheOk $true
+
+            $result.MeasuredCoveragePRCount        | Should -Be 0
+            $result.DispositionsNovelExternalCount | Should -Be 0
+            # The window population (N) still counts the PR tuple itself --
+            # only the judge-authorship-gated coverage/catch data is zeroed.
+            $result.CoObservedPRCount              | Should -Be 1
+        }
+    }
+
+    Context 'dated createdAt latest-wins merge across two judge bodies on the same PR' {
+        It 'keeps the LATER-createdAt body''s match_status for a repeated stable_finding_key' {
+            $earlier = New-RdEntry -Key 'gh-samekey' -ReviewerSource 'alice' -MatchStatus 'ambiguous'
+            $later   = New-RdEntry -Key 'gh-samekey' -ReviewerSource 'alice' -MatchStatus 'novel'
+            $earlierBody = New-RdBody -Pr 2400 -Entries @($earlier) -ExternalSourcesReconciled '[]'
+            $laterBody   = New-RdBody -Pr 2400 -Entries @($later) -ExternalSourcesReconciled '["gh-samekey"]'
+
+            $tuple = New-PrTuple -Number 2400 `
+                -Bodies @($earlierBody, $laterBody) `
+                -AuthorLogins @($script:JudgeLogin, $script:JudgeLogin) `
+                -CreatedAtValues @('2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z')
+            $corpus = [PSCustomObject]@{ Tuples = @($tuple); Truncated = $false }
+
+            $result = Get-PhaseContainmentTerminalObservation -Corpus $corpus -Entries @() -JudgeLogin $script:JudgeLogin -ValueCacheOk $true
+
+            # The later body's 'novel' verdict wins over the earlier 'ambiguous' one.
+            $result.DispositionsNovelExternalCount | Should -Be 1
+            $result.ExternalCatchCount             | Should -Be 1
+        }
+
+        It 'still contributes coverage/catch data when CreatedAtValues is blank (undated body)' {
+            $entry = New-RdEntry -Key 'gh-undated' -ReviewerSource 'alice' -MatchStatus 'novel'
+            $body = New-RdBody -Pr 2401 -Entries @($entry) -ExternalSourcesReconciled '["gh-undated"]'
+            $tuple = New-PrTuple -Number 2401 -Bodies @($body) -AuthorLogins @($script:JudgeLogin) -CreatedAtValues @('')
+
+            $corpus = [PSCustomObject]@{ Tuples = @($tuple); Truncated = $false }
+
+            $result = Get-PhaseContainmentTerminalObservation -Corpus $corpus -Entries @() -JudgeLogin $script:JudgeLogin -ValueCacheOk $true
+
+            $result.MeasuredCoveragePRCount        | Should -Be 1
+            $result.DispositionsNovelExternalCount | Should -Be 1
+        }
+    }
+
+    Context 'M2/M12: n1 (InternalCoObservedCatchCount) is scoped to the coverage-record PR set, not the whole window' {
+        It 'excludes an internal code-review/implementation catch on a PR that has NO review-dispositions coverage record, even though that PR is in the window' {
+            # PR 2500 has a judge-authored coverage record (in K); PR 2501 is
+            # merely present in the fetched window (a corpus tuple exists)
+            # but carries no review-dispositions marker at all, so it is NOT
+            # in K. Both PRs have an internal code-review/implementation
+            # catch in the VALUE-side $Entries.
+            $coveredBody = New-RdBody -Pr 2500 -Entries @() -ExternalSourcesReconciled '[]'
+            $coveredTuple = New-PrTuple -Number 2500 -Bodies @($coveredBody) -AuthorLogins @($script:JudgeLogin)
+
+            $uncoveredBody = 'Ordinary PR chatter, no review-dispositions marker.'
+            $uncoveredTuple = New-PrTuple -Number 2501 -Bodies @($uncoveredBody) -AuthorLogins @($script:JudgeLogin)
+
+            $corpus = [PSCustomObject]@{ Tuples = @($coveredTuple, $uncoveredTuple); Truncated = $false }
+
+            $valueEntries = @(
+                (New-CodeReviewValueEntry -PrNumber 2500),
+                (New-CodeReviewValueEntry -PrNumber 2501)
+            )
+
+            $result = Get-PhaseContainmentTerminalObservation -Corpus $corpus -Entries $valueEntries -JudgeLogin $script:JudgeLogin -ValueCacheOk $true
+
+            $result.CoObservedPRCount            | Should -Be 2   # M12: whole-window population (N)
+            $result.MeasuredCoveragePRCount       | Should -Be 1   # M12: DD3's actual co-observed set (K)
+            # M2: n1 counts ONLY the catch on the coverage-record PR (2500),
+            # never the catch on PR 2501 (window-present but uncovered) --
+            # before the fix, n1 would have counted BOTH (scoped to the
+            # whole-window $coObservedPrNumbers), diluting the estimator.
+            $result.InternalCoObservedCatchCount | Should -Be 1
+        }
+    }
+
+    Context 'M8: threads the corpus fetch''s own Truncated flag through, distinct from the value fetch' {
+        It 'reports CorpusTruncated=$true when the corpus itself truncated' {
+            $corpus = [PSCustomObject]@{ Tuples = @(); Truncated = $true }
+
+            $result = Get-PhaseContainmentTerminalObservation -Corpus $corpus -Entries @() -JudgeLogin $script:JudgeLogin -ValueCacheOk $true
+
+            $result.CorpusTruncated | Should -Be $true
+        }
+
+        It 'reports CorpusTruncated=$false when the corpus did not truncate (regression guard)' {
+            $corpus = [PSCustomObject]@{ Tuples = @(); Truncated = $false }
+
+            $result = Get-PhaseContainmentTerminalObservation -Corpus $corpus -Entries @() -JudgeLogin $script:JudgeLogin -ValueCacheOk $true
+
+            $result.CorpusTruncated | Should -Be $false
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# M1 writer-contract regression guard (skills/review-judgment/SKILL.md).
+# This is a documentation-only fix (the judge writes internal_match and
+# external_sources_reconciled; no runtime code in this repo consumes the
+# skill body directly), so its "test" is a content assertion pinning the
+# writer instruction actually landed, rather than exercising a function.
+# ---------------------------------------------------------------------------
+
+Describe 'M1: review-judgment SKILL.md documents the internal_match/external_sources_reconciled writer contract (issue #854 code-review escape-detection fix pass)' {
+    BeforeAll {
+        $script:SkillPath = Join-Path $PSScriptRoot '..' '..' '..' 'skills' 'review-judgment' 'SKILL.md'
+        $script:SkillText = Get-Content -Raw $script:SkillPath
+    }
+
+    It 'the SKILL.md file exists at the expected path' {
+        Test-Path $script:SkillPath | Should -BeTrue
+    }
+
+    It 'documents a writer rule for internal_match.match_status, not just a consumer rule (DD2)' {
+        $script:SkillText | Should -Match '(?m)^### `internal_match` Writer Rule'
+        $script:SkillText | Should -Match 'the judge sets `internal_match\.match_status` on \*\*every\*\* external-source disposition entry'
+    }
+
+    It 'instructs emitting external_sources_reconciled even when empty (M9 legal zero-finding coverage record)' {
+        $script:SkillText | Should -Match 'Emit it \*\*even when empty\*\*'
+        $script:SkillText | Should -Match 'external_sources_reconciled: \[\]'
+    }
+
+    It 'bumps the disposition-recording examples to schema_version: 4 (no longer instructs schema_version: 3 as current)' {
+        $script:SkillText | Should -Match 'Use `schema_version: 4` \(current emission format\)'
+        $script:SkillText | Should -Match '(?m)^   schema_version: 4$'
+        $script:SkillText | Should -Not -Match 'Use `schema_version: 3` \(current emission format\)'
+    }
+}
