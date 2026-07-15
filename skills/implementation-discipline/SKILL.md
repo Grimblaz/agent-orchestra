@@ -106,6 +106,7 @@ After implementation, confirm:
 2. Expected integration points are actually connected.
 3. The implementation satisfies the design requirements and acceptance criteria.
 4. Any JSON output created or edited is parseable and preserves required array typing.
+5. For generated user-facing explanatory text spanning multiple root causes (a Note, warning, or error message covering more than one "why did this happen" case): verify each sub-case is named distinctly rather than conflated with a differently-caused sub-case under shared wording, and that it cross-references any companion doc a maintainer needs to act on it correctly.
 
 For JSON changes:
 
