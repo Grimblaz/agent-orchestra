@@ -145,6 +145,27 @@ In the same PR comment as the `<!-- judge-rulings ... -->` block, emit one `<!--
 - `severity`, `systemic_fix_type`, `category`: carry forward from the finding
 - `apparatus_meta: false` unless a stated criterion justifies `true`; when `apparatus_meta: true`, the entry is audited
 
+#### Observer emission variant (post-review-observer)
+
+`reviewer_source` values referenced below are resolved per § `reviewer_source` Lookup Order (later in this document) — read that section first if the resolution mechanism itself is in question; this rule only consumes the already-resolved value.
+
+When a sustained finding's `reviewer_source` resolves to a real external identity (not the reserved `local` sentinel) and its `internal_match.match_status` is `novel`, emit the observer variant of the phase-containment block instead of the standard code-review block above — one block per finding, never both:
+
+- `finding_key`: `post-review-observer:{stable_finding_key}` — this exact prefix is load-bearing (M26): `Get-EmissionGap` attributes a block to a surface by checking the `finding_key` prefix, so a block emitted with the wrong prefix is invisible to, or miscounted by, the reconciliation sweep even though it would pass schema validation.
+- `caught_stage: post-review-observer`
+- `escape_distance`: recomputed as `4 - ordinal(catchable_phase)` (post-review-observer projection = 4; same phase ordinals as above)
+- `introduced_phase`, `catchable_phase`, `severity`, `systemic_fix_type`, `category`, `apparatus_meta`: same setter rule and carry-forward as the code-review block above
+
+**Novel-gating is a trinary, not a two-way rule (M25)**:
+
+- `reviewer_source` is the reserved `local` sentinel → standard `code-review` block, unchanged.
+- `reviewer_source` is a resolved real external identity AND `internal_match.match_status: novel` → observer block, which REPLACES the standard block. One defect, one block, never both.
+- `internal_match.match_status` is `duplicate` or `ambiguous`, OR `reviewer_source` is the `unresolved` lookup-failure sentinel → NEITHER block is emitted.
+
+Writing the unqualified two-way version of this rule — "any resolved external identity gets an observer block" — is wrong: it would emit an observer block for a `duplicate`-matched finding, double-counting one defect as both a catch-side overlap and an escape-side miss.
+
+**Dispatch is exact-equality only (M40)**: test `reviewer_source -eq 'local'`, never `-like`, `-match`, or other containment-style matching. A real GitHub login literally named `local` is normalized to `ext-local` by the intake process specifically so it can be told apart from the reserved `local` sentinel (see `skills/code-review-intake/SKILL.md` § GitHub Review Mode, around line 21, for the normalization rule) — a containment-style dispatch would misclassify `ext-local` as pipeline-native and silently delete a real escape.
+
 **Setter rule**: `catchable_phase` and `introduced_phase` must each be set by explicit agent judgment with no default — the agent must reason about which phase was the earliest in which this specific defect was catchable. Validate each block against `skills/calibration-pipeline/schemas/phase-containment.schema.json`.
 
 **Emission check (hub maintainers only)**: after posting the `judge-rulings` PR comment with its phase-containment blocks, run `pwsh ./.github/scripts/phase-containment-emission-check.ps1 -Pr {N}` and treat its output as advisory — warn-only, never blocking. The repo-relative script path does not resolve from a consumer repo's CWD, so this nudge applies only when working in the Agent Orchestra hub repo itself; see the script header for the full contract.

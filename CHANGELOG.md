@@ -2,6 +2,14 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.3.13] — 2026-07-15
+
+### Added
+
+- Phase-containment ledger closes the code-review terminal-stage blind spot (#854): a new `post-review-observer` caught-stage (projection 4) turns external-reviewer catches the pipeline missed into real ledger escapes, and the maintainer report renders a two-arm code-review verdict (catch-side veto + escape-side miss estimate) instead of a structurally-artifactual `0.00`/`ELIGIBLE`.
+- `skills/review-judgment/SKILL.md` documents the observer emission variant: the `post-review-observer:{stable_finding_key}` prefix, novel-gated trinary dispatch, and exact-equality `local`-sentinel matching that a judge must follow when emitting phase-containment blocks in production.
+- `Documents/Design/phase-containment-ledger.md` records the two-arm certification model, the fail-closed coverage/NaN/reconciliation guards, and the two owner-approved doctrine revisions (`value-block-cost-dependency-854`, `coverage-authorship-854`) this issue made explicit.
+
 ## [3.3.12] — 2026-07-13
 
 ### Added
