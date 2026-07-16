@@ -66,7 +66,7 @@ Issue #344 changes the skills boundary from "skills are reference material" to "
 | `software-architecture` | `.github/skills/software-architecture/` | Clean Architecture, SOLID principles, and architectural decision guidance |
 | `specification-authoring` | `.github/skills/specification-authoring/` | Structured authoring guidance for formal specification documents |
 | `systematic-debugging` | `.github/skills/systematic-debugging/` | 4-phase debugging process (Observe, Hypothesize, Test, Fix) for complex issues |
-| `terminal-hygiene` | `.github/skills/terminal-hygiene/` | Terminal and test execution guardrails for Agent Orchestra workflows |
+| `terminal-hygiene` | `.github/skills/terminal-hygiene/` | Terminal and test execution guardrails plus session-cost discipline for Agent Orchestra workflows |
 | `test-driven-development` | `.github/skills/test-driven-development/` | Test-Driven Development workflow guidance, quality standards, and practical patterns |
 | `ui-iteration` | `.github/skills/ui-iteration/` | Reusable screenshot-driven UI polish workflow for iterative visual refinement |
 | `ui-testing` | `.github/skills/ui-testing/` | Resilient React component testing strategies focusing on user behavior |

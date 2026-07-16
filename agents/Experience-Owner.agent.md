@@ -64,7 +64,7 @@ Customer experience bookend — upstream framing before technical design begins,
 
 ## Process
 
-Load `skills/solution-authoring/SKILL.md` first and follow its protocol before any subsequent skill fires a structured question. Then load `skills/upstream-onboarding/SKILL.md` and follow its protocol. (Note: cross-session engagement-state will be preserved via the SMC-20 engagement-record markers and the same-decision-resume skip rule, preventing repeated questioning on settled decisions across sessions (SMC-20 engagement-record markers active for both read and write paths per #576). The classification gate applies only once a target artifact is established — on greenfield invocations, defer until an issue is created.)
+Load `skills/solution-authoring/SKILL.md` first and follow its protocol before any subsequent skill fires a structured question. Then load `skills/upstream-onboarding/SKILL.md` and follow its protocol. Then load `skills/terminal-hygiene/SKILL.md` § Session-Cost Discipline and follow its guidance for the remainder of this session. (Note: cross-session engagement-state will be preserved via the SMC-20 engagement-record markers and the same-decision-resume skip rule, preventing repeated questioning on settled decisions across sessions (SMC-20 engagement-record markers active for both read and write paths per #576). The classification gate applies only once a target artifact is established — on greenfield invocations, defer until an issue is created.)
 
 ## GitHub Setup
 

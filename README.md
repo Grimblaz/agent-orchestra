@@ -263,7 +263,7 @@ Skills are domain-specific knowledge packages in `skills/` (repo root) that agen
 | **bdd-scenarios** | Structured Given/When/Then scenario authoring and CE Gate coverage checks |
 | **session-memory-contract** | Session-state survival labels, canonical mechanisms, and cross-tool handoff rules |
 | **session-startup** | Automatic startup cleanup guard for new conversations |
-| **terminal-hygiene** | Terminal and test execution guardrails for Agent Orchestra workflows |
+| **terminal-hygiene** | Terminal and test execution guardrails plus session-cost discipline for Agent Orchestra workflows |
 
 > **VS Code 1.108+**: Skills are auto-discovered from `skills/` (repo root) when `chat.useAgentSkills` is enabled.
 
