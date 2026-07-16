@@ -559,7 +559,9 @@ function Add-CostToBucket {
     <#
     .SYNOPSIS
         Computes cost for one event's tokens and adds it to the bucket's cost_estimate_usd.
-        Increments null_cost_events when the model is unknown.
+        Increments null_cost_events when the model is unknown, EXCEPT for the zero-usage
+        '<synthetic>' marker, which is not a model and is excluded entirely (see the guard
+        below for the full reasoning).
     #>
     [CmdletBinding()]
     param(
@@ -575,6 +577,31 @@ function Add-CostToBucket {
     if ($null -eq $Model -or [string]::IsNullOrWhiteSpace($Model)) {
         Add-NullCostEventToBucket -Bucket $Bucket -Message "cost-attribution: no model identifier present for provider '$Provider' — cost contribution is null; incrementing null_cost_events" -WarningMessages $WarningMessages
         Add-NullCostEventReason -Reason 'empty_model' -Model $Model -Provider $Provider -NullCostEventTracker $NullCostEventTracker
+        return
+    }
+
+    # Issue #487 (post-render fix): '<synthetic>' is the marker Claude Code puts in
+    # message.model for assistant messages it injects itself — API-error notices,
+    # "No response requested." status lines, model-unavailable notices. It is not a
+    # model, it has no rate, and it can never resolve against the rate table. Every
+    # such event carries all-zero usage, so the true cost contribution is exactly
+    # 0.00 rather than unknown.
+    #
+    # Without this guard the marker fell through to the unknown_key branch below,
+    # which did two dishonest things: it told maintainers to add a
+    # cost-rate-table.json row for a non-model (a false-actionable instruction that
+    # can never resolve), and via Add-NullCostEventToBucket it rewrote a
+    # genuinely-0.00 bucket cost to $null. Both are the misleading-null class that
+    # issue #487 exists to eliminate, so the event is not counted as a null-cost
+    # event at all: a synthetic marker is not an unknown model at any layer.
+    #
+    # The guard is deliberately narrow on both axes. Exact literal only, with no
+    # angle-bracket heuristic: a bracketed string is not inherently a non-model, and
+    # a broader rule could silently suppress a real unknown model. All-zero usage is
+    # required too, so if a future Claude Code release ever emits this marker with
+    # real tokens, the event still surfaces loudly through the normal unknown-model
+    # path instead of silently dropping real cost.
+    if ($Model -eq '<synthetic>' -and 0 -eq ($Usage['input'] + $Usage['output'] + $Usage['cache_creation'] + $Usage['cache_read'])) {
         return
     }
 

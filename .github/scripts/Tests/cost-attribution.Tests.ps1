@@ -635,6 +635,62 @@ Describe 'Get-CostAttribution' {
             $result.null_cost_events_by_reason.empty_model | Should -Be 0
         }
 
+        It 'never names the <synthetic> marker as an addable unknown model (issue #487 post-render fix)' {
+            # '<synthetic>' is what Claude Code puts in message.model for assistant
+            # messages it injects itself (API-error notices, "No response requested."
+            # status lines). Verified against the real transcript history: every such
+            # event carries all-zero usage, so its true cost is exactly 0.00. Before
+            # this fix it landed in unknown_models and the rendered Note instructed
+            # maintainers to add a cost-rate-table.json row for it — a false-actionable
+            # instruction for a non-model that can never resolve.
+            $dispatch = script:New-AgentDispatch -SubagentType 'code-smith'
+            $syntheticEvent = script:New-AssistantEvent -Content @($dispatch) -Model '<synthetic>' `
+                -InputTokens 0 -OutputTokens 0 -CacheCreation 0 -CacheRead 0
+
+            $result = Get-CostAttribution -Events @($syntheticEvent) -RateTablePath $script:RateTablePath -WarningVariable wv
+
+            $result.unknown_models | Should -BeNullOrEmpty -Because 'a synthetic marker is not an unknown model at any layer — it must never enter the set'
+            $result.null_cost_events_by_reason.unknown_key | Should -Be 0
+            $result.null_cost_events_by_reason.empty_model | Should -Be 0
+            $result.null_cost_events_by_reason.rate_unavailable | Should -Be 0
+            $result.ports['implement-code'].null_cost_events | Should -Be 0 -Because 'zero tokens times any rate is exactly 0.00 — the cost is known, not null'
+            $result.ports['implement-code'].cost_estimate_usd | Should -Be 0.0 -Because 'counting the marker as a null-cost event would rewrite a genuinely-0.00 bucket cost to $null, which is the misleading-null class issue #487 exists to eliminate'
+        }
+
+        It 'renders no add-a-rate-row Note clause for a <synthetic>-only session (issue #487 post-render fix)' {
+            $dispatch = script:New-AgentDispatch -SubagentType 'code-smith'
+            $syntheticEvent = script:New-AssistantEvent -Content @($dispatch) -Model '<synthetic>' `
+                -InputTokens 0 -OutputTokens 0 -CacheCreation 0 -CacheRead 0
+
+            $result = Get-CostAttribution -Events @($syntheticEvent) -RateTablePath $script:RateTablePath -WarningVariable wv
+            $completeness = @{
+                completeness                   = 'complete'
+                stop_reason                    = 'end_turn'
+                excluded_from_rolling_baseline = $false
+                exclude_reason                 = ''
+            }
+
+            $markdown = Format-CostPatternMarkdown -Attribution $result -Completeness $completeness
+
+            $markdown | Should -Not -Match 'add rows to' -Because 'the Note must never tell a maintainer to add a rate row for a marker that is not a model'
+            $markdown | Should -Not -Match ([regex]::Escape('<synthetic>')) -Because 'the marker must not be named anywhere in the rendered Note'
+        }
+
+        It 'still surfaces <synthetic> loudly if it ever carries real tokens (guard is narrow by design)' {
+            # The suppression is scoped to the proven case (all-zero usage). If a future
+            # Claude Code release ever emits this marker with real tokens, the event must
+            # NOT be silently dropped — it falls through to the normal unknown-model path
+            # so the cost surfaces instead of vanishing.
+            $dispatch = script:New-AgentDispatch -SubagentType 'code-smith'
+            $tokenBearingSynthetic = script:New-AssistantEvent -Content @($dispatch) -Model '<synthetic>' `
+                -InputTokens 500 -OutputTokens 120
+
+            $result = Get-CostAttribution -Events @($tokenBearingSynthetic) -RateTablePath $script:RateTablePath -WarningVariable wv
+
+            $result.null_cost_events_by_reason.unknown_key | Should -Be 1 -Because 'real tokens attributed to a non-model is a genuine anomaly that must fail loud, not be silently suppressed'
+            $result.unknown_models | Should -Be @('claude/<synthetic>')
+        }
+
         It 'leaves unknown_models empty while incrementing rate_unavailable for a Copilot known-key event' {
             $dispatch = script:New-AgentDispatch -SubagentType 'code-smith'
             $copilotEvent = script:New-CopilotAssistantEvent -Content @($dispatch) -Model 'gpt-4o-mini-2024-07-18' -InputTokens 300 -OutputTokens 90
