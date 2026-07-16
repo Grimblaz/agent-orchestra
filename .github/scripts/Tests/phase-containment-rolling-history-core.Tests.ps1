@@ -157,6 +157,116 @@ Describe 'Invoke-PhaseContainmentDedup — different keys both survive' {
 }
 
 # ---------------------------------------------------------------------------
+# 5b. Dedup — appended_at (issue #863 s4, judge-sustained M12/M13/M14)
+# ---------------------------------------------------------------------------
+
+Describe 'Invoke-PhaseContainmentDedup — appended_at' {
+    BeforeAll {
+        function script:New-ValidPCEntry5b {
+            param(
+                [string]$FindingKey = 'code-review:762:F1',
+                [string]$CreatedAt = '2024-01-01T12:00:00Z',
+                # Intentionally untyped: a typed [string] parameter with a
+                # $null default gets coerced to '' at bind time when the
+                # caller omits -AppendedAt, which would defeat the
+                # "absent means no key" distinction this helper needs.
+                $AppendedAt = $null
+            )
+            $entry = @{
+                finding_key       = $FindingKey
+                introduced_phase  = 'design'
+                catchable_phase   = 'design'
+                caught_stage      = 'code-review'
+                escape_distance   = 2
+                severity          = 'high'
+                systemic_fix_type = 'skill'
+                category          = 'architecture'
+                apparatus_meta    = $false
+                seed              = $false
+                createdAt         = $CreatedAt
+                surface           = 'issue'
+                issueOrPrNumber   = 762
+            }
+            if ($null -ne $AppendedAt) { $entry['appended_at'] = [string]$AppendedAt }
+            return $entry
+        }
+    }
+
+    It 'AC6 inversion case: a re-annotated block wins against a stale block in a later-created sibling' {
+        # comment1 was created first (createdAt=07-01) but re-annotated later
+        # (appended_at=07-16T12:00). comment2 is a stale sibling created
+        # AFTER comment1's original createdAt but BEFORE the re-annotation
+        # (createdAt=07-10), carrying no appended_at. Pre-fix, comparing
+        # createdAt only, comment2 (07-10) would incorrectly beat comment1
+        # (07-01) even though comment1 was actually edited most recently.
+        $reAnnotated = script:New-ValidPCEntry5b -CreatedAt '2026-07-01T00:00:00Z' -AppendedAt '2026-07-16T12:00:00Z'
+        $stale = script:New-ValidPCEntry5b -CreatedAt '2026-07-10T00:00:00Z'
+
+        $result = Invoke-PhaseContainmentDedup -RawEntries @($reAnnotated, $stale)
+
+        $result | Should -HaveCount 1
+        $result[0].createdAt | Should -Be '2026-07-01T00:00:00Z'
+        $result[0]['appended_at'] | Should -Be '2026-07-16T12:00:00Z'
+    }
+
+    It 'absence-fallback case: entries with no appended_at dedup on createdAt exactly as before' {
+        $older = script:New-ValidPCEntry5b -CreatedAt '2024-01-01T10:00:00Z'
+        $newer = script:New-ValidPCEntry5b -CreatedAt '2024-01-01T12:00:00Z'
+
+        $result = Invoke-PhaseContainmentDedup -RawEntries @($older, $newer)
+
+        $result | Should -HaveCount 1
+        $result[0].createdAt | Should -Be '2024-01-01T12:00:00Z'
+    }
+
+    It 'mixed-pair case: one entry stamped with appended_at, the paired entry falling back to createdAt' {
+        # Stamped entry's appended_at (07-05) is later than the fallback
+        # entry's createdAt (07-04) — stamped entry must win.
+        $stamped = script:New-ValidPCEntry5b -CreatedAt '2026-07-01T00:00:00Z' -AppendedAt '2026-07-05T00:00:00Z'
+        $fallback = script:New-ValidPCEntry5b -CreatedAt '2026-07-04T00:00:00Z'
+
+        $result = Invoke-PhaseContainmentDedup -RawEntries @($stamped, $fallback)
+        $result | Should -HaveCount 1
+        $result[0]['appended_at'] | Should -Be '2026-07-05T00:00:00Z'
+
+        # Reverse: fallback entry's createdAt (07-10) is later than the
+        # stamped entry's appended_at (07-05) — fallback entry must win.
+        $stamped2 = script:New-ValidPCEntry5b -CreatedAt '2026-07-01T00:00:00Z' -AppendedAt '2026-07-05T00:00:00Z'
+        $fallback2 = script:New-ValidPCEntry5b -CreatedAt '2026-07-10T00:00:00Z'
+
+        $result2 = Invoke-PhaseContainmentDedup -RawEntries @($stamped2, $fallback2)
+        $result2 | Should -HaveCount 1
+        $result2[0].createdAt | Should -Be '2026-07-10T00:00:00Z'
+        $result2[0].ContainsKey('appended_at') | Should -Be $false
+    }
+
+    It 'present-but-malformed case: a non-Z-format appended_at is routed into InvalidEntryCount, not silently kept' {
+        $malformed = script:New-ValidPCEntry5b -FindingKey 'code-review:762:F9' -CreatedAt '2026-07-01T00:00:00Z' -AppendedAt '2026-07-01T00:00:00' # missing Z suffix
+        $counter = 0
+
+        $result = Invoke-PhaseContainmentDedup -RawEntries @($malformed) -InvalidEntryCount ([ref]$counter)
+
+        $result | Should -HaveCount 0
+        $counter | Should -Be 1
+    }
+
+    It 'offset-form-vs-Z inversion case: an offset-form appended_at does not win over a correctly-formatted Z sibling' {
+        # Design-review scenario: appended_at is offset-form (not strict Z),
+        # so it must be treated as malformed and dropped — never allowed to
+        # silently win the comparison via a Kind-blind tick comparison.
+        $offsetForm = script:New-ValidPCEntry5b -CreatedAt '2026-07-01T00:00:00Z' -AppendedAt '2026-07-16T10:00:00-07:00'
+        $zForm = script:New-ValidPCEntry5b -CreatedAt '2026-07-16T14:00:00Z'
+        $counter = 0
+
+        $result = Invoke-PhaseContainmentDedup -RawEntries @($offsetForm, $zForm) -InvalidEntryCount ([ref]$counter)
+
+        $result | Should -HaveCount 1
+        $result[0].createdAt | Should -Be '2026-07-16T14:00:00Z'
+        $counter | Should -Be 1
+    }
+}
+
+# ---------------------------------------------------------------------------
 # 6. Pagination simulation — entries from a paginated comment thread collected
 # escape_distance for design + code-review = 3 - 1 = 2
 # escape_distance for plan  + code-review = 3 - 2 = 1

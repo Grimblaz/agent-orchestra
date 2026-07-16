@@ -71,6 +71,11 @@
       "type": "boolean",
       "default": false,
       "description": "When true, distinguishes seeded baseline entries from organic entries. Seeded entries are known injected defects used to calibrate the pipeline."
+    },
+    "appended_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$",
+      "description": "Optional. Block-level re-annotation timestamp (strict ISO-8601 UTC, Z-suffixed) written when a block is edited in place. Lets dedup (Invoke-PhaseContainmentDedup) correctly identify the freshest copy of a re-annotated finding_key even when the edit lands in a comment whose own createdAt does not advance (GitHub does not bump createdAt on PATCH). Falls back to the comment-level createdAt when absent, so historic blocks are unaffected. This pattern is NOT enforced at runtime by any schema validator — phase-containment-rolling-history-core.ps1 performs its own runtime strict-format check and routes a malformed-but-present value into InvalidEntryCount rather than silently reverting to first-seen."
     }
   },
   "additionalProperties": false

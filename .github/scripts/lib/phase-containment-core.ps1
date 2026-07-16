@@ -193,6 +193,7 @@ function script:ConvertFrom-PhaseContainmentYamlInternal {
         category          = $null
         apparatus_meta    = $false
         seed              = $false
+        appended_at       = $null
     }
 
     $lines = $Yaml -split '\r?\n'
@@ -232,6 +233,16 @@ function script:ConvertFrom-PhaseContainmentYamlInternal {
         elseif ($line -match '^\s*seed\s*:\s*(.+)$') {
             $val = ($Matches[1].Trim() -replace '\s+#.*$', '' -replace '^[''"]|[''"]$', '').ToLowerInvariant()
             $result['seed'] = ($val -eq 'true')
+        }
+        elseif ($line -match '^\s*appended_at\s*:\s*(.+)$') {
+            # Issue #863 s4: block-level re-annotation timestamp. Captured
+            # raw here (no format validation at parse time — a malformed
+            # value must be distinguishable from "absent" so the dedup
+            # layer can route it into InvalidEntryCount instead of quietly
+            # treating it as absent-and-fallback). Strict Z-format
+            # validation happens at runtime in
+            # phase-containment-rolling-history-core.ps1's dedup path.
+            $result['appended_at'] = ($Matches[1].Trim() -replace '\s+#.*$', '' -replace '^[''"]|[''"]$', '')
         }
     }
 
