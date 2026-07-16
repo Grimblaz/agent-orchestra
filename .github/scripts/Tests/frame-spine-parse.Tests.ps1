@@ -300,6 +300,26 @@ Describe 'frame spine parser' -Tag 'unit' {
         $sliceBlocks | Should -Contain $script:S5SliceBlock
     }
 
+    It 'does not false-match frame-slices-{ID} or frame-slices-generated-at markers as frame-slice blocks (863 regression pin)' {
+        $commentBody = @(
+            '<!-- frame-slices-863 -->'
+            'plan sibling body content, not a frame-slice block'
+            '<!-- frame-slices-generated-at: 2026-07-16T18:00:00Z -->'
+            ''
+            '<!-- frame-slice'
+            $script:S2SliceBlock
+            '-->'
+        ) -join "`n"
+
+        $byStepId = @(Get-FSCSliceBlocksByStepId -CommentBody $commentBody -StepId 's2')
+        $byPort = @(Get-FSCSliceBlocksByPort -CommentBody $commentBody -PortName 'implement-code')
+
+        $byStepId | Should -HaveCount 1
+        $byStepId[0] | Should -BeExactly $script:S2SliceBlock
+        $byPort | Should -HaveCount 1
+        $byPort[0] | Should -BeExactly $script:S2SliceBlock
+    }
+
     It 'round-trips canonical spine YAML through parse and serialize without byte changes' {
         $parsed = ConvertFrom-FSCSpineYaml -SpineBlock $script:CanonicalSpineBlock
 

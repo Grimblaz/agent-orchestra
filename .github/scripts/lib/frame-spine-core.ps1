@@ -450,6 +450,21 @@ function script:ConvertTo-FSCSpineLookupJsonLines {
     return [string[]]@($json)
 }
 
+function script:Get-FSCSliceSiblingGeneratedAt {
+    param([AllowNull()][string]$CommentBody)
+
+    $normalized = script:ConvertTo-FSCNormalizedText -Text $CommentBody
+    if ([string]::IsNullOrEmpty($normalized)) { return $null }
+
+    # Scalar HTML-comment marker on the frame-slices-{ID} sibling body, e.g.:
+    #   <!-- frame-slices-generated-at: 2026-07-16T18:00:00Z -->
+    # Not a frame-spine/frame-slice block; matched directly, no block-name regex reuse.
+    $match = [regex]::Match($normalized, '<!--\s*frame-slices-generated-at\s*:\s*(?<value>.*?)\s*-->')
+    if (-not $match.Success) { return $null }
+
+    return $match.Groups['value'].Value.Trim()
+}
+
 function Invoke-FSCSpineLookupCli {
     param(
         [Parameter(ParameterSetName = 'ByPath', Mandatory)]
@@ -512,6 +527,42 @@ function Invoke-FSCSpineLookupCli {
         return [pscustomobject]@{ ExitCode = 0; Lines = [string[]]$lines.ToArray() }
     }
 
+    # Spine/slice-sibling drift cross-check (863-D3/AC5). Body-content check only — no new
+    # parameter, ByPath/ByStdin parameter sets untouched. Two absence cases are NOT the same:
+    # no slice_comment_id at all means a legacy/unsplit plan (no check, current behavior);
+    # slice_comment_id present but the sibling's frame-slices-generated-at marker missing means
+    # a split plan whose writer dropped the stamp -- a defect, fail loud (sibling-unstamped).
+    if (-not [string]::IsNullOrWhiteSpace($parsedSpine.SliceCommentId)) {
+        $siblingGeneratedAt = script:Get-FSCSliceSiblingGeneratedAt -CommentBody $commentBody
+        if ($null -eq $siblingGeneratedAt) {
+            if ($Format -eq 'Json') {
+                return [pscustomobject]@{ ExitCode = 1; Lines = script:ConvertTo-FSCSpineLookupJsonLines -Data @{
+                    status               = 'sibling-unstamped'
+                    slice_comment_id     = $parsedSpine.SliceCommentId
+                    current_generated_at = $currentGeneratedAt
+                } }
+            }
+            $lines.Add('status: sibling-unstamped') | Out-Null
+            $lines.Add("slice_comment_id: $($parsedSpine.SliceCommentId)") | Out-Null
+            $lines.Add("current_generated_at: $currentGeneratedAt") | Out-Null
+            return [pscustomobject]@{ ExitCode = 1; Lines = [string[]]$lines.ToArray() }
+        }
+
+        if ($siblingGeneratedAt -ne $currentGeneratedAt) {
+            if ($Format -eq 'Json') {
+                return [pscustomobject]@{ ExitCode = 0; Lines = script:ConvertTo-FSCSpineLookupJsonLines -Data @{
+                    status               = 'stale-spine'
+                    current_generated_at = $currentGeneratedAt
+                    sibling_generated_at = $siblingGeneratedAt
+                } }
+            }
+            $lines.Add('status: stale-spine') | Out-Null
+            $lines.Add("current_generated_at: $currentGeneratedAt") | Out-Null
+            $lines.Add("sibling_generated_at: $siblingGeneratedAt") | Out-Null
+            return [pscustomobject]@{ ExitCode = 0; Lines = [string[]]$lines.ToArray() }
+        }
+    }
+
     $sliceBlocks = @(Get-FSCSliceBlocksByStepId -CommentBody $commentBody -StepId $StepId)
     if ($sliceBlocks.Count -eq 0) {
         if ($Format -eq 'Json') {
@@ -522,6 +573,23 @@ function Invoke-FSCSpineLookupCli {
         }
         $lines.Add('status: missing-slice') | Out-Null
         $lines.Add("step_id: $StepId") | Out-Null
+        return [pscustomobject]@{ ExitCode = 1; Lines = [string[]]$lines.ToArray() }
+    }
+
+    # Duplicate step_id across the concatenated corpus (judge-sustained M10): the spine YAML
+    # parser fails loud on a duplicate slice key (:230, invalid-spine); mirror that discipline
+    # here instead of silently first-winning on $sliceBlocks[0].
+    if ($sliceBlocks.Count -gt 1) {
+        if ($Format -eq 'Json') {
+            return [pscustomobject]@{ ExitCode = 1; Lines = script:ConvertTo-FSCSpineLookupJsonLines -Data @{
+                status  = 'duplicate-slice-id'
+                step_id = $StepId
+                count   = $sliceBlocks.Count
+            } }
+        }
+        $lines.Add('status: duplicate-slice-id') | Out-Null
+        $lines.Add("step_id: $StepId") | Out-Null
+        $lines.Add("count: $($sliceBlocks.Count)") | Out-Null
         return [pscustomobject]@{ ExitCode = 1; Lines = [string[]]$lines.ToArray() }
     }
 

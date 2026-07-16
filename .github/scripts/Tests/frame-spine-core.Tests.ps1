@@ -148,6 +148,99 @@ Describe 'frame-spine-core stdin and JSON output' -Tag 'unit' {
             '-->'
         ) -join "`n"
 
+        # Fixtures for the 863-D3/AC5 slice-sibling generated_at cross-check.
+        $script:CanonicalSpineBlockWithPointer = @(
+            'spine_schema_version: 2'
+            'generated_at: 2026-07-16T18:00:00Z'
+            'coverage: complete'
+            'slice_comment_id: 4995965999'
+            'ports:'
+            '  implement-code: [s2]'
+            'slices:'
+            '  s2:'
+            '    execution_mode: serial'
+            '    rc: GREEN code action'
+            '    ac_refs: [AC1, AC2]'
+            '    depends_on: []'
+            '    cycle: 1'
+        ) -join "`n"
+
+        $script:S2SliceBlockWithPointer = @(
+            'id: s2'
+            'provides: [implement-code]'
+            'execution_mode: serial'
+            'rc: GREEN code action'
+            'ac_refs: [AC1, AC2]'
+            'depends_on: []'
+            'cycle: 1'
+        ) -join "`n"
+
+        # Sibling marker matches the spine's generated_at (fresh, no drift).
+        $script:LookupCommentBodyWithFreshSibling = @(
+            'Issue discussion before the durable handoff.'
+            ''
+            '<!-- frame-spine'
+            $script:CanonicalSpineBlockWithPointer
+            '-->'
+            ''
+            '<!-- frame-slices-4995965999 -->'
+            '<!-- frame-slices-generated-at: 2026-07-16T18:00:00Z -->'
+            ''
+            '<!-- frame-slice'
+            $script:S2SliceBlockWithPointer
+            '-->'
+        ) -join "`n"
+
+        # Sibling marker diverges from the spine's generated_at (torn: fresh spine + stale sibling).
+        $script:LookupCommentBodyWithStaleSibling = @(
+            'Issue discussion before the durable handoff.'
+            ''
+            '<!-- frame-spine'
+            $script:CanonicalSpineBlockWithPointer
+            '-->'
+            ''
+            '<!-- frame-slices-4995965999 -->'
+            '<!-- frame-slices-generated-at: 2026-07-16T10:00:00Z -->'
+            ''
+            '<!-- frame-slice'
+            $script:S2SliceBlockWithPointer
+            '-->'
+        ) -join "`n"
+
+        # slice_comment_id present, but the sibling's frame-slices-generated-at marker is missing
+        # entirely -- a writer defect, not legacy history.
+        $script:LookupCommentBodyWithUnstampedSibling = @(
+            'Issue discussion before the durable handoff.'
+            ''
+            '<!-- frame-spine'
+            $script:CanonicalSpineBlockWithPointer
+            '-->'
+            ''
+            '<!-- frame-slices-4995965999 -->'
+            ''
+            '<!-- frame-slice'
+            $script:S2SliceBlockWithPointer
+            '-->'
+        ) -join "`n"
+
+        # Two frame-slice blocks sharing the same step id in one concatenated body (863-D2 assumes
+        # caller-side concatenation already happened before this function runs).
+        $script:LookupCommentBodyWithDuplicateSlice = @(
+            'Issue discussion before the durable handoff.'
+            ''
+            '<!-- frame-spine'
+            $script:CanonicalSpineBlock
+            '-->'
+            ''
+            '<!-- frame-slice'
+            $script:S2SliceBlock
+            '-->'
+            ''
+            '<!-- frame-slice'
+            $script:S2SliceBlock
+            '-->'
+        ) -join "`n"
+
         # Helper: write content to a temp file on TestDrive with UTF-8 NoBOM encoding
         $script:WriteCommentBody = {
             param([Parameter(Mandatory)][string]$Content)
@@ -327,6 +420,86 @@ Describe 'frame-spine-core stdin and JSON output' -Tag 'unit' {
             $parsed.step_id | Should -Be 's3'
             $parsed.slice | Should -Match 'provides:\s*\[implement-test\]'
             $parsed.slice | Should -Not -Match '(?m)^adapter:'
+        }
+    }
+
+    Context 'Case 8: slice-sibling generated_at cross-check (863-D3/AC5)' {
+
+        It 'returns stale-spine JSON when the sibling marker diverges from the spine generated_at' {
+            $commentFile = & $script:WriteCommentBody -Content $script:LookupCommentBodyWithStaleSibling
+            $resolvedPath = (Resolve-Path -LiteralPath $commentFile).ProviderPath
+
+            $result = Invoke-FSCSpineLookupCli -CommentBodyPath $resolvedPath -Format Json -GeneratedAt '2026-07-16T18:00:00Z' -StepId 's2'
+
+            $result | Should -Not -BeNullOrEmpty
+            $result.ExitCode | Should -Be 0
+            $jsonText = ($result.Lines) -join "`n"
+            $parsed = $jsonText | ConvertFrom-Json
+
+            $parsed.status | Should -Be 'stale-spine'
+            $parsed.PSObject.Properties['current_generated_at'] | Should -Not -BeNullOrEmpty
+            $parsed.PSObject.Properties['sibling_generated_at'] | Should -Not -BeNullOrEmpty
+            $parsed.sibling_generated_at | Should -Not -Be $parsed.current_generated_at
+        }
+
+        It 'returns ok when the sibling marker matches the spine generated_at' {
+            $commentFile = & $script:WriteCommentBody -Content $script:LookupCommentBodyWithFreshSibling
+            $resolvedPath = (Resolve-Path -LiteralPath $commentFile).ProviderPath
+
+            $result = Invoke-FSCSpineLookupCli -CommentBodyPath $resolvedPath -Format Json -GeneratedAt '2026-07-16T18:00:00Z' -StepId 's2'
+
+            $result | Should -Not -BeNullOrEmpty
+            $result.ExitCode | Should -Be 0
+            $jsonText = ($result.Lines) -join "`n"
+            $parsed = $jsonText | ConvertFrom-Json
+
+            $parsed.status | Should -Be 'ok'
+            $parsed.step_id | Should -Be 's2'
+        }
+
+        It 'fails loud with sibling-unstamped when slice_comment_id is present but the sibling marker is absent (defect, not history)' {
+            $commentFile = & $script:WriteCommentBody -Content $script:LookupCommentBodyWithUnstampedSibling
+            $resolvedPath = (Resolve-Path -LiteralPath $commentFile).ProviderPath
+
+            $result = Invoke-FSCSpineLookupCli -CommentBodyPath $resolvedPath -Format Json -GeneratedAt '2026-07-16T18:00:00Z' -StepId 's2'
+
+            $result | Should -Not -BeNullOrEmpty
+            $result.ExitCode | Should -Be 1
+            $jsonText = ($result.Lines) -join "`n"
+            $parsed = $jsonText | ConvertFrom-Json
+
+            $parsed.status | Should -Be 'sibling-unstamped'
+            $parsed.PSObject.Properties['slice_comment_id'] | Should -Not -BeNullOrEmpty
+        }
+
+        It 'skips the cross-check entirely for a legacy spine with no slice_comment_id pointer' {
+            $commentFile = & $script:WriteCommentBody -Content $script:LookupCommentBody
+            $resolvedPath = (Resolve-Path -LiteralPath $commentFile).ProviderPath
+
+            $result = Invoke-FSCSpineLookupCli -CommentBodyPath $resolvedPath -Format Json -GeneratedAt '2026-05-04T14:30:00Z' -StepId 's2'
+
+            $result | Should -Not -BeNullOrEmpty
+            $result.ExitCode | Should -Be 0
+            $jsonText = ($result.Lines) -join "`n"
+            $parsed = $jsonText | ConvertFrom-Json
+
+            $parsed.status | Should -Be 'ok'
+        }
+
+        It 'fails loud with duplicate-slice-id when the concatenated corpus carries two frame-slice blocks for the same step id' {
+            $commentFile = & $script:WriteCommentBody -Content $script:LookupCommentBodyWithDuplicateSlice
+            $resolvedPath = (Resolve-Path -LiteralPath $commentFile).ProviderPath
+
+            $result = Invoke-FSCSpineLookupCli -CommentBodyPath $resolvedPath -Format Json -GeneratedAt '2026-05-04T14:30:00Z' -StepId 's2'
+
+            $result | Should -Not -BeNullOrEmpty
+            $result.ExitCode | Should -Be 1
+            $jsonText = ($result.Lines) -join "`n"
+            $parsed = $jsonText | ConvertFrom-Json
+
+            $parsed.status | Should -Be 'duplicate-slice-id'
+            $parsed.step_id | Should -Be 's2'
+            $parsed.count | Should -Be 2
         }
     }
 }

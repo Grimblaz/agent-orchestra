@@ -203,6 +203,21 @@ Describe 'Frame validator plan mode CLI' -Tag 'unit' {
         $result.Output | Should -Not -Match '\(missing-id\)'
     }
 
+    It 'does not false-match frame-slices-{ID} or frame-slices-generated-at sibling markers as frame-slice blocks (863 regression pin)' {
+        $documentedSlice = & $script:NewFrameSliceBlock -StepId 's4' -CommitIndex '4'
+        $siblingMarkers = @(
+            '<!-- frame-slices-512 -->'
+            '<!-- frame-slices-generated-at: 2026-05-04T15:00:00Z -->'
+        ) -join "`n"
+        $comment = & $script:NewPlanComment -PortLines @('  implement-test: [s4]') -SliceBlocks @($siblingMarkers, $documentedSlice)
+
+        $result = & $script:InvokeFrameValidateCli -Arguments @('-Mode', 'plan') -InputText $comment
+
+        $result.ExitCode | Should -Be 0
+        $result.Output | Should -Match 'PlanStructuralCoverage'
+        $result.Output | Should -Not -Match '\(missing-id\)'
+    }
+
     It 'warns when an acceptance criterion has no slice ac-refs coverage' {
         $sliceWithoutAc4 = & $script:NewFrameSliceBlock -StepId 's4' -CommitIndex '4' -FieldLines @(
             'provides: [implement-test]',
