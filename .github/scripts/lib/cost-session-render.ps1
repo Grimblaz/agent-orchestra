@@ -489,8 +489,18 @@ function Invoke-CostSessionRender {
                     $priorComment.body,
                     $script:FCLCostPatternSectionRegex
                 )
-                $priorSection = if ($sectionMatch.Success) {
-                    $sectionMatch.Groups['section'].Value.TrimEnd()
+                # Issue #487 (post-render fix): require a NON-EMPTY captured section, not
+                # merely Success. A null or empty pattern makes [regex]::Match return
+                # Success=True with a zero-length match instead of throwing, so a bare
+                # Success check accepted an empty section, skipped the fallback below, and
+                # shipped the preservation notice with the cost data destroyed — the exact
+                # production failure caused by FCLCostPatternSectionRegex going unmarshaled
+                # into the worker clone (fixed in Get-FCLCostScriptState). The marshal fix
+                # cures that instance; this check keeps ANY future empty-match cause
+                # degrading into the YAML-only fallback rather than into silent data loss.
+                $priorSectionText = $sectionMatch.Groups['section'].Value
+                $priorSection = if ($sectionMatch.Success -and -not [string]::IsNullOrWhiteSpace($priorSectionText)) {
+                    $priorSectionText.TrimEnd()
                 } else {
                     # Fallback: visible heading unavailable — use YAML block only.
                     "<!-- cost-pattern-data`n$priorYamlForSection`n-->"

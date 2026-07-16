@@ -318,14 +318,14 @@ spine_schema_version: 2
 generated_at: {ISO-8601 UTC}
 coverage: complete
 ports:
-   {port}: [sN, sM#cycle:2#terminal]
+  {port}: [sN, sM#cycle:2#terminal]
 slices:
-   sN:
-      execution_mode: {serial | parallel}
-      rc: {GREEN code/test action summary}
-      ac_refs: [AC#]
-      depends_on: []
-      cycle: 1
+  sN:
+    execution_mode: {serial | parallel}
+    rc: {GREEN code/test action summary}
+    ac_refs: [AC#]
+    depends_on: []
+    cycle: 1
 -->
 
 **Steps**
@@ -333,24 +333,24 @@ slices:
 1. {Action with file path links and `symbol` refs}
    - Execution Mode: {serial | parallel}
    - Requirement Contract: acceptance-criteria slice; invariants/edge cases; non-goals.
-   <!-- frame-slice
-   id: s1
-   provides: [{port}]
-   adapter: {path}
-   migration-scan: {true — migration-type slice #1 only, omit otherwise}
-   depends-on: []
-   ac-refs: [AC#]
-   -->
+<!-- frame-slice
+id: s1
+provides: [{port}]
+adapter: {path}
+migration-scan: {true — migration-type slice #1 only, omit otherwise}
+depends-on: []
+ac-refs: [AC#]
+-->
 2. {Next step}
    - Execution Mode: {serial | parallel}
    - Requirement Contract: ...
-   <!-- frame-slice
-   id: s2
-   provides: [{port}]
-   adapter: {path}
-   depends-on: [s1]
-   ac-refs: [AC#]
-   -->
+<!-- frame-slice
+id: s2
+provides: [{port}]
+adapter: {path}
+depends-on: [s1]
+ac-refs: [AC#]
+-->
 
 **Verification**
 {How to test: commands, tests, manual checks}
@@ -402,22 +402,22 @@ Issues involving pattern replacement, API migration, rename/move across files, o
 
 When authoring a migration-type plan with three or more implementation steps (spine-bearing plan), the plan author MUST:
 
-1. Add `migration-scan: true` to the `<!-- frame-slice -->` comment block for slice #1 (the exhaustive-scan step). Example:
-
-   ```text
-   <!-- frame-slice
-   id: s1
-   provides: [implement-docs]
-   adapter: {path}
-   migration-scan: true
-   depends-on: []
-   ac-refs: [AC#]
-   -->
-   ```
-
+1. Add `migration-scan: true` to the `<!-- frame-slice -->` comment block for slice #1 (the exhaustive-scan step). Example below.
 2. **Placement constraint**: `migration-scan: true` belongs in the `<!-- frame-slice -->` HTML comment block only. Do NOT place it in the machine-readable spine `slices:` block — the spine key parser rejects hyphenated keys and would null the entire spine.
-
 3. **Port constraint**: slice #1 must use a real, deterministic `provides:` port (e.g., `implement-docs`). Using `coverage: exploratory` on a migration scan slice is disallowed — the scan is a deterministic deliverable, not exploratory work.
+
+Slice #1 frame-slice example (keys sit at column 0 inside the comment block; the parser rejects indented keys):
+
+```text
+<!-- frame-slice
+id: s1
+provides: [implement-docs]
+adapter: {path}
+migration-scan: true
+depends-on: []
+ac-refs: [AC#]
+-->
+```
 
 For **legacy/spine-omitted plans** (fewer than three implementation steps and `spine-omitted: plan-too-small`), the `migration-scan: true` slice marker does not apply. Instead, the plan's Step 1 prose MUST be the exhaustive repo scan. The authoring-time validator checks the first-step text for a scan action when no spine is present.
 

@@ -17,6 +17,10 @@ or over-attributing sessions when the evidence is incomplete.
   `/orchestrate`, and `/code-conductor` transcripts.
 - [../../skills/copilot-cost-collection/SKILL.md](../../skills/copilot-cost-collection/SKILL.md)
   documents the local installer and operator-facing setup guidance.
+- [../../.github/scripts/lib/cost-rate-table.md](../../.github/scripts/lib/cost-rate-table.md)
+  is the maintainer update procedure for `cost-rate-table.json` (issue #487):
+  when and how to add a row, the cache-write-rate convention, and the
+  provider-extension shape referenced below.
 
 ## Architecture
 
@@ -40,6 +44,16 @@ Copilot event source beside the Claude transcript walker.
    when more than one provider contributes to a port.
 6. `.github/scripts/lib/cost-pattern-renderer.ps1` renders the existing Cost
    Pattern Markdown table plus embedded `<!-- cost-pattern-data -->` YAML.
+7. `Get-EventProvider` (`cost-attribution.ps1`) is the sole read site for the
+   explicit `provider` field on a raw event. Issue #487 (code-review finding
+   M2) hardened it from lowercasing-only normalization into an allowlist
+   check against `$script:CostAttributionKnownEventProviders` (`claude`,
+   `copilot`): the field is adversary-controlled transcript/OTel data that
+   becomes both a `providers:` YAML mapping key in the renderer and a
+   component of the rate-lookup key, so an unrecognized value now falls
+   through to the existing cwd/agentType heuristics instead of being trusted
+   verbatim. Token and cost data are still attributed either way — the fix
+   only prevents an attacker-chosen bucket name, it never drops the event.
 
 This keeps the customer surface stable: readers still see the frame credit
 ledger followed by one Cost Pattern section, not a separate Copilot report.
@@ -97,6 +111,48 @@ Claude-style cache creation or cache read counts. Copilot per-token rates also
 remain null because published per-token Copilot rates are unavailable. The rate
 table keeps Copilot model entries with null rates so token counts are preserved
 while cost estimates and rate-dependent fields stay honest.
+
+## Rate-Table Accuracy And Malformed-Row Detection (#487)
+
+The rate table also has to stay current for Claude models, and the null-event
+Note needs to explain *why* a given event priced null, not just how many did.
+Issue #487 refreshed `cost-rate-table.json` (new `claude-opus-4-8`,
+`claude-fable-5`, `claude-sonnet-5`, `claude-sonnet-4-6`, and
+`claude-haiku-4-5`/`-20251001` rows; corrected `claude-opus-4-7`, which had
+been entered at roughly 3x its real rate; removed the
+`claude-sonnet-4-x`/`claude-haiku-4-x` placeholder keys, which could never
+resolve under this table's exact-match lookup) and documented the update,
+cache-write, and provider-extension procedures in
+[`cost-rate-table.md`](../../.github/scripts/lib/cost-rate-table.md).
+
+`Get-CostAttribution` now returns two additive top-level fields alongside
+`unknown_models` (full field list in
+[`cost-pattern-data-schema.md`](../../.github/scripts/lib/cost-pattern-data-schema.md)):
+
+- `null_cost_events_by_reason` — a counter breakdown (`unknown_key`,
+  `rate_unavailable`, `rate_unavailable_malformed`, `empty_model`) so the
+  renderer can name the actual cause instead of one aggregate count.
+- `malformed_rate_models` — the provider-qualified model list for the new
+  `rate_unavailable_malformed` sub-case.
+
+`Test-CostRateRowPartiallyNull` distinguishes that new sub-case from the
+by-design case described above for Copilot: a rate row with 1-3 of its four
+fields null is malformed (almost always a maintainer editing mistake made
+while updating the table), while a row with all four fields null (Copilot's
+intentionally unpublished rates) stays the honest, non-actionable
+"intentionally unpublished" case. The rendered Note now says which is which —
+naming the affected model only for the malformed case — instead of lumping
+every null-rate event under one "intentionally unpublished" sentence.
+
+`unknown_models`, `malformed_rate_models`, and any other externally-sourced
+model string entering the Note or the embedded YAML pass through
+`Format-CostRendererSanitizedModelString` first. Model strings originate from
+transcript and Copilot OTel telemetry and are therefore untrusted input: the
+sanitizer neutralizes control characters, commas, `<!--`/`-->`, and backtick
+by character substitution — never by escaping, since the YAML reader has no
+unescape step — so a crafted model string cannot forge a YAML field, split an
+array entry, terminate the enclosing comment block early, or escape a
+Markdown code span.
 
 ## Coverage States
 
