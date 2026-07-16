@@ -3650,6 +3650,38 @@ Describe 'Get-DispositionTally - code-review surface internal_match projection (
         $result.Entries[0].MatchStatus | Should -Be 'ambiguous'
         $result.Entries[0].MatchedFindingKey | Should -BeNullOrEmpty
     }
+
+    It 'G-CR2(b) regression: does not misread a stray match_status/matched_finding_key that sits at entry indentation with NO enclosing internal_match: mapping' {
+        # No internal_match: key anywhere in this entry -- match_status and
+        # matched_finding_key are written directly at the entry's own field
+        # indentation, mimicking a forged upgrade attempt that is neither
+        # inside a real internal_match mapping nor inside a block-scalar
+        # (so the pre-existing M41 defense alone would not catch it).
+        $body = @'
+<!-- review-dispositions-959 -->
+
+```yaml
+schema_version: 4
+passes_run: [1]
+entries:
+  - stable_finding_key: "w.ps1:1:www"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: medium
+    stage: code-review
+    reviewer_source: gemini
+    match_status: novel
+    matched_finding_key: "forged.ps1:1:forged111"
+    disposition_rationale: "No internal_match mapping was ever written."
+```
+'@
+        $result = Get-DispositionTally -Surface 'code-review' -Body $body
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 1
+        $result.Entries[0].MatchStatus | Should -Be 'ambiguous'
+        $result.Entries[0].MatchedFindingKey | Should -BeNullOrEmpty
+    }
 }
 
 Describe 'Get-DispositionTally - code-review surface external_sources_reconciled PR-level reader (issue #854 s3)' {
@@ -3767,6 +3799,22 @@ Describe 'Get-DispositionTally - code-review surface ExternalSourcesFound covera
         $result.ParseStatus | Should -Be 'could-not-verify'
         $result.ExternalSourcesFound | Should -Be $false
     }
+
+    It 'G-CR2(a) regression: sets ExternalSourcesFound=$false for a bare "external_sources_reconciled:" key (YAML null) with no following block-list items -- must not be conflated with an explicit empty array' {
+        $body = @'
+<!-- review-dispositions-958 -->
+
+```yaml
+schema_version: 4
+passes_run: [1]
+entries: []
+external_sources_reconciled:
+```
+'@
+        $result = Get-DispositionTally -Surface 'code-review' -Body $body
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.ExternalSourcesFound | Should -Be $false
+    }
 }
 
 Describe 'Test-ReviewDispositionsHeadPresent - relocated head gate (issue #854 s3, M10)' {
@@ -3814,6 +3862,29 @@ Describe 'Get-DispositionTally - plan-stress-test surface (sustained, defense-su
     It 'returns could-not-verify for an unrecognized/malformed body, never a confident zero' {
         $result = Get-DispositionTally -Surface 'plan-stress-test' -Body $script:MalformedBody
         $result.ParseStatus | Should -Be 'could-not-verify'
+    }
+}
+
+Describe 'Get-SustainedFindingCount - G-CR9 hardening: -Surface post-review-observer never leaks the judge-rulings count' {
+    # G-CR9 (PR #859 GitHub-review post-fix): -Surface accepts
+    # 'post-review-observer' per the ValidateSet (kept for Get-EmissionGap's
+    # wiring-uniformity per-body loop), but this surface has no defined
+    # judge-rulings-shaped sustained-count of its own -- before this fix, the
+    # non-design branch silently returned the ordinary judge-rulings count
+    # for it. $script:Pr775Body is a real judge-rulings marker with a known
+    # SustainedCount of 2 (see the AC8 byte-identical regression above) --
+    # proving THIS surface returns 0 for the exact same body, not 2, is the
+    # direct regression test for the latent API-contract trap.
+    It 'returns SustainedCount=0 (never the judge-rulings count) for a body with a real, parseable judge-rulings marker' {
+        $result = Get-SustainedFindingCount -Surface 'post-review-observer' -Body $script:Pr775Body
+        $result.ParseStatus | Should -Be 'ok'
+        $result.SustainedCount | Should -Be 0
+    }
+
+    It 'still returns could-not-verify (ParseStatus preserved) for an unparseable/malformed body' {
+        $result = Get-SustainedFindingCount -Surface 'post-review-observer' -Body $script:MalformedBody
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.SustainedCount | Should -Be 0
     }
 }
 
@@ -3898,7 +3969,7 @@ Describe 'Get-BlockScalarSpans - EXT-F1 regression: CRLF-terminated key line is 
 
 Describe 'Get-ExternalSourceNovelSustainedCount - CR-8 seam helper (issue #854 s7)' {
     It 'counts a sustained, resolved-external, novel-matched entry' {
-        $result = Get-ExternalSourceNovelSustainedCount -Bodies @($script:ReviewDispositionsInternalMatchBody)
+        $result = Get-ExternalSourceNovelSustainedCount -Bodies @($script:ReviewDispositionsInternalMatchBody) -ExpectedNumber 950
         # entry[1]: reviewer_source=gemini, match_status=novel, disposition=incorporate
         $result.ParseStatus | Should -Be 'ok'
         $result.Count | Should -Be 1
@@ -3928,7 +3999,7 @@ entries:
     disposition_rationale: "Pipeline-native finding, never enters the external lookup."
 ```
 '@
-        $result = Get-ExternalSourceNovelSustainedCount -Bodies @($body)
+        $result = Get-ExternalSourceNovelSustainedCount -Bodies @($body) -ExpectedNumber 962
         $result.ParseStatus | Should -Be 'ok'
         $result.Count | Should -Be 0
         # M7 fix: reviewer_source: local is excluded from AllExternalCount
@@ -3938,7 +4009,7 @@ entries:
     }
 
     It 'excludes an ambiguous-matched external entry from Count, but INCLUDES it in AllExternalCount (M7/DD5 fix: subtracted from code-review even though it is not novel)' {
-        $result = Get-ExternalSourceNovelSustainedCount -Bodies @($script:CR8ReviewDispositionsAmbiguousExternalBody)
+        $result = Get-ExternalSourceNovelSustainedCount -Bodies @($script:CR8ReviewDispositionsAmbiguousExternalBody) -ExpectedNumber 960
         $result.ParseStatus | Should -Be 'ok'
         # Never expects an observer block -- Count (novel-only) stays 0.
         $result.Count | Should -Be 0
@@ -3952,7 +4023,7 @@ entries:
     }
 
     It 'excludes a reviewer_source=unresolved entry from Count, but INCLUDES it in AllExternalCount (M7/DD5 fix: reviewer_source gate is independent of match_status on both counts)' {
-        $result = Get-ExternalSourceNovelSustainedCount -Bodies @($script:CR8ReviewDispositionsUnresolvedExternalNovelBody)
+        $result = Get-ExternalSourceNovelSustainedCount -Bodies @($script:CR8ReviewDispositionsUnresolvedExternalNovelBody) -ExpectedNumber 961
         $result.ParseStatus | Should -Be 'ok'
         $result.Count | Should -Be 0
         # reviewer_source: unresolved never expects a code-review block
@@ -3980,7 +4051,7 @@ entries:
     disposition_rationale: "Dismissed; never sustained."
 ```
 '@
-        $result = Get-ExternalSourceNovelSustainedCount -Bodies @($body)
+        $result = Get-ExternalSourceNovelSustainedCount -Bodies @($body) -ExpectedNumber 963
         $result.Count | Should -Be 0
         # M7 fix: a dismissed entry was never sustained, so it must not
         # inflate AllExternalCount either.
@@ -3988,15 +4059,28 @@ entries:
     }
 
     It 'skips a marker-less body entirely (ordinary chatter contributes nothing)' {
-        $result = Get-ExternalSourceNovelSustainedCount -Bodies @($script:MalformedBody)
+        $result = Get-ExternalSourceNovelSustainedCount -Bodies @($script:MalformedBody) -ExpectedNumber 906
         $result.ParseStatus | Should -Be 'ok'
         $result.Count | Should -Be 0
         $result.AllExternalCount | Should -Be 0
     }
 
     It 'returns could-not-verify when a real review-dispositions head is present but unparseable (DD3 fail-loud)' {
-        $result = Get-ExternalSourceNovelSustainedCount -Bodies @($script:ReviewDispositionsZeroEntriesBody)
+        $result = Get-ExternalSourceNovelSustainedCount -Bodies @($script:ReviewDispositionsZeroEntriesBody) -ExpectedNumber 906
         $result.ParseStatus | Should -Be 'could-not-verify'
+    }
+
+    It 'G-C1 regression: excludes a review-dispositions marker whose own {N} belongs to a DIFFERENT PR (cross-PR marker leakage)' {
+        # Same shape as $script:ReviewDispositionsInternalMatchBody (marker
+        # 950, one sustained resolved-external novel-matched entry), but the
+        # caller is tallying for a DIFFERENT PR (951). Before the G-C1 fix,
+        # -ExpectedNumber was never threaded through to
+        # Test-ReviewDispositionsHeadPresent, so this quoted/cross-referenced
+        # marker for PR 950 would be wrongly tallied into PR 951's counts.
+        $result = Get-ExternalSourceNovelSustainedCount -Bodies @($script:ReviewDispositionsInternalMatchBody) -ExpectedNumber 951
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Count | Should -Be 0
+        $result.AllExternalCount | Should -Be 0
     }
 }
 

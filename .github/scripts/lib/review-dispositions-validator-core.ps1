@@ -171,8 +171,11 @@ foreach ($body in $rawBodies) {
             if ($payload.schema_version -eq 4 -and [string]::IsNullOrWhiteSpace($entry.reviewer_source)) {
                 Add-RdvFinding "review-dispositions-${PullRequestNumber}: $entryLabel (v4) missing required reviewer_source"
             }
-            # v2/v3: ac_cross_check required on >=medium dismiss/defer entries
-            if ($payload.schema_version -in @(2, 3)) {
+            # v2/v3/v4: ac_cross_check required on >=medium dismiss/defer entries.
+            # G-C2 fix: the v4 sweep (above) added reviewer_source enforcement to
+            # this same per-entry loop but never extended this gate, silently
+            # disabling ac_cross_check enforcement for the current schema version.
+            if ($payload.schema_version -in @(2, 3, 4)) {
                 $mediumOrAbove = @('medium', 'high', 'critical')
                 $dismissOrDefer = @('dismiss', 'defer')
                 if ($entry.disposition -in $dismissOrDefer -and $entry.severity -in $mediumOrAbove) {

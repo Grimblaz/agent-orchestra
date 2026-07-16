@@ -425,6 +425,13 @@ function Invoke-PhaseContainmentReportCli {
         RepoOwner  = $RepoOwner
         RepoName   = $RepoName
         WindowDays = $WindowDays
+        # G-CR3 fix (PR #859 GitHub-review post-fix, security): thread the
+        # same JudgeLogin already used to gate Get-PhaseContainmentTerminalObservation's
+        # coverage/dispositions tally (below) into the value-side entries
+        # fetch too, so a non-judge-authored phase-containment block (e.g. a
+        # forged post-review-observer block) contributes zero entries
+        # instead of silently participating in reconciliation.
+        JudgeLogin = $JudgeLogin
     }
     if ($Token) {
         $fetchParams['Token'] = $Token
@@ -470,8 +477,22 @@ function Invoke-PhaseContainmentReportCli {
     # parsing bug in the derivation logic) and must not be silently
     # swallowed as expected degradation -- it is surfaced via Write-Warning
     # -- but the rollup still fails closed on $null either way.
+    #
+    # G-CR6 fix (PR #859 GitHub-review post-fix): Get-PhaseContainmentCommentCorpus
+    # can return a non-null, non-throwing result with Source='timeout' or
+    # 'repo-resolution-failed' and empty Tuples -- $corpusError stays $null
+    # and $corpus is non-null, so the check above alone let this branch
+    # proceed with a genuinely empty corpus. That derives K=0/N=0, which the
+    # rollup then renders as "coverage insufficient (0 of 0 co-observed PRs
+    # measured, need >=5)" -- a real corpus-fetch failure disguised as a
+    # measured-but-thin population. Gate on Corpus.Source too, matching the
+    # cost path's own pattern (Get-ReviewCostRollup already consults
+    # $corpus.Source), so both failure sources fall through to the same
+    # $null/"terminal observation unavailable" degradation as a thrown fetch
+    # error.
+    $corpusSourceOk = $null -ne $corpus -and [string]$corpus.Source -notin @('timeout', 'repo-resolution-failed')
     $terminalObservation = $null
-    if ($null -eq $corpusError -and $null -ne $corpus) {
+    if ($null -eq $corpusError -and $corpusSourceOk) {
         try {
             $terminalObservation = Get-PhaseContainmentTerminalObservation -Corpus $corpus -Entries $entries -JudgeLogin $JudgeLogin -ValueCacheOk $bypassValueCache
         }

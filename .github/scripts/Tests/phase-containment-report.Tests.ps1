@@ -141,6 +141,40 @@ Describe 'Invoke-PhaseContainmentReportCli' {
         }
     }
 
+    Context 'G-CR6 regression: Corpus.Source failure without a thrown exception (PR #859 GitHub-review post-fix)' {
+        # Get-PhaseContainmentCommentCorpus can return a non-null, non-
+        # throwing result with Source='timeout'/'repo-resolution-failed' and
+        # empty Tuples -- before this fix, the terminal-observation branch
+        # only checked for a thrown exception (via $corpusError) or a $null
+        # corpus, so this genuine failure mode derived K=0/N=0 from the
+        # empty corpus and rendered the misleading "coverage insufficient (0
+        # of 0 co-observed PRs measured, need >=5)" instead of the honest
+        # "terminal observation unavailable" degradation.
+        BeforeEach {
+            Mock Get-PhaseContainmentHistory { New-FixedHistoryResult }
+        }
+
+        It 'renders terminal-observation-unavailable, not coverage-insufficient, when Corpus.Source is timeout' {
+            Mock Get-PhaseContainmentCommentCorpus { New-FixedCorpusResult -Source 'timeout' }
+
+            $output = Invoke-PhaseContainmentReportCli -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 90 -Token ''
+            $joined = $output -join "`n"
+
+            $joined | Should -Match 'Coverage:\s+NOT ASSESSABLE \(terminal observation unavailable'
+            $joined | Should -Not -Match '0 of 0 co-observed PRs measured'
+        }
+
+        It 'renders terminal-observation-unavailable, not coverage-insufficient, when Corpus.Source is repo-resolution-failed' {
+            Mock Get-PhaseContainmentCommentCorpus { New-FixedCorpusResult -Source 'repo-resolution-failed' }
+
+            $output = Invoke-PhaseContainmentReportCli -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 90 -Token ''
+            $joined = $output -join "`n"
+
+            $joined | Should -Match 'Coverage:\s+NOT ASSESSABLE \(terminal observation unavailable'
+            $joined | Should -Not -Match '0 of 0 co-observed PRs measured'
+        }
+    }
+
     Context 'fetch coherence: -ValueCacheOk / -NoCache precedence (issue #768 s6, judge-sustained M8)' {
         BeforeEach {
             Mock Get-PhaseContainmentHistory { New-FixedHistoryResult }

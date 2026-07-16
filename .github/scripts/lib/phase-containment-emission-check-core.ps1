@@ -864,11 +864,32 @@ function Get-SustainedFindingCount {
         post-review-observer (M16 fix: this docstring previously omitted
         the fourth ValidateSet member even though the parameter attribute
         already accepted it).
+
+        G-CR9 fix (PR #859 GitHub-review post-fix): -Surface
+        'post-review-observer' has no defined per-body judge-rulings-shaped
+        sustained-count of its own — its real expected count is the
+        external-source-novel count Get-ExternalSourceNovelSustainedCount
+        computes across the whole comment corpus (consumed by
+        Get-EmissionGap's CR-8 seam), not anything derivable from a single
+        body in this function's judge-rulings/finding_dispositions shape.
+        This surface is kept in the ValidateSet ONLY so Get-EmissionGap's
+        generic per-body loop can call this function uniformly across all
+        four surfaces for its ParseStatus/head-corrupt diagnosis (M16's
+        wiring-uniformity precedent) -- SustainedCount for this surface is
+        ALWAYS 0 (see .OUTPUTS), never the judge-rulings count the
+        non-design branch would otherwise compute. A caller that actually
+        needs post-review-observer's expected count must call
+        Get-ExternalSourceNovelSustainedCount directly, mirroring
+        Get-DispositionTally's M17 precedent of hardening this same surface
+        against silently returning a wrong-shaped/wrong-surface result.
     .PARAMETER Body
         The raw comment body text to scan.
     .OUTPUTS
         [PSCustomObject] with:
-          SustainedCount [int]    — count of sustained findings (0 when none)
+          SustainedCount [int]    — count of sustained findings (0 when none).
+                          ALWAYS 0 for -Surface 'post-review-observer' (see
+                          .PARAMETER Surface, G-CR9) -- never the judge-rulings
+                          count this surface has no defined shape for.
           ParseStatus    [string] — 'ok' or 'could-not-verify'
     #>
     param(
@@ -894,7 +915,17 @@ function Get-SustainedFindingCount {
     # returns DefenseSustainedCount, but this function's public output must
     # stay byte-identical to its pre-#768 shape.
     $internalResult = Get-JudgeRulingsSustainedCountInternal -Body $Body
-    return [PSCustomObject]@{ SustainedCount = $internalResult.SustainedCount; ParseStatus = $internalResult.ParseStatus }
+
+    # G-CR9 fix: post-review-observer reuses the judge-rulings parse above
+    # ONLY for its ParseStatus (Get-EmissionGap's could-not-verify/
+    # head-corrupt diagnosis depends on that -- M16 wiring uniformity), but
+    # its SustainedCount is never a meaningful judge-rulings count for this
+    # surface. Force 0 rather than leak the wrong number to any direct
+    # caller (Get-EmissionGap itself always discards this value for this
+    # surface via the CR-8 seam, so this is a no-op for the only production
+    # caller and closes the latent API-contract trap for any future one).
+    $sustainedCount = if ($Surface -eq 'post-review-observer') { 0 } else { $internalResult.SustainedCount }
+    return [PSCustomObject]@{ SustainedCount = $sustainedCount; ParseStatus = $internalResult.ParseStatus }
 }
 
 #endregion
@@ -1266,10 +1297,20 @@ function script:Get-ExternalSourcesReconciledFromRegion {
     }
 
     if ([string]::IsNullOrWhiteSpace($rawValue)) {
-        # Block-list style (or a bare empty key, treated as an explicit empty
-        # array): scan immediately-following indented `- item` lines only,
-        # stopping at the first line that is not one (a dedented/column-0
-        # next key, a blank line, or the fence close).
+        # Block-list style: scan immediately-following indented `- item`
+        # lines only, stopping at the first line that is not one (a
+        # dedented/column-0 next key, a blank line, or the fence close).
+        #
+        # G-CR2(a) fix: a bare `external_sources_reconciled:` with NOTHING
+        # after the colon and NO following `- item` lines is a genuine YAML
+        # null, not an explicit empty array -- per YAML, `key:` alone means
+        # the value is null, while `key: []` (handled above) is the only
+        # legal explicit-empty-array spelling. Before this fix, a bare null
+        # was returned as Found=true/Values=[], letting non-conformant input
+        # fabricate a measured-empty coverage signal. Only report Found=true
+        # here when the block-list scan actually finds at least one real
+        # item; otherwise fall through to the malformed/not-found return
+        # below, same as any other unrecognized shape.
         $keyLineEnd = $Region.IndexOf("`n", $survivor.Index, [System.StringComparison]::Ordinal)
         $items = [System.Collections.Generic.List[string]]::new()
         if ($keyLineEnd -ge 0) {
@@ -1283,12 +1324,116 @@ function script:Get-ExternalSourcesReconciledFromRegion {
                 }
             }
         }
-        return [PSCustomObject]@{ Found = $true; Values = $items.ToArray() }
+        if ($items.Count -gt 0) {
+            return [PSCustomObject]@{ Found = $true; Values = $items.ToArray() }
+        }
+        return [PSCustomObject]@{ Found = $false; Values = @() }
     }
 
     # Neither a recognizable flow array nor an empty/block-list shape: a
     # malformed value. Report not-found rather than fabricating structure.
     return [PSCustomObject]@{ Found = $false; Values = @() }
+}
+
+#endregion
+
+#region Get-InternalMatchMappingSpan (private, G-CR2(b) seam)
+
+function script:Get-InternalMatchMappingSpan {
+    <#
+    .SYNOPSIS
+        Finds the internal_match: mapping's own content span within an entry
+        span, so match_status/matched_finding_key extraction can be bounded
+        to text that actually sits inside an internal_match mapping (G-CR2(b)
+        fix, PR #859 GitHub-review post-fix) rather than matched at any
+        indentation anywhere in the entry.
+    .DESCRIPTION
+        internal_match is written in one of two legal shapes (skills/
+        review-judgment/SKILL.md § `internal_match` Writer Rule):
+          - Flow mapping on one line: `internal_match: { match_status: novel }`
+          - Block mapping: `internal_match:` alone on its own line (optionally
+            followed by a trailing comment), with `match_status:`/
+            `matched_finding_key:` on subsequent lines indented strictly more
+            than the `internal_match:` key itself (same dedent-termination
+            rule as Get-BlockScalarSpans).
+        Before this fix, match_status/matched_finding_key were matched via
+        the house $KeyAnchor at ANY indentation anywhere in the entry span,
+        with no requirement that they sit inside an internal_match mapping at
+        all — a crafted `match_status: novel` line anywhere else in the entry
+        (not merely inside disposition_rationale's block-scalar content,
+        which the M41 exclusion already guards) could upgrade the safe
+        'ambiguous' default. Takes the FIRST key-anchored, non-block-scalar
+        internal_match: match only, same precedent as the entry's other
+        single-value fields.
+    .PARAMETER EntrySpan
+        The already-isolated entry span text (Get-ReviewDispositionsTallyInternal's
+        per-entry $entrySpan).
+    .PARAMETER KeyAnchor
+        The house $keyAnchor pattern fragment (real line-start, dash-item, or
+        flow-mapping key position).
+    .PARAMETER BlockScalarSpans
+        Get-BlockScalarSpans result computed over the parent $Region.
+    .PARAMETER SpanStart
+        $EntrySpan's own start offset within $Region (so the block-scalar
+        exclusion check can convert entrySpan-relative indices to
+        region-relative indices, matching the other exclusion checks in
+        Get-ReviewDispositionsTallyInternal).
+    .OUTPUTS
+        [PSCustomObject]@{ Start; End } (entrySpan-relative, End exclusive)
+        covering only the mapping's content, or $null when no real
+        internal_match key is found.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$EntrySpan,
+        [Parameter(Mandatory)][string]$KeyAnchor,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$BlockScalarSpans,
+        [Parameter(Mandatory)][int]$SpanStart
+    )
+
+    $candidates = [regex]::Matches($EntrySpan, "(?m)${KeyAnchor}(internal_match)\s*:[ \t]*(\{)?")
+    $survivor = $candidates | Where-Object {
+        -not (Test-IndexInBlockScalarSpan -Index ($SpanStart + $_.Groups[1].Index) -Spans $BlockScalarSpans)
+    } | Select-Object -First 1
+    if (-not $survivor) { return $null }
+
+    if ($survivor.Groups[2].Success) {
+        # Flow mapping: internal_match: { ... } -- content span is the
+        # balanced brace region. This schema never nests braces inside
+        # internal_match, so a first-close-brace search is sufficient.
+        $openIdx = $survivor.Groups[2].Index
+        $closeIdx = $EntrySpan.IndexOf('}', $openIdx)
+        if ($closeIdx -le $openIdx) { return $null }
+        return [PSCustomObject]@{ Start = $openIdx; End = $closeIdx }
+    }
+
+    # Block mapping: content is every subsequent line indented strictly more
+    # than the internal_match: key line itself.
+    $keyMatchIndex = $survivor.Groups[1].Index
+    $lineStartSearch = $EntrySpan.LastIndexOf("`n", [Math]::Max($keyMatchIndex - 1, 0))
+    $lineStart = if ($lineStartSearch -lt 0) { 0 } else { $lineStartSearch + 1 }
+    $keyIndent = $keyMatchIndex - $lineStart
+
+    $keyLineEnd = $EntrySpan.IndexOf("`n", $keyMatchIndex, [System.StringComparison]::Ordinal)
+    if ($keyLineEnd -lt 0) { return $null }
+    $pos = $keyLineEnd + 1
+    $contentEnd = $EntrySpan.Length
+    while ($pos -le $EntrySpan.Length) {
+        $nextNewline = $EntrySpan.IndexOf("`n", $pos, [System.StringComparison]::Ordinal)
+        $lineText = if ($nextNewline -ge 0) { $EntrySpan.Substring($pos, $nextNewline - $pos) } else { $EntrySpan.Substring($pos) }
+        if ($lineText.Trim().Length -eq 0) {
+            if ($nextNewline -lt 0) { $contentEnd = $EntrySpan.Length; break }
+            $pos = $nextNewline + 1
+            continue
+        }
+        $lineIndent = [regex]::Match($lineText, '^[ \t]*').Value.Length
+        if ($lineIndent -le $keyIndent) {
+            $contentEnd = $pos
+            break
+        }
+        if ($nextNewline -lt 0) { $contentEnd = $EntrySpan.Length; break }
+        $pos = $nextNewline + 1
+    }
+    return [PSCustomObject]@{ Start = ($keyLineEnd + 1); End = $contentEnd }
 }
 
 #endregion
@@ -1526,14 +1671,25 @@ function script:Get-ReviewDispositionsTallyInternal {
         # ever violated. Seam Specification default: absent internal_match
         # is 'ambiguous' — a bookkeeping omission must never manufacture an
         # escape.
+        # G-CR2(b) fix: match_status/matched_finding_key must additionally
+        # fall inside the entry's own internal_match: mapping content span --
+        # without this, either field could be matched anywhere in the entry
+        # at any indentation, letting a crafted stray `match_status: novel`
+        # (outside any internal_match block, and outside disposition_rationale's
+        # block-scalar content the M41 exclusion already guards) wrongly
+        # upgrade the safe 'ambiguous' default.
+        $internalMatchSpan = Get-InternalMatchMappingSpan -EntrySpan $entrySpan -KeyAnchor $keyAnchor -BlockScalarSpans $blockScalarSpans -SpanStart $spanStart
+
         $matchStatusCandidates = [regex]::Matches($entrySpan, "(?m)${keyAnchor}(match_status)\s*:\s*(duplicate|novel|ambiguous)\b")
         $matchStatusSurvivor = $matchStatusCandidates | Where-Object {
+            $internalMatchSpan -and $_.Groups[1].Index -ge $internalMatchSpan.Start -and $_.Groups[1].Index -lt $internalMatchSpan.End -and
             -not (Test-IndexInBlockScalarSpan -Index ($spanStart + $_.Groups[1].Index) -Spans $blockScalarSpans)
         } | Select-Object -First 1
         $matchStatus = if ($matchStatusSurvivor) { $matchStatusSurvivor.Groups[2].Value } else { 'ambiguous' }
 
         $matchedFindingKeyCandidates = [regex]::Matches($entrySpan, "(?m)${keyAnchor}(matched_finding_key)\s*:\s*(.+)")
         $matchedFindingKeySurvivor = $matchedFindingKeyCandidates | Where-Object {
+            $internalMatchSpan -and $_.Groups[1].Index -ge $internalMatchSpan.Start -and $_.Groups[1].Index -lt $internalMatchSpan.End -and
             -not (Test-IndexInBlockScalarSpan -Index ($spanStart + $_.Groups[1].Index) -Spans $blockScalarSpans)
         } | Select-Object -First 1
         $matchedFindingKey = if ($matchedFindingKeySurvivor) { ConvertFrom-YamlQuotedScalar -Value $matchedFindingKeySurvivor.Groups[2].Value } else { $null }
@@ -1980,8 +2136,21 @@ function script:Get-ExternalSourceNovelSustainedCount {
         chatter with no real review-dispositions marker contributes nothing
         rather than poisoning the aggregate (mirrors Get-EmissionGap's own
         Test-EmissionMarkerPresent gating for the judge-rulings surfaces).
+
+        G-C1 fix (PR #859 GitHub-review post-fix): -ExpectedNumber is now
+        threaded through to Test-ReviewDispositionsHeadPresent, matching the
+        M13 cross-PR marker gate that already protects the terminal-
+        observation seam (phase-containment-report.ps1). Without it, a
+        quoted/cross-referenced `review-dispositions-{N}` marker for a
+        DIFFERENT PR/issue on this body would be treated as a real head for
+        THIS PR and tallied into these counts.
     .PARAMETER Bodies
         Array of raw comment body text (the same corpus Get-EmissionGap scans).
+    .PARAMETER ExpectedNumber
+        The current PR/issue id. A review-dispositions marker whose own
+        captured {N} does not match this value is treated as not present
+        (same semantics as Test-ReviewDispositionsHeadPresent's own
+        -ExpectedNumber parameter).
     .OUTPUTS
         [PSCustomObject] with:
           Count            [int]    — sustained, resolved-external,
@@ -2003,7 +2172,8 @@ function script:Get-ExternalSourceNovelSustainedCount {
                             fail-loud)
     #>
     param(
-        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Bodies
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Bodies,
+        [Parameter(Mandatory)][int]$ExpectedNumber
     )
 
     $count = 0
@@ -2011,7 +2181,7 @@ function script:Get-ExternalSourceNovelSustainedCount {
     $anyCouldNotVerify = $false
 
     foreach ($body in $Bodies) {
-        if (-not (Test-ReviewDispositionsHeadPresent -Body $body)) {
+        if (-not (Test-ReviewDispositionsHeadPresent -Body $body -ExpectedNumber $ExpectedNumber)) {
             continue
         }
         $tally = Get-DispositionTally -Surface 'code-review' -Body $body
@@ -2300,7 +2470,7 @@ function Get-EmissionGap {
     # Get-ExternalSourceNovelSustainedCount for the full DD1-trinary
     # derivation of both counts).
     if ($Surface -eq 'code-review' -or $Surface -eq 'post-review-observer') {
-        $externalNovel = Get-ExternalSourceNovelSustainedCount -Bodies $Bodies
+        $externalNovel = Get-ExternalSourceNovelSustainedCount -Bodies $Bodies -ExpectedNumber $Id
         if ($externalNovel.ParseStatus -eq 'could-not-verify') {
             $anyCouldNotVerify = $true
         }

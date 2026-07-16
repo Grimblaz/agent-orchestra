@@ -435,6 +435,45 @@ Describe 'Format-PhaseContainmentReport — code-review escape-side arm (issue #
             $script:ReportText.Contains('Caveat: this is a lower-bound, correlated-blind-spot estimate') | Should -BeTrue -Because "Actual report:`n$script:ReportText"
         }
     }
+
+    Context 'G-CR4 regression: assessed-high escape-side unique-catch rate renders NOT ELIGIBLE, not WITHHELD' {
+        BeforeAll {
+            # Catch side stays clean (5 escape_distance=0 code-review entries,
+            # no critical/high severity, no real post-review-observer $Entries
+            # -- so RelaxationEligible starts $true from the catch-side pass).
+            # ObserverEscapeCount is supplied directly (overriding the
+            # $Entries-derived default, per this function's own documented
+            # contract) so the unique-catch rate computation alone is what
+            # flips RelaxationEligible to $false: 2 / (3 + 2) = 40% >= 5%.
+            # Reconciliation passes (DispositionsNovelExternalCount=0 matches
+            # the zero observer blocks actually present in $Entries), so this
+            # is a genuinely MEASURED high escape rate, not an unavailable
+            # assessment -- before the G-CR4 fix this rendered as the
+            # misleading generic "WITHHELD (escape-side unique-catch rate too
+            # high (40.0% >= 5%))".
+            $script:Rollup = Get-PhaseContainmentRollup -Entries (New-PC854CleanCodeReviewEntries -Count 5) -WindowLabel '90d' -TerminalObservation @{
+                CoObservedPRCount              = 8
+                MeasuredCoveragePRCount        = 5
+                DispositionsNovelExternalCount = 0
+                InternalCoObservedCatchCount   = 3
+                ExternalCatchCount             = 0
+                DuplicateCount                 = 0
+                ObserverEscapeCount            = 2
+            }
+            $script:ReportText = (Format-PhaseContainmentReport -Context (New-PC772Context -Rollup $script:Rollup)) -join "`n"
+        }
+
+        It 'renders the row-level NOT ELIGIBLE headline with the measured rate, not WITHHELD' {
+            $expectedRate = '{0:P1}' -f 0.4
+            $script:ReportText.Contains("Relaxation signal:  NOT ELIGIBLE (escape-side unique-catch rate too high ($expectedRate >= 5%))") | Should -BeTrue -Because "Actual report:`n$script:ReportText"
+            $script:ReportText.Contains('Relaxation signal:  WITHHELD (escape-side unique-catch rate too high') | Should -BeFalse -Because "Actual report:`n$script:ReportText"
+        }
+
+        It 'still renders the escape-side arm detail (unique-catch rate) unchanged' {
+            $expectedRate = '{0:P1}' -f 0.4
+            $script:ReportText.Contains("Unique-catch rate:  $expectedRate") | Should -BeTrue -Because "Actual report:`n$script:ReportText"
+        }
+    }
 }
 
 # ---------------------------------------------------------------------------

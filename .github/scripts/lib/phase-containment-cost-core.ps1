@@ -389,7 +389,13 @@ function Get-ReviewCostRollup {
 
             for ($i = 0; $i -lt $bodies.Count; $i++) {
                 $body = [string]$bodies[$i]
-                if (-not (Test-ReviewDispositionsHeadPresent -Body $body)) { continue }
+                # G-CR10 fix (PR #859 GitHub-review post-fix): pass -ExpectedNumber,
+                # matching the G-C1 fix at the sibling emission-check module's own
+                # Get-ExternalSourceNovelSustainedCount call site. Without it, a
+                # quoted/cross-referenced review-dispositions-{N} marker for a
+                # DIFFERENT PR than $number would be treated as present here and
+                # feed this PR's cost/dismiss-rate tallies.
+                if (-not (Test-ReviewDispositionsHeadPresent -Body $body -ExpectedNumber $number)) { continue }
                 if ($surface -eq 'pr') { $costPresentPrNumbers.Add($number) | Out-Null }
 
                 $tally = Get-DispositionTally -Surface 'code-review' -Body $body

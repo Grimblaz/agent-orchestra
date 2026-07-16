@@ -293,6 +293,28 @@ function Invoke-PhaseContainmentCommentScan {
     .PARAMETER CreatedAtValues
         Optional parallel array of createdAt strings (ISO 8601), one per body.
         If not supplied, entries get an empty string for createdAt.
+    .PARAMETER AuthorLogins
+        Optional parallel array of comment author logins, one per body
+        (Get-PhaseContainmentCommentCorpus's tuple contract). Index-paired
+        with CommentBodies the same way CreatedAtValues is.
+    .PARAMETER JudgeLogin
+        G-CR3 fix (PR #859 GitHub-review post-fix, security): when supplied
+        (non-empty), every body is gated through
+        Test-PhaseContainmentCommentAuthoredByJudge against AuthorLogins
+        BEFORE it is scanned for phase-containment-{ID} blocks — a
+        non-judge-authored body contributes ZERO entries, closing the
+        forged-block vector (any account that can comment could otherwise
+        post a well-formed post-review-observer block claiming
+        catchable_phase: experience/design to satisfy all-phase
+        reconciliation while leaving the real implementation-scoped escape
+        count untouched). Wires up Select-PhaseContainmentJudgeAuthoredBodies's
+        filtering primitive (previously dead code with zero production
+        callers) at the point entries are actually built, mirroring the same
+        authorship discipline phase-containment-report.ps1's
+        Get-PhaseContainmentTerminalObservation already applies to the
+        coverage/dispositions tally. Left empty (the default), no gating is
+        applied — preserves this function's existing behavior for callers
+        that do not carry author provenance.
     .OUTPUTS
         [PSCustomObject] with:
           Entries           [array] — parsed, validated entry hashtables with appended metadata.
@@ -304,16 +326,26 @@ function Invoke-PhaseContainmentCommentScan {
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$CommentBodies,
         [Parameter(Mandatory)][int]$IssueOrPrNumber,
         [string]$Surface = 'unknown',
-        [AllowEmptyCollection()][string[]]$CreatedAtValues = @()
+        [AllowEmptyCollection()][string[]]$CreatedAtValues = @(),
+        [AllowEmptyCollection()][string[]]$AuthorLogins = @(),
+        [AllowEmptyString()][string]$JudgeLogin = ''
     )
 
     $results = [System.Collections.Generic.List[hashtable]]::new()
     $id      = [string]$IssueOrPrNumber
     $invalidEntryCount = 0
+    $gateOnAuthor = -not [string]::IsNullOrWhiteSpace($JudgeLogin)
 
     for ($i = 0; $i -lt $CommentBodies.Count; $i++) {
         $body = $CommentBodies[$i]
         $createdAt = if ($i -lt $CreatedAtValues.Count) { $CreatedAtValues[$i] } else { '' }
+
+        if ($gateOnAuthor) {
+            $authorLogin = if ($i -lt $AuthorLogins.Count) { $AuthorLogins[$i] } else { '' }
+            if (-not (Test-PhaseContainmentCommentAuthoredByJudge -AuthorLogin $authorLogin -JudgeLogin $JudgeLogin)) {
+                continue
+            }
+        }
 
         # M4 fix (issue #772/#831 post-fix review): thread the D6 pair-match
         # skip count out of Get-PhaseContainmentBlock so a malformed/
@@ -535,7 +567,7 @@ function script:Get-SurfaceACorpusGraphQL {
                 foreach ($cn in $commentNodes) {
                     if ($null -ne $cn) {
                         $commentBodies.Add([string]$cn['body'])
-                        $cnCreatedAt = if ($cn.ContainsKey('createdAt')) { [string]$cn['createdAt'] } else { '' }
+                        $cnCreatedAt = if ($cn.ContainsKey('createdAt')) { script:ConvertTo-PhaseContainmentIsoString -Value $cn['createdAt'] } else { '' }
                         $commentCreatedAt.Add($cnCreatedAt)
                         $commentAuthorLogins.Add((script:Get-PhaseContainmentCommentAuthorLogin -CommentNode $cn))
                     }
@@ -597,7 +629,7 @@ function script:Get-SurfaceACorpusGraphQL {
                             foreach ($cn in @($huntComments['nodes'])) {
                                 if ($null -ne $cn) {
                                     $commentBodies.Add([string]$cn['body'])
-                                    $cnCreatedAtHunt = if ($cn.ContainsKey('createdAt')) { [string]$cn['createdAt'] } else { '' }
+                                    $cnCreatedAtHunt = if ($cn.ContainsKey('createdAt')) { script:ConvertTo-PhaseContainmentIsoString -Value $cn['createdAt'] } else { '' }
                                     $commentCreatedAt.Add($cnCreatedAtHunt)
                                     $commentAuthorLogins.Add((script:Get-PhaseContainmentCommentAuthorLogin -CommentNode $cn))
                                 }
@@ -679,7 +711,7 @@ function script:Get-SurfaceACorpusGraphQL {
                         foreach ($cn in @($pageComments['nodes'])) {
                             if ($null -ne $cn) {
                                 $commentBodies.Add([string]$cn['body'])
-                                $cnCreatedAt2 = if ($cn.ContainsKey('createdAt')) { [string]$cn['createdAt'] } else { '' }
+                                $cnCreatedAt2 = if ($cn.ContainsKey('createdAt')) { script:ConvertTo-PhaseContainmentIsoString -Value $cn['createdAt'] } else { '' }
                                 $commentCreatedAt.Add($cnCreatedAt2)
                                 $commentAuthorLogins.Add((script:Get-PhaseContainmentCommentAuthorLogin -CommentNode $cn))
                             }
@@ -742,7 +774,8 @@ function script:Get-SurfaceAEntriesGraphQL {
         [Parameter(Mandatory)][string]$Repo,
         [Parameter(Mandatory)][int]$WindowDays,
         [Parameter(Mandatory)][System.Diagnostics.Stopwatch]$Stopwatch,
-        [Parameter(Mandatory)][int]$TimeoutSeconds
+        [Parameter(Mandatory)][int]$TimeoutSeconds,
+        [AllowEmptyString()][string]$JudgeLogin = ''
     )
 
     $corpusResult = script:Get-SurfaceACorpusGraphQL `
@@ -763,11 +796,15 @@ function script:Get-SurfaceAEntriesGraphQL {
         # tuple in this loop — the original per-item try/catch this
         # extraction moved away from.
         try {
+            # G-CR3 fix: thread AuthorLogins/JudgeLogin through so a
+            # non-judge-authored body contributes zero entries.
             $scanResult = Invoke-PhaseContainmentCommentScan `
                 -CommentBodies $tuple['Bodies'] `
                 -IssueOrPrNumber $tuple['Number'] `
                 -Surface $tuple['Surface'] `
-                -CreatedAtValues $tuple['CreatedAtValues']
+                -CreatedAtValues $tuple['CreatedAtValues'] `
+                -AuthorLogins @($tuple['AuthorLogins']) `
+                -JudgeLogin $JudgeLogin
 
             foreach ($e in $scanResult.Entries) { $entries.Add($e) }
             $invalidEntryCount += $scanResult.InvalidEntryCount
@@ -866,7 +903,7 @@ function script:Get-SurfaceBCorpusGraphQL {
                 foreach ($cn in $commentNodes) {
                     if ($null -ne $cn) {
                         $commentBodies.Add([string]$cn['body'])
-                        $cnCreatedAtB = if ($cn.ContainsKey('createdAt')) { [string]$cn['createdAt'] } else { '' }
+                        $cnCreatedAtB = if ($cn.ContainsKey('createdAt')) { script:ConvertTo-PhaseContainmentIsoString -Value $cn['createdAt'] } else { '' }
                         $commentCreatedAt.Add($cnCreatedAtB)
                         $commentAuthorLogins.Add((script:Get-PhaseContainmentCommentAuthorLogin -CommentNode $cn))
                     }
@@ -928,7 +965,7 @@ function script:Get-SurfaceBCorpusGraphQL {
                             foreach ($cn in @($huntComments['nodes'])) {
                                 if ($null -ne $cn) {
                                     $commentBodies.Add([string]$cn['body'])
-                                    $cnCreatedAtBHunt = if ($cn.ContainsKey('createdAt')) { [string]$cn['createdAt'] } else { '' }
+                                    $cnCreatedAtBHunt = if ($cn.ContainsKey('createdAt')) { script:ConvertTo-PhaseContainmentIsoString -Value $cn['createdAt'] } else { '' }
                                     $commentCreatedAt.Add($cnCreatedAtBHunt)
                                     $commentAuthorLogins.Add((script:Get-PhaseContainmentCommentAuthorLogin -CommentNode $cn))
                                 }
@@ -1000,7 +1037,7 @@ function script:Get-SurfaceBCorpusGraphQL {
                         foreach ($cn in @($pageComments['nodes'])) {
                             if ($null -ne $cn) {
                                 $commentBodies.Add([string]$cn['body'])
-                                $cnCreatedAtB2 = if ($cn.ContainsKey('createdAt')) { [string]$cn['createdAt'] } else { '' }
+                                $cnCreatedAtB2 = if ($cn.ContainsKey('createdAt')) { script:ConvertTo-PhaseContainmentIsoString -Value $cn['createdAt'] } else { '' }
                                 $commentCreatedAt.Add($cnCreatedAtB2)
                                 $commentAuthorLogins.Add((script:Get-PhaseContainmentCommentAuthorLogin -CommentNode $cn))
                             }
@@ -1061,7 +1098,8 @@ function script:Get-SurfaceBEntriesGraphQL {
         [Parameter(Mandatory)][string]$Repo,
         [Parameter(Mandatory)][int]$WindowDays,
         [Parameter(Mandatory)][System.Diagnostics.Stopwatch]$Stopwatch,
-        [Parameter(Mandatory)][int]$TimeoutSeconds
+        [Parameter(Mandatory)][int]$TimeoutSeconds,
+        [AllowEmptyString()][string]$JudgeLogin = ''
     )
 
     $corpusResult = script:Get-SurfaceBCorpusGraphQL `
@@ -1078,11 +1116,15 @@ function script:Get-SurfaceBEntriesGraphQL {
         # M7 fix (issue #782 post-review): see Get-SurfaceAEntriesGraphQL's
         # identical per-item try/catch for the rationale.
         try {
+            # G-CR3 fix: thread AuthorLogins/JudgeLogin through so a
+            # non-judge-authored body contributes zero entries.
             $scanResult = Invoke-PhaseContainmentCommentScan `
                 -CommentBodies $tuple['Bodies'] `
                 -IssueOrPrNumber $tuple['Number'] `
                 -Surface $tuple['Surface'] `
-                -CreatedAtValues $tuple['CreatedAtValues']
+                -CreatedAtValues $tuple['CreatedAtValues'] `
+                -AuthorLogins @($tuple['AuthorLogins']) `
+                -JudgeLogin $JudgeLogin
 
             foreach ($e in $scanResult.Entries) { $entries.Add($e) }
             $invalidEntryCount += $scanResult.InvalidEntryCount
@@ -1180,7 +1222,7 @@ function script:Get-PhaseContainmentCorpusRest {
                         foreach ($c in $comments) {
                             if ($null -ne $c) {
                                 $commentBodies.Add([string]$c['body'])
-                                $cCreatedAt = if ($c.ContainsKey('createdAt')) { [string]$c['createdAt'] } else { '' }
+                                $cCreatedAt = if ($c.ContainsKey('createdAt')) { script:ConvertTo-PhaseContainmentIsoString -Value $c['createdAt'] } else { '' }
                                 $commentCreatedAt.Add($cCreatedAt)
                                 $commentAuthorLogins.Add((script:Get-PhaseContainmentCommentAuthorLogin -CommentNode $c))
                             }
@@ -1276,7 +1318,7 @@ function script:Get-PhaseContainmentCorpusRest {
                         foreach ($c in $comments) {
                             if ($null -ne $c) {
                                 $commentBodies.Add([string]$c['body'])
-                                $cCreatedAt = if ($c.ContainsKey('createdAt')) { [string]$c['createdAt'] } else { '' }
+                                $cCreatedAt = if ($c.ContainsKey('createdAt')) { script:ConvertTo-PhaseContainmentIsoString -Value $c['createdAt'] } else { '' }
                                 $commentCreatedAt.Add($cCreatedAt)
                                 $commentAuthorLogins.Add((script:Get-PhaseContainmentCommentAuthorLogin -CommentNode $c))
                             }
@@ -1326,7 +1368,8 @@ function script:Get-PhaseContainmentEntriesRest {
     param(
         [Parameter(Mandatory)][int]$WindowDays,
         [Parameter(Mandatory)][System.Diagnostics.Stopwatch]$Stopwatch,
-        [Parameter(Mandatory)][int]$TimeoutSeconds
+        [Parameter(Mandatory)][int]$TimeoutSeconds,
+        [AllowEmptyString()][string]$JudgeLogin = ''
     )
 
     $corpusResult = script:Get-PhaseContainmentCorpusRest `
@@ -1338,11 +1381,15 @@ function script:Get-PhaseContainmentEntriesRest {
         # M7 fix (issue #782 post-review): see Get-SurfaceAEntriesGraphQL's
         # identical per-item try/catch for the rationale.
         try {
+            # G-CR3 fix: thread AuthorLogins/JudgeLogin through so a
+            # non-judge-authored body contributes zero entries.
             $scanResult = Invoke-PhaseContainmentCommentScan `
                 -CommentBodies $tuple['Bodies'] `
                 -IssueOrPrNumber $tuple['Number'] `
                 -Surface $tuple['Surface'] `
-                -CreatedAtValues $tuple['CreatedAtValues']
+                -CreatedAtValues $tuple['CreatedAtValues'] `
+                -AuthorLogins @($tuple['AuthorLogins']) `
+                -JudgeLogin $JudgeLogin
 
             foreach ($e in $scanResult.Entries) { $entries.Add($e) }
             $invalidEntryCount += $scanResult.InvalidEntryCount
@@ -1590,6 +1637,16 @@ function Get-PhaseContainmentHistory {
         $env:TEMP\.phase-containment-cache-{RepoOwner}-{RepoName}.json
     .PARAMETER TimeoutSeconds
         Per-run budget in seconds. Default: 30.
+    .PARAMETER JudgeLogin
+        G-CR3 fix (PR #859 GitHub-review post-fix, security): threaded
+        through to Invoke-PhaseContainmentCommentScan (via the three
+        Get-Surface*Entries* wrappers below) so a body not authored by this
+        identity contributes zero phase-containment entries, matching the
+        same authorship discipline phase-containment-report.ps1's
+        Get-PhaseContainmentTerminalObservation already applies to the
+        coverage/dispositions tally. Left empty (the default), no gating is
+        applied — existing direct callers/tests that do not pass a judge
+        identity keep their prior unfiltered behavior.
     .OUTPUTS
         PSCustomObject with Entries, FetchedAt, Source, CacheAge, Truncated,
         InvalidEntryCount. Truncated/InvalidEntryCount are always present
@@ -1603,7 +1660,8 @@ function Get-PhaseContainmentHistory {
         [int]$WindowDays      = 90,
         [string]$Token        = '',
         [string]$CachePath    = '',
-        [int]$TimeoutSeconds  = 30
+        [int]$TimeoutSeconds  = 30,
+        [AllowEmptyString()][string]$JudgeLogin = ''
     )
 
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
@@ -1716,7 +1774,7 @@ function Get-PhaseContainmentHistory {
 
     $surfaceAResult = script:Get-SurfaceAEntriesGraphQL `
         -Owner $RepoOwner -Repo $RepoName -WindowDays $WindowDays `
-        -Stopwatch $stopwatch -TimeoutSeconds $TimeoutSeconds
+        -Stopwatch $stopwatch -TimeoutSeconds $TimeoutSeconds -JudgeLogin $JudgeLogin
 
     if ($surfaceAResult.IsError) {
         $useRest = $true
@@ -1747,7 +1805,7 @@ function Get-PhaseContainmentHistory {
 
         $surfaceBResult = script:Get-SurfaceBEntriesGraphQL `
             -Owner $RepoOwner -Repo $RepoName -WindowDays $WindowDays `
-            -Stopwatch $stopwatch -TimeoutSeconds $TimeoutSeconds
+            -Stopwatch $stopwatch -TimeoutSeconds $TimeoutSeconds -JudgeLogin $JudgeLogin
 
         if ($surfaceBResult.IsError) {
             $useRest = $true
@@ -1778,7 +1836,8 @@ function Get-PhaseContainmentHistory {
         $restResult = script:Get-PhaseContainmentEntriesRest `
             -WindowDays $WindowDays `
             -Stopwatch $stopwatch `
-            -TimeoutSeconds $TimeoutSeconds
+            -TimeoutSeconds $TimeoutSeconds `
+            -JudgeLogin $JudgeLogin
 
         # M2 (reset-on-discard): $rawEntries/$truncated/$invalidEntryCount
         # accumulated from a discarded GraphQL surface are intentionally
@@ -1826,7 +1885,17 @@ function Get-PhaseContainmentRollup {
         produces per-stage escape/irreducible rates with:
           - InsufficientData guard (N < 5, using cost-anomaly n<5 convention)
           - DenominatorZero guard
-          - RelaxationEligible signal (requires N>=5, IrreducibleRate~0, no critical severity)
+          - RelaxationEligible signal. G-CR12 fix (PR #859 GitHub-review
+            post-fix): this line previously described the retired
+            single-arm rule ("requires N>=5, IrreducibleRate~0, no critical
+            severity"). The shipped rule is two-arm: catch-side requires
+            N>=5, EscapeRate < 5%, and no sustained critical OR high
+            severity finding in the window (the veto also names 'high', not
+            just 'critical' — issue #854 M4/AC4); for the code-review stage
+            specifically, RelaxationEligible additionally requires a
+            passing escape-side terminal observation (coverage measured,
+            escape-arm reconciliation ok, unique-catch rate < 5% —
+            TerminalObservation-gated, below) before it can be $true.
           - DataUntrustworthy flag (when SustainedCounts completeness reconciliation fails)
           - LeakageMatrix (introduced_phase x caught_stage counts)
 
@@ -2489,6 +2558,17 @@ function Format-PhaseContainmentReport {
                 # truncated run never falls through to the misleading
                 # "NOT ELIGIBLE (escape_rate > 0)" text.
                 $lines.Add("  Relaxation signal:  WITHHELD (fetch truncated)")
+            }
+            elseif ($stage.RelaxationEligibleReason -like 'escape-side unique-catch rate too high*') {
+                # G-CR4 fix (PR #859 GitHub-review post-fix): this reason is
+                # a genuinely MEASURED assessed-high escape rate (M6's
+                # $uniqueCatchRate -ge 0.05 branch), not an unavailable/
+                # withheld assessment -- rendering it as WITHHELD mislabels a
+                # real escape-side failure as "not measured." The reason text
+                # already carries the measured percentage; this branch just
+                # gives it the matching escape-side NOT ELIGIBLE headline
+                # instead of the generic WITHHELD one below.
+                $lines.Add("  Relaxation signal:  NOT ELIGIBLE ($($stage.RelaxationEligibleReason))")
             }
             elseif ($null -ne $stage.RelaxationEligibleReason) {
                 # Issue #854 s6 reason-ladder extension: check the reason

@@ -380,6 +380,70 @@ seed: false
 }
 
 # ---------------------------------------------------------------------------
+# G-CR3 (critical/security, PR #859 GitHub-review post-fix): a forged
+# post-review-observer block from a NON-judge author must contribute ZERO
+# entries -- before this fix, Invoke-PhaseContainmentCommentScan had no
+# author parameter at all, so any commenter's well-formed
+# phase-containment-{ID} block (including one falsely claiming
+# catchable_phase: experience/design to inflate all-phase reconciliation
+# while leaving the real implementation-scoped escape count untouched) was
+# scanned and counted identically to a genuine judge-authored block.
+# ---------------------------------------------------------------------------
+
+Describe 'Invoke-PhaseContainmentCommentScan — G-CR3 judge-authorship gate' {
+    BeforeAll {
+        $script:ForgedObserverBody = @"
+<!-- phase-containment-859 -->
+finding_key: post-review-observer:gh-forged1
+introduced_phase: experience
+catchable_phase: experience
+caught_stage: post-review-observer
+escape_distance: 4
+severity: high
+systemic_fix_type: none
+category: script-automation
+apparatus_meta: false
+<!-- /phase-containment-859 -->
+"@
+    }
+
+    It 'scans normally with no gating when -JudgeLogin is not supplied (back-compat, unchanged behavior)' {
+        $scanResult = Invoke-PhaseContainmentCommentScan -CommentBodies @($script:ForgedObserverBody) -IssueOrPrNumber 859
+        $scanResult.Entries | Should -HaveCount 1
+    }
+
+    It 'rejects a forged block when the body author does NOT match -JudgeLogin' {
+        $scanResult = Invoke-PhaseContainmentCommentScan `
+            -CommentBodies @($script:ForgedObserverBody) `
+            -IssueOrPrNumber 859 `
+            -AuthorLogins @('random-commenter') `
+            -JudgeLogin 'github-actions[bot]'
+
+        $scanResult.Entries | Should -HaveCount 0
+    }
+
+    It 'rejects a forged block when AuthorLogins is unresolvable (empty string, fail-closed)' {
+        $scanResult = Invoke-PhaseContainmentCommentScan `
+            -CommentBodies @($script:ForgedObserverBody) `
+            -IssueOrPrNumber 859 `
+            -AuthorLogins @('') `
+            -JudgeLogin 'github-actions[bot]'
+
+        $scanResult.Entries | Should -HaveCount 0
+    }
+
+    It 'accepts the same block when the body author DOES match -JudgeLogin' {
+        $scanResult = Invoke-PhaseContainmentCommentScan `
+            -CommentBodies @($script:ForgedObserverBody) `
+            -IssueOrPrNumber 859 `
+            -AuthorLogins @('github-actions[bot]') `
+            -JudgeLogin 'github-actions[bot]'
+
+        $scanResult.Entries | Should -HaveCount 1
+    }
+}
+
+# ---------------------------------------------------------------------------
 # 9. Rollup — n=4 stage → InsufficientData + withheld relaxation signal
 # ---------------------------------------------------------------------------
 
@@ -1065,13 +1129,24 @@ Describe 'Get-PhaseContainmentRollup — code-review escape-side guard (issue #8
         $stage.UniqueCatchRateAssessable | Should -Be $true
     }
 
-    It 'sets RelaxationEligible=$false with a coverage reason (K of N) when all external findings on the co-observed PRs are unresolved (M7 — all-unresolved coverage contributes ZERO)' {
+    It 'G-CR7: sets RelaxationEligible=$false with a coverage reason (K of N) on a generic K=0-of-N rollup guard, independent of WHY the caller supplied K=0' {
         $entries = script:New-CleanCodeReviewEntries
 
-        # M7: five PRs whose external findings are ALL 'unresolved' must not
-        # count toward K — the caller (s6) is responsible for that exclusion
-        # when building MeasuredCoveragePRCount; this test proves the guard
-        # fails closed on the resulting K=0 rather than trusting CoObservedPRCount.
+        # G-CR7 fix (PR #859 GitHub-review post-fix, test-clarity only — no
+        # production code change): this test previously claimed "all-
+        # unresolved coverage contributes ZERO, the caller (s6) is
+        # responsible for that exclusion" as its rationale for K=0. That
+        # premise is stale: report.ps1:87-98 documents the M5 fix that
+        # REMOVED the >=1-resolved-finding requirement, and a valid
+        # external_sources_reconciled record now counts toward K (coverage
+        # means measurement) even when every finding on it is unresolved —
+        # the caller-side "all-unresolved excludes a PR from K" story this
+        # test used to describe no longer matches Get-PhaseContainmentTerminalObservation's
+        # actual derivation. This test never exercised that derivation path
+        # anyway (it hand-feeds MeasuredCoveragePRCount directly); its real,
+        # still-valid purpose is proving Get-PhaseContainmentRollup itself
+        # fails closed on a caller-supplied K=0 (whatever the caller's
+        # reason for K=0 might be), not trusting CoObservedPRCount instead.
         $terminalObservation = @{
             CoObservedPRCount              = 5
             MeasuredCoveragePRCount        = 0
@@ -2046,6 +2121,98 @@ Describe 'Get-PhaseContainmentCommentCorpus — AuthorLogins threaded through th
 
         $prTuple = $result.Tuples | Where-Object { $_['Number'] -eq 1106 }
         $prTuple['AuthorLogins'] | Should -Be @('grace')
+    }
+}
+
+# ---------------------------------------------------------------------------
+# G-CR13 (PR #859 GitHub-review post-fix): every createdAt extraction site in
+# the comment-node processing flow used a bare [string] cast on a value
+# ConvertFrom-Json -AsHashtable had already auto-parsed into a [datetime].
+# That cast drops the Kind/offset marker (current-culture formatting has no
+# 'Z'/offset token), so a later RoundtripKind re-parse yields Kind=Unspecified
+# and .ToUniversalTime() shifts the value by the LOCAL machine's UTC offset --
+# real data corruption on any non-UTC runtime (this repo's own dev
+# environment included, per the ConvertTo-PhaseContainmentIsoString rationale
+# at the top of this file). These fixtures prove the extracted CreatedAtValues
+# round-trip to the EXACT original UTC instant, not an offset-shifted one.
+# ---------------------------------------------------------------------------
+
+Describe 'Get-PhaseContainmentCommentCorpus — G-CR13 createdAt ISO round-trip preservation' {
+    AfterEach {
+        if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {
+            Remove-Item -Path Function:gh -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'round-trips a GraphQL comment createdAt (Surface A, issue) to the exact original UTC instant' {
+        $expectedUtc = [datetime]::Parse('2024-03-01T11:30:00Z', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+
+        $payload = @{
+            data = @{
+                search = @{
+                    pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                    nodes    = @(
+                        @{
+                            number   = 1201
+                            comments = @{
+                                nodes    = @(@{ author = @{ login = 'alice' }; body = '<!-- plan-issue-1201 -->'; createdAt = '2024-03-01T11:30:00Z' })
+                                pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                            }
+                        }
+                    )
+                }
+            }
+        }
+        $json = ($payload | ConvertTo-Json -Depth 12)
+        $emptySearchJson = (@{ data = @{ search = @{ pageInfo = @{ hasNextPage = $false; endCursor = $null }; nodes = @() } } } | ConvertTo-Json -Depth 6)
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $global:LASTEXITCODE = 0
+            if (($Args -join ' ') -match 'is:issue') { return $json }
+            if (($Args -join ' ') -match 'is:pr') { return $emptySearchJson }
+            return '{}'
+        }
+
+        $result = Get-PhaseContainmentCommentCorpus -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 30
+        $tuple = $result.Tuples | Where-Object { $_['Number'] -eq 1201 }
+        $rawCreatedAt = $tuple['CreatedAtValues'][0]
+
+        $reparsed = [datetime]::Parse($rawCreatedAt, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind)
+        $reparsed.Kind | Should -Be ([System.DateTimeKind]::Utc)
+        $reparsed.ToUniversalTime() | Should -Be $expectedUtc
+    }
+
+    It 'round-trips a REST comment createdAt (PR surface) to the exact original UTC instant' {
+        $expectedUtc = [datetime]::Parse('2024-03-02T09:15:00Z', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+
+        $restIssueList = (@() | ConvertTo-Json)
+        $restPrList = (@(@{ number = 1202 }) | ConvertTo-Json)
+        $restPrView = (@{ comments = @(@{ author = @{ login = 'grace' }; body = '<!-- judge-rulings pr=1202 -->'; createdAt = '2024-03-02T09:15:00Z' }) } | ConvertTo-Json -Depth 6)
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            if ($joined -match 'graphql') {
+                $global:LASTEXITCODE = 1
+                return 'boom'
+            }
+            $global:LASTEXITCODE = 0
+            if ($joined -match 'issue list') { return $restIssueList }
+            if ($joined -match 'pr list')    { return $restPrList }
+            if ($joined -match 'pr view')    { return $restPrView }
+            return '{}'
+        }
+
+        $result = Get-PhaseContainmentCommentCorpus -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 30
+        $result.Source | Should -Be 'rest'
+
+        $tuple = $result.Tuples | Where-Object { $_['Number'] -eq 1202 }
+        $rawCreatedAt = $tuple['CreatedAtValues'][0]
+
+        $reparsed = [datetime]::Parse($rawCreatedAt, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind)
+        $reparsed.Kind | Should -Be ([System.DateTimeKind]::Utc)
+        $reparsed.ToUniversalTime() | Should -Be $expectedUtc
     }
 }
 

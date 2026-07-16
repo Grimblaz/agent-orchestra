@@ -49,9 +49,12 @@
     escape_distance = projection(caught_stage) - ordinal(catchable_phase).
 
 .PARAMETER Pr
-    Single-target mode: check this PR number (code-review surface). Mutually
-    exclusive with -Issue and with corpus mode (-WindowDays is ignored when
-    -Pr or -Issue is supplied).
+    Single-target mode: check this PR number (code-review AND
+    post-review-observer surfaces are both scanned — G-CR11 fix, PR #859
+    GitHub-review post-fix: this text previously described PR mode as
+    code-review-only, but dispatch has scanned both surfaces since issue
+    #854 s7). Mutually exclusive with -Issue and with corpus mode
+    (-WindowDays is ignored when -Pr or -Issue is supplied).
 .PARAMETER Issue
     Single-target mode: check this issue number (design-challenge and
     plan-stress-test surfaces are both probed; whichever marker is present
