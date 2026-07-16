@@ -8,7 +8,8 @@
 .DESCRIPTION
     Finds <!-- review-dispositions-{PR} --> comments on a GitHub PR, parses their YAML
     payloads, and validates against the review-dispositions payload schema:
-      - schema_version must be 1, 2, or 3 (`{1,2,3}`). v1 entries are exempt from ac_cross_check checks.
+      - schema_version must be 1, 2, 3, or 4 (`{1,2,3,4}`). v1 entries are exempt from ac_cross_check checks.
+        v4 entries must carry reviewer_source (writer-mandatory, same as v3).
       - passes_run must be a non-empty subset of [1,2,3,4,5]
       - entries[] must each carry stable_finding_key, pass, disposition, classification,
         disposition_rationale
@@ -120,8 +121,8 @@ foreach ($body in $rawBodies) {
     }
 
     # schema_version
-    if ($null -eq $payload.schema_version -or $payload.schema_version -notin @(1, 2, 3)) {
-        Add-RdvFinding "review-dispositions-${PullRequestNumber}: schema_version must be 1, 2, or 3, got: $($payload.schema_version)"
+    if ($null -eq $payload.schema_version -or $payload.schema_version -notin @(1, 2, 3, 4)) {
+        Add-RdvFinding "review-dispositions-${PullRequestNumber}: schema_version must be 1, 2, 3, or 4, got: $($payload.schema_version)"
     }
 
     # passes_run
@@ -165,8 +166,16 @@ foreach ($body in $rawBodies) {
             if ([string]::IsNullOrWhiteSpace($entry.disposition_rationale)) {
                 Add-RdvFinding "review-dispositions-${PullRequestNumber}: $entryLabel missing required disposition_rationale"
             }
-            # v2/v3: ac_cross_check required on >=medium dismiss/defer entries
-            if ($payload.schema_version -in @(2, 3)) {
+            # v4: reviewer_source is writer-mandatory on every entry (same requirement as v3,
+            # but v3 has never enforced it here -- this check is new and applies to v4 only).
+            if ($payload.schema_version -eq 4 -and [string]::IsNullOrWhiteSpace($entry.reviewer_source)) {
+                Add-RdvFinding "review-dispositions-${PullRequestNumber}: $entryLabel (v4) missing required reviewer_source"
+            }
+            # v2/v3/v4: ac_cross_check required on >=medium dismiss/defer entries.
+            # G-C2 fix: the v4 sweep (above) added reviewer_source enforcement to
+            # this same per-entry loop but never extended this gate, silently
+            # disabling ac_cross_check enforcement for the current schema version.
+            if ($payload.schema_version -in @(2, 3, 4)) {
                 $mediumOrAbove = @('medium', 'high', 'critical')
                 $dismissOrDefer = @('dismiss', 'defer')
                 if ($entry.disposition -in $dismissOrDefer -and $entry.severity -in $mediumOrAbove) {

@@ -50,18 +50,20 @@ $script:JudgeRulingsVocabGatePattern = '(?m)(?:^\s*(?:-\s+)?|[{,]\s*)(dispositio
 #region Valid surfaces / id-domain mapping
 
 # -Surface uses the core's stage names exactly (StageProjections keys):
-# 'code-review', 'design-challenge', 'plan-stress-test' — see the three
-# [ValidateSet('code-review', 'design-challenge', 'plan-stress-test')]
+# 'code-review', 'design-challenge', 'plan-stress-test', 'post-review-observer'
+# — see the four
+# [ValidateSet('code-review', 'design-challenge', 'plan-stress-test', 'post-review-observer')]
 # parameter attributes in this file for the single source of truth (M11:
 # removed the redundant, never-referenced $script:ValidEmissionCheckSurfaces
 # array — PowerShell's ValidateSet attribute requires compile-time constant
 # values, so it cannot reference a script-scoped variable as a dynamic
 # source without a custom IValidateSetValuesGenerator class, which is more
-# machinery than three inline literal lists warrant here).
+# machinery than four inline literal lists warrant here).
 # id-domain per surface:
 #   code-review                -> Id = PR number,    blocks live on PR comments
 #   design-challenge            -> Id = issue number, blocks live on issue comments (design-phase-complete-{ID})
 #   plan-stress-test            -> Id = issue number, blocks live on issue comments (plan-issue-{ID})
+#   post-review-observer        -> Id = PR number,    blocks live on PR comments (same domain as code-review)
 # Callers must pass the matching domain; this module does not verify it.
 
 #endregion
@@ -729,14 +731,17 @@ function Test-EmissionMarkerPresent {
         mention with no such follow-on content is treated as ordinary prose,
         not a real marker.
     .PARAMETER Surface
-        One of: code-review, design-challenge, plan-stress-test
+        One of: code-review, design-challenge, plan-stress-test,
+        post-review-observer (M16 fix: this docstring previously omitted
+        the fourth ValidateSet member even though the parameter attribute
+        already accepted it).
     .PARAMETER Body
         The raw comment body text to scan.
     .OUTPUTS
         [bool] $true when a recognizable marker head is present, else $false.
     #>
     param(
-        [Parameter(Mandatory)][ValidateSet('code-review', 'design-challenge', 'plan-stress-test')][string]$Surface,
+        [Parameter(Mandatory)][ValidateSet('code-review', 'design-challenge', 'plan-stress-test', 'post-review-observer')][string]$Surface,
         [Parameter(Mandatory)][AllowEmptyString()][string]$Body
     )
 
@@ -855,16 +860,40 @@ function Get-SustainedFindingCount {
         never treated as zero. Zero sustained findings (marker present, no
         sustained entries) returns 0 with ParseStatus 'ok'.
     .PARAMETER Surface
-        One of: code-review, design-challenge, plan-stress-test
+        One of: code-review, design-challenge, plan-stress-test,
+        post-review-observer (M16 fix: this docstring previously omitted
+        the fourth ValidateSet member even though the parameter attribute
+        already accepted it).
+
+        G-CR9 fix (PR #859 GitHub-review post-fix): -Surface
+        'post-review-observer' has no defined per-body judge-rulings-shaped
+        sustained-count of its own — its real expected count is the
+        external-source-novel count Get-ExternalSourceNovelSustainedCount
+        computes across the whole comment corpus (consumed by
+        Get-EmissionGap's CR-8 seam), not anything derivable from a single
+        body in this function's judge-rulings/finding_dispositions shape.
+        This surface is kept in the ValidateSet ONLY so Get-EmissionGap's
+        generic per-body loop can call this function uniformly across all
+        four surfaces for its ParseStatus/head-corrupt diagnosis (M16's
+        wiring-uniformity precedent) -- SustainedCount for this surface is
+        ALWAYS 0 (see .OUTPUTS), never the judge-rulings count the
+        non-design branch would otherwise compute. A caller that actually
+        needs post-review-observer's expected count must call
+        Get-ExternalSourceNovelSustainedCount directly, mirroring
+        Get-DispositionTally's M17 precedent of hardening this same surface
+        against silently returning a wrong-shaped/wrong-surface result.
     .PARAMETER Body
         The raw comment body text to scan.
     .OUTPUTS
         [PSCustomObject] with:
-          SustainedCount [int]    — count of sustained findings (0 when none)
+          SustainedCount [int]    — count of sustained findings (0 when none).
+                          ALWAYS 0 for -Surface 'post-review-observer' (see
+                          .PARAMETER Surface, G-CR9) -- never the judge-rulings
+                          count this surface has no defined shape for.
           ParseStatus    [string] — 'ok' or 'could-not-verify'
     #>
     param(
-        [Parameter(Mandatory)][ValidateSet('code-review', 'design-challenge', 'plan-stress-test')][string]$Surface,
+        [Parameter(Mandatory)][ValidateSet('code-review', 'design-challenge', 'plan-stress-test', 'post-review-observer')][string]$Surface,
         [Parameter(Mandatory)][AllowEmptyString()][string]$Body
     )
 
@@ -886,7 +915,17 @@ function Get-SustainedFindingCount {
     # returns DefenseSustainedCount, but this function's public output must
     # stay byte-identical to its pre-#768 shape.
     $internalResult = Get-JudgeRulingsSustainedCountInternal -Body $Body
-    return [PSCustomObject]@{ SustainedCount = $internalResult.SustainedCount; ParseStatus = $internalResult.ParseStatus }
+
+    # G-CR9 fix: post-review-observer reuses the judge-rulings parse above
+    # ONLY for its ParseStatus (Get-EmissionGap's could-not-verify/
+    # head-corrupt diagnosis depends on that -- M16 wiring uniformity), but
+    # its SustainedCount is never a meaningful judge-rulings count for this
+    # surface. Force 0 rather than leak the wrong number to any direct
+    # caller (Get-EmissionGap itself always discards this value for this
+    # surface via the CR-8 seam, so this is a no-op for the only production
+    # caller and closes the latent API-contract trap for any future one).
+    $sustainedCount = if ($Surface -eq 'post-review-observer') { 0 } else { $internalResult.SustainedCount }
+    return [PSCustomObject]@{ SustainedCount = $sustainedCount; ParseStatus = $internalResult.ParseStatus }
 }
 
 #endregion
@@ -927,11 +966,14 @@ function Get-DispositionTally {
         review-dispositions marker is the per-finding engineer-disposition
         ledger this function accounts). Returns a joint per-entry projection —
         one tuple per entry, `{StableFindingKey; Disposition; Stage;
-        ReviewerSource}` — so callers can build both the AC1 per-stage
+        ReviewerSource; MatchStatus; MatchedFindingKey}` (issue #854 s3 added
+        the last two, additive) — so callers can build both the AC1 per-stage
         dismiss/defer marginal and the AC2 per-source x disposition joint
         table from the same data. Entries are filtered to `stage ==
         'code-review'` (v1/v2 entries, which predate or omit the `stage`
         field, default to `code-review`); a `stage: ce` entry is excluded.
+        Also returns the PR-level `ExternalSourcesReconciled` field (issue
+        #854 s3) — an empty array when absent/unparseable, never $null.
 
         -Surface design-challenge / plan-stress-test extend the two existing
         script-scoped internals (additive-return only; see
@@ -947,14 +989,33 @@ function Get-DispositionTally {
         body, or an unrecognized/absent marker head, is a could-not-verify
         condition, never treated as zero.
     .PARAMETER Surface
-        One of: code-review, design-challenge, plan-stress-test
+        One of: code-review, design-challenge, plan-stress-test,
+        post-review-observer (M16 fix: this docstring previously omitted
+        the fourth ValidateSet member even though the parameter attribute
+        already accepted it -- see M17, above, for why this function
+        actually rejects that fourth value at runtime rather than handling
+        it).
     .PARAMETER Body
         The raw comment body text to scan.
     .OUTPUTS
         [PSCustomObject]. For -Surface code-review:
           Surface     [string] — 'code-review'
           Entries     [PSCustomObject[]] — one per in-scope entry, each with
-                      StableFindingKey, Disposition, Stage, ReviewerSource
+                      StableFindingKey, Disposition, Stage, ReviewerSource,
+                      MatchStatus, MatchedFindingKey
+          ExternalSourcesReconciled [string[]] — PR-level column-0 field
+                      (issue #854 s3); empty array when absent/unparseable
+          ExternalSourcesFound [bool] — post-fix batch 4 (issue #854 s6):
+                      $true only when a REAL PR-level external_sources_
+                      reconciled field was found and parsed this body,
+                      independent of whether ParseStatus 'ok' came from
+                      entries alone. This is the coverage-purposes signal
+                      callers (e.g. Get-PhaseContainmentTerminalObservation's
+                      MeasuredCoveragePRCount/K derivation) must use instead
+                      of ParseStatus -eq 'ok' alone -- a purely internal-only
+                      marker (real entries, no external reconciliation ever
+                      attempted this pass) sets this $false even though
+                      ParseStatus stays 'ok' for its entry data.
           ParseStatus [string] — 'ok' or 'could-not-verify'
         For -Surface plan-stress-test:
           Surface               [string]
@@ -971,19 +1032,38 @@ function Get-DispositionTally {
           ParseStatus           [string] — 'ok' or 'could-not-verify'
     #>
     param(
-        [Parameter(Mandatory)][ValidateSet('code-review', 'design-challenge', 'plan-stress-test')][string]$Surface,
+        [Parameter(Mandatory)][ValidateSet('code-review', 'design-challenge', 'plan-stress-test', 'post-review-observer')][string]$Surface,
         [Parameter(Mandatory)][AllowEmptyString()][string]$Body
     )
 
+    # M17 fix (post-fix judge-sustained review): -Surface's ValidateSet
+    # accepts 'post-review-observer', but no branch below has a defined
+    # shape for it -- the code below used to fall through to the
+    # plan-stress-test-shaped default for ANY surface that isn't
+    # code-review/design-challenge, silently mislabeling a wrong-shaped
+    # result ({SustainedCount; DefenseSustainedCount}, not code-review's
+    # {Entries; ExternalSourcesReconciled}) with Surface='post-review-observer'.
+    # No live caller passes this value today (Get-EmissionGap's
+    # post-review-observer handling goes through
+    # Get-ExternalSourceNovelSustainedCount instead, never this function),
+    # so this is defensive hardening against a future caller passing the
+    # value the ValidateSet already accepts -- fail loud rather than
+    # silently returning a wrong-shaped result.
+    if ($Surface -eq 'post-review-observer') {
+        throw "Get-DispositionTally: -Surface 'post-review-observer' is not supported. This function has no defined per-entry/tally shape for that surface -- Get-EmissionGap resolves post-review-observer's expected count via Get-ExternalSourceNovelSustainedCount instead. Pass 'code-review', 'design-challenge', or 'plan-stress-test'."
+    }
+
     if ([string]::IsNullOrWhiteSpace($Body)) {
         if ($Surface -eq 'code-review') {
-            return [PSCustomObject]@{ Surface = $Surface; Entries = @(); ParseStatus = 'could-not-verify' }
+            return [PSCustomObject]@{ Surface = $Surface; Entries = @(); ExternalSourcesReconciled = @(); ExternalSourcesFound = $false; ParseStatus = 'could-not-verify' }
         }
         if ($Surface -eq 'design-challenge') {
             # Additive (issue #768 s4): DismissedCount, see the design-challenge
             # branch below and Get-DesignChallengeSustainedCountInternal.
             return [PSCustomObject]@{ Surface = $Surface; SustainedCount = 0; DefenseSustainedCount = 0; DismissedCount = 0; ParseStatus = 'could-not-verify' }
         }
+        # plan-stress-test (the only ValidateSet member remaining after the
+        # post-review-observer throw above).
         return [PSCustomObject]@{ Surface = $Surface; SustainedCount = 0; DefenseSustainedCount = 0; ParseStatus = 'could-not-verify' }
     }
 
@@ -1003,10 +1083,16 @@ function Get-DispositionTally {
         if ($inner.ParseStatus -eq 'ok') {
             $hasEmptyKeyEntry = @($filteredEntries | Where-Object { [string]::IsNullOrWhiteSpace($_.StableFindingKey) }).Count -gt 0
             if ($hasEmptyKeyEntry) {
-                return [PSCustomObject]@{ Surface = $Surface; Entries = @(); ParseStatus = 'could-not-verify' }
+                return [PSCustomObject]@{ Surface = $Surface; Entries = @(); ExternalSourcesReconciled = @(); ExternalSourcesFound = $false; ParseStatus = 'could-not-verify' }
             }
         }
-        return [PSCustomObject]@{ Surface = $Surface; Entries = $filteredEntries; ParseStatus = $inner.ParseStatus }
+        $externalSourcesReconciled = if ($inner.ParseStatus -eq 'ok') { @($inner.ExternalSourcesReconciled) } else { @() }
+        # Post-fix batch 4 (issue #854 s6): propagate the internal parser's
+        # honest ExternalSourcesFound signal unchanged -- never re-derive it
+        # from ParseStatus or Entries.Count here, that is exactly the bug
+        # this fix closes.
+        $externalSourcesFound = if ($inner.ParseStatus -eq 'ok') { [bool]$inner.ExternalSourcesFound } else { $false }
+        return [PSCustomObject]@{ Surface = $Surface; Entries = $filteredEntries; ExternalSourcesReconciled = $externalSourcesReconciled; ExternalSourcesFound = $externalSourcesFound; ParseStatus = $inner.ParseStatus }
     }
 
     if ($Surface -eq 'design-challenge') {
@@ -1020,7 +1106,9 @@ function Get-DispositionTally {
         }
     }
 
-    # plan-stress-test
+    # plan-stress-test (the only ValidateSet member remaining after the
+    # post-review-observer throw and the code-review/design-challenge
+    # branches above -- M17 fix).
     $inner = Get-JudgeRulingsSustainedCountInternal -Body $Body
     return [PSCustomObject]@{
         Surface               = $Surface
@@ -1032,17 +1120,336 @@ function Get-DispositionTally {
 
 #endregion
 
+#region Review-dispositions head gate (private, shared with phase-containment-cost-core.ps1)
+
+function script:Get-ReviewDispositionsRealHeadMatch {
+    <#
+    .SYNOPSIS
+        Vocab-gated real-head match for the <!-- review-dispositions-{N} -->
+        marker (issue #854 s3, M10).
+    .DESCRIPTION
+        Single source of truth for "where does the real review-dispositions
+        head start" — same bounded-lookahead vocab-gate technique as
+        Get-RealJudgeRulingsHeadMatches above (a maintainer's prose sentence
+        merely describing the marker convention is not mistaken for a real
+        block). Landed HERE, beside Get-DispositionTally, rather than as a
+        third copy of the head-detection trio (issue #842 CM11) or by
+        extending phase-containment-cost-core.ps1's script:-private reach
+        into this file's internals (issue #842 CM17, the anti-pattern this
+        move retires). phase-containment-cost-core.ps1 dot-sources this file
+        and consumes Test-ReviewDispositionsHeadPresent (below) directly —
+        it no longer carries its own copy.
+    .PARAMETER Body
+        The raw comment body text to scan.
+    .OUTPUTS
+        The [System.Text.RegularExpressions.Match] for the real head, or
+        $null when no vocab-gate-passing head exists.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Body
+    )
+    if ([string]::IsNullOrWhiteSpace($Body)) { return $null }
+
+    # Capture group 1 (the marker's own {N}) lets Test-ReviewDispositionsHeadPresent's
+    # optional -ExpectedNumber check (M13 fix) read the matched marker's own
+    # number directly off the returned Match, with no second regex pass.
+    $headPattern = '<!--\s*review-dispositions-(\d+)\s*-->'
+    $headCandidates = [regex]::Matches($Body, $headPattern)
+    if ($headCandidates.Count -eq 0) { return $null }
+
+    $lookaheadWindow = 400
+    foreach ($candidate in $headCandidates) {
+        $windowEnd = [Math]::Min($Body.Length, $candidate.Index + $candidate.Length + $lookaheadWindow)
+        $window = $Body.Substring($candidate.Index, $windowEnd - $candidate.Index)
+        if ([regex]::IsMatch($window, '(?m)^\s*(entries|schema_version|stable_finding_key)\s*:')) {
+            return $candidate
+        }
+    }
+    return $null
+}
+
+function script:Test-ReviewDispositionsHeadPresent {
+    <#
+    .SYNOPSIS
+        Vocab-gated presence check for the <!-- review-dispositions-{N} -->
+        marker head.
+    .DESCRIPTION
+        Bool wrapper around Get-ReviewDispositionsRealHeadMatch, so
+        Get-ReviewCostRollup (phase-containment-cost-core.ps1) can
+        distinguish "no review-dispositions marker on this body" (ordinary
+        chatter, contributes nothing) from "marker present but unparseable"
+        (a real could-not-verify condition Get-DispositionTally's own
+        Get-ReviewDispositionsTallyInternal reports). Relocated here from
+        phase-containment-cost-core.ps1 (issue #854 s3, M10) — the head gate
+        now lives beside Get-DispositionTally in the same file, and
+        phase-containment-cost-core.ps1 consumes it via its existing
+        dot-source of this file rather than keeping a private duplicate.
+
+        M13 fix (post-fix judge-sustained review): the marker head literal
+        (<!-- review-dispositions-{N} -->) carries its own PR number, but
+        this check never verified that {N} matches the PR/issue whose tuple
+        is actually being tallied. Without that check, a judge-authored
+        comment on PR X that happens to quote another PR Y's
+        review-dispositions block (e.g. cross-referencing a related PR in
+        prose) contributed to X's coverage/tallies even though the block's
+        own {N} says Y. The optional -ExpectedNumber parameter closes this:
+        when supplied, a real head whose captured {N} does not equal
+        -ExpectedNumber is treated the same as no marker head at all (the
+        caller's existing "skip, don't count" branch), never a
+        could-not-verify. Callers that omit -ExpectedNumber (e.g.
+        phase-containment-cost-core.ps1's existing call site) are unchanged.
+    .PARAMETER Body
+        The raw comment body text to scan.
+    .PARAMETER ExpectedNumber
+        Optional. When supplied, the marker is reported present only if its
+        own captured {N} equals this value; a real head with a mismatched
+        {N} is reported as NOT present (M13 fix).
+    .OUTPUTS
+        [bool]
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Body,
+        [Parameter()][Nullable[int]]$ExpectedNumber
+    )
+    $headMatch = Get-ReviewDispositionsRealHeadMatch -Body $Body
+    if ($null -eq $headMatch) { return $false }
+    if ($null -ne $ExpectedNumber) {
+        $markerNumber = [int]$headMatch.Groups[1].Value
+        if ($markerNumber -ne $ExpectedNumber) { return $false }
+    }
+    return $true
+}
+
+#endregion
+
+#region Get-ExternalSourcesReconciledFromRegion (private)
+
+function script:Get-ExternalSourcesReconciledFromRegion {
+    <#
+    .SYNOPSIS
+        Column-0-anchored PR-level reader for the review-dispositions v4
+        `external_sources_reconciled` field (issue #854 s3, M30/M41).
+    .DESCRIPTION
+        Deliberately NOT the house $keyAnchor idiom used elsewhere in this
+        file for per-entry fields — that pattern's leading `^\s*`
+        alternative matches at ANY indentation, so an entry-nested
+        `external_sources_reconciled:` decoy line (indented under an
+        entries[] list item) would be misread as the real PR-level field
+        (M30). This reader anchors on true column-0 line-start only:
+        `(?m)^external_sources_reconciled\s*:`.
+
+        Block-scalar exclusion (M41): captures the KEYWORD itself in its own
+        regex capture group and anchors Test-IndexInBlockScalarSpan on THAT
+        group's index, rather than the overall match's index — the same
+        precedent as the entry-boundary pattern above (the only other site
+        in this file with a keyword group), and unlike the existing
+        disposition/stage/reviewer_source extraction sites, which capture
+        only the VALUE and rely on writer field order alone. For a strict
+        column-0 (`^`, no leading `\s*`) pattern, this check can never
+        exclude any match in practice — Get-BlockScalarSpans terminates
+        every block-scalar span at the first non-blank line whose indent is
+        <= the block scalar key's own indent, and 0 (a genuine column-0
+        line) is always <= any non-negative key indent, so a truly-column-0
+        line can never be counted as inside a span. The check is kept
+        anyway, matching the file's established defense-in-depth idiom and
+        guarding against a future weakening of the column-0 anchor.
+    .PARAMETER Region
+        The already-isolated fenced-YAML region text (the same $region
+        Get-ReviewDispositionsTallyInternal computes from the marker's
+        fenced code block).
+    .PARAMETER BlockScalarSpans
+        The Get-BlockScalarSpans result computed over the SAME $Region.
+    .OUTPUTS
+        [PSCustomObject] with:
+          Found  [bool]     — whether a real, non-block-scalar column-0
+                   external_sources_reconciled field was found and parsed
+          Values [string[]] — the dequoted array items (empty array both
+                   when Found is $false and when the field is a genuinely
+                   empty array, e.g. `external_sources_reconciled: []`)
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Region,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$BlockScalarSpans
+    )
+
+    $pattern = '(?m)^(external_sources_reconciled)\s*:[ \t]*([^\r\n]*)'
+    $candidates = [regex]::Matches($Region, $pattern)
+    $survivor = $null
+    foreach ($candidate in $candidates) {
+        if (-not (Test-IndexInBlockScalarSpan -Index $candidate.Groups[1].Index -Spans $BlockScalarSpans)) {
+            $survivor = $candidate
+            break
+        }
+    }
+    if ($null -eq $survivor) {
+        return [PSCustomObject]@{ Found = $false; Values = @() }
+    }
+
+    $rawValue = $survivor.Groups[2].Value.Trim()
+
+    if ($rawValue -match '^\[(.*)\]$') {
+        $inner = $Matches[1].Trim()
+        if ([string]::IsNullOrWhiteSpace($inner)) {
+            return [PSCustomObject]@{ Found = $true; Values = @() }
+        }
+        $items = @($inner -split ',' | ForEach-Object { ConvertFrom-YamlQuotedScalar -Value $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        return [PSCustomObject]@{ Found = $true; Values = $items }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($rawValue)) {
+        # Block-list style: scan immediately-following indented `- item`
+        # lines only, stopping at the first line that is not one (a
+        # dedented/column-0 next key, a blank line, or the fence close).
+        #
+        # G-CR2(a) fix: a bare `external_sources_reconciled:` with NOTHING
+        # after the colon and NO following `- item` lines is a genuine YAML
+        # null, not an explicit empty array -- per YAML, `key:` alone means
+        # the value is null, while `key: []` (handled above) is the only
+        # legal explicit-empty-array spelling. Before this fix, a bare null
+        # was returned as Found=true/Values=[], letting non-conformant input
+        # fabricate a measured-empty coverage signal. Only report Found=true
+        # here when the block-list scan actually finds at least one real
+        # item; otherwise fall through to the malformed/not-found return
+        # below, same as any other unrecognized shape.
+        $keyLineEnd = $Region.IndexOf("`n", $survivor.Index, [System.StringComparison]::Ordinal)
+        $items = [System.Collections.Generic.List[string]]::new()
+        if ($keyLineEnd -ge 0) {
+            $restLines = $Region.Substring($keyLineEnd + 1) -split "`n"
+            foreach ($line in $restLines) {
+                if ($line -match '^[ \t]+-\s+(.+?)\s*\r?$') {
+                    $items.Add((ConvertFrom-YamlQuotedScalar -Value $Matches[1]))
+                }
+                else {
+                    break
+                }
+            }
+        }
+        if ($items.Count -gt 0) {
+            return [PSCustomObject]@{ Found = $true; Values = $items.ToArray() }
+        }
+        return [PSCustomObject]@{ Found = $false; Values = @() }
+    }
+
+    # Neither a recognizable flow array nor an empty/block-list shape: a
+    # malformed value. Report not-found rather than fabricating structure.
+    return [PSCustomObject]@{ Found = $false; Values = @() }
+}
+
+#endregion
+
+#region Get-InternalMatchMappingSpan (private, G-CR2(b) seam)
+
+function script:Get-InternalMatchMappingSpan {
+    <#
+    .SYNOPSIS
+        Finds the internal_match: mapping's own content span within an entry
+        span, so match_status/matched_finding_key extraction can be bounded
+        to text that actually sits inside an internal_match mapping (G-CR2(b)
+        fix, PR #859 GitHub-review post-fix) rather than matched at any
+        indentation anywhere in the entry.
+    .DESCRIPTION
+        internal_match is written in one of two legal shapes (skills/
+        review-judgment/SKILL.md § `internal_match` Writer Rule):
+          - Flow mapping on one line: `internal_match: { match_status: novel }`
+          - Block mapping: `internal_match:` alone on its own line (optionally
+            followed by a trailing comment), with `match_status:`/
+            `matched_finding_key:` on subsequent lines indented strictly more
+            than the `internal_match:` key itself (same dedent-termination
+            rule as Get-BlockScalarSpans).
+        Before this fix, match_status/matched_finding_key were matched via
+        the house $KeyAnchor at ANY indentation anywhere in the entry span,
+        with no requirement that they sit inside an internal_match mapping at
+        all — a crafted `match_status: novel` line anywhere else in the entry
+        (not merely inside disposition_rationale's block-scalar content,
+        which the M41 exclusion already guards) could upgrade the safe
+        'ambiguous' default. Takes the FIRST key-anchored, non-block-scalar
+        internal_match: match only, same precedent as the entry's other
+        single-value fields.
+    .PARAMETER EntrySpan
+        The already-isolated entry span text (Get-ReviewDispositionsTallyInternal's
+        per-entry $entrySpan).
+    .PARAMETER KeyAnchor
+        The house $keyAnchor pattern fragment (real line-start, dash-item, or
+        flow-mapping key position).
+    .PARAMETER BlockScalarSpans
+        Get-BlockScalarSpans result computed over the parent $Region.
+    .PARAMETER SpanStart
+        $EntrySpan's own start offset within $Region (so the block-scalar
+        exclusion check can convert entrySpan-relative indices to
+        region-relative indices, matching the other exclusion checks in
+        Get-ReviewDispositionsTallyInternal).
+    .OUTPUTS
+        [PSCustomObject]@{ Start; End } (entrySpan-relative, End exclusive)
+        covering only the mapping's content, or $null when no real
+        internal_match key is found.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$EntrySpan,
+        [Parameter(Mandatory)][string]$KeyAnchor,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$BlockScalarSpans,
+        [Parameter(Mandatory)][int]$SpanStart
+    )
+
+    $candidates = [regex]::Matches($EntrySpan, "(?m)${KeyAnchor}(internal_match)\s*:[ \t]*(\{)?")
+    $survivor = $candidates | Where-Object {
+        -not (Test-IndexInBlockScalarSpan -Index ($SpanStart + $_.Groups[1].Index) -Spans $BlockScalarSpans)
+    } | Select-Object -First 1
+    if (-not $survivor) { return $null }
+
+    if ($survivor.Groups[2].Success) {
+        # Flow mapping: internal_match: { ... } -- content span is the
+        # balanced brace region. This schema never nests braces inside
+        # internal_match, so a first-close-brace search is sufficient.
+        $openIdx = $survivor.Groups[2].Index
+        $closeIdx = $EntrySpan.IndexOf('}', $openIdx)
+        if ($closeIdx -le $openIdx) { return $null }
+        return [PSCustomObject]@{ Start = $openIdx; End = $closeIdx }
+    }
+
+    # Block mapping: content is every subsequent line indented strictly more
+    # than the internal_match: key line itself.
+    $keyMatchIndex = $survivor.Groups[1].Index
+    $lineStartSearch = $EntrySpan.LastIndexOf("`n", [Math]::Max($keyMatchIndex - 1, 0))
+    $lineStart = if ($lineStartSearch -lt 0) { 0 } else { $lineStartSearch + 1 }
+    $keyIndent = $keyMatchIndex - $lineStart
+
+    $keyLineEnd = $EntrySpan.IndexOf("`n", $keyMatchIndex, [System.StringComparison]::Ordinal)
+    if ($keyLineEnd -lt 0) { return $null }
+    $pos = $keyLineEnd + 1
+    $contentEnd = $EntrySpan.Length
+    while ($pos -le $EntrySpan.Length) {
+        $nextNewline = $EntrySpan.IndexOf("`n", $pos, [System.StringComparison]::Ordinal)
+        $lineText = if ($nextNewline -ge 0) { $EntrySpan.Substring($pos, $nextNewline - $pos) } else { $EntrySpan.Substring($pos) }
+        if ($lineText.Trim().Length -eq 0) {
+            if ($nextNewline -lt 0) { $contentEnd = $EntrySpan.Length; break }
+            $pos = $nextNewline + 1
+            continue
+        }
+        $lineIndent = [regex]::Match($lineText, '^[ \t]*').Value.Length
+        if ($lineIndent -le $keyIndent) {
+            $contentEnd = $pos
+            break
+        }
+        if ($nextNewline -lt 0) { $contentEnd = $EntrySpan.Length; break }
+        $pos = $nextNewline + 1
+    }
+    return [PSCustomObject]@{ Start = ($keyLineEnd + 1); End = $contentEnd }
+}
+
+#endregion
+
 #region Get-ReviewDispositionsTallyInternal (private)
 
 function script:Get-ReviewDispositionsTallyInternal {
     <#
     .SYNOPSIS
         Per-entry segmented parser for the `<!-- review-dispositions-{PR} -->`
-        marker (issue #768 s3). Private to Get-DispositionTally's code-review
-        branch.
+        marker (issue #768 s3; issue #854 s3 added internal_match and the
+        PR-level external_sources_reconciled reader). Private to
+        Get-DispositionTally's code-review branch.
     .DESCRIPTION
-        Head detection is vocab-gated (same convention as
-        Get-RealJudgeRulingsHeadMatches above): the literal
+        Head detection delegates to Get-ReviewDispositionsRealHeadMatch
+        (above; relocated here issue #854 s3, M10): the literal
         `<!-- review-dispositions-{N} -->` head substring alone is not
         sufficient — a bounded lookahead window after it must also contain
         real field vocabulary (`entries:`/`schema_version:`/
@@ -1057,34 +1464,75 @@ function script:Get-ReviewDispositionsTallyInternal {
         injected-newline field value that happens to contain a bare-looking
         key line on its own line cannot be mistaken for a new entry.
 
-        Within each entry's own bounds, `disposition:` and `reviewer_source:`
-        are read via the FIRST key-anchored match only (same $keyAnchor
-        convention as the judge-rulings/finding_dispositions detectors — real
+        Within each entry's own bounds, `disposition:`, `reviewer_source:`,
+        `match_status:`, and `matched_finding_key:` are read via the FIRST
+        key-anchored, non-block-scalar match only (same $keyAnchor convention
+        as the judge-rulings/finding_dispositions detectors — real
         line-start, dash-item, or flow-mapping key position). Taking only the
-        first match closes the decoy vector where a later
+        first surviving match closes the decoy vector where a later
         `disposition_rationale` block-scalar value, or an injected-newline
-        `reviewer_source` value, happens to contain a second `disposition:`-
-        or `reviewer_source:`-shaped line further down the SAME entry: the
-        real field is always written before those free-text fields per the
-        schema/writer field order, so it always wins the first-match race.
-        `reviewer_source` is matched on its own distinct key name, so it can
-        never be confused with the unrelated nested `ac_cross_check.source`
-        field (different literal key, not merely different position).
+        field value, happens to contain a second matching key line further
+        down the SAME entry: the real field is always written before those
+        free-text fields per the schema/writer field order (internal_match
+        specifically before disposition_rationale, M42), so it always wins
+        the first-match race; the block-scalar exclusion (M41) is defense in
+        depth on top of that ordering guarantee. `reviewer_source` and
+        `match_status`/`matched_finding_key` are each matched on their own
+        distinct key name, so none can ever be confused with the unrelated
+        nested `ac_cross_check.source` field (different literal keys, not
+        merely different position).
+
+        internal_match defaults (Seam Specification, issue #854): absent
+        `internal_match`/`match_status` on an entry defaults MatchStatus to
+        'ambiguous' — a bookkeeping omission must never manufacture an
+        escape. `matched_finding_key` defaults to $null when absent.
+
+        PR-level external_sources_reconciled (issue #854 s3, M9/M30):
+        Get-ExternalSourcesReconciledFromRegion (above) reads the column-0
+        top-level field from the SAME isolated $region, BEFORE the
+        zero-entries early return below — a body with a real head, a clean
+        parse, and a column-0 external_sources_reconciled field but ZERO
+        segmentable entries is a LEGAL coverage record (M9: "coverage means
+        measurement", not "coverage requires findings"), not a
+        could-not-verify. Every other unparseable state — no head, no fenced
+        region, zero entries with no parseable external_sources_reconciled
+        field, or an entry with unrecognized disposition — stays
+        could-not-verify per DD3.
 
         Hand-rolled line-regex only — no ConvertFrom-Yaml / powershell-yaml
         (file-level SECURITY invariant at the top of this file).
 
         Fail-loud (DD3): no recognizable marker head, an unparseable/unclosed
-        fenced region, zero segmentable entries, or an entry whose
-        `disposition:` value is missing/unrecognized all return
-        ParseStatus 'could-not-verify', never a silently empty/zero result.
+        fenced region, zero segmentable entries with no legal M9 coverage
+        fallback, or an entry whose `disposition:` value is missing/
+        unrecognized all return ParseStatus 'could-not-verify', never a
+        silently empty/zero result.
     .PARAMETER Body
         The raw comment body text to scan.
     .OUTPUTS
         [PSCustomObject] with:
-          Entries     [PSCustomObject[]] — one per entry (before the stage
-                      filter Get-DispositionTally applies), each with
-                      StableFindingKey, Disposition, Stage, ReviewerSource
+          Entries                    [PSCustomObject[]] — one per entry
+                      (before the stage filter Get-DispositionTally
+                      applies), each with StableFindingKey, Disposition,
+                      Stage, ReviewerSource, MatchStatus, MatchedFindingKey
+          ExternalSourcesReconciled  [string[]] — PR-level column-0 field
+                      (empty array when absent/unparseable)
+          ExternalSourcesFound       [bool] — post-fix batch 4 (issue #854
+                      s6): whether a REAL column-0 external_sources_reconciled
+                      field was actually found and parsed on this body
+                      (Get-ExternalSourcesReconciledFromRegion's own .Found),
+                      independent of whether any entries segmented. This is
+                      the coverage-purposes signal: ParseStatus stays 'ok'
+                      whenever entries themselves parse cleanly (so callers
+                      that tally per-entry dispositions regardless of
+                      external reconciliation, e.g. the review-cost rollup,
+                      keep working on internal-only markers) — but a purely
+                      internal-only marker (entries present, no PR-level
+                      external_sources_reconciled field ever written because
+                      no external review was reconciled this pass) must never
+                      be mistaken for a genuinely measured co-observed PR.
+                      Only present (meaningfully) when ParseStatus is 'ok';
+                      $false on every could-not-verify return.
           ParseStatus [string] — 'ok' or 'could-not-verify'
     #>
     param(
@@ -1098,22 +1546,7 @@ function script:Get-ReviewDispositionsTallyInternal {
     # 'Key-anchor pattern' drift-guard meta-test in this file's Tests.
     $keyAnchor = '(?:^\s*(?:-\s+)?|[{,]\s*)'
 
-    $headPattern = '<!--\s*review-dispositions-\d+\s*-->'
-    $headCandidates = [regex]::Matches($Body, $headPattern)
-    if ($headCandidates.Count -eq 0) {
-        return [PSCustomObject]@{ Entries = @(); ParseStatus = 'could-not-verify' }
-    }
-
-    $lookaheadWindow = 400
-    $realHead = $null
-    foreach ($candidate in $headCandidates) {
-        $windowEnd = [Math]::Min($Body.Length, $candidate.Index + $candidate.Length + $lookaheadWindow)
-        $window = $Body.Substring($candidate.Index, $windowEnd - $candidate.Index)
-        if ([regex]::IsMatch($window, '(?m)^\s*(entries|schema_version|stable_finding_key)\s*:')) {
-            $realHead = $candidate
-            break
-        }
-    }
+    $realHead = Get-ReviewDispositionsRealHeadMatch -Body $Body
     if ($null -eq $realHead) {
         return [PSCustomObject]@{ Entries = @(); ParseStatus = 'could-not-verify' }
     }
@@ -1164,7 +1597,20 @@ function script:Get-ReviewDispositionsTallyInternal {
     $entryBoundaryPattern = '(?m)^\s*-\s+(stable_finding_key|finding_id)\s*:'
     $blockScalarSpans = Get-BlockScalarSpans -Text $region
     $entryStarts = @([regex]::Matches($region, $entryBoundaryPattern) | Where-Object { -not (Test-IndexInBlockScalarSpan -Index $_.Groups[1].Index -Spans $blockScalarSpans) })
+
+    # M9 (issue #854 s3): read the PR-level external_sources_reconciled field
+    # BEFORE the zero-entries early return below, so a head-present,
+    # cleanly-parsing body carrying a real column-0 external_sources_reconciled
+    # field but ZERO segmentable entries is treated as a LEGAL coverage
+    # record ('ok' with empty Entries) rather than a false could-not-verify —
+    # coverage means measurement, and "measured zero new findings" is a real
+    # measurement outcome, not an absence of one.
+    $externalSourcesResult = Get-ExternalSourcesReconciledFromRegion -Region $region -BlockScalarSpans $blockScalarSpans
+
     if ($entryStarts.Count -eq 0) {
+        if ($externalSourcesResult.Found) {
+            return [PSCustomObject]@{ Entries = @(); ExternalSourcesReconciled = $externalSourcesResult.Values; ExternalSourcesFound = $true; ParseStatus = 'ok' }
+        }
         return [PSCustomObject]@{ Entries = @(); ParseStatus = 'could-not-verify' }
     }
 
@@ -1212,15 +1658,66 @@ function script:Get-ReviewDispositionsTallyInternal {
         $reviewerSourceMatch = [regex]::Match($entrySpan, "(?m)${keyAnchor}reviewer_source\s*:\s*(\S+)")
         $reviewerSource = if ($reviewerSourceMatch.Success) { ConvertFrom-YamlQuotedScalar -Value ($reviewerSourceMatch.Groups[1].Value.TrimEnd(',', '}', ']')) } else { $null }
 
+        # internal_match.match_status / matched_finding_key (issue #854 s3,
+        # M41): a keyword capture group anchors the block-scalar exclusion
+        # check on the KEYWORD's own position, not the overall match's start
+        # — same precedent as the entry-boundary pattern above, and unlike
+        # the disposition/stage/reviewer_source sites above (which capture
+        # only the value and rely on writer field order, M42, to keep the
+        # real field ahead of any decoy in disposition_rationale). Take the
+        # FIRST match whose keyword position is NOT inside a block-scalar
+        # span, so a rationale block scalar quoting fake internal_match text
+        # can never be misread as the real field even if field order is
+        # ever violated. Seam Specification default: absent internal_match
+        # is 'ambiguous' — a bookkeeping omission must never manufacture an
+        # escape.
+        # G-CR2(b) fix: match_status/matched_finding_key must additionally
+        # fall inside the entry's own internal_match: mapping content span --
+        # without this, either field could be matched anywhere in the entry
+        # at any indentation, letting a crafted stray `match_status: novel`
+        # (outside any internal_match block, and outside disposition_rationale's
+        # block-scalar content the M41 exclusion already guards) wrongly
+        # upgrade the safe 'ambiguous' default.
+        $internalMatchSpan = Get-InternalMatchMappingSpan -EntrySpan $entrySpan -KeyAnchor $keyAnchor -BlockScalarSpans $blockScalarSpans -SpanStart $spanStart
+
+        $matchStatusCandidates = [regex]::Matches($entrySpan, "(?m)${keyAnchor}(match_status)\s*:\s*(duplicate|novel|ambiguous)\b")
+        $matchStatusSurvivor = $matchStatusCandidates | Where-Object {
+            $internalMatchSpan -and $_.Groups[1].Index -ge $internalMatchSpan.Start -and $_.Groups[1].Index -lt $internalMatchSpan.End -and
+            -not (Test-IndexInBlockScalarSpan -Index ($spanStart + $_.Groups[1].Index) -Spans $blockScalarSpans)
+        } | Select-Object -First 1
+        $matchStatus = if ($matchStatusSurvivor) { $matchStatusSurvivor.Groups[2].Value } else { 'ambiguous' }
+
+        $matchedFindingKeyCandidates = [regex]::Matches($entrySpan, "(?m)${keyAnchor}(matched_finding_key)\s*:\s*(.+)")
+        $matchedFindingKeySurvivor = $matchedFindingKeyCandidates | Where-Object {
+            $internalMatchSpan -and $_.Groups[1].Index -ge $internalMatchSpan.Start -and $_.Groups[1].Index -lt $internalMatchSpan.End -and
+            -not (Test-IndexInBlockScalarSpan -Index ($spanStart + $_.Groups[1].Index) -Spans $blockScalarSpans)
+        } | Select-Object -First 1
+        $matchedFindingKey = if ($matchedFindingKeySurvivor) { ConvertFrom-YamlQuotedScalar -Value $matchedFindingKeySurvivor.Groups[2].Value } else { $null }
+
         $entries.Add([PSCustomObject]@{
-                StableFindingKey = $stableFindingKey
-                Disposition      = $disposition
-                Stage            = $stage
-                ReviewerSource   = $reviewerSource
+                StableFindingKey  = $stableFindingKey
+                Disposition       = $disposition
+                Stage             = $stage
+                ReviewerSource    = $reviewerSource
+                MatchStatus       = $matchStatus
+                MatchedFindingKey = $matchedFindingKey
             })
     }
 
-    return [PSCustomObject]@{ Entries = $entries.ToArray(); ParseStatus = 'ok' }
+    # Post-fix batch 4 (issue #854 s6): ParseStatus stays 'ok' unconditionally
+    # here -- the entries themselves parsed cleanly, and callers that tally
+    # per-entry dispositions regardless of external reconciliation (e.g. the
+    # review-cost rollup's internal dismiss-rate accounting) must keep
+    # working on a purely internal-only marker. ExternalSourcesFound is the
+    # SEPARATE, honest signal for coverage-purposes callers: $true only when
+    # a real PR-level external_sources_reconciled field was actually found
+    # (Get-ExternalSourcesReconciledFromRegion's own .Found) -- never
+    # inferred from ParseStatus or from entries merely being present. Before
+    # this fix, the with-entries path never gated on .Found at all, so a
+    # purely internal-only marker (real entries, no PR-level field ever
+    # written because no external review was reconciled this pass) was
+    # indistinguishable from a genuinely measured co-observed PR downstream.
+    return [PSCustomObject]@{ Entries = $entries.ToArray(); ExternalSourcesReconciled = $externalSourcesResult.Values; ExternalSourcesFound = $externalSourcesResult.Found; ParseStatus = 'ok' }
 }
 
 #endregion
@@ -1592,6 +2089,134 @@ function script:Get-DesignChallengeSustainedCountInternal {
 
 #endregion
 
+#region Get-ExternalSourceNovelSustainedCount (private, CR-8 seam)
+
+function script:Get-ExternalSourceNovelSustainedCount {
+    <#
+    .SYNOPSIS
+        Counts sustained, resolved-external, novel-matched review-dispositions
+        entries across a comment corpus (issue #854 s7, CR-8/M26 seam).
+    .DESCRIPTION
+        817-D1 aggregation-seam precedent (the same precedent that added
+        DismissedCount to Get-DesignChallengeSustainedCountInternal): this
+        helper extends the UNPINNED sibling Get-DispositionTally, never
+        Get-SustainedFindingCount (AC8-pinned byte-identical output). Called
+        only from Get-EmissionGap.
+
+        DD1 trinary (Seam Specification, issue #854), per review-dispositions
+        entry:
+          - reviewer_source -eq 'local' (M40 exact-equality — 'ext-local' is
+            a resolved external identity and must not match) -> pipeline-
+            native, expects a standard code-review block. Excluded from
+            BOTH counts below.
+          - resolved external identity (reviewer_source not 'local', not
+            'unresolved', not null/empty) AND internal_match.match_status
+            'novel' AND sustained (disposition -ne 'dismiss') -> expects an
+            OBSERVER block INSTEAD of a code-review block. Counted in Count
+            (and, being non-local, also counted in AllExternalCount).
+          - match_status 'duplicate' or 'ambiguous', or reviewer_source
+            'unresolved' -> expects NEITHER block type (skills/review-judgment/SKILL.md's
+            DD1 trinary, third leg). M7 fix (post-fix
+            judge-sustained review, DD5 "external-source sustained findings
+            no longer produce code-review blocks," unrestricted to
+            novel-only): these entries are absent from BOTH surfaces'
+            expected counts, matching what a SKILL-conformant judge actually
+            emits (nothing). They are excluded from Count (never trigger an
+            observer-block expectation) but ARE counted in AllExternalCount
+            (subtracted from code-review's expected total too) — the prior
+            behavior of leaving them inside code-review's subtrahend
+            complement was the bug: it kept demanding a code-review block
+            the SKILL forbids that judge from ever emitting.
+        A dismissed entry (disposition: dismiss) is never sustained and is
+        always excluded from both counts regardless of reviewer_source/
+        match_status.
+
+        Gated per body by Test-ReviewDispositionsHeadPresent, the same
+        vocab-gated head check Get-ReviewCostRollup uses, so ordinary PR
+        chatter with no real review-dispositions marker contributes nothing
+        rather than poisoning the aggregate (mirrors Get-EmissionGap's own
+        Test-EmissionMarkerPresent gating for the judge-rulings surfaces).
+
+        G-C1 fix (PR #859 GitHub-review post-fix): -ExpectedNumber is now
+        threaded through to Test-ReviewDispositionsHeadPresent, matching the
+        M13 cross-PR marker gate that already protects the terminal-
+        observation seam (phase-containment-report.ps1). Without it, a
+        quoted/cross-referenced `review-dispositions-{N}` marker for a
+        DIFFERENT PR/issue on this body would be treated as a real head for
+        THIS PR and tallied into these counts.
+    .PARAMETER Bodies
+        Array of raw comment body text (the same corpus Get-EmissionGap scans).
+    .PARAMETER ExpectedNumber
+        The current PR/issue id. A review-dispositions marker whose own
+        captured {N} does not match this value is treated as not present
+        (same semantics as Test-ReviewDispositionsHeadPresent's own
+        -ExpectedNumber parameter).
+    .OUTPUTS
+        [PSCustomObject] with:
+          Count            [int]    — sustained, resolved-external,
+                            novel-matched entries only. Added to
+                            post-review-observer's expected total (an
+                            observer block is expected INSTEAD of a
+                            code-review block for exactly this population).
+          AllExternalCount [int]    — every sustained, non-local entry
+                            (resolved external identity OR the 'unresolved'
+                            sentinel), regardless of match_status. Subtracted
+                            from code-review's expected total (M7/DD5 fix) —
+                            the superset Count is drawn from, since a
+                            SKILL-conformant judge never emits a code-review
+                            block for ANY non-local sustained entry, not just
+                            novel-matched ones.
+          ParseStatus      [string] — 'ok', or 'could-not-verify' when a body
+                            carries a real review-dispositions head that
+                            Get-DispositionTally could not parse (DD3
+                            fail-loud)
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Bodies,
+        [Parameter(Mandatory)][int]$ExpectedNumber
+    )
+
+    $count = 0
+    $allExternalCount = 0
+    $anyCouldNotVerify = $false
+
+    foreach ($body in $Bodies) {
+        if (-not (Test-ReviewDispositionsHeadPresent -Body $body -ExpectedNumber $ExpectedNumber)) {
+            continue
+        }
+        $tally = Get-DispositionTally -Surface 'code-review' -Body $body
+        if ($tally.ParseStatus -eq 'could-not-verify') {
+            $anyCouldNotVerify = $true
+            continue
+        }
+        foreach ($entry in $tally.Entries) {
+            if ($entry.Disposition -eq 'dismiss') { continue }
+            if ([string]::IsNullOrWhiteSpace($entry.ReviewerSource)) { continue }
+            if ($entry.ReviewerSource -eq 'local') { continue }
+            # M7 fix: every sustained, non-local entry is absent from
+            # code-review's expected block count regardless of match_status
+            # (DD5) — a duplicate/ambiguous-matched or reviewer_source-
+            # unresolved entry never produces a code-review block from a
+            # SKILL-conformant judge, so it must be subtracted from
+            # code-review's expected total via AllExternalCount just like a
+            # novel-matched entry, even though it does NOT expect an
+            # observer block (Count stays novel-only, below).
+            $allExternalCount++
+            if ($entry.ReviewerSource -eq 'unresolved') { continue }
+            if ($entry.MatchStatus -ne 'novel') { continue }
+            $count++
+        }
+    }
+
+    return [PSCustomObject]@{
+        Count            = $count
+        AllExternalCount = $allExternalCount
+        ParseStatus      = if ($anyCouldNotVerify) { 'could-not-verify' } else { 'ok' }
+    }
+}
+
+#endregion
+
 #region Get-EmissionGap
 
 function Get-EmissionGap {
@@ -1631,7 +2256,20 @@ function Get-EmissionGap {
     .PARAMETER Id
         PR number (code-review) or issue number (design-challenge, plan-stress-test).
     .PARAMETER Surface
-        One of: code-review, design-challenge, plan-stress-test
+        One of: code-review, design-challenge, plan-stress-test,
+        post-review-observer. For code-review and post-review-observer, the
+        CR-8 seam (Get-ExternalSourceNovelSustainedCount, below) adjusts
+        SustainedCount after the per-body loop. M7 fix (post-fix
+        judge-sustained review, DD5): code-review's total has ALL sustained,
+        non-local review-dispositions entries subtracted out —
+        AllExternalCount, not just the novel-matched subset — since a
+        duplicate/ambiguous-matched or reviewer_source-unresolved entry
+        never produces a code-review block from a SKILL-conformant judge
+        either. post-review-observer's total is the narrower novel-matched-
+        only Count (an observer block is expected INSTEAD of a code-review
+        block only for that population; duplicate/ambiguous/unresolved
+        entries expect NEITHER block type, so they must not inflate
+        post-review-observer's expected total).
     .OUTPUTS
         [PSCustomObject] with:
           SustainedCount [int]
@@ -1657,7 +2295,7 @@ function Get-EmissionGap {
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Bodies,
         [Parameter(Mandatory)][int]$Id,
-        [Parameter(Mandatory)][ValidateSet('code-review', 'design-challenge', 'plan-stress-test')][string]$Surface
+        [Parameter(Mandatory)][ValidateSet('code-review', 'design-challenge', 'plan-stress-test', 'post-review-observer')][string]$Surface
     )
 
     $totalSustained = 0
@@ -1801,6 +2439,53 @@ function Get-EmissionGap {
         # (if any) do not count either. A bare phase-containment block with
         # no accompanying authoritative marker on the same body is exactly
         # the pure-chatter-with-injected-blocks vector M4 closes.
+    }
+
+    # CR-8 seam (issue #854 s7): sustained code-review count above came from
+    # Get-SustainedFindingCount, the AC8-pinned judge-rulings reader — never
+    # modified here. Get-ExternalSourceNovelSustainedCount (817-D1
+    # aggregation-seam precedent: extend the unpinned sibling, never the
+    # pinned function) separately reads the review-dispositions marker's
+    # ReviewerSource/internal_match fields Get-DispositionTally exposes. A
+    # resolved-external, novel-matched, sustained entry expects an OBSERVER
+    # block INSTEAD of a code-review block, so it becomes post-review-
+    # observer's whole expected count (Count, the novel-only subset).
+    #
+    # M7 fix (post-fix judge-sustained review): code-review's subtraction
+    # uses AllExternalCount, the BROADER non-local-regardless-of-match-status
+    # count — not Count. review-judgment SKILL.md's DD1 trinary (skills/
+    # review-judgment/SKILL.md, "Novel-gating is a trinary, not a two-way
+    # rule") and DD5 ("external-source sustained findings no longer produce
+    # code-review blocks," unrestricted to novel-only) both say a duplicate/
+    # ambiguous-matched entry, or one whose reviewer_source is the
+    # 'unresolved' sentinel, expects NEITHER block type from a
+    # SKILL-conformant judge — not a code-review block either. The prior
+    # version of this seam left those entries inside code-review's
+    # subtrahend complement (still counted as an expected code-review
+    # block), which is exactly the bug: it kept demanding a block the SKILL
+    # forbids the judge from ever emitting. AllExternalCount is the
+    # superset that correctly removes them from code-review's expected
+    # total too, while Count (the narrower novel-only subset) still governs
+    # post-review-observer's expected total unchanged (see
+    # Get-ExternalSourceNovelSustainedCount for the full DD1-trinary
+    # derivation of both counts).
+    if ($Surface -eq 'code-review' -or $Surface -eq 'post-review-observer') {
+        $externalNovel = Get-ExternalSourceNovelSustainedCount -Bodies $Bodies -ExpectedNumber $Id
+        if ($externalNovel.ParseStatus -eq 'could-not-verify') {
+            $anyCouldNotVerify = $true
+        }
+        if ($Surface -eq 'code-review') {
+            $totalSustained = $totalSustained - $externalNovel.AllExternalCount
+        }
+        else {
+            # post-review-observer: the per-body loop above reused
+            # Get-SustainedFindingCount's generic judge-rulings shape (the
+            # same shape code-review reads) purely so ValidateSet/M5 wiring
+            # is uniform across surfaces — that raw count is not the right
+            # number for this surface and is discarded here. The seam's
+            # external+novel+sustained count IS the whole expected total.
+            $totalSustained = $externalNovel.Count
+        }
     }
 
     $parseStatus = if ($anyCouldNotVerify) { 'could-not-verify' } else { 'ok' }

@@ -145,6 +145,27 @@ In the same PR comment as the `<!-- judge-rulings ... -->` block, emit one `<!--
 - `severity`, `systemic_fix_type`, `category`: carry forward from the finding
 - `apparatus_meta: false` unless a stated criterion justifies `true`; when `apparatus_meta: true`, the entry is audited
 
+#### Observer emission variant (post-review-observer)
+
+`reviewer_source` values referenced below are resolved per § `reviewer_source` Lookup Order (later in this document) — read that section first if the resolution mechanism itself is in question; this rule only consumes the already-resolved value.
+
+When a sustained finding's `reviewer_source` resolves to a real external identity (not the reserved `local` sentinel) and its `internal_match.match_status` is `novel`, emit the observer variant of the phase-containment block instead of the standard code-review block above — one block per finding, never both:
+
+- `finding_key`: `post-review-observer:{stable_finding_key}` — this exact prefix is load-bearing (M26): `Get-EmissionGap` attributes a block to a surface by checking the `finding_key` prefix, so a block emitted with the wrong prefix is invisible to, or miscounted by, the reconciliation sweep even though it would pass schema validation.
+- `caught_stage: post-review-observer`
+- `escape_distance`: recomputed as `4 - ordinal(catchable_phase)` (post-review-observer projection = 4; same phase ordinals as above)
+- `introduced_phase`, `catchable_phase`, `severity`, `systemic_fix_type`, `category`, `apparatus_meta`: same setter rule and carry-forward as the code-review block above
+
+**Novel-gating is a trinary, not a two-way rule (M25)**:
+
+- `reviewer_source` is the reserved `local` sentinel → standard `code-review` block, unchanged.
+- `reviewer_source` is a resolved real external identity AND `internal_match.match_status: novel` → observer block, which REPLACES the standard block. One defect, one block, never both.
+- `internal_match.match_status` is `duplicate` or `ambiguous`, OR `reviewer_source` is the `unresolved` lookup-failure sentinel → NEITHER block is emitted.
+
+Writing the unqualified two-way version of this rule — "any resolved external identity gets an observer block" — is wrong: it would emit an observer block for a `duplicate`-matched finding, double-counting one defect as both a catch-side overlap and an escape-side miss.
+
+**Dispatch is exact-equality only (M40)**: test `reviewer_source -eq 'local'`, never `-like`, `-match`, or other containment-style matching. A real GitHub login literally named `local` is normalized to `ext-local` by the intake process specifically so it can be told apart from the reserved `local` sentinel (see `skills/code-review-intake/SKILL.md` § GitHub Review Mode, around line 21, for the normalization rule) — a containment-style dispatch would misclassify `ext-local` as pipeline-native and silently delete a real escape.
+
 **Setter rule**: `catchable_phase` and `introduced_phase` must each be set by explicit agent judgment with no default — the agent must reason about which phase was the earliest in which this specific defect was catchable. Validate each block against `skills/calibration-pipeline/schemas/phase-containment.schema.json`.
 
 **Emission check (hub maintainers only)**: after posting the `judge-rulings` PR comment with its phase-containment blocks, run `pwsh ./.github/scripts/phase-containment-emission-check.ps1 -Pr {N}` and treat its output as advisory — warn-only, never blocking. The repo-relative script path does not resolve from a consumer repo's CWD, so this nudge applies only when working in the Agent Orchestra hub repo itself; see the script header for the full contract.
@@ -240,9 +261,23 @@ Both disposition-recording sites below (§ Routine Findings and § Load-Bearing 
 2. **`gh api` re-derivation** — otherwise (standalone or resumed judge pass), extract the `comment_id` embedded in the finding's `stable_finding_key` and re-derive the reviewer identity via `gh api`, trying the PR-review-comment, issue-comment, and review endpoints in turn. Parse rule: the `comment_id` is the numeric run immediately after the `gh-` prefix, up to the next `-` or end of string; this covers both the single-finding `gh-{comment_id}` key shape and the multi-finding `gh-{comment_id}-{hash}` key shape identically. Normalize the re-derived login per the canonical `reviewer_source` normalization rule in `skills/code-review-intake/SKILL.md` § GitHub Review Mode (lowercase, `.login`-only, trailing `[bot]` strip, quoted-scalar output, reserved-value/`ext-`-prefix collision escape) — this site does not restate that mechanism.
 3. **`unresolved` sentinel** — on any failure (comment deleted, API error, no comment ID embedded in the key to re-derive from), write the sentinel `unresolved`. Never write `local` on lookup failure — `local` is reserved exclusively for pipeline-native (non-GitHub-sourced) findings, which are written directly per the guard above and never fall through to this sentinel.
 
+### `internal_match` Writer Rule (GitHub-Sourced Findings Only, DD2)
+
+`internal_match.match_status` and the PR-level `external_sources_reconciled` field are **written by the judge**, not merely consumed — § Observer emission variant (above) only ever reads the already-resolved value; this section is the writer contract those readers depend on.
+
+At reconciliation time — with **both** the internal prosecution ledger (this PR's own pipeline-native findings) and the external review's findings in context simultaneously, per design decision DD2 — the judge sets `internal_match.match_status` on **every** external-source disposition entry (any entry whose `reviewer_source` resolved to a value other than `local`):
+
+- **`duplicate`** — the external finding describes the same defect as an already-caught internal finding. Also write `matched_finding_key` with that internal finding's `stable_finding_key`.
+- **`novel`** — the external finding has no matching internal finding; the pipeline missed it. This is what the observer emission variant later turns into a `post-review-observer` escape block.
+- **`ambiguous`** — the judge cannot confidently resolve a match either way after verification. Excluded from `n₂`/`m`/coverage math downstream (Seam Specification) — an honest "could not resolve" must never be forced into `duplicate` or `novel`.
+
+`reviewer_source: local` entries (pipeline-native findings) never carry `internal_match` — the field only applies to external-source entries. Field order matters: `internal_match` is written **before** `disposition_rationale` (M42) so a `disposition_rationale` block-scalar's free text can never be mistaken for the real field by a downstream line-regex parser.
+
+**Scope (post-fix batch 4, issue #854 s6; corrected G-CR8, PR #859 GitHub-review post-fix): only when this pass ran in GitHub Review Mode.** The PR-level `external_sources_reconciled` field records that an external review was actually reconciled against — it is meaningless, and actively misleading, on a pass that never had one. Emit it once in the same posted marker **only when this pass is GitHub Review Mode** — determined from the session context/command that invoked this pass (`skills/code-review-intake/SKILL.md` § GitHub Review Mode (Proxy Prosecution Pipeline) — the `/review-github` proxy-prosecution path that ingests GitHub-sourced findings), never from entry presence. Within a GitHub Review Mode pass, emit it **even when empty** (`external_sources_reconciled: []`): a genuinely zero-finding external review is a legal, required coverage record (M9 — "coverage means measurement, not presence"), and omitting the field on a GitHub Review Mode pass is indistinguishable downstream from "this PR was never measured at all." A zero-finding external review pass has zero entries by definition, so a detection test keyed on entry presence (e.g. "at least one entry this pass whose `reviewer_source` resolved to a value other than `local`") can never fire on exactly the case M9 requires the field to be emitted for — GitHub Review Mode is a property of the SESSION, not a derived property of what got written. On a purely internal-only pass — plain `/orchestra:review`, no GitHub-sourced findings ingested this pass — **omit the field entirely**. Do not emit `external_sources_reconciled: []` on an internal-only pass: that would falsely claim an external review was reconciled and never occurred, manufacturing a measured-looking zero that was never actually measured (the exact false-clean coverage vector this issue exists to eliminate).
+
 ### Routine Findings — Silent Recording
 
-For routine findings, the agent records the disposition silently in the `review-dispositions-{PR}` accumulator without firing an `AskUserQuestion`. Use `schema_version: 3` (current emission format); write `severity`, `stage`, and `reviewer_source` (the reviewer identity or class that produced the finding — use `local` for pipeline-native prosecution/defense/judge findings; external identities are resolved per § `reviewer_source` Lookup Order above) for all entries, and include `ac_cross_check` for any `dismiss` or `defer` entry with severity ≥ medium:
+For routine findings, the agent records the disposition silently in the `review-dispositions-{PR}` accumulator without firing an `AskUserQuestion`. Use `schema_version: 4` (current emission format); write `severity`, `stage`, and `reviewer_source` (the reviewer identity or class that produced the finding — use `local` for pipeline-native prosecution/defense/judge findings; external identities are resolved per § `reviewer_source` Lookup Order above) for all entries, `internal_match` for external-source entries (§ `internal_match` Writer Rule above), and include `ac_cross_check` for any `dismiss` or `defer` entry with severity ≥ medium. Remember the PR-level `external_sources_reconciled` field once per posted marker (§ `internal_match` Writer Rule above; § Persistence — Ordering below shows the full marker shape):
 
 > **Pre-condition**: for any `dismiss` entry with severity ≥ medium, run the AC cross-check (see § AC Cross-Check — Blocking Pre-Condition) before writing this entry.
 
@@ -280,7 +315,7 @@ Capture the engineer's choice verbatim.
 
 > **Pre-condition**: if the engineer chooses `dismiss` with severity ≥ medium, run the AC cross-check (see § AC Cross-Check — Blocking Pre-Condition) before writing this entry.
 
-Record as (v3 format — include `severity`, `stage`, `reviewer_source`, and `ac_cross_check` for dismiss/defer entries with severity ≥ medium):
+Record as (v4 format — include `severity`, `stage`, `reviewer_source`, `internal_match` for external-source entries (§ `internal_match` Writer Rule above), and `ac_cross_check` for dismiss/defer entries with severity ≥ medium):
 
 ```yaml
 - stable_finding_key: "src/auth/session.ts:88:token-expiry-not-checked-b7c1a2f3"
@@ -293,6 +328,8 @@ Record as (v3 format — include `severity`, `stage`, `reviewer_source`, and `ac
   reviewer_source: local     # v3: writer always emits this field (writer obligation); the reader/consumer treats an absent field as local for backward compat with pre-v3 entries (reader-semantics fallback) — local is reserved for pipeline-native findings; external identities resolve per § reviewer_source Lookup Order
   disposition_rationale: "Engineer chose incorporate: the expiry check was confirmed missing and the fix is bounded to one function."
 ```
+
+This example's `reviewer_source: local` means no `internal_match` is written (pipeline-native). For a load-bearing finding whose `reviewer_source` resolved to an external identity, add `internal_match: { match_status: ... }` before `disposition_rationale`, same shape as the routine external-source example above.
 
 ### Escalate Semantics
 
@@ -376,13 +413,13 @@ This enables re-review of a PR without re-asking for findings already dispositio
 
 Write in this order (atomic marker first, engagement-record second):
 
-1. **`<!-- review-dispositions-{PR} -->`** — Post as a PR comment. Payload: `schema_version: 3`, `passes_run: [...]`, `entries: [...]` (all findings, routine and load-bearing, one entry per finding). v2 added per-entry `severity`, `ac_cross_check`, and `stage` fields; v3 adds per-entry `reviewer_source` (the reviewer identity or class — `local` for pipeline-native findings; external identities resolve per § `reviewer_source` Lookup Order above). This is the atomic per-finding record.
+1. **`<!-- review-dispositions-{PR} -->`** — Post as a PR comment. Payload: `schema_version: 4`, `passes_run: [...]`, `entries: [...]` (all findings, routine and load-bearing, one entry per finding), plus the PR-level `external_sources_reconciled` field. v2 added per-entry `severity`, `ac_cross_check`, and `stage` fields; v3 added per-entry `reviewer_source` (the reviewer identity or class — `local` for pipeline-native findings; external identities resolve per § `reviewer_source` Lookup Order above); v4 adds per-entry `internal_match` and the PR-level `external_sources_reconciled` field (see § `internal_match` Writer Rule below). This is the atomic per-finding record.
 
    ````text
    <!-- review-dispositions-{PR} -->
 
    ```yaml
-   schema_version: 3
+   schema_version: 4
    passes_run: [1, 2, 3, 4, 5]
    entries:
      - stable_finding_key: "..."
@@ -391,7 +428,7 @@ Write in this order (atomic marker first, engagement-record second):
        classification: routine
        severity: medium
        stage: code-review
-       reviewer_source: local   # or an origin-derived value (e.g. "jdoe", resolved per § reviewer_source Lookup Order) when the finding came from an external reviewer
+       reviewer_source: local   # pipeline-native finding: no internal_match (see below)
        disposition_rationale: "..."
        ac_cross_check:
          file_arm: false
@@ -400,14 +437,27 @@ Write in this order (atomic marker first, engagement-record second):
          ac_ref: "- the AC line that matched"
          source: issue
          routed: force-accept
+     - stable_finding_key: "gh-123456789"
+       pass: 1
+       disposition: incorporate
+       classification: routine
+       severity: medium
+       stage: code-review
+       reviewer_source: jdoe    # external identity, resolved per § reviewer_source Lookup Order
+       internal_match:          # written BEFORE disposition_rationale (M42 field order)
+         match_status: novel    # duplicate | novel | ambiguous — see § internal_match Writer Rule
+       disposition_rationale: "..."
+   external_sources_reconciled: ["gh-123456789"]   # PR-level; emitted ONLY because this pass ran in GitHub Review Mode (a property of the SESSION/command, e.g. /review-github — never inferred from entry presence). [] is a legal, required zero-finding coverage record WITHIN a GitHub Review Mode pass, never an omission; on a purely internal-only pass (no external-source entries this pass) OMIT this field entirely instead.
    ```
    ````
 
    > **v3 per-entry requirements** (carried over unchanged from v2): For entries with `disposition: dismiss` or `disposition: defer` and `severity` ≥ medium, `ac_cross_check` is required. The `ac_cross_check` object records which arms ran (`file_arm`, `term_arm`), the result tier (`matched-high | matched-ambiguous | no-match`), the matched AC reference if any, the source, and the routing outcome. Legacy `schema_version: 1` entries are exempt from this check. `artifact_citation` covers non-AC inherited artifacts; `ac_cross_check.ac_ref` is the AC-specific channel.
    >
+   > **v4 requirements** (additive on top of v3): every external-source entry (`reviewer_source` not `local`) carries `internal_match.match_status`, written per § `internal_match` Writer Rule below. The PR-level `external_sources_reconciled` field is emitted once per posted marker **only on a GitHub Review Mode pass** (§ `internal_match` Writer Rule above) — including as `external_sources_reconciled: []` when that external review found nothing to reconcile. An absent field means this pass never attempted external reconciliation (the normal, expected state for a plain internal-only `/orchestra:review` pass); an empty array means a GitHub Review Mode pass measured and found zero (M9). Never emit the field on an internal-only pass, even as `[]` — that would misrepresent an unmeasured pass as a measured one. `reviewer_source` stays required on every entry, same as v3.
+   >
    > **`stage` field values**: The `stage` field records which pipeline stage produced this entry: `code-review` for the post-judge disposition gate, `ce` for CE Gate defect deferral. Both stages use the same `ac_cross_check` pre-condition at severity ≥ medium.
    >
-   > **In-session schema audit (before posting)**: Before posting the `review-dispositions-{PR}` comment to the PR, run a warn-only schema check using `.github/scripts/lib/review-dispositions-validator-core.ps1 -PullRequestNumber {PR} -InMemoryMarkers @($rawMarkerText)`. Surface any `findings` as warnings. This catches v3 schema violations (e.g., missing `ac_cross_check` on dismiss/defer entries at severity ≥ medium) before the marker is committed to the PR timeline. The validator is warn-only and never blocks posting.
+   > **In-session schema audit (before posting)**: Before posting the `review-dispositions-{PR}` comment to the PR, run a warn-only schema check using `.github/scripts/lib/review-dispositions-validator-core.ps1 -PullRequestNumber {PR} -InMemoryMarkers @($rawMarkerText)`. Surface any `findings` as warnings. This catches v4 schema violations (e.g., missing `ac_cross_check` on dismiss/defer entries at severity ≥ medium, or a missing `reviewer_source`) before the marker is committed to the PR timeline. The validator is warn-only and never blocks posting.
 
 2. **`<!-- engagement-record-review-{PR} -->`** — Post as a separate PR comment (not the same comment as review-dispositions). Payload follows `skills/engagement-record-emission/SKILL.md` shape at `schema_version: 4`, `phase: review`. Load-bearing findings that fired `AskUserQuestion` appear in `load_bearing_decisions[]` with their `engineer_choice` and `audit_rationale`. Routine findings do not appear in the engagement-record.
 

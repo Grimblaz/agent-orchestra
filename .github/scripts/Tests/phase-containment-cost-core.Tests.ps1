@@ -363,6 +363,21 @@ Describe 'Get-ReviewCostRollup - code-review post-judge dismiss-rate + defer sem
         $result.CodeReview.PostJudgeDismissRate.Numerator | Should -Be 1
         $result.CodeReview.DeferCount | Should -Be 1
     }
+
+    It 'G-CR10 regression: excludes a review-dispositions marker whose own {N} belongs to a DIFFERENT PR than the tuple Number (cross-PR marker leakage)' {
+        # Same marker body as the test above (review-dispositions-100, 4
+        # entries), but the tuple's own Number is 101 -- a different PR.
+        # Before the G-CR10 fix, Test-ReviewDispositionsHeadPresent was
+        # called with no -ExpectedNumber at this call site, so this
+        # cross-PR-quoted marker would still be tallied into PR 101's cost
+        # rollup.
+        $tuple = @{ Number = 101; Surface = 'pr'; Bodies = @($script:CostReviewDispositionsPr100Body); CreatedAtValues = @('2026-01-01T00:00:00Z') }
+        $result = Get-ReviewCostRollup -Tuples @($tuple) -Source 'graphql' -Truncated $false -ValuePresentPrNumbers @(101)
+
+        $result.CodeReview.PostJudgeDismissRate.N | Should -Be 0
+        $result.CodeReview.PostJudgeDismissRate.Numerator | Should -Be 0
+        $result.CodeReview.DeferCount | Should -Be 0
+    }
 }
 
 Describe 'Get-ReviewCostRollup - per-reviewer-source joint grouping' {

@@ -2,7 +2,7 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
-## [3.3.15] — 2026-07-16
+## [3.3.16] — 2026-07-16
 
 ### Added
 
@@ -14,6 +14,13 @@ All notable changes to agent-orchestra will be documented in this file.
 - Fixed the frame-spine template in `skills/plan-authoring/SKILL.md` (`### Plan-markdown template`): the example `<!-- frame-spine ... -->` block was authored at 3-space/6-space indentation, but `frame-spine-core.ps1`'s parser requires exactly 2-space/4-space and returns `$null` silently on any mismatch. Every plan authored from the prior template carried a dead spine.
 - The Cost Pattern Note no longer reports Claude Code's `<synthetic>` message marker as an addable unknown model (issue #487). `<synthetic>` is what Claude Code puts in `message.model` for assistant messages it injects itself (API-error notices, status lines); it is not a model and can never resolve against the rate table, so the Note was instructing maintainers to add a rate row that would never match. Zero-usage `<synthetic>` events are now excluded from `unknown_models` and from `null_cost_events` entirely — their true cost is exactly `0.00`, and counting them rewrote a genuinely-`0.00` bucket cost to `null`, the same misleading-null class issue #487 exists to eliminate.
 - Fixed silent loss of the Cost Pattern section during re-emission preservation (issue #487). `$script:FCLCostPatternSectionRegex` was missing from `Get-FCLCostScriptState`'s marshal list, so it resolved to `$null` inside the worker runspace clone. `[regex]::Match(body, $null)` does not throw — it returns `Success=True` with an empty match, so the preservation branch accepted an empty section, never reached its YAML-only fallback, and posted the "prior populated render was kept" notice with the cost data destroyed. The regex is now marshaled, and the acceptance guard additionally requires a non-empty captured section so any future empty-match cause degrades into the fallback instead of silent data loss. Third instance of the worker-runspace `$script:`-constant drop first fixed for issue #825 (C3) and issue #496 (C-1).
+## [3.3.15] — 2026-07-16
+
+### Added
+
+- Phase-containment ledger closes the code-review terminal-stage blind spot (#854): a new `post-review-observer` caught-stage (projection 4) turns external-reviewer catches the pipeline missed into real ledger escapes, and the maintainer report renders a two-arm code-review verdict (catch-side veto + escape-side miss estimate) instead of a structurally-artifactual `0.00`/`ELIGIBLE`.
+- `skills/review-judgment/SKILL.md` documents the observer emission variant: the `post-review-observer:{stable_finding_key}` prefix, novel-gated trinary dispatch, and exact-equality `local`-sentinel matching that a judge must follow when emitting phase-containment blocks in production.
+- `Documents/Design/phase-containment-ledger.md` records the two-arm certification model, the fail-closed coverage/NaN/reconciliation guards, and the two owner-approved doctrine revisions (`value-block-cost-dependency-854`, `coverage-authorship-854`) this issue made explicit.
 
 ## [3.3.14] — 2026-07-15
 

@@ -1655,6 +1655,346 @@ entries:
 ```
 '@
 
+# --- issue #854 s3 fixtures: internal_match, external_sources_reconciled,
+# M9 zero-entry legal coverage, head gate ------------------------------------
+
+# Basic internal_match projection: entry 1 carries match_status: duplicate
+# plus matched_finding_key; entry 2 carries match_status: novel with no
+# matched_finding_key (must default to $null); entry 3 carries no
+# internal_match block at all (Seam Specification default: 'ambiguous').
+$script:ReviewDispositionsInternalMatchBody = @'
+<!-- review-dispositions-950 -->
+
+```yaml
+schema_version: 4
+passes_run: [1]
+entries:
+  - stable_finding_key: "p.ps1:1:ppp"
+    pass: 1
+    disposition: dismiss
+    classification: routine
+    internal_match:
+      match_status: duplicate
+      matched_finding_key: "orig.ps1:9:aaa111"
+    severity: medium
+    stage: code-review
+    reviewer_source: local
+    disposition_rationale: "Already caught internally; matches an earlier finding."
+  - stable_finding_key: "p.ps1:2:qqq"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    internal_match:
+      match_status: novel
+    severity: high
+    stage: code-review
+    reviewer_source: gemini
+    disposition_rationale: "Not previously caught internally."
+  - stable_finding_key: "p.ps1:3:rrr"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: low
+    stage: code-review
+    reviewer_source: local
+    disposition_rationale: "No internal_match block at all -- must default to ambiguous."
+```
+'@
+
+# M41 regression: a fake "match_status: duplicate" / "matched_finding_key:"
+# pair embedded in disposition_rationale's block-scalar CONTENT (indented,
+# genuinely inside the span) with NO real internal_match field anywhere else
+# in the entry. Without the block-scalar exclusion check, the house
+# $keyAnchor's leading `^\s*` would match this indented decoy (unlike the
+# strict column-0 external_sources_reconciled reader, this field-extraction
+# site's defense is genuinely load-bearing, not merely redundant with a
+# stricter anchor) and misread it as the real field.
+$script:ReviewDispositionsInternalMatchBlockScalarDecoyBody = @'
+<!-- review-dispositions-954 -->
+
+```yaml
+schema_version: 4
+passes_run: [1]
+entries:
+  - stable_finding_key: "u.ps1:1:uuu"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: medium
+    stage: code-review
+    reviewer_source: local
+    disposition_rationale: |
+      No internal_match block was recorded for this entry. A NOTE for future
+      readers: some legacy tooling used to write inline fragments like
+      match_status: duplicate
+      matched_finding_key: "should-never-be-read"
+      directly in prose; those must never be picked up as real structure.
+```
+'@
+
+# Normal (non-zero-entries) path: one real entry AND a valid PR-level
+# external_sources_reconciled flow-array field co-existing on the same body.
+$script:ReviewDispositionsWithExternalSourcesReconciledBody = @'
+<!-- review-dispositions-955 -->
+
+```yaml
+schema_version: 4
+passes_run: [1]
+entries:
+  - stable_finding_key: "v.ps1:1:vvv"
+    pass: 1
+    disposition: dismiss
+    classification: routine
+    internal_match:
+      match_status: duplicate
+      matched_finding_key: "v.ps1:1:vvv"
+    severity: medium
+    stage: code-review
+    reviewer_source: local
+    disposition_rationale: "Reconciled: this finding matches an external reviewer's finding already caught internally."
+external_sources_reconciled: ["v.ps1:1:vvv"]
+```
+'@
+
+# Block-list (non-flow) style external_sources_reconciled, combined with the
+# M9 zero-entries legal-coverage case, so both value shapes get fixture
+# coverage.
+$script:ExternalSourcesReconciledZeroEntriesLegalBody = @'
+<!-- review-dispositions-951 -->
+
+```yaml
+schema_version: 4
+passes_run: [1]
+entries: []
+external_sources_reconciled: ["a.ps1:1:aaa111", "b.ps1:2:bbb222"]
+```
+'@
+
+$script:ExternalSourcesReconciledZeroEntriesBlockListBody = @'
+<!-- review-dispositions-956 -->
+
+```yaml
+schema_version: 4
+passes_run: [1]
+entries: []
+external_sources_reconciled:
+  - "c.ps1:1:ccc333"
+  - "d.ps1:2:ddd444"
+```
+'@
+
+# M9 contrast: head present, zero entries, but external_sources_reconciled's
+# value is neither a flow array nor a block list (malformed) -- must stay
+# could-not-verify, not fabricate a legal-coverage 'ok'.
+$script:ExternalSourcesReconciledZeroEntriesMalformedBody = @'
+<!-- review-dispositions-957 -->
+
+```yaml
+schema_version: 4
+passes_run: [1]
+entries: []
+external_sources_reconciled: not-an-array
+```
+'@
+
+# M30 regression (fixture ii): external_sources_reconciled written INSIDE an
+# entry (indented under the list item, same indent as the entry's other
+# fields) must NOT be misread as the PR-level field -- the strict column-0
+# anchor excludes it purely by indentation, independent of block-scalar
+# status.
+$script:ExternalSourcesReconciledEntryNestedDecoyBody = @'
+<!-- review-dispositions-952 -->
+
+```yaml
+schema_version: 4
+passes_run: [1]
+entries:
+  - stable_finding_key: "s.ps1:1:sss"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: medium
+    stage: code-review
+    reviewer_source: local
+    external_sources_reconciled: ["decoy.ps1:1:decoy111"]
+    disposition_rationale: "Entry-nested decoy key must not be read as the PR-level field."
+```
+'@
+
+# M41 regression (fixture i): external_sources_reconciled-looking text
+# embedded in disposition_rationale's block-scalar CONTENT (indented, so
+# genuinely part of the span) must not be read as real structure. This text
+# is excluded by the same column-0 anchor as the entry-nested decoy above
+# (block-scalar content is, by construction, always indented relative to its
+# key line, so it can never land at column 0) -- the block-scalar-span
+# exclusion check is implemented on this reader too (M41), as defense in
+# depth, even though it is not the reachable defense for this specific
+# fixture.
+$script:ExternalSourcesReconciledBlockScalarDecoyBody = @'
+<!-- review-dispositions-953 -->
+
+```yaml
+schema_version: 4
+passes_run: [1]
+entries:
+  - stable_finding_key: "t.ps1:1:ttt"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: medium
+    stage: code-review
+    reviewer_source: local
+    disposition_rationale: |
+      Unrelated free-text discussion that happens to quote marker-looking
+      text from a different context:
+      external_sources_reconciled: [forged.ps1:1:forged111]
+      This must never be read as the real PR-level field.
+```
+'@
+
+# M15 (post-fix judge-sustained review): combined-attack fixture -- BOTH the
+# M30 entry-nested external_sources_reconciled decoy AND the M41
+# disposition_rationale block-scalar decoy on the SAME entry, simultaneously.
+# Before this fixture, no test exercised the two independent defenses
+# together, only in isolation (the two fixtures above); this proves neither
+# defense depends on the OTHER decoy being absent -- the column-0 anchor
+# excludes the entry-nested decoy by indentation regardless of the
+# block-scalar decoy's presence, and the block-scalar-span exclusion (defense
+# in depth) independently excludes the rationale-embedded decoy regardless of
+# the entry-nested decoy's presence.
+$script:ExternalSourcesReconciledCombinedDecoyBody = @'
+<!-- review-dispositions-954 -->
+
+```yaml
+schema_version: 4
+passes_run: [1]
+entries:
+  - stable_finding_key: "u.ps1:1:uuu"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: medium
+    stage: code-review
+    reviewer_source: local
+    external_sources_reconciled: ["decoy.ps1:1:decoy222"]
+    disposition_rationale: |
+      Unrelated free-text discussion that happens to quote marker-looking
+      text from a different context:
+      external_sources_reconciled: [forged.ps1:1:forged222]
+      This must never be read as the real PR-level field.
+```
+'@
+
+#endregion
+
+#region Fixtures: issue #854 s7 CR-8/M26 seam (post-review-observer surface)
+
+# Judge-rulings marker, id 950, exactly one sustained finding. Paired with
+# $script:ReviewDispositionsInternalMatchBody (already id 950 above), whose
+# entry[1] is reviewer_source=gemini, match_status=novel, disposition=
+# incorporate -- a resolved-external, novel-matched, sustained entry that
+# expects an observer block INSTEAD of a code-review block.
+$script:CR8JudgeRulings950Body = @'
+```yaml
+<!-- judge-rulings pr=950 -->
+- id: F1
+  judge_ruling: sustained
+  judge_confidence: high
+  points_awarded: P+5
+-->
+```
+'@
+
+# Judge-rulings marker, id 960, exactly one sustained finding. Paired with
+# $script:CR8ReviewDispositionsAmbiguousExternalBody below.
+$script:CR8JudgeRulings960Body = @'
+```yaml
+<!-- judge-rulings pr=960 -->
+- id: F1
+  judge_ruling: sustained
+  judge_confidence: high
+  points_awarded: P+5
+-->
+```
+'@
+
+# One sustained, resolved-external (reviewer_source: gemini) entry whose
+# internal_match.match_status is 'ambiguous'. Per the Seam Specification this
+# expects NEITHER an observer block NOR a code-review-count subtraction -- it
+# must stay inside code-review's subtrahend complement (still expected as a
+# code-review block).
+$script:CR8ReviewDispositionsAmbiguousExternalBody = @'
+<!-- review-dispositions-960 -->
+
+```yaml
+schema_version: 4
+passes_run: [1]
+entries:
+  - stable_finding_key: "amb.ps1:1:amb111"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    internal_match:
+      match_status: ambiguous
+    severity: medium
+    stage: code-review
+    reviewer_source: gemini
+    disposition_rationale: "External finding could not be reconciled against internal findings; ambiguous match."
+```
+'@
+
+# Judge-rulings marker, id 961, exactly one sustained finding. Paired with
+# $script:CR8ReviewDispositionsUnresolvedExternalNovelBody below.
+$script:CR8JudgeRulings961Body = @'
+```yaml
+<!-- judge-rulings pr=961 -->
+- id: F1
+  judge_ruling: sustained
+  judge_confidence: high
+  points_awarded: P+5
+-->
+```
+'@
+
+# One sustained entry whose reviewer_source is the 'unresolved' sentinel
+# (review-judgment SKILL.md's tier-3 lookup-failure sentinel) even though its
+# match_status is 'novel'. reviewer_source: unresolved is NOT a resolved
+# external identity, so this must be excluded from the CR-8 seam's count
+# regardless of match_status -- defense-in-depth proof that the exclusion
+# checks reviewer_source independently of match_status.
+$script:CR8ReviewDispositionsUnresolvedExternalNovelBody = @'
+<!-- review-dispositions-961 -->
+
+```yaml
+schema_version: 4
+passes_run: [1]
+entries:
+  - stable_finding_key: "unr.ps1:1:unr111"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    internal_match:
+      match_status: novel
+    severity: medium
+    stage: code-review
+    reviewer_source: unresolved
+    disposition_rationale: "GitHub comment lookup failed; reviewer identity sentinel is unresolved per review-judgment SKILL.md lookup-order tier 3."
+```
+'@
+
+# Zero-sustained judge-rulings marker, id 970, for the M26 wrong-prefix
+# fixture below (isolates BlockCount behavior from SustainedCount).
+$script:CR8JudgeRulings970ZeroSustainedBody = @'
+```yaml
+<!-- judge-rulings pr=970 -->
+- id: X1
+  judge_ruling: defense-sustained
+  judge_confidence: high
+  points_awarded: D+0
+-->
+```
+'@
+
 #endregion
 
 }
@@ -3277,6 +3617,224 @@ Describe 'Get-DispositionTally - code-review surface fail-loud paths (DD3)' {
     }
 }
 
+# ---------------------------------------------------------------------------
+# issue #854 s3: internal_match per-entry projection, external_sources_reconciled
+# PR-level reader, M9 zero-entry legal coverage, relocated head gate.
+# ---------------------------------------------------------------------------
+
+Describe 'Get-DispositionTally - code-review surface internal_match projection (issue #854 s3)' {
+    It 'reads match_status=duplicate with matched_finding_key on the first entry' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsInternalMatchBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 3
+        $result.Entries[0].MatchStatus | Should -Be 'duplicate'
+        $result.Entries[0].MatchedFindingKey | Should -Be 'orig.ps1:9:aaa111'
+    }
+
+    It 'reads match_status=novel with a null matched_finding_key when the field is absent' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsInternalMatchBody
+        $result.Entries[1].MatchStatus | Should -Be 'novel'
+        $result.Entries[1].MatchedFindingKey | Should -BeNullOrEmpty
+    }
+
+    It 'defaults MatchStatus to ambiguous (Seam Specification) when internal_match is absent entirely' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsInternalMatchBody
+        $result.Entries[2].MatchStatus | Should -Be 'ambiguous'
+        $result.Entries[2].MatchedFindingKey | Should -BeNullOrEmpty
+    }
+
+    It 'M41: does not misread a fake match_status/matched_finding_key embedded in a disposition_rationale block scalar as the real field' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsInternalMatchBlockScalarDecoyBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 1
+        $result.Entries[0].MatchStatus | Should -Be 'ambiguous'
+        $result.Entries[0].MatchedFindingKey | Should -BeNullOrEmpty
+    }
+
+    It 'G-CR2(b) regression: does not misread a stray match_status/matched_finding_key that sits at entry indentation with NO enclosing internal_match: mapping' {
+        # No internal_match: key anywhere in this entry -- match_status and
+        # matched_finding_key are written directly at the entry's own field
+        # indentation, mimicking a forged upgrade attempt that is neither
+        # inside a real internal_match mapping nor inside a block-scalar
+        # (so the pre-existing M41 defense alone would not catch it).
+        $body = @'
+<!-- review-dispositions-959 -->
+
+```yaml
+schema_version: 4
+passes_run: [1]
+entries:
+  - stable_finding_key: "w.ps1:1:www"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: medium
+    stage: code-review
+    reviewer_source: gemini
+    match_status: novel
+    matched_finding_key: "forged.ps1:1:forged111"
+    disposition_rationale: "No internal_match mapping was ever written."
+```
+'@
+        $result = Get-DispositionTally -Surface 'code-review' -Body $body
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 1
+        $result.Entries[0].MatchStatus | Should -Be 'ambiguous'
+        $result.Entries[0].MatchedFindingKey | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Get-DispositionTally - code-review surface external_sources_reconciled PR-level reader (issue #854 s3)' {
+    It 'reads a flow-array external_sources_reconciled field alongside real entries' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsWithExternalSourcesReconciledBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 1
+        @($result.ExternalSourcesReconciled) | Should -Be @('v.ps1:1:vvv')
+    }
+
+    It 'M9: a real head with a valid column-0 field but ZERO segmentable entries is a legal ok coverage record (flow-array shape)' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ExternalSourcesReconciledZeroEntriesLegalBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 0
+        @($result.ExternalSourcesReconciled) | Should -Be @('a.ps1:1:aaa111', 'b.ps1:2:bbb222')
+    }
+
+    It 'M9: the same legal-coverage ruling holds for the block-list value shape' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ExternalSourcesReconciledZeroEntriesBlockListBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 0
+        @($result.ExternalSourcesReconciled) | Should -Be @('c.ps1:1:ccc333', 'd.ps1:2:ddd444')
+    }
+
+    It 'M9 contrast: zero entries plus a MALFORMED external_sources_reconciled value stays could-not-verify, never a fabricated ok' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ExternalSourcesReconciledZeroEntriesMalformedBody
+        $result.ParseStatus | Should -Be 'could-not-verify'
+    }
+
+    It 'DD3 regression: zero entries with NO external_sources_reconciled field at all still stays could-not-verify (pre-#854 behavior unchanged)' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsZeroEntriesBody
+        $result.ParseStatus | Should -Be 'could-not-verify'
+    }
+
+    It 'M30: an entry-nested external_sources_reconciled decoy (indented under a list item) is not read as the PR-level field' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ExternalSourcesReconciledEntryNestedDecoyBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 1
+        @($result.ExternalSourcesReconciled) | Should -Be @()
+    }
+
+    It 'M41: an external_sources_reconciled-looking decoy embedded in a disposition_rationale block scalar is not read as real structure' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ExternalSourcesReconciledBlockScalarDecoyBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 1
+        @($result.ExternalSourcesReconciled) | Should -Be @()
+    }
+
+    It 'M15: both the M30 entry-nested decoy AND the M41 block-scalar decoy hold simultaneously on the same entry (combined-attack fixture, issue #854 post-fix judge-sustained review)' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ExternalSourcesReconciledCombinedDecoyBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 1
+        # Neither decoy is read as the real PR-level field, even with both
+        # present on the same entry at once.
+        @($result.ExternalSourcesReconciled) | Should -Be @()
+        # The entry's own real fields still parse correctly despite both
+        # decoys sitting directly alongside/inside them.
+        $result.Entries[0].StableFindingKey | Should -Be 'u.ps1:1:uuu'
+        $result.Entries[0].Disposition | Should -Be 'incorporate'
+        $result.Entries[0].ReviewerSource | Should -Be 'local'
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Post-fix batch 4 (issue #854 s6): the with-entries parser path used to
+# return ParseStatus='ok' unconditionally, NEVER gating on whether a real
+# PR-level external_sources_reconciled field was actually found -- so a
+# purely internal-only marker (real entries, no external reconciliation ever
+# attempted) was indistinguishable from a genuinely measured co-observed PR.
+# ExternalSourcesFound is the new, separate coverage-purposes signal: it must
+# mirror Get-ExternalSourcesReconciledFromRegion's own .Found honestly on the
+# with-entries path, exactly the way the zero-entries path (M9) already did.
+# ---------------------------------------------------------------------------
+
+Describe 'Get-DispositionTally - code-review surface ExternalSourcesFound coverage-purposes signal (post-fix batch 4, issue #854 s6)' {
+    It 'sets ExternalSourcesFound=$false on a with-entries body carrying NO external_sources_reconciled field at all (internal-only marker) even though ParseStatus stays ok' {
+        # $script:ReviewDispositionsBasicBody has real entries (including an
+        # external reviewer_source: gemini entry) but NEVER writes the
+        # PR-level external_sources_reconciled field -- exactly the
+        # reachable internal-only-pass shape.
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsBasicBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -BeGreaterThan 0
+        $result.ExternalSourcesFound | Should -Be $false
+    }
+
+    It 'sets ExternalSourcesFound=$true on a with-entries body carrying a REAL PR-level external_sources_reconciled field' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsWithExternalSourcesReconciledBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.ExternalSourcesFound | Should -Be $true
+    }
+
+    It 'sets ExternalSourcesFound=$true on the M9 zero-entries legal-coverage record (flow-array shape)' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ExternalSourcesReconciledZeroEntriesLegalBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.ExternalSourcesFound | Should -Be $true
+    }
+
+    It 'sets ExternalSourcesFound=$false when the only external_sources_reconciled-looking text is an entry-nested decoy (M30) -- entries still parse ok' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ExternalSourcesReconciledEntryNestedDecoyBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 1
+        $result.ExternalSourcesFound | Should -Be $false
+    }
+
+    It 'sets ExternalSourcesFound=$false when the only external_sources_reconciled-looking text is a block-scalar decoy (M41) -- entries still parse ok' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ExternalSourcesReconciledBlockScalarDecoyBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 1
+        $result.ExternalSourcesFound | Should -Be $false
+    }
+
+    It 'sets ExternalSourcesFound=$false on a could-not-verify result (empty-body shape)' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body ''
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.ExternalSourcesFound | Should -Be $false
+    }
+
+    It 'G-CR2(a) regression: sets ExternalSourcesFound=$false for a bare "external_sources_reconciled:" key (YAML null) with no following block-list items -- must not be conflated with an explicit empty array' {
+        $body = @'
+<!-- review-dispositions-958 -->
+
+```yaml
+schema_version: 4
+passes_run: [1]
+entries: []
+external_sources_reconciled:
+```
+'@
+        $result = Get-DispositionTally -Surface 'code-review' -Body $body
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.ExternalSourcesFound | Should -Be $false
+    }
+}
+
+Describe 'Test-ReviewDispositionsHeadPresent - relocated head gate (issue #854 s3, M10)' {
+    It 'returns $true for a real, vocab-gate-passing review-dispositions head' {
+        Test-ReviewDispositionsHeadPresent -Body $script:ReviewDispositionsBasicBody | Should -BeTrue
+    }
+
+    It 'returns $false (skipped, never could-not-verify) when no review-dispositions head is present at all' {
+        Test-ReviewDispositionsHeadPresent -Body $script:ReviewDispositionsNoMarkerBody | Should -BeFalse
+    }
+
+    It 'returns $false for a bare prose mention of the marker convention with no real vocabulary' {
+        Test-ReviewDispositionsHeadPresent -Body $script:ReviewDispositionsProseMentionOnlyBody | Should -BeFalse
+    }
+
+    It 'returns $false for an empty body' {
+        Test-ReviewDispositionsHeadPresent -Body '' | Should -BeFalse
+    }
+}
+
 Describe 'Get-DispositionTally - design-challenge surface (sustained, defense-sustained pair)' {
     It 'returns SustainedCount=6, DefenseSustainedCount=0 for the live #782 design block (no defense-sustained concept in this marker shape)' {
         $result = Get-DispositionTally -Surface 'design-challenge' -Body $script:Design782Body
@@ -3304,6 +3862,53 @@ Describe 'Get-DispositionTally - plan-stress-test surface (sustained, defense-su
     It 'returns could-not-verify for an unrecognized/malformed body, never a confident zero' {
         $result = Get-DispositionTally -Surface 'plan-stress-test' -Body $script:MalformedBody
         $result.ParseStatus | Should -Be 'could-not-verify'
+    }
+}
+
+Describe 'Get-SustainedFindingCount - G-CR9 hardening: -Surface post-review-observer never leaks the judge-rulings count' {
+    # G-CR9 (PR #859 GitHub-review post-fix): -Surface accepts
+    # 'post-review-observer' per the ValidateSet (kept for Get-EmissionGap's
+    # wiring-uniformity per-body loop), but this surface has no defined
+    # judge-rulings-shaped sustained-count of its own -- before this fix, the
+    # non-design branch silently returned the ordinary judge-rulings count
+    # for it. $script:Pr775Body is a real judge-rulings marker with a known
+    # SustainedCount of 2 (see the AC8 byte-identical regression above) --
+    # proving THIS surface returns 0 for the exact same body, not 2, is the
+    # direct regression test for the latent API-contract trap.
+    It 'returns SustainedCount=0 (never the judge-rulings count) for a body with a real, parseable judge-rulings marker' {
+        $result = Get-SustainedFindingCount -Surface 'post-review-observer' -Body $script:Pr775Body
+        $result.ParseStatus | Should -Be 'ok'
+        $result.SustainedCount | Should -Be 0
+    }
+
+    It 'still returns could-not-verify (ParseStatus preserved) for an unparseable/malformed body' {
+        $result = Get-SustainedFindingCount -Surface 'post-review-observer' -Body $script:MalformedBody
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.SustainedCount | Should -Be 0
+    }
+}
+
+Describe 'Get-DispositionTally - M17 hardening: -Surface post-review-observer is explicitly unsupported' {
+    # M17 (post-fix judge-sustained review): -Surface accepts
+    # 'post-review-observer' per the ValidateSet, but this function's own
+    # branches only ever handled code-review, design-challenge, and a
+    # fall-through plan-stress-test-shaped default for anything else --
+    # including post-review-observer, which used to silently return the
+    # WRONG shape ({SustainedCount; DefenseSustainedCount}, not the
+    # code-review shape {Entries; ExternalSourcesReconciled}) mislabeled
+    # with Surface='post-review-observer'. Verified unreachable from any
+    # live caller today (grep across .github/scripts finds no
+    # `Get-DispositionTally -Surface 'post-review-observer'` call site;
+    # Get-EmissionGap's post-review-observer handling goes through
+    # Get-ExternalSourceNovelSustainedCount instead, never this function) --
+    # this is defensive hardening against a future caller passing the value
+    # the ValidateSet already accepts, not a fix for a live bug.
+    It 'throws an explicit unsupported-surface error instead of silently returning a wrong-shaped result' {
+        { Get-DispositionTally -Surface 'post-review-observer' -Body $script:PlanStressTestBody } | Should -Throw
+    }
+
+    It 'throws even for an empty body (the IsNullOrWhiteSpace early-return path must not silently default either)' {
+        { Get-DispositionTally -Surface 'post-review-observer' -Body '' } | Should -Throw
     }
 }
 
@@ -3354,5 +3959,229 @@ Describe 'Get-BlockScalarSpans - EXT-F1 regression: CRLF-terminated key line is 
         $spans = Get-BlockScalarSpans -Text $text
 
         $spans.Count | Should -Be 1
+    }
+}
+
+# -----------------------------------------------------------------------
+# Issue #854 s7: post-review-observer fourth surface -- CR-8 expected-count
+# seam and M26 finding_key-prefix attribution.
+# -----------------------------------------------------------------------
+
+Describe 'Get-ExternalSourceNovelSustainedCount - CR-8 seam helper (issue #854 s7)' {
+    It 'counts a sustained, resolved-external, novel-matched entry' {
+        $result = Get-ExternalSourceNovelSustainedCount -Bodies @($script:ReviewDispositionsInternalMatchBody) -ExpectedNumber 950
+        # entry[1]: reviewer_source=gemini, match_status=novel, disposition=incorporate
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Count | Should -Be 1
+        # M7 fix: a novel-matched entry is also part of the broader
+        # all-external subtrahend (it is ALSO absent from code-review's
+        # expected count, same as every other non-local sustained entry).
+        $result.AllExternalCount | Should -Be 1
+    }
+
+    It 'excludes a local reviewer_source entry even when sustained (M40 exact-equality: local is pipeline-native)' {
+        $body = @'
+<!-- review-dispositions-962 -->
+
+```yaml
+schema_version: 4
+passes_run: [1]
+entries:
+  - stable_finding_key: "loc.ps1:1:loc111"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    internal_match:
+      match_status: novel
+    severity: medium
+    stage: code-review
+    reviewer_source: local
+    disposition_rationale: "Pipeline-native finding, never enters the external lookup."
+```
+'@
+        $result = Get-ExternalSourceNovelSustainedCount -Bodies @($body) -ExpectedNumber 962
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Count | Should -Be 0
+        # M7 fix: reviewer_source: local is excluded from AllExternalCount
+        # too -- it is exactly the entry that DOES expect a code-review
+        # block, so it must never be subtracted.
+        $result.AllExternalCount | Should -Be 0
+    }
+
+    It 'excludes an ambiguous-matched external entry from Count, but INCLUDES it in AllExternalCount (M7/DD5 fix: subtracted from code-review even though it is not novel)' {
+        $result = Get-ExternalSourceNovelSustainedCount -Bodies @($script:CR8ReviewDispositionsAmbiguousExternalBody) -ExpectedNumber 960
+        $result.ParseStatus | Should -Be 'ok'
+        # Never expects an observer block -- Count (novel-only) stays 0.
+        $result.Count | Should -Be 0
+        # DD5 ("external-source sustained findings no longer produce
+        # code-review blocks," unrestricted to novel-only): a duplicate/
+        # ambiguous-matched external entry never produces a code-review
+        # block either from a SKILL-conformant judge, so it must be
+        # subtracted from code-review's expected count -- AllExternalCount
+        # is the broader subtrahend that captures this.
+        $result.AllExternalCount | Should -Be 1
+    }
+
+    It 'excludes a reviewer_source=unresolved entry from Count, but INCLUDES it in AllExternalCount (M7/DD5 fix: reviewer_source gate is independent of match_status on both counts)' {
+        $result = Get-ExternalSourceNovelSustainedCount -Bodies @($script:CR8ReviewDispositionsUnresolvedExternalNovelBody) -ExpectedNumber 961
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Count | Should -Be 0
+        # reviewer_source: unresolved never expects a code-review block
+        # either (SKILL trinary case 3), so it too is subtracted.
+        $result.AllExternalCount | Should -Be 1
+    }
+
+    It 'excludes a dismissed entry regardless of reviewer_source/match_status' {
+        $body = @'
+<!-- review-dispositions-963 -->
+
+```yaml
+schema_version: 4
+passes_run: [1]
+entries:
+  - stable_finding_key: "dis.ps1:1:dis111"
+    pass: 1
+    disposition: dismiss
+    classification: routine
+    internal_match:
+      match_status: novel
+    severity: low
+    stage: code-review
+    reviewer_source: gemini
+    disposition_rationale: "Dismissed; never sustained."
+```
+'@
+        $result = Get-ExternalSourceNovelSustainedCount -Bodies @($body) -ExpectedNumber 963
+        $result.Count | Should -Be 0
+        # M7 fix: a dismissed entry was never sustained, so it must not
+        # inflate AllExternalCount either.
+        $result.AllExternalCount | Should -Be 0
+    }
+
+    It 'skips a marker-less body entirely (ordinary chatter contributes nothing)' {
+        $result = Get-ExternalSourceNovelSustainedCount -Bodies @($script:MalformedBody) -ExpectedNumber 906
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Count | Should -Be 0
+        $result.AllExternalCount | Should -Be 0
+    }
+
+    It 'returns could-not-verify when a real review-dispositions head is present but unparseable (DD3 fail-loud)' {
+        $result = Get-ExternalSourceNovelSustainedCount -Bodies @($script:ReviewDispositionsZeroEntriesBody) -ExpectedNumber 906
+        $result.ParseStatus | Should -Be 'could-not-verify'
+    }
+
+    It 'G-C1 regression: excludes a review-dispositions marker whose own {N} belongs to a DIFFERENT PR (cross-PR marker leakage)' {
+        # Same shape as $script:ReviewDispositionsInternalMatchBody (marker
+        # 950, one sustained resolved-external novel-matched entry), but the
+        # caller is tallying for a DIFFERENT PR (951). Before the G-C1 fix,
+        # -ExpectedNumber was never threaded through to
+        # Test-ReviewDispositionsHeadPresent, so this quoted/cross-referenced
+        # marker for PR 950 would be wrongly tallied into PR 951's counts.
+        $result = Get-ExternalSourceNovelSustainedCount -Bodies @($script:ReviewDispositionsInternalMatchBody) -ExpectedNumber 951
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Count | Should -Be 0
+        $result.AllExternalCount | Should -Be 0
+    }
+}
+
+Describe 'Get-EmissionGap - CR-8 seam: code-review/post-review-observer reconciliation (issue #854 s7)' {
+    It 'FIXTURE (b): a resolved-external, novel-matched, sustained finding expects an observer block and explicitly NOT a code-review block' {
+        $bodies = @($script:CR8JudgeRulings950Body, $script:ReviewDispositionsInternalMatchBody)
+
+        $codeReviewResult = Get-EmissionGap -Bodies $bodies -Id 950 -Surface 'code-review'
+        $observerResult = Get-EmissionGap -Bodies $bodies -Id 950 -Surface 'post-review-observer'
+
+        # code-review: 1 judge-rulings-sustained finding, minus 1 external-
+        # novel-sustained finding (subtracted) = 0 expected code-review blocks.
+        $codeReviewResult.SustainedCount | Should -Be 0
+        $codeReviewResult.BlockCount | Should -Be 0
+        $codeReviewResult.Gap | Should -Be 0
+        $codeReviewResult.ParseStatus | Should -Be 'ok'
+
+        # post-review-observer: the subtracted finding IS the whole expected
+        # total -- no observer block posted yet, so this is a real GAP.
+        $observerResult.SustainedCount | Should -Be 1
+        $observerResult.BlockCount | Should -Be 0
+        $observerResult.Gap | Should -Be 1
+        $observerResult.ParseStatus | Should -Be 'ok'
+    }
+
+    It 'FIXTURE (b) continued: posting a correctly-prefixed observer block closes the gap without disturbing the (already-clean) code-review surface' {
+        # Fix A (M4) co-location gate: a block only counts when its OWN body
+        # also carries the surface's authoritative marker head, so the
+        # observer block must be appended to the judge-rulings body, not
+        # passed as an isolated body.
+        $observerBlock = script:New-ValidPhaseContainmentBlockText -Id '950' -Surface 'post-review-observer' -FindingSuffix 'F1' -CaughtStage 'post-review-observer' -EscapeDistance 1
+        $judgeRulingsBodyWithBlock = $script:CR8JudgeRulings950Body + "`n$observerBlock"
+        $bodies = @($judgeRulingsBodyWithBlock, $script:ReviewDispositionsInternalMatchBody)
+
+        $codeReviewResult = Get-EmissionGap -Bodies $bodies -Id 950 -Surface 'code-review'
+        $observerResult = Get-EmissionGap -Bodies $bodies -Id 950 -Surface 'post-review-observer'
+
+        $codeReviewResult.Gap | Should -Be 0
+        $observerResult.SustainedCount | Should -Be 1
+        $observerResult.BlockCount | Should -Be 1
+        $observerResult.Gap | Should -Be 0
+    }
+
+    It 'FIXTURE (c): an ambiguous-matched external finding expects NEITHER block type and produces no false gap on either surface, WITHOUT a hand-supplied code-review block (M7/DD5 fix: a SKILL-conformant judge never emits one for this match status)' {
+        # M7 fix: the earlier version of this fixture hand-supplied a
+        # code-review block for the ambiguous-matched finding, which is
+        # exactly the shape review-judgment SKILL.md's DD1 trinary forbids
+        # (duplicate/ambiguous/unresolved external findings expect NEITHER
+        # block type) -- that decoy block was masking the M7 bug by making
+        # the pre-fix "not subtracted from code-review" behavior look
+        # correct. No code-review block is posted here; DD5 says a
+        # SKILL-conformant judge never posts one for this match status, so
+        # 0 expected == 0 posted is the correct clean state.
+        $bodies = @($script:CR8JudgeRulings960Body, $script:CR8ReviewDispositionsAmbiguousExternalBody)
+
+        $codeReviewResult = Get-EmissionGap -Bodies $bodies -Id 960 -Surface 'code-review'
+        $observerResult = Get-EmissionGap -Bodies $bodies -Id 960 -Surface 'post-review-observer'
+
+        # DD5 (unrestricted to novel-only): the ambiguous match IS subtracted
+        # from code-review's expected total -- 1 judge-rulings-sustained
+        # finding minus 1 all-external-sustained finding = 0 expected.
+        $codeReviewResult.SustainedCount | Should -Be 0
+        $codeReviewResult.BlockCount | Should -Be 0
+        $codeReviewResult.Gap | Should -Be 0
+
+        # No observer block is ever expected for an ambiguous match -- the
+        # observer surface must NOT phantom-demand one.
+        $observerResult.SustainedCount | Should -Be 0
+        $observerResult.BlockCount | Should -Be 0
+        $observerResult.Gap | Should -Be 0
+    }
+
+    It 'FIXTURE (c) variant: an unresolved-reviewer_source external finding (novel match_status) also produces no false gap on either surface, WITHOUT a hand-supplied code-review block (M7/DD5 fix)' {
+        $bodies = @($script:CR8JudgeRulings961Body, $script:CR8ReviewDispositionsUnresolvedExternalNovelBody)
+
+        $codeReviewResult = Get-EmissionGap -Bodies $bodies -Id 961 -Surface 'code-review'
+        $observerResult = Get-EmissionGap -Bodies $bodies -Id 961 -Surface 'post-review-observer'
+
+        $codeReviewResult.SustainedCount | Should -Be 0
+        $codeReviewResult.BlockCount | Should -Be 0
+        $codeReviewResult.Gap | Should -Be 0
+        $observerResult.SustainedCount | Should -Be 0
+        $observerResult.Gap | Should -Be 0
+    }
+
+    It 'FIXTURE (d) - M26: a wrong-prefix block (finding_key prefixed code-review: but caught_stage: post-review-observer) is invisible to the post-review-observer surface check and is instead miscounted toward code-review' {
+        # A hypothetical writer bug: the block's own caught_stage says
+        # post-review-observer, but its finding_key keeps the code-review
+        # prefix. Get-EmissionGap attributes blocks by finding_key PREFIX
+        # only (M26) -- caught_stage never overrides that attribution.
+        $wrongPrefixBlock = script:New-ValidPhaseContainmentBlockText -Id '970' -Surface 'code-review' -FindingSuffix 'F1' -CaughtStage 'post-review-observer' -EscapeDistance 1
+        $judgeRulingsBodyWithBlock = $script:CR8JudgeRulings970ZeroSustainedBody + "`n$wrongPrefixBlock"
+        $bodies = @($judgeRulingsBodyWithBlock)
+
+        $observerResult = Get-EmissionGap -Bodies $bodies -Id 970 -Surface 'post-review-observer'
+        $codeReviewResult = Get-EmissionGap -Bodies $bodies -Id 970 -Surface 'code-review'
+
+        # Invisible to the surface its caught_stage actually names.
+        $observerResult.BlockCount | Should -Be 0
+        # Miscounted toward the surface its finding_key prefix names instead
+        # -- exactly the M26 attribution hazard the assertion below guards.
+        $codeReviewResult.BlockCount | Should -Be 1
     }
 }

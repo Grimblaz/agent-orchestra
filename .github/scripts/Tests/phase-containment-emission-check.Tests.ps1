@@ -124,7 +124,11 @@ seed: false
         $report = Invoke-PhaseContainmentEmissionCheckSingleTarget -PrNumber '775'
 
         $report | Should -Match 'code-review #775: clean -- sustained=2 blocks=2'
-        $report | Should -Match 'Surfaces scanned: 1 \| Sustained counted: 2 \| Blocks matched: 2'
+        # Surfaces scanned is 2, not 1 (issue #854 s7): -Pr mode now also
+        # dispatches post-review-observer alongside code-review. This body
+        # carries no review-dispositions marker, so the observer surface
+        # contributes 0/0 (clean, unchanged sustained/blocks totals).
+        $report | Should -Match 'Surfaces scanned: 2 \| Sustained counted: 2 \| Blocks matched: 2'
         Should -Invoke Find-OrUpsertComment -Times 1 -ParameterFilter {
             $Type -eq 'pr' -and $Number -eq 775 -and $Marker -eq '<!-- pc-emission-check-report -->'
         }
@@ -812,6 +816,116 @@ judge_ruling: sustained
         $report | Should -Match 'INCOMPLETE: corpus fetch truncated'
         # Still scanned, not skipped: the gap line for PR 775 must render.
         $report | Should -Match 'code-review #775: GAP -- sustained=2 blocks=0 missing=2'
-        $report | Should -Match 'Surfaces scanned: 1 \| Sustained counted: 2 \| Blocks matched: 0'
+        # Surfaces scanned is 2, not 1 (issue #854 s7): corpus mode's PR-tuple
+        # dispatch array now also includes post-review-observer, which
+        # contributes 0/0 here (no review-dispositions marker in this
+        # fixture) and so does not render its own line, but still counts as
+        # a scanned surface.
+        $report | Should -Match 'Surfaces scanned: 2 \| Sustained counted: 2 \| Blocks matched: 0'
+    }
+}
+
+# ---------------------------------------------------------------------------
+# 5. Issue #854 s7 FIXTURE (a): post-review-observer end-to-end dispatch.
+#    The two $surfacesToCheck dispatch arrays alone decide whether the new
+#    surface is ever invoked (M5) -- a ValidateSet-only check would pass
+#    green even if these lines were never updated. These tests prove the
+#    surface actually gets scanned and rendered, not merely schema-accepted.
+# ---------------------------------------------------------------------------
+
+Describe 'Invoke-PhaseContainmentEmissionCheckSingleTarget - -Pr mode dispatches post-review-observer (issue #854 s7 FIXTURE a)' {
+    AfterEach {
+        if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {
+            Remove-Item -Path Function:gh -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'renders a post-review-observer line alongside code-review for a PR with only a judge-rulings marker (dispatch proof, not just structural acceptance)' {
+        $prBody = @'
+<!-- judge-rulings pr=810 -->
+judge_ruling: sustained
+-->
+'@
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $global:LASTEXITCODE = 0
+            return (@{ comments = @(@{ body = $prBody }) } | ConvertTo-Json -Depth 6)
+        }
+        Mock Find-OrUpsertComment { return 'https://example.invalid/comment' }
+
+        $report = Invoke-PhaseContainmentEmissionCheckSingleTarget -PrNumber '810'
+
+        # code-review sees the sole judge-rulings-sustained finding (no
+        # review-dispositions marker present, so the CR-8 seam subtracts 0).
+        $report | Should -Match 'code-review #810: GAP -- sustained=1 blocks=0 missing=1'
+        # post-review-observer was actually invoked and rendered its own line
+        # -- this line cannot exist unless the dispatch array included it.
+        $report | Should -Match 'post-review-observer #810: clean -- sustained=0 blocks=0'
+        $report | Should -Match 'Surfaces scanned: 2 \| Sustained counted: 1 \| Blocks matched: 0'
+    }
+
+    It 'end-to-end CR-8 seam reconciliation through the CLI dispatch: an external, novel, sustained finding renders as a GAP on post-review-observer and clean on code-review' {
+        $prBody = @'
+<!-- judge-rulings pr=811 -->
+judge_ruling: sustained
+-->
+
+<!-- review-dispositions-811 -->
+
+```yaml
+schema_version: 4
+passes_run: [1]
+entries:
+  - stable_finding_key: "ext.ps1:1:ext111"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    internal_match:
+      match_status: novel
+    severity: high
+    stage: code-review
+    reviewer_source: gemini
+    disposition_rationale: "External finding, not previously caught internally."
+```
+'@
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $global:LASTEXITCODE = 0
+            return (@{ comments = @(@{ body = $prBody }) } | ConvertTo-Json -Depth 6)
+        }
+        Mock Find-OrUpsertComment { return 'https://example.invalid/comment' }
+
+        $report = Invoke-PhaseContainmentEmissionCheckSingleTarget -PrNumber '811'
+
+        $report | Should -Match 'code-review #811: clean -- sustained=0 blocks=0'
+        $report | Should -Match 'post-review-observer #811: GAP -- sustained=1 blocks=0 missing=1'
+    }
+}
+
+Describe 'Invoke-PhaseContainmentEmissionCheckCorpus - PR tuples also dispatch post-review-observer (issue #854 s7 FIXTURE a, corpus-mode dispatch array)' {
+    It 'scans post-review-observer for a discovered PR tuple via the corpus dispatch array (:432)' {
+        $prBody = @'
+<!-- judge-rulings pr=812 -->
+judge_ruling: sustained
+-->
+'@
+        Mock Get-PhaseContainmentCommentCorpus {
+            return [PSCustomObject]@{
+                Tuples    = @(@{ Number = 812; Surface = 'pr'; Bodies = @($prBody); CreatedAtValues = @('2024-01-01T00:00:00Z') })
+                FetchedAt = (Get-Date)
+                Source    = 'graphql'
+                Truncated = $false
+            }
+        }
+
+        $report = Invoke-PhaseContainmentEmissionCheckCorpus -WindowDays 30 -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra'
+
+        $report | Should -Match 'code-review #812: GAP -- sustained=1 blocks=0 missing=1'
+        # Zero-count rows only render in corpus mode when ParseStatus is not
+        # 'ok' with zero counts (see Invoke-PhaseContainmentEmissionCheckCorpus's
+        # positive-coverage gate) -- Surfaces scanned counts BOTH dispatched
+        # surfaces regardless of whether their row rendered, so 2 here is the
+        # dispatch proof.
+        $report | Should -Match 'Surfaces scanned: 2 \| Sustained counted: 1 \| Blocks matched: 0'
     }
 }

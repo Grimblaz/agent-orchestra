@@ -16,8 +16,8 @@
   "properties": {
     "finding_key": {
       "type": "string",
-      "pattern": "^(code-review|design-challenge|plan-stress-test):.+",
-      "description": "Uniform cross-surface identifier: {surface}:{stable_finding_key}. Surface is one of: code-review, design-challenge, plan-stress-test."
+      "pattern": "^(code-review|design-challenge|plan-stress-test|post-review-observer):.+",
+      "description": "Uniform cross-surface identifier: {surface}:{stable_finding_key}. Surface is one of: code-review, design-challenge, plan-stress-test, post-review-observer."
     },
     "introduced_phase": {
       "type": "string",
@@ -31,7 +31,7 @@
     },
     "caught_stage": {
       "type": "string",
-      "enum": ["design-challenge", "plan-stress-test", "code-review"],
+      "enum": ["design-challenge", "plan-stress-test", "code-review", "post-review-observer"],
       "description": "The stage at which the defect was actually caught."
     },
     "escape_distance": {

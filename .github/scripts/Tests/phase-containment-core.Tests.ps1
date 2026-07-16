@@ -492,6 +492,57 @@ Describe 'finding_key pattern drift guard (issue #772 D4)' {
     }
 }
 
+Describe 'post-review-observer three-way key-set drift guard (issue #854 M18)' {
+    It 'StageProjections keys, ValidCaughtStages, and the schema caught_stage enum are set-equal (order-independent)' {
+        # The schema carries no projection numbers (only prose), so the finding_key-pattern
+        # byte-equality precedent cannot cover $script:StageProjections. This asserts
+        # three-way set equality across the two runtime constants and the schema enum instead.
+        $schemaPath = Join-Path $script:RepoRoot 'skills/calibration-pipeline/schemas/phase-containment.schema.json'
+        $schema     = Get-Content -LiteralPath $schemaPath -Raw | ConvertFrom-Json
+        $schemaCaughtStages = @($schema.properties.caught_stage.enum) | Sort-Object
+
+        $projectionKeys  = @($script:StageProjections.Keys) | Sort-Object
+        $validStagesList = @($script:ValidCaughtStages)     | Sort-Object
+
+        ($projectionKeys -join ',') | Should -Be ($validStagesList -join ',') -Because 'StageProjections.Keys and ValidCaughtStages must name the same caught_stage set'
+        ($projectionKeys -join ',') | Should -Be ($schemaCaughtStages -join ',') -Because 'StageProjections.Keys and the schema caught_stage enum must name the same caught_stage set'
+    }
+}
+
+Describe 'post-review-observer recompute fixture (issue #854 M18)' {
+    It 'validates when caught_stage=post-review-observer, catchable_phase=implementation, escape_distance=1 (projection 4 - ordinal 3)' {
+        $entry = @{
+            finding_key       = 'post-review-observer:gh-9999'
+            introduced_phase  = 'implementation'
+            catchable_phase   = 'implementation'
+            caught_stage      = 'post-review-observer'
+            escape_distance   = 1
+            severity          = 'high'
+            systemic_fix_type = 'instruction'
+            category          = 'pattern'
+        }
+        $result = Test-PhaseContainmentEntry -Entry $entry
+        $result.IsValid | Should -Be $true
+        $result.Errors  | Should -BeNullOrEmpty
+    }
+
+    It 'rejects when caught_stage=post-review-observer, catchable_phase=implementation, escape_distance=2 (recomputed value is 1, not 2)' {
+        $entry = @{
+            finding_key       = 'post-review-observer:gh-9998'
+            introduced_phase  = 'implementation'
+            catchable_phase   = 'implementation'
+            caught_stage      = 'post-review-observer'
+            escape_distance   = 2
+            severity          = 'high'
+            systemic_fix_type = 'instruction'
+            category          = 'pattern'
+        }
+        $result = Test-PhaseContainmentEntry -Entry $entry
+        $result.IsValid | Should -Be $false
+        $result.Errors  | Should -Match 'mismatch'
+    }
+}
+
 Describe 'Invalid enum value' {
     It 'returns IsValid=$false when severity is an unknown value "ultra"' {
         $entry = @{
