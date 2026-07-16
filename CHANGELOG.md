@@ -2,7 +2,7 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
-## [3.3.14] — 2026-07-15
+## [3.3.15] — 2026-07-16
 
 ### Added
 
@@ -12,6 +12,13 @@ All notable changes to agent-orchestra will be documented in this file.
 
 - Corrected the `claude-opus-4-7` rate-table entry, which was priced at roughly 3x the correct rate (issue #487).
 - Fixed the frame-spine template in `skills/plan-authoring/SKILL.md` (`### Plan-markdown template`): the example `<!-- frame-spine ... -->` block was authored at 3-space/6-space indentation, but `frame-spine-core.ps1`'s parser requires exactly 2-space/4-space and returns `$null` silently on any mismatch. Every plan authored from the prior template carried a dead spine.
+
+## [3.3.14] — 2026-07-15
+
+### Fixed
+
+- **Cost telemetry: raised the walker budget chain so a real profile can finish (#496).** The Claude cost walker was given a 10s timeout, but a measured real profile (`~/.claude/projects` = 696 MB / 1770 jsonl files) needs **69.1 seconds** to walk. This was not flaky: it failed deterministically on any machine with a grown profile, so cost telemetry was silently lost and the `Cost Pattern Presence Check` continuous integration (CI) job failed. Because the corpus grows ~22 MB/day, the new defaults carry real headroom rather than a token bump: Claude walker 10s to 180s (~2.6x the measured worst case), Copilot walker 6s to 60s, cost sub-budget 19s to 270s, and outer ledger budget 30s to 300s. Raising a timeout is nearly free: it only binds in the slow case, and in CI there are no transcripts, so the walk returns instantly and the higher ceiling never engages.
+- **Centralized the cost-telemetry budget constants (#496).** The four coupled knobs were hardcoded literals scattered across two files, and they nest: both walkers must fit inside the cost sub-budget, which must fit inside the outer budget. The outer budget is a hard wall (`WaitOne` then `Stop()`), so raising an inner knob alone silently accomplished nothing. All four now live in `.github/scripts/lib/cost-telemetry-budgets.ps1`, which is loaded (via PowerShell dot-sourcing, the mechanism that imports a script's variables and functions directly into the caller) by `frame-credit-ledger.ps1` and `lib/cost-session-render.ps1`. Each consumer still lets an environment variable override the constant when one is set, exactly as before. The rolling-history fetch budget and cache TTL move there too, with their values deliberately unchanged. A new Pester contract test (`.github/scripts/Tests/cost-telemetry-budgets.Tests.ps1`) asserts the nesting relationship, so a future edit to one knob can no longer silently break the chain.
 
 ## [3.3.13] — 2026-07-15
 
