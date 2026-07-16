@@ -309,6 +309,35 @@ entries:
         $allMessages | Should -Match 'ac_cross_check'
     }
 
+    It 'G-C2 regression: v4 dismiss entry missing ac_cross_check at severity medium emits warning' {
+        # G-C2 (PR #859 GitHub-review post-fix): the v4 sweep added
+        # reviewer_source enforcement to this loop but never extended the
+        # ac_cross_check gate to schema_version 4, silently disabling it for
+        # v4 -- the current emission format. Before the fix this payload
+        # passed with status 'clean'.
+        $body = @'
+<!-- review-dispositions-42 -->
+
+```yaml
+schema_version: 4
+passes_run: [1]
+entries:
+  - stable_finding_key: "src/auth.ts:10:null-check-a1b2c3d4"
+    pass: 1
+    disposition: dismiss
+    classification: routine
+    severity: medium
+    reviewer_source: local
+    disposition_rationale: "Dismissed without running AC cross-check."
+```
+'@
+        $result = script:Run-Validator -PR 42 -Bodies @($body)
+
+        $result.status | Should -Be 'findings'
+        $allMessages = (@($result.findings) | ForEach-Object { $_.message }) -join "`n"
+        $allMessages | Should -Match 'ac_cross_check'
+    }
+
     It 'v1 entry without ac_cross_check passes validator (legacy exemption)' {
         # v1 marker should NOT warn about missing ac_cross_check even for dismiss entries
         $body = @'
@@ -374,12 +403,12 @@ entries:
         $result.marker_count | Should -Be 1
     }
 
-    It 'schema_version 4 emits warning mentioning schema_version (out of range)' {
+    It 'schema_version 5 emits warning mentioning schema_version (out of range)' {
         $body = @'
 <!-- review-dispositions-42 -->
 
 ```yaml
-schema_version: 4
+schema_version: 5
 passes_run: [1]
 entries:
   - stable_finding_key: "src/auth.ts:10:null-check-a1b2c3d4"
@@ -396,12 +425,12 @@ entries:
         $allMessages | Should -Match 'schema_version'
     }
 
-    It 'schema_version 4 error text no longer claims "1 or 2" and instead spans 1, 2, or 3' {
+    It 'schema_version 5 error text no longer claims "1, 2, or 3" and instead spans 1, 2, 3, or 4' {
         $body = @'
 <!-- review-dispositions-42 -->
 
 ```yaml
-schema_version: 4
+schema_version: 5
 passes_run: [1]
 entries:
   - stable_finding_key: "src/auth.ts:10:null-check-a1b2c3d4"
@@ -414,14 +443,64 @@ entries:
         $result = script:Run-Validator -PR 42 -Bodies @($body)
 
         $allMessages = (@($result.findings) | ForEach-Object { $_.message }) -join "`n"
-        $allMessages | Should -Match 'schema_version must be 1, 2, or 3, got: 4'
+        $allMessages | Should -Match 'schema_version must be 1, 2, 3, or 4, got: 5'
     }
 
-    It 'validator header comment documents schema_version acceptance of 1, 2, or 3 (no stale "1 or 2" text)' {
+    It 'validator header comment documents schema_version acceptance of 1, 2, 3, or 4 (no stale "1, 2, or 3" text)' {
         $validatorContent = Get-Content -Path $script:ValidatorScript -Raw
 
-        $validatorContent | Should -Match 'schema_version must be 1, 2, or 3'
-        $validatorContent | Should -Not -Match 'schema_version must be 1 or 2'
+        $validatorContent | Should -Match 'schema_version must be 1, 2, 3, or 4'
+        $validatorContent | Should -Not -Match 'schema_version must be 1, 2, or 3'
+    }
+
+    It 'v4 entry with reviewer_source validates (status clean)' {
+        $body = @'
+<!-- review-dispositions-42 -->
+
+```yaml
+schema_version: 4
+passes_run: [1]
+entries:
+  - stable_finding_key: "src/auth.ts:10:null-check-a1b2c3d4"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    disposition_rationale: "v4 entry tagged with reviewer_source."
+    reviewer_source: local
+    internal_match:
+      match_status: novel
+```
+'@
+        $result = script:Run-Validator -PR 42 -Bodies @($body)
+
+        $result.status       | Should -Be 'clean'
+        $result.marker_count | Should -Be 1
+    }
+
+    It 'v4 entry missing reviewer_source is rejected for the reviewer_source reason, not the version reason' {
+        # M16: a v4 payload missing reviewer_source must fail specifically because
+        # reviewer_source is writer-mandatory on v4 -- not because schema_version 4
+        # is out of range (it is now in range).
+        $body = @'
+<!-- review-dispositions-42 -->
+
+```yaml
+schema_version: 4
+passes_run: [1]
+entries:
+  - stable_finding_key: "src/auth.ts:10:null-check-a1b2c3d4"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    disposition_rationale: "v4 entry with no reviewer_source supplied."
+```
+'@
+        $result = script:Run-Validator -PR 42 -Bodies @($body)
+
+        $result.status | Should -Be 'findings'
+        $allMessages = (@($result.findings) | ForEach-Object { $_.message }) -join "`n"
+        $allMessages | Should -Match 'missing required reviewer_source'
+        $allMessages | Should -Not -Match 'schema_version must be'
     }
 }
 

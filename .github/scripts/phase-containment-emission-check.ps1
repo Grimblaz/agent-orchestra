@@ -49,9 +49,12 @@
     escape_distance = projection(caught_stage) - ordinal(catchable_phase).
 
 .PARAMETER Pr
-    Single-target mode: check this PR number (code-review surface). Mutually
-    exclusive with -Issue and with corpus mode (-WindowDays is ignored when
-    -Pr or -Issue is supplied).
+    Single-target mode: check this PR number (code-review AND
+    post-review-observer surfaces are both scanned — G-CR11 fix, PR #859
+    GitHub-review post-fix: this text previously described PR mode as
+    code-review-only, but dispatch has scanned both surfaces since issue
+    #854 s7). Mutually exclusive with -Issue and with corpus mode
+    (-WindowDays is ignored when -Pr or -Issue is supplied).
 .PARAMETER Issue
     Single-target mode: check this issue number (design-challenge and
     plan-stress-test surfaces are both probed; whichever marker is present
@@ -326,7 +329,7 @@ function Invoke-PhaseContainmentEmissionCheckSingleTarget {
     $lines.Add('Warn-only maintainer advisory (DD1-secondary framing) -- comment authorship is not filtered.')
     $lines.Add('')
 
-    $surfacesToCheck = if ($isPr) { @('code-review') } else { @('design-challenge', 'plan-stress-test') }
+    $surfacesToCheck = if ($isPr) { @('code-review', 'post-review-observer') } else { @('design-challenge', 'plan-stress-test') }
     $scannedCount = 0
     $sustainedTotal = 0
     $blocksTotal = 0
@@ -429,7 +432,7 @@ function Invoke-PhaseContainmentEmissionCheckCorpus {
         $surfaceKind = [string]$tuple['Surface']
         $bodies = @($tuple['Bodies'])
 
-        $surfacesToCheck = if ($surfaceKind -eq 'pr') { @('code-review') } else { @('design-challenge', 'plan-stress-test') }
+        $surfacesToCheck = if ($surfaceKind -eq 'pr') { @('code-review', 'post-review-observer') } else { @('design-challenge', 'plan-stress-test') }
 
         foreach ($surface in $surfacesToCheck) {
             $gap = Get-EmissionGap -Bodies $bodies -Id $number -Surface $surface

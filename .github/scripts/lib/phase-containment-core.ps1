@@ -24,9 +24,10 @@ $script:PhaseOrdinals = @{
 #region Stage projections (TOTAL map — rejection on invalid input)
 
 $script:StageProjections = @{
-    'design-challenge' = 1
-    'plan-stress-test' = 2
-    'code-review'      = 3
+    'design-challenge'     = 1
+    'plan-stress-test'     = 2
+    'code-review'          = 3
+    'post-review-observer' = 4
 }
 
 #endregion
@@ -35,7 +36,7 @@ $script:StageProjections = @{
 
 $script:ValidIntroducedPhases  = @('experience', 'design', 'plan', 'implementation')
 $script:ValidCatchablePhases   = @('experience', 'design', 'plan', 'implementation')
-$script:ValidCaughtStages      = @('design-challenge', 'plan-stress-test', 'code-review')
+$script:ValidCaughtStages      = @('design-challenge', 'plan-stress-test', 'code-review', 'post-review-observer')
 $script:ValidSeverities        = @('critical', 'high', 'medium', 'low')
 $script:ValidSystemicFixTypes  = @('instruction', 'skill', 'agent-prompt', 'plan-template', 'none')
 $script:ValidCategories        = @(
@@ -58,7 +59,7 @@ $script:ValidCategories        = @(
 # Drift between the two is asserted by the "finding_key pattern drift" test in
 # phase-containment-core.Tests.ps1 (follows the Get-PhaseContainmentEnumDriftStatus
 # precedent below).
-$script:FindingKeyPattern = '^(code-review|design-challenge|plan-stress-test):.+'
+$script:FindingKeyPattern = '^(code-review|design-challenge|plan-stress-test|post-review-observer):.+'
 
 #endregion
 

@@ -133,6 +133,134 @@ function Invoke-PhaseContainmentDedup {
 }
 
 # -------------------------------------------------------------------------
+# Private: Get-PhaseContainmentCommentAuthorLogin
+# Issue #854 s4 (M8): the corpus previously selected only body/createdAt
+# with no author, so any account that could comment could forge a
+# well-formed coverage record. Both GraphQL (`author { login }`, added to
+# all six comments() sites below) and REST (`gh issue/pr view --json
+# comments`, which already returns an `author.login` field on every
+# comment object with no extra selection needed) surface an `author`
+# hashtable with a `login` key; this helper centralizes the null-safe
+# extraction (deleted GitHub accounts return `author: null` from GraphQL)
+# so all eight fetch sites (six GraphQL, two REST) share one path instead
+# of duplicating the ContainsKey/null checks.
+# -------------------------------------------------------------------------
+
+function script:Get-PhaseContainmentCommentAuthorLogin {
+    <#
+    .SYNOPSIS
+        Extracts a comment node's author login, defaulting to '' when the
+        author field is absent or null.
+    .PARAMETER CommentNode
+        A single comment node hashtable (from ConvertFrom-Json -AsHashtable).
+    .OUTPUTS
+        [string] the author's login, or '' when unresolvable.
+    #>
+    param([AllowNull()]$CommentNode)
+
+    if ($null -eq $CommentNode -or $CommentNode -isnot [hashtable]) { return '' }
+    if (-not $CommentNode.ContainsKey('author')) { return '' }
+    $author = $CommentNode['author']
+    if ($null -eq $author -or $author -isnot [hashtable]) { return '' }
+    if (-not $author.ContainsKey('login')) { return '' }
+    return [string]$author['login']
+}
+
+# -------------------------------------------------------------------------
+# Public function: Test-PhaseContainmentCommentAuthoredByJudge
+# Issue #854 s4 (M8) — the comparison primitive future gate consumers use
+# to decide whether a comment's coverage/internal_match data is trustworthy.
+# -------------------------------------------------------------------------
+
+function Test-PhaseContainmentCommentAuthoredByJudge {
+    <#
+    .SYNOPSIS
+        Compares a comment's author login against the judge identity.
+    .DESCRIPTION
+        Any account that can comment on an issue/PR can otherwise post a
+        well-formed `<!-- review-dispositions-{PR} -->` body carrying a
+        forged `external_sources_reconciled` / `internal_match` record and
+        silently unlock ELIGIBLE. Coverage records and internal_match
+        values must be honored ONLY from the body the judge itself posted.
+
+        Normalization mirrors skills/code-review-intake/SKILL.md's
+        reviewer_source rule: lowercase(login) with a trailing `[bot]`
+        suffix stripped, so `github-actions` and `github-actions[bot]`
+        compare equal. This is a DISTINCT axis from reviewer_source (a
+        writer-supplied value inside the body text) — never conflate the
+        two. An empty/unresolvable AuthorLogin (deleted account, or a REST/
+        GraphQL response that omitted author) never matches any judge
+        login — fail-closed by construction.
+    .PARAMETER AuthorLogin
+        The comment's raw author login (may be '' when unresolvable).
+    .PARAMETER JudgeLogin
+        The expected judge identity's login — e.g. the repo's known CI
+        poster identity (`github-actions[bot]`) or the authenticated
+        identity that posted the PR's review-dispositions marker. Caller-
+        supplied; this function does not discover it.
+    .OUTPUTS
+        [bool]
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$AuthorLogin,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$JudgeLogin
+    )
+
+    if ([string]::IsNullOrWhiteSpace($AuthorLogin) -or [string]::IsNullOrWhiteSpace($JudgeLogin)) {
+        return $false
+    }
+
+    $normalized = ($AuthorLogin.ToLowerInvariant() -replace '\[bot\]$', '')
+    $normalizedJudge = ($JudgeLogin.ToLowerInvariant() -replace '\[bot\]$', '')
+    return $normalized -eq $normalizedJudge
+}
+
+# -------------------------------------------------------------------------
+# Public function: Select-PhaseContainmentJudgeAuthoredBodies
+# Issue #854 s4 (M8) — the filtering primitive future gate consumers use so
+# a non-judge-authored body carrying a well-formed dispositions marker
+# contributes ZERO coverage: exclude it BEFORE it ever reaches a parser
+# (Get-DispositionTally), rather than parsing it and trying to discard its
+# output afterward.
+# -------------------------------------------------------------------------
+
+function Select-PhaseContainmentJudgeAuthoredBodies {
+    <#
+    .SYNOPSIS
+        Filters a corpus tuple's Bodies down to those authored by the judge
+        identity.
+    .DESCRIPTION
+        Index-paired with AuthorLogins the same way CreatedAtValues is
+        index-paired with Bodies (Get-PhaseContainmentCommentCorpus's tuple
+        contract). A body with no resolvable author (empty AuthorLogin) is
+        excluded, matching Test-PhaseContainmentCommentAuthoredByJudge's
+        fail-closed default.
+    .PARAMETER Bodies
+        The tuple's Bodies[] array.
+    .PARAMETER AuthorLogins
+        The tuple's AuthorLogins[] array, index-paired with Bodies.
+    .PARAMETER JudgeLogin
+        The expected judge identity's login.
+    .OUTPUTS
+        [string[]] the subset of Bodies authored by the judge, in original order.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Bodies,
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$AuthorLogins,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$JudgeLogin
+    )
+
+    $selected = [System.Collections.Generic.List[string]]::new()
+    for ($i = 0; $i -lt $Bodies.Count; $i++) {
+        $authorLogin = if ($i -lt $AuthorLogins.Count) { $AuthorLogins[$i] } else { '' }
+        if (Test-PhaseContainmentCommentAuthoredByJudge -AuthorLogin $authorLogin -JudgeLogin $JudgeLogin) {
+            $selected.Add($Bodies[$i])
+        }
+    }
+    return , $selected.ToArray()
+}
+
+# -------------------------------------------------------------------------
 # Public helper: Invoke-PhaseContainmentCommentScan
 # Scan an array of comment bodies for phase-containment-{ID} blocks.
 # Exposed so tests can call it with mock data without real API calls.
@@ -165,6 +293,28 @@ function Invoke-PhaseContainmentCommentScan {
     .PARAMETER CreatedAtValues
         Optional parallel array of createdAt strings (ISO 8601), one per body.
         If not supplied, entries get an empty string for createdAt.
+    .PARAMETER AuthorLogins
+        Optional parallel array of comment author logins, one per body
+        (Get-PhaseContainmentCommentCorpus's tuple contract). Index-paired
+        with CommentBodies the same way CreatedAtValues is.
+    .PARAMETER JudgeLogin
+        G-CR3 fix (PR #859 GitHub-review post-fix, security): when supplied
+        (non-empty), every body is gated through
+        Test-PhaseContainmentCommentAuthoredByJudge against AuthorLogins
+        BEFORE it is scanned for phase-containment-{ID} blocks — a
+        non-judge-authored body contributes ZERO entries, closing the
+        forged-block vector (any account that can comment could otherwise
+        post a well-formed post-review-observer block claiming
+        catchable_phase: experience/design to satisfy all-phase
+        reconciliation while leaving the real implementation-scoped escape
+        count untouched). Wires up Select-PhaseContainmentJudgeAuthoredBodies's
+        filtering primitive (previously dead code with zero production
+        callers) at the point entries are actually built, mirroring the same
+        authorship discipline phase-containment-report.ps1's
+        Get-PhaseContainmentTerminalObservation already applies to the
+        coverage/dispositions tally. Left empty (the default), no gating is
+        applied — preserves this function's existing behavior for callers
+        that do not carry author provenance.
     .OUTPUTS
         [PSCustomObject] with:
           Entries           [array] — parsed, validated entry hashtables with appended metadata.
@@ -176,16 +326,26 @@ function Invoke-PhaseContainmentCommentScan {
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$CommentBodies,
         [Parameter(Mandatory)][int]$IssueOrPrNumber,
         [string]$Surface = 'unknown',
-        [AllowEmptyCollection()][string[]]$CreatedAtValues = @()
+        [AllowEmptyCollection()][string[]]$CreatedAtValues = @(),
+        [AllowEmptyCollection()][string[]]$AuthorLogins = @(),
+        [AllowEmptyString()][string]$JudgeLogin = ''
     )
 
     $results = [System.Collections.Generic.List[hashtable]]::new()
     $id      = [string]$IssueOrPrNumber
     $invalidEntryCount = 0
+    $gateOnAuthor = -not [string]::IsNullOrWhiteSpace($JudgeLogin)
 
     for ($i = 0; $i -lt $CommentBodies.Count; $i++) {
         $body = $CommentBodies[$i]
         $createdAt = if ($i -lt $CreatedAtValues.Count) { $CreatedAtValues[$i] } else { '' }
+
+        if ($gateOnAuthor) {
+            $authorLogin = if ($i -lt $AuthorLogins.Count) { $AuthorLogins[$i] } else { '' }
+            if (-not (Test-PhaseContainmentCommentAuthoredByJudge -AuthorLogin $authorLogin -JudgeLogin $JudgeLogin)) {
+                continue
+            }
+        }
 
         # M4 fix (issue #772/#831 post-fix review): thread the D6 pair-match
         # skip count out of Get-PhaseContainmentBlock so a malformed/
@@ -359,7 +519,7 @@ function script:Get-SurfaceACorpusGraphQL {
       ... on Issue {
         number
         comments(first: 100) {
-          nodes { body createdAt }
+          nodes { author { login } body createdAt }
           pageInfo { hasNextPage endCursor }
         }
       }
@@ -399,6 +559,7 @@ function script:Get-SurfaceACorpusGraphQL {
                 # Collect all comment bodies from the initial page
                 $commentBodies   = [System.Collections.Generic.List[string]]::new()
                 $commentCreatedAt = [System.Collections.Generic.List[string]]::new()
+                $commentAuthorLogins = [System.Collections.Generic.List[string]]::new()
 
                 $commentBlock = $issueNode['comments']
                 $commentNodes = @($commentBlock['nodes'])
@@ -406,8 +567,9 @@ function script:Get-SurfaceACorpusGraphQL {
                 foreach ($cn in $commentNodes) {
                     if ($null -ne $cn) {
                         $commentBodies.Add([string]$cn['body'])
-                        $cnCreatedAt = if ($cn.ContainsKey('createdAt')) { [string]$cn['createdAt'] } else { '' }
+                        $cnCreatedAt = if ($cn.ContainsKey('createdAt')) { script:ConvertTo-PhaseContainmentIsoString -Value $cn['createdAt'] } else { '' }
                         $commentCreatedAt.Add($cnCreatedAt)
+                        $commentAuthorLogins.Add((script:Get-PhaseContainmentCommentAuthorLogin -CommentNode $cn))
                     }
                 }
 
@@ -446,7 +608,7 @@ function script:Get-SurfaceACorpusGraphQL {
   repository(owner: "$Owner", name: "$Repo") {
     issue(number: $issueNum) {
       comments(first: 100, after: "$cursor") {
-        nodes { body createdAt }
+        nodes { author { login } body createdAt }
         pageInfo { hasNextPage endCursor }
       }
     }
@@ -467,8 +629,9 @@ function script:Get-SurfaceACorpusGraphQL {
                             foreach ($cn in @($huntComments['nodes'])) {
                                 if ($null -ne $cn) {
                                     $commentBodies.Add([string]$cn['body'])
-                                    $cnCreatedAtHunt = if ($cn.ContainsKey('createdAt')) { [string]$cn['createdAt'] } else { '' }
+                                    $cnCreatedAtHunt = if ($cn.ContainsKey('createdAt')) { script:ConvertTo-PhaseContainmentIsoString -Value $cn['createdAt'] } else { '' }
                                     $commentCreatedAt.Add($cnCreatedAtHunt)
+                                    $commentAuthorLogins.Add((script:Get-PhaseContainmentCommentAuthorLogin -CommentNode $cn))
                                 }
                             }
                             $huntPi = $huntComments['pageInfo']
@@ -519,7 +682,7 @@ function script:Get-SurfaceACorpusGraphQL {
   repository(owner: "$Owner", name: "$Repo") {
     issue(number: $issueNum) {
       comments(first: 100, after: "$cursor") {
-        nodes { body createdAt }
+        nodes { author { login } body createdAt }
         pageInfo { hasNextPage endCursor }
       }
     }
@@ -548,8 +711,9 @@ function script:Get-SurfaceACorpusGraphQL {
                         foreach ($cn in @($pageComments['nodes'])) {
                             if ($null -ne $cn) {
                                 $commentBodies.Add([string]$cn['body'])
-                                $cnCreatedAt2 = if ($cn.ContainsKey('createdAt')) { [string]$cn['createdAt'] } else { '' }
+                                $cnCreatedAt2 = if ($cn.ContainsKey('createdAt')) { script:ConvertTo-PhaseContainmentIsoString -Value $cn['createdAt'] } else { '' }
                                 $commentCreatedAt.Add($cnCreatedAt2)
+                                $commentAuthorLogins.Add((script:Get-PhaseContainmentCommentAuthorLogin -CommentNode $cn))
                             }
                         }
                         $pi = $pageComments['pageInfo']
@@ -571,6 +735,7 @@ function script:Get-SurfaceACorpusGraphQL {
                     Surface          = 'issue'
                     Bodies           = $commentBodies.ToArray()
                     CreatedAtValues  = $commentCreatedAt.ToArray()
+                    AuthorLogins     = $commentAuthorLogins.ToArray()
                 })
             }
 
@@ -609,7 +774,8 @@ function script:Get-SurfaceAEntriesGraphQL {
         [Parameter(Mandatory)][string]$Repo,
         [Parameter(Mandatory)][int]$WindowDays,
         [Parameter(Mandatory)][System.Diagnostics.Stopwatch]$Stopwatch,
-        [Parameter(Mandatory)][int]$TimeoutSeconds
+        [Parameter(Mandatory)][int]$TimeoutSeconds,
+        [AllowEmptyString()][string]$JudgeLogin = ''
     )
 
     $corpusResult = script:Get-SurfaceACorpusGraphQL `
@@ -630,11 +796,15 @@ function script:Get-SurfaceAEntriesGraphQL {
         # tuple in this loop — the original per-item try/catch this
         # extraction moved away from.
         try {
+            # G-CR3 fix: thread AuthorLogins/JudgeLogin through so a
+            # non-judge-authored body contributes zero entries.
             $scanResult = Invoke-PhaseContainmentCommentScan `
                 -CommentBodies $tuple['Bodies'] `
                 -IssueOrPrNumber $tuple['Number'] `
                 -Surface $tuple['Surface'] `
-                -CreatedAtValues $tuple['CreatedAtValues']
+                -CreatedAtValues $tuple['CreatedAtValues'] `
+                -AuthorLogins @($tuple['AuthorLogins']) `
+                -JudgeLogin $JudgeLogin
 
             foreach ($e in $scanResult.Entries) { $entries.Add($e) }
             $invalidEntryCount += $scanResult.InvalidEntryCount
@@ -693,7 +863,7 @@ function script:Get-SurfaceBCorpusGraphQL {
       ... on PullRequest {
         number
         comments(first: 100) {
-          nodes { body createdAt }
+          nodes { author { login } body createdAt }
           pageInfo { hasNextPage endCursor }
         }
       }
@@ -725,6 +895,7 @@ function script:Get-SurfaceBCorpusGraphQL {
 
                 $commentBodies   = [System.Collections.Generic.List[string]]::new()
                 $commentCreatedAt = [System.Collections.Generic.List[string]]::new()
+                $commentAuthorLogins = [System.Collections.Generic.List[string]]::new()
 
                 $commentBlock = $prNode['comments']
                 $commentNodes = @($commentBlock['nodes'])
@@ -732,8 +903,9 @@ function script:Get-SurfaceBCorpusGraphQL {
                 foreach ($cn in $commentNodes) {
                     if ($null -ne $cn) {
                         $commentBodies.Add([string]$cn['body'])
-                        $cnCreatedAtB = if ($cn.ContainsKey('createdAt')) { [string]$cn['createdAt'] } else { '' }
+                        $cnCreatedAtB = if ($cn.ContainsKey('createdAt')) { script:ConvertTo-PhaseContainmentIsoString -Value $cn['createdAt'] } else { '' }
                         $commentCreatedAt.Add($cnCreatedAtB)
+                        $commentAuthorLogins.Add((script:Get-PhaseContainmentCommentAuthorLogin -CommentNode $cn))
                     }
                 }
 
@@ -772,7 +944,7 @@ function script:Get-SurfaceBCorpusGraphQL {
   repository(owner: "$Owner", name: "$Repo") {
     pullRequest(number: $prNum) {
       comments(first: 100, after: "$cursor") {
-        nodes { body createdAt }
+        nodes { author { login } body createdAt }
         pageInfo { hasNextPage endCursor }
       }
     }
@@ -793,8 +965,9 @@ function script:Get-SurfaceBCorpusGraphQL {
                             foreach ($cn in @($huntComments['nodes'])) {
                                 if ($null -ne $cn) {
                                     $commentBodies.Add([string]$cn['body'])
-                                    $cnCreatedAtBHunt = if ($cn.ContainsKey('createdAt')) { [string]$cn['createdAt'] } else { '' }
+                                    $cnCreatedAtBHunt = if ($cn.ContainsKey('createdAt')) { script:ConvertTo-PhaseContainmentIsoString -Value $cn['createdAt'] } else { '' }
                                     $commentCreatedAt.Add($cnCreatedAtBHunt)
+                                    $commentAuthorLogins.Add((script:Get-PhaseContainmentCommentAuthorLogin -CommentNode $cn))
                                 }
                             }
                             $huntPi = $huntComments['pageInfo']
@@ -838,7 +1011,7 @@ function script:Get-SurfaceBCorpusGraphQL {
   repository(owner: "$Owner", name: "$Repo") {
     pullRequest(number: $prNum) {
       comments(first: 100, after: "$cursor") {
-        nodes { body createdAt }
+        nodes { author { login } body createdAt }
         pageInfo { hasNextPage endCursor }
       }
     }
@@ -864,8 +1037,9 @@ function script:Get-SurfaceBCorpusGraphQL {
                         foreach ($cn in @($pageComments['nodes'])) {
                             if ($null -ne $cn) {
                                 $commentBodies.Add([string]$cn['body'])
-                                $cnCreatedAtB2 = if ($cn.ContainsKey('createdAt')) { [string]$cn['createdAt'] } else { '' }
+                                $cnCreatedAtB2 = if ($cn.ContainsKey('createdAt')) { script:ConvertTo-PhaseContainmentIsoString -Value $cn['createdAt'] } else { '' }
                                 $commentCreatedAt.Add($cnCreatedAtB2)
+                                $commentAuthorLogins.Add((script:Get-PhaseContainmentCommentAuthorLogin -CommentNode $cn))
                             }
                         }
                         $pi = $pageComments['pageInfo']
@@ -885,6 +1059,7 @@ function script:Get-SurfaceBCorpusGraphQL {
                     Surface          = 'pr'
                     Bodies           = $commentBodies.ToArray()
                     CreatedAtValues  = $commentCreatedAt.ToArray()
+                    AuthorLogins     = $commentAuthorLogins.ToArray()
                 })
             }
 
@@ -923,7 +1098,8 @@ function script:Get-SurfaceBEntriesGraphQL {
         [Parameter(Mandatory)][string]$Repo,
         [Parameter(Mandatory)][int]$WindowDays,
         [Parameter(Mandatory)][System.Diagnostics.Stopwatch]$Stopwatch,
-        [Parameter(Mandatory)][int]$TimeoutSeconds
+        [Parameter(Mandatory)][int]$TimeoutSeconds,
+        [AllowEmptyString()][string]$JudgeLogin = ''
     )
 
     $corpusResult = script:Get-SurfaceBCorpusGraphQL `
@@ -940,11 +1116,15 @@ function script:Get-SurfaceBEntriesGraphQL {
         # M7 fix (issue #782 post-review): see Get-SurfaceAEntriesGraphQL's
         # identical per-item try/catch for the rationale.
         try {
+            # G-CR3 fix: thread AuthorLogins/JudgeLogin through so a
+            # non-judge-authored body contributes zero entries.
             $scanResult = Invoke-PhaseContainmentCommentScan `
                 -CommentBodies $tuple['Bodies'] `
                 -IssueOrPrNumber $tuple['Number'] `
                 -Surface $tuple['Surface'] `
-                -CreatedAtValues $tuple['CreatedAtValues']
+                -CreatedAtValues $tuple['CreatedAtValues'] `
+                -AuthorLogins @($tuple['AuthorLogins']) `
+                -JudgeLogin $JudgeLogin
 
             foreach ($e in $scanResult.Entries) { $entries.Add($e) }
             $invalidEntryCount += $scanResult.InvalidEntryCount
@@ -1031,15 +1211,25 @@ function script:Get-PhaseContainmentCorpusRest {
                         # index pairing between Bodies and CreatedAtValues.
                         $commentBodies    = [System.Collections.Generic.List[string]]::new()
                         $commentCreatedAt = [System.Collections.Generic.List[string]]::new()
+                        # Issue #854 s4 (M8): `gh issue view --json comments`
+                        # already returns an `author.login` field on every
+                        # comment object with no extra field selection needed
+                        # (empirically confirmed by cost-baseline-harvest.ps1's
+                        # identical `.author.login` read off the same `--json
+                        # comments` shape) — unlike the GraphQL path, no query
+                        # change is required here, only extraction.
+                        $commentAuthorLogins = [System.Collections.Generic.List[string]]::new()
                         foreach ($c in $comments) {
                             if ($null -ne $c) {
                                 $commentBodies.Add([string]$c['body'])
-                                $cCreatedAt = if ($c.ContainsKey('createdAt')) { [string]$c['createdAt'] } else { '' }
+                                $cCreatedAt = if ($c.ContainsKey('createdAt')) { script:ConvertTo-PhaseContainmentIsoString -Value $c['createdAt'] } else { '' }
                                 $commentCreatedAt.Add($cCreatedAt)
+                                $commentAuthorLogins.Add((script:Get-PhaseContainmentCommentAuthorLogin -CommentNode $c))
                             }
                         }
                         $bodies          = $commentBodies.ToArray()
                         $createdAtValues = $commentCreatedAt.ToArray()
+                        $authorLogins    = $commentAuthorLogins.ToArray()
                         # GH-8 fix: apply the same marker-presence gate the
                         # GraphQL path uses (Get-SurfaceACorpusGraphQL) before
                         # including this issue's tuple in the returned
@@ -1052,7 +1242,7 @@ function script:Get-PhaseContainmentCorpusRest {
                         $hasMarker = ($allBodiesText -match "<!--\s*design-phase-complete-$num\s*-->") -or
                                      ($allBodiesText -match "<!--\s*plan-issue-$num\s*-->")
                         if (-not $hasMarker) { continue }
-                        $tuples.Add(@{ Number = $num; Surface = 'issue'; Bodies = $bodies; CreatedAtValues = $createdAtValues })
+                        $tuples.Add(@{ Number = $num; Surface = 'issue'; Bodies = $bodies; CreatedAtValues = $createdAtValues; AuthorLogins = $authorLogins })
                     }
                     catch {
                         # M2 fix: same rationale as the view-failure branch
@@ -1121,18 +1311,24 @@ function script:Get-PhaseContainmentCorpusRest {
                         # rationale above (identical desync risk applies here).
                         $commentBodies    = [System.Collections.Generic.List[string]]::new()
                         $commentCreatedAt = [System.Collections.Generic.List[string]]::new()
+                        # Issue #854 s4 (M8): see the Surface A REST rationale
+                        # above — `gh pr view --json comments` also already
+                        # returns `author.login` with no extra selection.
+                        $commentAuthorLogins = [System.Collections.Generic.List[string]]::new()
                         foreach ($c in $comments) {
                             if ($null -ne $c) {
                                 $commentBodies.Add([string]$c['body'])
-                                $cCreatedAt = if ($c.ContainsKey('createdAt')) { [string]$c['createdAt'] } else { '' }
+                                $cCreatedAt = if ($c.ContainsKey('createdAt')) { script:ConvertTo-PhaseContainmentIsoString -Value $c['createdAt'] } else { '' }
                                 $commentCreatedAt.Add($cCreatedAt)
+                                $commentAuthorLogins.Add((script:Get-PhaseContainmentCommentAuthorLogin -CommentNode $c))
                             }
                         }
                         $bodies          = $commentBodies.ToArray()
                         $createdAtValues = $commentCreatedAt.ToArray()
+                        $authorLogins    = $commentAuthorLogins.ToArray()
                         # Only scan PRs that have judge-rulings
                         if (-not (($bodies -join "`n") -match '<!--\s*judge-rulings')) { continue }
-                        $tuples.Add(@{ Number = $num; Surface = 'pr'; Bodies = $bodies; CreatedAtValues = $createdAtValues })
+                        $tuples.Add(@{ Number = $num; Surface = 'pr'; Bodies = $bodies; CreatedAtValues = $createdAtValues; AuthorLogins = $authorLogins })
                     }
                     catch {
                         # M2 fix: see the identical Surface A rationale above.
@@ -1172,7 +1368,8 @@ function script:Get-PhaseContainmentEntriesRest {
     param(
         [Parameter(Mandatory)][int]$WindowDays,
         [Parameter(Mandatory)][System.Diagnostics.Stopwatch]$Stopwatch,
-        [Parameter(Mandatory)][int]$TimeoutSeconds
+        [Parameter(Mandatory)][int]$TimeoutSeconds,
+        [AllowEmptyString()][string]$JudgeLogin = ''
     )
 
     $corpusResult = script:Get-PhaseContainmentCorpusRest `
@@ -1184,11 +1381,15 @@ function script:Get-PhaseContainmentEntriesRest {
         # M7 fix (issue #782 post-review): see Get-SurfaceAEntriesGraphQL's
         # identical per-item try/catch for the rationale.
         try {
+            # G-CR3 fix: thread AuthorLogins/JudgeLogin through so a
+            # non-judge-authored body contributes zero entries.
             $scanResult = Invoke-PhaseContainmentCommentScan `
                 -CommentBodies $tuple['Bodies'] `
                 -IssueOrPrNumber $tuple['Number'] `
                 -Surface $tuple['Surface'] `
-                -CreatedAtValues $tuple['CreatedAtValues']
+                -CreatedAtValues $tuple['CreatedAtValues'] `
+                -AuthorLogins @($tuple['AuthorLogins']) `
+                -JudgeLogin $JudgeLogin
 
             foreach ($e in $scanResult.Entries) { $entries.Add($e) }
             $invalidEntryCount += $scanResult.InvalidEntryCount
@@ -1253,6 +1454,20 @@ function Get-PhaseContainmentCommentCorpus {
         CreatedAtValues (e.g. Invoke-PhaseContainmentDedup's latest-wins
         comparison) now get real timestamps under REST fallback too, not
         just under GraphQL.
+
+        Issue #854 s4 (M8): tuples also now carry a per-comment AuthorLogins
+        array, index-paired with Bodies/CreatedAtValues the same way. All six
+        GraphQL comments() query sites (issue base/hunt/page, PR base/hunt/
+        page) select `author { login }` alongside `body createdAt`; both
+        REST fallback surfaces extract the same field from `gh issue/pr view
+        --json comments`, which already returns author.login with no extra
+        selection. This closes the forged-coverage vector: without an author
+        on record, any account that could comment on an issue/PR could post
+        a well-formed dispositions marker and forge a coverage record. See
+        Test-PhaseContainmentCommentAuthoredByJudge and
+        Select-PhaseContainmentJudgeAuthoredBodies (above) for the
+        comparison/filtering primitives future gate consumers use against
+        this field.
     .PARAMETER RepoOwner
         GitHub repository owner (e.g., 'Grimblaz'). Resolved via 'gh repo view' if not supplied.
     .PARAMETER RepoName
@@ -1265,7 +1480,7 @@ function Get-PhaseContainmentCommentCorpus {
         Per-run budget in seconds. Default: 30.
     .OUTPUTS
         [PSCustomObject] with:
-          Tuples    [array]  — each entry: @{ Number; Surface ('issue'|'pr'); Bodies [string[]]; CreatedAtValues [string[]] }
+          Tuples    [array]  — each entry: @{ Number; Surface ('issue'|'pr'); Bodies [string[]]; CreatedAtValues [string[]]; AuthorLogins [string[]] (issue #854 s4; index-paired with Bodies, '' when unresolvable) }
           FetchedAt [datetime]
           Source    [string] — 'graphql' | 'rest' | 'timeout' | 'repo-resolution-failed'
           Truncated [bool]   — issue #772 D1: true when any silent-truncation
@@ -1422,6 +1637,16 @@ function Get-PhaseContainmentHistory {
         $env:TEMP\.phase-containment-cache-{RepoOwner}-{RepoName}.json
     .PARAMETER TimeoutSeconds
         Per-run budget in seconds. Default: 30.
+    .PARAMETER JudgeLogin
+        G-CR3 fix (PR #859 GitHub-review post-fix, security): threaded
+        through to Invoke-PhaseContainmentCommentScan (via the three
+        Get-Surface*Entries* wrappers below) so a body not authored by this
+        identity contributes zero phase-containment entries, matching the
+        same authorship discipline phase-containment-report.ps1's
+        Get-PhaseContainmentTerminalObservation already applies to the
+        coverage/dispositions tally. Left empty (the default), no gating is
+        applied — existing direct callers/tests that do not pass a judge
+        identity keep their prior unfiltered behavior.
     .OUTPUTS
         PSCustomObject with Entries, FetchedAt, Source, CacheAge, Truncated,
         InvalidEntryCount. Truncated/InvalidEntryCount are always present
@@ -1435,7 +1660,8 @@ function Get-PhaseContainmentHistory {
         [int]$WindowDays      = 90,
         [string]$Token        = '',
         [string]$CachePath    = '',
-        [int]$TimeoutSeconds  = 30
+        [int]$TimeoutSeconds  = 30,
+        [AllowEmptyString()][string]$JudgeLogin = ''
     )
 
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
@@ -1548,7 +1774,7 @@ function Get-PhaseContainmentHistory {
 
     $surfaceAResult = script:Get-SurfaceAEntriesGraphQL `
         -Owner $RepoOwner -Repo $RepoName -WindowDays $WindowDays `
-        -Stopwatch $stopwatch -TimeoutSeconds $TimeoutSeconds
+        -Stopwatch $stopwatch -TimeoutSeconds $TimeoutSeconds -JudgeLogin $JudgeLogin
 
     if ($surfaceAResult.IsError) {
         $useRest = $true
@@ -1579,7 +1805,7 @@ function Get-PhaseContainmentHistory {
 
         $surfaceBResult = script:Get-SurfaceBEntriesGraphQL `
             -Owner $RepoOwner -Repo $RepoName -WindowDays $WindowDays `
-            -Stopwatch $stopwatch -TimeoutSeconds $TimeoutSeconds
+            -Stopwatch $stopwatch -TimeoutSeconds $TimeoutSeconds -JudgeLogin $JudgeLogin
 
         if ($surfaceBResult.IsError) {
             $useRest = $true
@@ -1610,7 +1836,8 @@ function Get-PhaseContainmentHistory {
         $restResult = script:Get-PhaseContainmentEntriesRest `
             -WindowDays $WindowDays `
             -Stopwatch $stopwatch `
-            -TimeoutSeconds $TimeoutSeconds
+            -TimeoutSeconds $TimeoutSeconds `
+            -JudgeLogin $JudgeLogin
 
         # M2 (reset-on-discard): $rawEntries/$truncated/$invalidEntryCount
         # accumulated from a discarded GraphQL surface are intentionally
@@ -1658,7 +1885,17 @@ function Get-PhaseContainmentRollup {
         produces per-stage escape/irreducible rates with:
           - InsufficientData guard (N < 5, using cost-anomaly n<5 convention)
           - DenominatorZero guard
-          - RelaxationEligible signal (requires N>=5, IrreducibleRate~0, no critical severity)
+          - RelaxationEligible signal. G-CR12 fix (PR #859 GitHub-review
+            post-fix): this line previously described the retired
+            single-arm rule ("requires N>=5, IrreducibleRate~0, no critical
+            severity"). The shipped rule is two-arm: catch-side requires
+            N>=5, EscapeRate < 5%, and no sustained critical OR high
+            severity finding in the window (the veto also names 'high', not
+            just 'critical' — issue #854 M4/AC4); for the code-review stage
+            specifically, RelaxationEligible additionally requires a
+            passing escape-side terminal observation (coverage measured,
+            escape-arm reconciliation ok, unique-catch rate < 5% —
+            TerminalObservation-gated, below) before it can be $true.
           - DataUntrustworthy flag (when SustainedCounts completeness reconciliation fails)
           - LeakageMatrix (introduced_phase x caught_stage counts)
 
@@ -1676,6 +1913,86 @@ function Get-PhaseContainmentRollup {
         Optional hashtable @{ 'design-challenge'=N; 'plan-stress-test'=N; 'code-review'=N }
         specifying expected count of sustained (non-apparatus_meta) findings per surface.
         When provided, actual count mismatch marks DataUntrustworthy=$true for that stage.
+        Issue #854 M36: entries with caught_stage='post-review-observer' are excluded from
+        the observed count before comparison, so a caller that has not yet started supplying
+        observer-inclusive expectations does not spuriously fail closed once observer entries
+        start appearing in the corpus.
+    .PARAMETER TerminalObservation
+        Optional hashtable, mirroring the $SustainedCounts idiom (optional, $null default,
+        ContainsKey-guarded per key), carrying the pre-aggregated escape-side (post-review-
+        observer) measurement for the code-review stage only. Issue #854 (governing principle:
+        "coverage means measurement, not presence") - when $null, or when any contained guard
+        fails, the code-review stage's RelaxationEligible is forced to $false (never upgraded
+        by this parameter, only ever downgraded) whenever the catch-side computation above
+        would otherwise have set it to $true. Design-challenge and plan-stress-test are
+        unaffected; they have no downstream observer.
+
+        All keys are optional; a missing key defaults as noted. Scoping rules below are the
+        Seam Specification (binding on s3/s5/s6/s7) and are the CALLER's responsibility to
+        honor when building this hashtable - this function consumes already-scoped counts,
+        it does not re-derive them from raw finding records.
+
+          CoObservedPRCount              [int]  N - total PR tuples observed in the code-review
+                                                 window (every PR code-review already covers,
+                                                 whether or not a review-dispositions record was
+                                                 ever posted for it). This is NOT DD3's narrower
+                                                 "co-observed" population (M12 fix) -- it is used
+                                                 only as the denominator for the K-of-N coverage-
+                                                 ratio display below. Default 0.
+          MeasuredCoveragePRCount        [int]  K - PRs counting toward coverage AND DD3's
+                                                 actual "co-observed" population: those with a
+                                                 judge-authored, cleanly-parsed review-
+                                                 dispositions record carrying an
+                                                 ExternalSourcesReconciled coverage record (M9 -
+                                                 a head-present, clean parse with zero entries IS
+                                                 a legal coverage record; coverage means
+                                                 measurement, not >=1 finding -- M5 fix removed
+                                                 the earlier >=1-resolved-finding requirement).
+                                                 InternalCoObservedCatchCount (n1) and the
+                                                 Chapman estimator's n2/m are scoped to THIS
+                                                 population, never to CoObservedPRCount's whole-
+                                                 window N (M2/M12 fix). Default 0.
+          DispositionsNovelExternalCount [int]  Dispositions-recorded external findings with
+                                                 internal_match.match_status='novel', compared
+                                                 against the emitted post-review-observer
+                                                 blocks this function counts directly from
+                                                 $Entries (M13 escape-arm reconciliation). The
+                                                 review-dispositions record carries no
+                                                 catchable_phase field, so this count spans ALL
+                                                 catchable_phase values; the reconciliation
+                                                 comparison below counts observer blocks the same
+                                                 catchable_phase-blind way (M6 fix) -- only the
+                                                 unique-catch-rate numerator stays scoped to
+                                                 catchable_phase='implementation' per the Seam
+                                                 Specification. Omitted -> reconciliation cannot
+                                                 be verified and fails closed.
+          InternalCoObservedCatchCount   [int]  n1 - caught_stage='code-review' AND
+                                                 catchable_phase='implementation' entries,
+                                                 restricted to MeasuredCoveragePRCount's PR set
+                                                 (DD3's co-observed population), not
+                                                 CoObservedPRCount's whole-window population
+                                                 (M2/M12 fix). Default 0.
+          ExternalCatchCount             [int]  n2 - external sustained findings on co-observed
+                                                 PRs, excluding match_status 'ambiguous' and
+                                                 'unresolved'. Default 0.
+          DuplicateCount                 [int]  m - external sustained findings with
+                                                 match_status 'duplicate' (the catch/escape
+                                                 overlap). Default 0.
+          ObserverEscapeCount            [int]  Numerator for the unique-catch rate. Defaults
+                                                 to the observer-block count this function
+                                                 derives from $Entries when omitted, scoped to
+                                                 catchable_phase='implementation' per the Seam
+                                                 Specification.
+          ValueCacheOk                   [bool] Seam Specification -ValueCacheOk coherence
+                                                 rule - $false withholds the escape arm
+                                                 entirely. Default $true.
+          CorpusTruncated                [bool] M8 fix: whether the review-cost comment CORPUS
+                                                 fetch (distinct from the -Truncated switch
+                                                 below, which reflects the separate VALUE fetch)
+                                                 truncated. $true withholds the escape arm --
+                                                 novel-carrying PRs may have silently dropped
+                                                 from this derivation while K still reads >=5.
+                                                 Default $false.
     .PARAMETER WindowLabel
         Optional label for the window (for display purposes only).
     .PARAMETER Truncated
@@ -1696,6 +2013,7 @@ function Get-PhaseContainmentRollup {
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Entries,
         [hashtable]$SustainedCounts = $null,
+        [hashtable]$TerminalObservation = $null,
         [string]$WindowLabel = '',
         [switch]$Truncated
     )
@@ -1779,13 +2097,36 @@ function Get-PhaseContainmentRollup {
         $insufficientData  = $denominatorZero -or ($n -lt 5)
 
         # Completeness reconciliation (fail-closed, P14)
+        # M36 (issue #854 s5): observer-caught entries (caught_stage=
+        # 'post-review-observer') are excluded from the observed count
+        # before comparing against $SustainedCounts. Those expectations are
+        # derived from judge-rulings sustained counts that predate the
+        # observer surface, so leaving them in would spuriously fail
+        # closed for every caller that has not yet started supplying
+        # observer-inclusive expectations.
+        $observerCaughtCount = 0
+        foreach ($e in $nonApparatusEntries) {
+            $eCaughtStage = if ($e -is [hashtable]) { [string]$e['caught_stage'] } else { [string]$e.caught_stage }
+            if ($eCaughtStage -eq 'post-review-observer') { $observerCaughtCount++ }
+        }
+        $nExcludingObserver = $n - $observerCaughtCount
+
         $dataUntrustworthy       = $false
         $dataUntrustworthyReason = $null
         if ($null -ne $SustainedCounts -and $SustainedCounts.ContainsKey($stage)) {
             $expectedCount = [int]$SustainedCounts[$stage]
-            if ($n -ne $expectedCount) {
+            if ($nExcludingObserver -ne $expectedCount) {
                 $dataUntrustworthy       = $true
-                $dataUntrustworthyReason = "Entry count mismatch: expected $expectedCount sustained findings for '$stage', observed $n."
+                # Byte-identical to the pre-#854 message when no observer
+                # entries are present (phase-containment-format-report.Tests.ps1
+                # pins the exact "expected N sustained findings for 'stage',
+                # observed M." wording); the observer-exclusion note is only
+                # appended when it actually changed the observed count.
+                $dataUntrustworthyReason = "Entry count mismatch: expected $expectedCount sustained findings for '$stage', observed $nExcludingObserver."
+                if ($observerCaughtCount -gt 0) {
+                    $entryWord = if ($observerCaughtCount -eq 1) { 'entry' } else { 'entries' }
+                    $dataUntrustworthyReason = "Entry count mismatch: expected $expectedCount sustained findings for '$stage', observed $nExcludingObserver (excluding $observerCaughtCount observer-caught $entryWord)."
+                }
             }
         }
 
@@ -1806,21 +2147,30 @@ function Get-PhaseContainmentRollup {
         }
 
         # Relaxation eligibility
-        $relaxationEligible = $null
+        $relaxationEligible   = $null
+        $criticalFindingCount = 0
+        $highFindingCount     = 0
         if (-not $insufficientData -and -not $denominatorZero -and -not $dataUntrustworthy) {
             # Relaxation-eligible when escape_rate < 0.05 (effectively zero escapes) and no
-            # critical-severity finding in the window. See #762 design notes for the threshold rationale.
+            # critical- OR high-severity finding in the window. See #762 design notes for the
+            # threshold rationale. Issue #854 M4: the catch-side veto previously checked only
+            # 'critical', silently letting a sustained 'high' finding render ELIGIBLE -- AC4
+            # requires the veto to cover critical/high and the render to name both counts and
+            # severity, so both counts are tallied here (not a bare boolean) for the renderer.
 
-            $hasCritical = $false
             foreach ($e in $nonApparatusEntries) {
                 $sev = if ($e -is [hashtable]) { [string]$e['severity'] } else { [string]$e.severity }
                 if ($sev -eq 'critical') {
-                    $hasCritical = $true
-                    break
+                    $criticalFindingCount++
+                }
+                elseif ($sev -eq 'high') {
+                    $highFindingCount++
                 }
             }
 
-            if ($null -ne $escapeRate -and $escapeRate -lt 0.05 -and -not $hasCritical) {
+            $hasSeverityVeto = ($criticalFindingCount -gt 0) -or ($highFindingCount -gt 0)
+
+            if ($null -ne $escapeRate -and $escapeRate -lt 0.05 -and -not $hasSeverityVeto) {
                 $relaxationEligible = $true
             }
             else {
@@ -1835,6 +2185,218 @@ function Get-PhaseContainmentRollup {
         # data-untrustworthy state, matching the design intent that no known
         # silent-degradation path can present a wrong number as clean.
         $relaxationEligibleReason = $null
+
+        # ---------------------------------------------------------------
+        # Issue #854 s5: terminal-observation escape-side guard (M4/M7/M13).
+        # INSERTION POINT IS EXACT: this runs AFTER the reason reset directly
+        # above and BEFORE the C11 truncation override directly below.
+        # Inserting it earlier would let this block's own reason be nulled
+        # by the reset; inserting it later (inside/after C11) would let a
+        # truncation override silently swallow an escape-side finding.
+        #
+        # Applies only to the code-review stage - the sole stage with a
+        # downstream observer. "Coverage means measurement" (governing
+        # principle): the escape-side stats below are computed and exposed
+        # on the Stage object regardless of the catch-side verdict, so a
+        # WITHHELD/NOT-ELIGIBLE catch side can still render an honest
+        # escape-side arm (CE Gate S1/S3). The RelaxationEligible flag
+        # itself is only ever DOWNGRADED here, never upgraded: catch-side
+        # $true is a precondition of, never a consequence of, the escape
+        # side passing (M10 precedence - both arms required for ELIGIBLE).
+        # ---------------------------------------------------------------
+        $coverageK                     = $null
+        $coverageN                     = $null
+        $coverageOk                    = $null
+        $reconciliationOk              = $null
+        $observerBlockCount            = $null
+        $observerBlockCountAllPhases   = $null
+        $dispositionsNovelCount        = $null
+        $uniqueCatchRate               = $null
+        $uniqueCatchRateAssessable     = $false
+        $chapmanBothMissedEstimate     = $null
+        $chapmanState                  = $null
+        $escapeArmWithheld             = $false
+        $escapeArmWithheldReason       = $null
+
+        if ($stage -eq 'code-review') {
+            if ($null -eq $TerminalObservation) {
+                $escapeArmWithheld       = $true
+                $escapeArmWithheldReason = 'terminal observation unavailable — escape-side coverage was not measured'
+                if ($relaxationEligible -eq $true) {
+                    $relaxationEligible       = $false
+                    $relaxationEligibleReason = $escapeArmWithheldReason
+                }
+            }
+            elseif ($TerminalObservation.ContainsKey('ValueCacheOk') -and -not [bool]$TerminalObservation['ValueCacheOk']) {
+                $escapeArmWithheld       = $true
+                $escapeArmWithheldReason = 'escape arm withheld — cached value population cannot be joined to a same-run corpus'
+                if ($relaxationEligible -eq $true) {
+                    $relaxationEligible       = $false
+                    $relaxationEligibleReason = $escapeArmWithheldReason
+                }
+            }
+            elseif ($TerminalObservation.ContainsKey('CorpusTruncated') -and [bool]$TerminalObservation['CorpusTruncated']) {
+                # M8 fix: the review-cost comment CORPUS fetch truncated --
+                # a DIFFERENT, independent fetch from the value fetch this
+                # rollup's own -Truncated switch already gates on. A
+                # truncated corpus can silently drop novel-carrying PRs
+                # while K still reads >=5, undercounting misses toward a
+                # false ELIGIBLE. Fail the escape arm closed here rather
+                # than rely on a non-gating prose warning elsewhere.
+                $escapeArmWithheld       = $true
+                $escapeArmWithheldReason = 'escape arm withheld — the review-cost comment corpus fetch was truncated, so novel-carrying PRs may have silently dropped'
+                if ($relaxationEligible -eq $true) {
+                    $relaxationEligible       = $false
+                    $relaxationEligibleReason = $escapeArmWithheldReason
+                }
+            }
+            else {
+                $coverageN  = if ($TerminalObservation.ContainsKey('CoObservedPRCount'))      { [int]$TerminalObservation['CoObservedPRCount'] }      else { 0 }
+                $coverageK  = if ($TerminalObservation.ContainsKey('MeasuredCoveragePRCount')) { [int]$TerminalObservation['MeasuredCoveragePRCount'] } else { 0 }
+                $coverageOk = ($coverageK -ge 5)
+
+                if (-not $coverageOk) {
+                    if ($relaxationEligible -eq $true) {
+                        $relaxationEligible       = $false
+                        $relaxationEligibleReason = "coverage insufficient: $coverageK of $coverageN co-observed PRs measured (need >=5)"
+                    }
+                }
+                else {
+                    # Escape-arm reconciliation (M13): the dispositions-
+                    # recorded novel-external count is caller-supplied
+                    # (dispositions data lives outside this ledger); the
+                    # emitted observer-block count is counted directly from
+                    # $Entries, which already carries any post-review-
+                    # observer blocks fetched for this window. Comparing
+                    # both explicitly - never inferring one from the other -
+                    # is what keeps "0 misses" distinguishable from "0
+                    # blocks emitted".
+                    $dispositionsNovelCount = if ($TerminalObservation.ContainsKey('DispositionsNovelExternalCount')) { [int]$TerminalObservation['DispositionsNovelExternalCount'] } else { $null }
+
+                    # M6 fix: the review-dispositions record carries no
+                    # catchable_phase field at all, so DispositionsNovelExternalCount
+                    # (above) is inherently catchable_phase-blind -- it counts every
+                    # novel external finding the judge recorded, regardless of which
+                    # bucket (design-challenge/plan-stress-test/code-review) the
+                    # resulting observer block eventually routes to (AC7: observer
+                    # entries route by catchable_phase and only ever ADD escapes to
+                    # design/plan buckets, conservative, never irreducible).
+                    # Reconciliation must compare the SAME population on both sides,
+                    # so $observerBlockCountAllPhases (below) counts every emitted
+                    # post-review-observer block regardless of catchable_phase. This
+                    # is intentionally a DIFFERENT, wider count than $observerBlockCount
+                    # (implementation-scoped, used below ONLY as the unique-catch-rate
+                    # numerator default per the Seam Specification's "observer escapes
+                    # in the numerator are scoped to catchable_phase: implementation"
+                    # rule) -- a design/plan-catchable novel finding must not be
+                    # misread as a reconciliation mismatch just because it is outside
+                    # the unique-catch-rate's own, narrower scope.
+                    $observerBlockCount          = 0
+                    $observerBlockCountAllPhases = 0
+                    foreach ($e in $Entries) {
+                        $eCaughtStage    = if ($e -is [hashtable]) { [string]$e['caught_stage'] }    else { [string]$e.caught_stage }
+                        $eCatchablePhase = if ($e -is [hashtable]) { [string]$e['catchable_phase'] }  else { [string]$e.catchable_phase }
+                        if ($eCaughtStage -eq 'post-review-observer') {
+                            $observerBlockCountAllPhases++
+                            if ($eCatchablePhase -eq 'implementation') {
+                                $observerBlockCount++
+                            }
+                        }
+                    }
+
+                    if ($null -eq $dispositionsNovelCount) {
+                        $reconciliationOk = $false
+                        if ($relaxationEligible -eq $true) {
+                            $relaxationEligible       = $false
+                            $relaxationEligibleReason = 'terminal observation incomplete — dispositions-recorded novel count unavailable for reconciliation'
+                        }
+                    }
+                    elseif ($dispositionsNovelCount -ne $observerBlockCountAllPhases) {
+                        $reconciliationOk = $false
+                        if ($relaxationEligible -eq $true) {
+                            $relaxationEligible       = $false
+                            $relaxationEligibleReason = "escape-arm reconciliation failed: $dispositionsNovelCount dispositions-recorded novel finding(s) vs $observerBlockCountAllPhases emitted observer block(s)"
+                        }
+                    }
+                    else {
+                        $reconciliationOk = $true
+
+                        # Unique-catch rate (M6, NaN-guarded): observer
+                        # escapes / (internal co-observed catches + observer
+                        # escapes). Denominator 0 -> $null, NEVER
+                        # [double]::NaN - a naive division by zero returns
+                        # NaN, and NaN satisfies neither -lt nor -ge, so a
+                        # downstream "-not ($rate -ge 0.05)" check would read
+                        # NaN as ELIGIBLE (verified live: `$nan -lt 0.05` and
+                        # `$nan -ge 0.05` are both $false in PowerShell).
+                        # Rejecting $null/IsNaN BEFORE any comparison is
+                        # mandatory, not optional.
+                        $n1              = if ($TerminalObservation.ContainsKey('InternalCoObservedCatchCount')) { [int]$TerminalObservation['InternalCoObservedCatchCount'] } else { 0 }
+                        $observerEscapes = if ($TerminalObservation.ContainsKey('ObserverEscapeCount'))          { [int]$TerminalObservation['ObserverEscapeCount'] }          else { $observerBlockCount }
+                        $uniqueCatchDenominator = $n1 + $observerEscapes
+
+                        # M18 fix (post-fix judge-sustained review): widened
+                        # from -eq 0 to -le 0 as defensive hardening. Not
+                        # reachable from the current shipped caller (n1 and
+                        # observerEscapes are both structurally non-negative
+                        # int counts, so their sum can never be negative
+                        # here), but this file's own doctrine elsewhere
+                        # treats a denominator guard as mandatory, not
+                        # optional, and -eq 0 alone would silently let a
+                        # future negative-denominator regression divide
+                        # through instead of routing to the not-assessable
+                        # branch below.
+                        if ($uniqueCatchDenominator -le 0) {
+                            $uniqueCatchRate           = $null
+                            $uniqueCatchRateAssessable = $false
+                        }
+                        else {
+                            $uniqueCatchRate           = [double]$observerEscapes / [double]$uniqueCatchDenominator
+                            $uniqueCatchRateAssessable = -not [double]::IsNaN($uniqueCatchRate)
+                        }
+
+                        if ((-not $uniqueCatchRateAssessable) -or ($null -eq $uniqueCatchRate)) {
+                            $uniqueCatchRate           = $null
+                            $uniqueCatchRateAssessable = $false
+                            if ($relaxationEligible -eq $true) {
+                                $relaxationEligible       = $false
+                                $relaxationEligibleReason = 'escape-side unique-catch rate not assessable (no co-observed internal or observer catches)'
+                            }
+                        }
+                        elseif ($uniqueCatchRate -ge 0.05) {
+                            if ($relaxationEligible -eq $true) {
+                                $relaxationEligible       = $false
+                                $relaxationEligibleReason = "escape-side unique-catch rate too high ({0:P1} >= 5%)" -f $uniqueCatchRate
+                            }
+                        }
+                        # else: escape side is clean; $relaxationEligible stands (unchanged).
+
+                        # Chapman estimator (M11/M14) - informational, does
+                        # NOT gate RelaxationEligible. Renders N-hat MINUS
+                        # (n1+n2-m) under the "both missed" label - N-hat
+                        # alone is the TOTAL population estimate, not what
+                        # both reviewers missed. n2/m are caller-scoped per
+                        # the Seam Specification (n2 excludes ambiguous and
+                        # unresolved; m counts duplicate only).
+                        $n2 = if ($TerminalObservation.ContainsKey('ExternalCatchCount')) { [int]$TerminalObservation['ExternalCatchCount'] } else { 0 }
+                        $m  = if ($TerminalObservation.ContainsKey('DuplicateCount'))      { [int]$TerminalObservation['DuplicateCount'] }      else { 0 }
+
+                        if ($m -lt 1) {
+                            $chapmanState = 'sparse'
+                        }
+                        elseif ($m -gt [Math]::Min($n1, $n2)) {
+                            $chapmanState = 'unavailable'
+                        }
+                        else {
+                            $nHat = ((([double]$n1 + 1) * ([double]$n2 + 1)) / ([double]$m + 1)) - 1
+                            $chapmanBothMissedEstimate = $nHat - ([double]$n1 + [double]$n2 - [double]$m)
+                            $chapmanState              = 'estimate'
+                        }
+                    }
+                }
+            }
+        }
+
         if ($Truncated) {
             $relaxationEligible       = $false
             $relaxationEligibleReason = 'fetch truncated'
@@ -1850,8 +2412,23 @@ function Get-PhaseContainmentRollup {
             InsufficientData          = $insufficientData
             RelaxationEligible        = $relaxationEligible
             RelaxationEligibleReason  = $relaxationEligibleReason
+            CriticalFindingCount      = $criticalFindingCount
+            HighFindingCount          = $highFindingCount
             DataUntrustworthy         = $dataUntrustworthy
             DataUntrustworthyReason   = $dataUntrustworthyReason
+            CoverageK                 = $coverageK
+            CoverageN                 = $coverageN
+            CoverageOk                = $coverageOk
+            ReconciliationOk          = $reconciliationOk
+            DispositionsNovelExternalCount = $dispositionsNovelCount
+            ObserverBlockCount        = $observerBlockCount
+            ObserverBlockCountAllPhases = $observerBlockCountAllPhases
+            UniqueCatchRate           = $uniqueCatchRate
+            UniqueCatchRateAssessable = $uniqueCatchRateAssessable
+            ChapmanBothMissedEstimate = $chapmanBothMissedEstimate
+            ChapmanState              = $chapmanState
+            EscapeArmWithheld         = $escapeArmWithheld
+            EscapeArmWithheldReason   = $escapeArmWithheldReason
         }
     }
 
@@ -1974,7 +2551,7 @@ function Format-PhaseContainmentReport {
                 $lines.Add("  Relaxation signal:  WITHHELD")
             }
             elseif ($stage.RelaxationEligible -eq $true) {
-                $lines.Add("  Relaxation signal:  ELIGIBLE (escape_rate ~0, no critical findings)")
+                $lines.Add("  Relaxation signal:  ELIGIBLE (escape_rate ~0, no critical/high findings)")
             }
             elseif ($stage.RelaxationEligibleReason -eq 'fetch truncated') {
                 # P9: checked BEFORE the EscapeRate reason-guess below so a
@@ -1982,18 +2559,114 @@ function Format-PhaseContainmentReport {
                 # "NOT ELIGIBLE (escape_rate > 0)" text.
                 $lines.Add("  Relaxation signal:  WITHHELD (fetch truncated)")
             }
+            elseif ($stage.RelaxationEligibleReason -like 'escape-side unique-catch rate too high*') {
+                # G-CR4 fix (PR #859 GitHub-review post-fix): this reason is
+                # a genuinely MEASURED assessed-high escape rate (M6's
+                # $uniqueCatchRate -ge 0.05 branch), not an unavailable/
+                # withheld assessment -- rendering it as WITHHELD mislabels a
+                # real escape-side failure as "not measured." The reason text
+                # already carries the measured percentage; this branch just
+                # gives it the matching escape-side NOT ELIGIBLE headline
+                # instead of the generic WITHHELD one below.
+                $lines.Add("  Relaxation signal:  NOT ELIGIBLE ($($stage.RelaxationEligibleReason))")
+            }
+            elseif ($null -ne $stage.RelaxationEligibleReason) {
+                # Issue #854 s6 reason-ladder extension: check the reason
+                # field BEFORE falling through to the two-branch escape-
+                # rate/critical-severity guess below, mirroring the P9
+                # 'fetch truncated' precedent immediately above. Without
+                # this check, a downgrade set by the code-review escape-
+                # side guard in Get-PhaseContainmentRollup (coverage
+                # insufficient, reconciliation failure, unassessable
+                # unique-catch rate) mis-renders as the generic "critical
+                # severity finding in window" guess, since RelaxationEligible
+                # is $false either way and the guess below cannot tell the
+                # two situations apart.
+                $lines.Add("  Relaxation signal:  WITHHELD ($($stage.RelaxationEligibleReason))")
+            }
             else {
                 # Determine reason
                 if ($stage.EscapeRate -ge 0.05) {
                     $lines.Add("  Relaxation signal:  NOT ELIGIBLE (escape_rate > 0)")
                 }
                 else {
-                    $lines.Add("  Relaxation signal:  NOT ELIGIBLE (critical severity finding in window)")
+                    # Issue #854 M4: the catch-side veto now fires for a
+                    # sustained 'high'-severity finding the same as
+                    # 'critical' (AC4), so the render must name both counts
+                    # and the severities that triggered the block instead of
+                    # a bare "critical severity finding in window" guess.
+                    $lines.Add("  Relaxation signal:  NOT ELIGIBLE ($($stage.CriticalFindingCount) critical, $($stage.HighFindingCount) high severity finding(s) in window)")
                 }
             }
         }
 
         $lines.Add('')
+
+        # -----------------------------------------------------------------
+        # Issue #854 s6 (M21): the code-review row renders an independent
+        # escape-side (post-review-observer) arm, regardless of which
+        # catch-side branch above fired (denominator=0, n<5, data
+        # untrustworthy, or the normal reason-ladder render) — the previous
+        # short-circuit chain returned before ever reaching escape-side
+        # data, so a coverage-insufficient or reconciliation-failed window
+        # was indistinguishable from a genuinely clean one. Upstream stages
+        # (design-challenge, plan-stress-test) have no downstream observer
+        # and are unaffected — this block only ever fires for code-review.
+        # -----------------------------------------------------------------
+        if ($stageName -eq 'code-review') {
+            $lines.Add("  Escape-side (post-review observer):")
+
+            if ($stage.EscapeArmWithheld) {
+                $lines.Add("    Coverage:           NOT ASSESSABLE ($($stage.EscapeArmWithheldReason))")
+            }
+            elseif ($null -eq $stage.CoverageK -or $null -eq $stage.CoverageN) {
+                # Defensive fallback -- should only be reachable if a future
+                # caller supplies a TerminalObservation shape this renderer
+                # does not yet know how to read.
+                $lines.Add("    Coverage:           NOT ASSESSABLE (escape-side data unavailable)")
+            }
+            elseif (-not $stage.CoverageOk) {
+                $lines.Add("    Coverage:           $($stage.CoverageK) of $($stage.CoverageN) co-observed PRs measured (need >=5)")
+                $lines.Add("    Escape-side signal: NOT ASSESSABLE (coverage insufficient)")
+            }
+            else {
+                $lines.Add("    Coverage:           $($stage.CoverageK) of $($stage.CoverageN) co-observed PRs measured")
+
+                if ($stage.ReconciliationOk -eq $false) {
+                    $novelDisplay = if ($null -ne $stage.DispositionsNovelExternalCount) { [string]$stage.DispositionsNovelExternalCount } else { 'unavailable' }
+                    # M6 fix: render the SAME catchable_phase-blind count the
+                    # reconciliation check actually compared against
+                    # ($ObserverBlockCountAllPhases), not the narrower
+                    # catchable_phase=implementation-only $ObserverBlockCount
+                    # (that field is reserved for the unique-catch-rate's own
+                    # miss-count display below) -- otherwise the rendered
+                    # numbers would not match the comparison that actually
+                    # failed.
+                    $lines.Add("    Escape-side signal: NOT ASSESSABLE (escape-arm reconciliation failed: $novelDisplay dispositions-recorded novel finding(s) vs $($stage.ObserverBlockCountAllPhases) emitted observer block(s))")
+                }
+                else {
+                    $lines.Add("    Miss count (observer blocks): $($stage.ObserverBlockCount)")
+
+                    if (-not $stage.UniqueCatchRateAssessable -or $null -eq $stage.UniqueCatchRate) {
+                        $lines.Add("    Unique-catch rate:  NOT ASSESSABLE (no co-observed internal or observer catches)")
+                    }
+                    else {
+                        $lines.Add(("    Unique-catch rate:  {0:P1}" -f $stage.UniqueCatchRate))
+                    }
+
+                    switch ($stage.ChapmanState) {
+                        'estimate' { $lines.Add(("    Chapman (both-missed est.): {0:F1}" -f $stage.ChapmanBothMissedEstimate)) }
+                        'sparse' { $lines.Add("    Chapman (both-missed est.): overlap too sparse") }
+                        'unavailable' { $lines.Add("    Chapman (both-missed est.): estimate unavailable -- overlap exceeds observed population") }
+                        default { $lines.Add("    Chapman (both-missed est.): not computed") }
+                    }
+
+                    $lines.Add("    Caveat: this is a lower-bound, correlated-blind-spot estimate -- both the pipeline and the external reviewer may share systemic blind spots this corpus cannot detect.")
+                }
+            }
+
+            $lines.Add('')
+        }
     }
 
     # ---- Render leakage matrix ----
