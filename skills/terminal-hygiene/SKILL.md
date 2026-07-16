@@ -56,7 +56,14 @@ Rule 1 (parent-side diagnostics): never dispatch a subagent for a check the pare
 
 **Local files**: use targeted in-place `Edit` calls; never rewrite a whole file to change part of it.
 
-**GitHub issue/PR bodies**: compose the new body once from content already in context, then post it with a single `--body-file` write. Precede the write with a freshness check: re-read the live body via structured JSON extraction — `gh issue view {N} --json body --jq '.body'` (or `gh pr view {N} --json body --jq '.body'` for PR bodies), never `gh view` console text output and never a `>`-redirected tmp file — compare it against your in-context snapshot, and halt-and-reconcile if they diverge — bodies are edited concurrently across sessions and phases. Halt-and-reconcile means: stop, re-fetch the live body via that same clean channel, and re-compose the write payload from the reconciled content already in context — never merge the re-read output directly into the payload. This check narrows but does not eliminate the inherent check-then-write race window between the freshness read and the write itself. The prohibition is scoped to **payload reuse**, not to reading: never let `gh view` output become the write payload — on Windows, `gh view` output OEM-mangles non-ASCII (em-dashes, section signs, emoji); never write a tmp copy and then edit it before posting.
+**GitHub issue/PR bodies**: bodies are edited concurrently across sessions and phases, so follow this sequence:
+
+1. Compose the new body once from content already in context.
+2. Precede the write with a freshness check: re-read the live body via structured JSON extraction — `gh issue view {N} --json body --jq '.body'` (or `gh pr view {N} --json body --jq '.body'` for PR bodies), never `gh view` console text output and never a `>`-redirected tmp file — and compare it against your in-context snapshot.
+3. If they diverge, halt-and-reconcile: stop, re-fetch the live body via that same clean channel, and re-compose the write payload from the reconciled content already in context — never merge the re-read output directly into the payload.
+4. Post the composed body with a single `--body-file` write.
+
+The prohibition is scoped to **payload reuse**, not to reading: never let `gh view` output become the write payload — on Windows, `gh view` output OEM-mangles non-ASCII (em-dashes, section signs, emoji); never write a tmp copy and then edit it before posting. This check narrows but does not eliminate the inherent check-then-write race window between the freshness read and the write itself.
 
 Content destined to become a write payload — including the freshness-comparison read above — must be read **in full** and fidelity-verified — the extract-don't-dump rule (rule 4 below) does not apply to read-modify-write payloads.
 
