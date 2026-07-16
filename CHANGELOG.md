@@ -2,6 +2,15 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.3.16] — 2026-07-16
+
+### Fixed
+- Plan comments no longer hit GitHub's 65,536-codepoint comment cap. `frame-slice` blocks move to a `frame-slices-{ID}` sibling comment and `phase-containment`/`judge-rulings` blocks co-move to a `phase-containment-ledger-{ID}` sibling, both pointed to from the plan comment (#863). Fixes the #854 incident where an authoring agent spent 5-10 rounds compressing load-bearing plan content to fit under the cap.
+
+### Added
+- `frame-spine-lookup`'s Dispatch Inputs gain a second, optional sibling-comment id; the shim fetches and concatenates both bodies when present, with an identity check guarding against a stale or mismatched pointer.
+- Block-level `appended_at` provenance on phase-containment ledger entries, so dedup resolves correctly once blocks span multiple comments.
+
 ## [3.3.15] — 2026-07-16
 
 ### Added
