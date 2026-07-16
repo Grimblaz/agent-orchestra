@@ -1,6 +1,6 @@
 ---
 name: copilot-cost-collection
-description: "Copilot OTel cost collection setup and interpretation guidance. Use when enabling local Copilot Chat OTel file export, installing the workspace sentinel, or explaining branch-correlated Copilot cost telemetry. DO NOT USE FOR: Claude-native cost capture, durable session memory handoff, or review-pipeline scoring logic."
+description: "Copilot OTel cost collection setup and interpretation guidance. Use when enabling local Copilot Chat OTel file export, installing the workspace sentinel, or explaining branch-correlated Copilot cost telemetry. DO NOT USE FOR: Claude-native cost capture, durable session memory handoff, review-pipeline scoring logic, or session-cost discipline behavior rules (see skills/terminal-hygiene/SKILL.md § Session-Cost Discipline)."
 ---
 
 # Copilot Cost Collection

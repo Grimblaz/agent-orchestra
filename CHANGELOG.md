@@ -2,6 +2,12 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.3.17] — 2026-07-16
+
+### Added
+
+- Added session-cost discipline rules (parent-side diagnostics, targeted edits, batching, extract-do-not-dump) to `skills/terminal-hygiene/SKILL.md`, with pointer references in Code-Conductor and the three upstream agent bodies, and a CI-registered contract test (#474).
+
 ## [3.3.16] — 2026-07-16
 
 ### Added

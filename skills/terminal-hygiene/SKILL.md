@@ -1,6 +1,6 @@
 ---
 name: terminal-hygiene
-description: "Terminal and test execution guardrails for Agent Orchestra workflows. Use when choosing sync versus async terminal mode, scoping Pester runs, retrying background commands, detecting or recovering from multiline-prompt continuation stalls, wrapping subagent diagnostics to avoid non-zero-exit halts, or avoiding terminal and subagent batching mistakes. DO NOT USE FOR: application-level debugging root-cause analysis (use systematic-debugging) or post-merge archival workflow steps (use post-pr-review)."
+description: "Terminal and test execution guardrails plus session-cost discipline for Agent Orchestra workflows. Use when choosing sync/async terminal mode, scoping Pester runs, retrying background commands, recovering from multiline-prompt stalls, wrapping subagent diagnostics, avoiding terminal/subagent batching mistakes, or applying session-cost discipline. DO NOT USE FOR: application-level debugging (use systematic-debugging), post-merge archival (use post-pr-review), or cost telemetry/measurement setup (use copilot-cost-collection)."
 ---
 
 # Terminal Hygiene
@@ -13,10 +13,11 @@ Terminal and validation rules that keep workflow execution predictable.
 - When deciding between `mode: sync` and `mode: async` / `isBackground: true`
 - When validating at step boundaries without overflowing terminal state
 - When retrying background terminal commands safely
+- When applying session-cost discipline (parent-side diagnostics, targeted edits, call batching, extract-don't-dump) in a long-context orchestrated session
 
 ## Scope
 
-These rules supplement, not replace, any agent-specific terminal guidance such as Code-Conductor's non-interactive guardrails.
+These rules supplement, not replace, any agent-specific terminal guidance such as Code-Conductor's non-interactive guardrails. Scope also extends to session-cost discipline for long-context agent sessions — not terminal execution alone.
 
 ## Pester Scope
 
@@ -42,6 +43,41 @@ Pester 5 writes pass/fail output to the terminal buffer rather than redirected f
 ## No Terminal/Subagent Batching
 
 Do not batch `run_in_terminal` and subagent dispatch calls in the same parallel tool-call set. Sequential use is fine. Parallel subagent dispatch remains allowed when no terminal command shares that batch.
+
+## Session-Cost Discipline
+
+Four rules that keep long-context orchestrated sessions from spending money re-reading their own transcript instead of doing work. They apply to any long-context agent session, not terminal execution alone.
+
+### 1. Parent-side diagnostics
+
+Rule 1 (parent-side diagnostics): never dispatch a subagent for a check the parent could do in ≤2 tool calls. Reserve subagent dispatch for substantive specialist work.
+
+### 2. Targeted edits, split by target
+
+**Local files**: use targeted in-place `Edit` calls; never rewrite a whole file to change part of it.
+
+**GitHub issue/PR bodies**: bodies are edited concurrently across sessions and phases, so follow this sequence:
+
+1. Compose the new body once from content already in context.
+2. Precede the write with a freshness check: re-read the live body via structured JSON extraction — `gh issue view {N} --json body --jq '.body'` (or `gh pr view {N} --json body --jq '.body'` for PR bodies), never `gh view` console text output and never a `>`-redirected tmp file — and compare it against your in-context snapshot.
+3. If they diverge, halt-and-reconcile: stop, re-fetch the live body via that same clean channel, and re-compose the write payload from the reconciled content already in context — never merge the re-read output directly into the payload.
+4. Post the composed body with a single `--body-file` write.
+
+The prohibition is scoped to **payload reuse**, not to reading: never let `gh view` output become the write payload — on Windows, `gh view` output OEM-mangles non-ASCII (em-dashes, section signs, emoji); never write a tmp copy and then edit it before posting. This check narrows but does not eliminate the inherent check-then-write race window between the freshness read and the write itself.
+
+Content destined to become a write payload — including the freshness-comparison read above — must be read **in full** and fidelity-verified — the extract-don't-dump rule (rule 4 below) does not apply to read-modify-write payloads.
+
+See `## Scratch & Temp-File Hygiene` above for where scratch files belong; that section is this skill's single source of truth for scratch-file location and is not restated here.
+
+### 3. Batch independent tool calls
+
+Rule 3 (call batching): batch independent tool calls in one message when they have no dependency between them. Each avoidable sequential call re-reads the whole session context (~$0.08/call, measured on PR #857, 2026-07-16). **Carve-out**: `## No Terminal/Subagent Batching` above always wins — never batch a terminal command and a subagent dispatch in the same parallel set.
+
+### 4. Extract, don't dump
+
+Rule 4 (extract, don't dump): extract at the tool boundary (`--jq`, `grep`, `Select-String`, targeted `Read` offsets) instead of dumping full structured payloads into context. **Exception**: read-modify-write payloads (rule 2 above) must be read in full. Measured on PR #857 (2026-07-16): one careless 36,000-character dump cost approximately $7, because every later call re-carried it — see the [#476 cost-analysis comment (2026-07-16)](https://github.com/Grimblaz/agent-orchestra/issues/476#issuecomment-4992967140). This figure is historical evidence, not a standing rate.
+
+**Scope acknowledgment**: nine agent bodies currently load this skill unscoped (Code-Conductor, Code-Critic, Code-Smith, Doc-Keeper, Process-Review, Refactor-Specialist, Specification, Test-Writer, UI-Iterator); rules 2-4 are generic session discipline that benefits any of them, not just the bodies that carry an explicit Session-Cost Discipline load reference — this is a scope acknowledgment, not a call to edit those other bodies.
 
 ## Terminal Cleanup
 

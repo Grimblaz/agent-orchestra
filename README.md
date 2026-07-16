@@ -3,7 +3,7 @@
 > ⚠️ **GitHub Copilot / VS Code support is frozen and retiring after 2026-08-31.**
 > Claude Code is the actively supported path. See [COPILOT-DEPRECATION.md](Documents/Design/copilot-deprecation.md) for details and the reach-out channel if you depend on Copilot support.
 
-[![Version](https://img.shields.io/badge/version-v3.3.16-blue.svg)](../../releases)
+[![Version](https://img.shields.io/badge/version-v3.3.17-blue.svg)](../../releases)
 [![Ready for Production](https://img.shields.io/badge/status-production%20ready-green.svg)](../../releases)
 
 A multi-agent workflow system that orchestrates AI-assisted software development through specialized Claude Code agents. *(GitHub Copilot/VS Code: frozen and retiring after 2026-08-31 — see [COPILOT-DEPRECATION.md](Documents/Design/copilot-deprecation.md))*
@@ -263,7 +263,7 @@ Skills are domain-specific knowledge packages in `skills/` (repo root) that agen
 | **bdd-scenarios** | Structured Given/When/Then scenario authoring and CE Gate coverage checks |
 | **session-memory-contract** | Session-state survival labels, canonical mechanisms, and cross-tool handoff rules |
 | **session-startup** | Automatic startup cleanup guard for new conversations |
-| **terminal-hygiene** | Terminal and test execution guardrails for Agent Orchestra workflows |
+| **terminal-hygiene** | Terminal and test execution guardrails plus session-cost discipline for Agent Orchestra workflows |
 
 > **VS Code 1.108+**: Skills are auto-discovered from `skills/` (repo root) when `chat.useAgentSkills` is enabled.
 

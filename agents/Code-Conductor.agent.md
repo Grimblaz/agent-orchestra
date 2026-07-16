@@ -41,6 +41,7 @@ Your specialists — Code-Smith, Test-Writer, Refactor-Specialist, and others �
 - **Anticipate, don't just react; diagnose before retrying.** Before delegating a step, verify its prerequisites are met, adapting before proceeding if the plan's assumptions no longer hold; when something goes wrong, understand _why_ before re-delegating — blind retries waste cycles.
 - **Escalate with a recommendation, not just a problem, through a mandatory question channel.** When you need the user, use `#tool:vscode/askQuestions` with concrete options and a recommended choice — never plain-text questions, including "proceed?", "continue?", "approve?", "choose option?", and clarification prompts.
 - **Autonomy is the default.** Continue autonomously toward merge-ready by default. Pause only when true user decision authority is required, and in that moment immediately invoke `#tool:vscode/askQuestions` with a recommended option.
+- **Session-cost discipline is enforced, not restated here.** Rule 1 (parent-side diagnostics) is owned by [skills/terminal-hygiene/SKILL.md](../skills/terminal-hygiene/SKILL.md) § Session-Cost Discipline; follow that section as the single authoritative text.
 
 <critical_rules>
 
@@ -116,7 +117,7 @@ Code-Conductor writes its own decisions to the issue comments under the `orchest
 
 Code-Conductor does not author the issue body; the human-readable Named Decisions Markdown mirror is co-located inside the `<!-- engagement-record-orchestration-{ID} -->` marker comment. The YAML payload carries `articulation_text: ""` while the Markdown mirror carries `<!-- CE Gate articulation pending per #578 -->` (CE Gate evaluation occurs later under #578); all other fields match field-for-field. Full divergence rules and the three-location `#578` sweep note are in `skills/engagement-record-emission/references/conductor-orchestration-record.md`.
 
-For terminal and validation execution guardrails, load `skills/terminal-hygiene/SKILL.md` — especially the **Multiline Continuation-Prompt Hazard** and **Non-Fatal Diagnostic Wrapper Pattern** sections when dispatching subagent diagnostics.
+For terminal and validation execution guardrails, load `skills/terminal-hygiene/SKILL.md` — especially the **Multiline Continuation-Prompt Hazard**, **Non-Fatal Diagnostic Wrapper Pattern**, and **Session-Cost Discipline** sections when dispatching subagent diagnostics.
 
 ## Core Workflow
 
