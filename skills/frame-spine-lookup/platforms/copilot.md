@@ -27,7 +27,11 @@ Copilot bindings:
      proceed to step 4.
   4. Concatenate plan body then sibling body with a single blank line between them (plan body
      first) into one lookup body file:
-     `(Get-Content $env:TEMP\plan-body.md -Raw) + "`n`n" + (Get-Content $env:TEMP\sibling-body.md -Raw) | Set-Content $env:TEMP\lookup-body.md -NoNewline`
+
+     ```powershell
+     (Get-Content $env:TEMP\plan-body.md -Raw) + "`n`n" + (Get-Content $env:TEMP\sibling-body.md -Raw) | Set-Content $env:TEMP\lookup-body.md -NoNewline
+     ```
+
   5. Invoke lookup against the concatenated file by path (not stdin):
      `pwsh -File .github/scripts/lib/frame-spine-core.ps1 -Op Lookup -CommentBodyPath $env:TEMP\lookup-body.md -Format Json -GeneratedAt {generated_at} -StepId {id}`
 - Parse the JSON `status` field to determine the outcome. Do **not** branch on exit code alone —

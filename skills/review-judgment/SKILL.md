@@ -144,6 +144,7 @@ In the same PR comment as the `<!-- judge-rulings ... -->` block, emit one `<!--
 - `escape_distance`: recomputed as `3 - ordinal(catchable_phase)` (code-review projection = 3; phase ordinals: experience=0, design=1, plan=2, implementation=3)
 - `severity`, `systemic_fix_type`, `category`: carry forward from the finding
 - `apparatus_meta: false` unless a stated criterion justifies `true`; when `apparatus_meta: true`, the entry is audited
+- `appended_at`: stamp the current UTC instant in the strict `yyyy-MM-ddTHH:mm:ssZ` form (863 M1 fix) — this block is hand-authored directly into the PR comment (no script primitive writes it on this surface), so the judge/agent authoring the block is responsible for stamping this field itself
 
 #### Observer emission variant (post-review-observer)
 

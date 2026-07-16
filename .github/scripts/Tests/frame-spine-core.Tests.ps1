@@ -183,7 +183,7 @@ Describe 'frame-spine-core stdin and JSON output' -Tag 'unit' {
             $script:CanonicalSpineBlockWithPointer
             '-->'
             ''
-            '<!-- frame-slices-4995965999 -->'
+            '<!-- frame-slices-863 -->'
             '<!-- frame-slices-generated-at: 2026-07-16T18:00:00Z -->'
             ''
             '<!-- frame-slice'
@@ -199,7 +199,7 @@ Describe 'frame-spine-core stdin and JSON output' -Tag 'unit' {
             $script:CanonicalSpineBlockWithPointer
             '-->'
             ''
-            '<!-- frame-slices-4995965999 -->'
+            '<!-- frame-slices-863 -->'
             '<!-- frame-slices-generated-at: 2026-07-16T10:00:00Z -->'
             ''
             '<!-- frame-slice'
@@ -216,7 +216,7 @@ Describe 'frame-spine-core stdin and JSON output' -Tag 'unit' {
             $script:CanonicalSpineBlockWithPointer
             '-->'
             ''
-            '<!-- frame-slices-4995965999 -->'
+            '<!-- frame-slices-863 -->'
             ''
             '<!-- frame-slice'
             $script:S2SliceBlockWithPointer
@@ -519,7 +519,7 @@ Describe 'frame-spine-core stdin and JSON output' -Tag 'unit' {
             ) -join "`n"
 
             $script:SiblingOnlyFetchBodyFresh = @(
-                '<!-- frame-slices-4995965999 -->'
+                '<!-- frame-slices-863 -->'
                 '<!-- frame-slices-generated-at: 2026-07-16T18:00:00Z -->'
                 ''
                 '<!-- frame-slice'
@@ -528,7 +528,7 @@ Describe 'frame-spine-core stdin and JSON output' -Tag 'unit' {
             ) -join "`n"
 
             $script:SiblingOnlyFetchBodyStale = @(
-                '<!-- frame-slices-4995965999 -->'
+                '<!-- frame-slices-863 -->'
                 '<!-- frame-slices-generated-at: 2026-07-16T10:00:00Z -->'
                 ''
                 '<!-- frame-slice'

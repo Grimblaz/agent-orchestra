@@ -1,6 +1,6 @@
 <!-- audit-meta
-last-verified: cbcd3b14e05c201f559ac420cd9667aa38090b7b
-generated-at: 2026-07-16T21:39:16Z
+last-verified: 4f9c076e5c9a5c59ee17105d91a9a6fe2bc675fc
+generated-at: 2026-07-16T23:41:02Z
 -->
 
 ## Purpose
@@ -320,7 +320,10 @@ Copilot always reads from the source tree in the hub repo. This dual-resolved be
 - **examples**:
   - `.tmp/issue-{ISSUE_NUMBER}-body.md`
   - `.tmp/{N}-comments.json`
-- **notes**: Agent scratch / temp-file workspace (introduced in issue #643). Gitignored, consumer-local scratch directory where agents write transient working files (issue-body drafts, comment payloads, engagement-record mirrors) per skills/terminal-hygiene/SKILL.md Scratch & Temp-File Hygiene. Not a distribution artifact and not committed to any repo. Literal example paths such as .tmp/issue-643-body.md and .tmp/643-comments.json appearing in skill body text map to this family. The agent treats this path as consumer-local session scratch; attempting to resolve it from the hub repo or plugin cache is a wasted tool call.
+  - `.tmp/plan-body.md`
+  - `.tmp/sibling-body.md`
+  - `.tmp/lookup-body.md`
+- **notes**: Agent scratch / temp-file workspace (introduced in issue #643). Gitignored, consumer-local scratch directory where agents write transient working files (issue-body drafts, comment payloads, engagement-record mirrors) per skills/terminal-hygiene/SKILL.md Scratch & Temp-File Hygiene. Not a distribution artifact and not committed to any repo. Literal example paths such as .tmp/issue-643-body.md and .tmp/643-comments.json appearing in skill body text map to this family. The agent treats this path as consumer-local session scratch; attempting to resolve it from the hub repo or plugin cache is a wasted tool call. `.tmp/plan-body.md`, `.tmp/sibling-body.md`, and `.tmp/lookup-body.md` (issue #863 M7 fix) are the frame-spine-lookup Claude-shim fetch-sequence intermediates — previously registered under a separate now-retired `/tmp/*.md` family before the Claude shim was corrected to the repo-relative `.tmp/` convention this family already governs; same ephemeral, single-Bash-sequence, never-durable semantics apply.
 
 ### `.vscode/settings.json`
 
@@ -343,18 +346,6 @@ Copilot always reads from the source tree in the hub repo. This dual-resolved be
   - `/memories/session/design-issue-{ID}.md`
   - `/memories/session/review-state-{ID}.md`
 - **notes**: Claude Code session-only memory files written during a live session. Not distribution artifacts and not committed to any repo. Placeholders {ID} and {N} are in the D2a set; {id} (lowercase), {scope}, {primary}, {secondary1}, {secondaryN} are session-scoped runtime tokens, not D2a-normalized. Only the canonical eight ({ID}, {PR}, {NUMBER}, {name}, {port}, {ISSUE_NUMBER}, {N}, {Surface}) are normalized for path-family clustering. Any agent that tries to Read a path in this family when no session is active performs a wasted tool call.
-
-### `/tmp/*.md`
-
-- **claude_resolves**: none
-- **copilot_resolves**: none
-- **requires_version_bump**: false
-- **experience**: wasted-tool-call
-- **examples**:
-  - `/tmp/plan-body.md`
-  - `/tmp/sibling-body.md`
-  - `/tmp/lookup-body.md`
-- **notes**: Local Bash-tool intermediate files used only within a single frame-spine-lookup fetch sequence (issue #863 s6) — `gh api` writes a comment body to one of these paths, an optional identity check and concatenation step reads/combines them, and frame-spine-core.ps1 -Op Lookup consumes the result via -CommentBodyPath. Ephemeral to that one Bash sequence on one machine; never a durable artifact, never committed, and not resolvable across turns, sessions, or specialists. An agent that tries to Read one of these paths outside the exact fetch-then-lookup sequence that created it performs a wasted tool call.
 
 ### `agents/*.agent.md`
 

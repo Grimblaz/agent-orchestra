@@ -8,22 +8,22 @@ in the parent skill for the complete list.
 Claude bindings:
 
 - Use the `Bash` tool to fetch the plan-issue comment body:
-  `gh api repos/{owner}/{repo}/issues/comments/{id} --jq .body > /tmp/plan-body.md`
-  (`gh api repos/{owner}/{repo}/issues/comments/{id}` — pipe the `.body` field to a temp file.)
+  `gh api repos/{owner}/{repo}/issues/comments/{id} --jq .body > .tmp/plan-body.md`
+  (`gh api repos/{owner}/{repo}/issues/comments/{id}` — pipe the `.body` field to a temp file. Repo-relative `.tmp/` per `skills/terminal-hygiene/SKILL.md`'s single-source-of-truth scratch convention — `gh api` works fine with a relative path.)
 - **When a sibling comment id was dispatched** (the spine's `slice_comment_id` was present at
   dispatch time), also fetch the sibling body the same way:
-  `gh api repos/{owner}/{repo}/issues/comments/{sibling-id} --jq .body > /tmp/sibling-body.md`
+  `gh api repos/{owner}/{repo}/issues/comments/{sibling-id} --jq .body > .tmp/sibling-body.md`
   Then run the identity check before concatenating — verify the sibling body carries a
   `<!-- frame-slices-{ID} -->` marker matching the dispatched issue number:
-  `grep -q -- "<!-- frame-slices-{issue-id} -->" /tmp/sibling-body.md || echo sibling-identity-mismatch`
+  `grep -q -- "<!-- frame-slices-{issue-id} -->" .tmp/sibling-body.md || echo sibling-identity-mismatch`
   If that check fails, report `sibling-identity-mismatch` to Conductor and stop — do not proceed
   to concatenation or invoke the lookup. If it passes, concatenate plan body then sibling body
   with a single blank line between them (plan body first):
-  `{ cat /tmp/plan-body.md; printf '\n\n'; cat /tmp/sibling-body.md; } > /tmp/lookup-body.md`
+  `{ cat .tmp/plan-body.md; printf '\n\n'; cat .tmp/sibling-body.md; } > .tmp/lookup-body.md`
 - **When no sibling id was dispatched** (legacy plan, no `slice_comment_id` on the spine), use
-  `/tmp/plan-body.md` directly as the lookup body — this is the unchanged single-fetch shape.
+  `.tmp/plan-body.md` directly as the lookup body — this is the unchanged single-fetch shape.
 - Use the `Bash` tool to invoke the lookup against whichever body was produced above
-  (`/tmp/lookup-body.md` when a sibling was fetched, `/tmp/plan-body.md` otherwise):
+  (`.tmp/lookup-body.md` when a sibling was fetched, `.tmp/plan-body.md` otherwise):
   `pwsh -File .github/scripts/lib/frame-spine-core.ps1 -Op Lookup -CommentBodyPath {path} -GeneratedAt {generated_at} -StepId {id} -Format Json`
 - Parse the JSON `status` field to determine the outcome. Do **not** branch on exit code alone —
   `stale-spine` exits 0. See the Exit Codes table in `SKILL.md` for the complete list.
