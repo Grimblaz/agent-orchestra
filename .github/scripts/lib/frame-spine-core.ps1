@@ -444,10 +444,45 @@ function Resolve-FSCCommentBodyPath {
 }
 
 function script:ConvertTo-FSCSpineLookupJsonLines {
-    param([Parameter(Mandatory)][hashtable]$Data)
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Data)
 
     $json = $Data | ConvertTo-Json -Compress -Depth 5
     return [string[]]@($json)
+}
+
+function script:New-FSCLookupStatusResult {
+    <#
+    .SYNOPSIS
+        Builds the ExitCode/Lines result pair for a Lookup CLI status branch
+        in either Text or Json -Format, from one ordered field set.
+    .DESCRIPTION
+        Every non-'ok' status branch in Invoke-FSCSpineLookupCli emits the
+        same `status` field plus zero or more auxiliary fields, once as
+        Json (via ConvertTo-FSCSpineLookupJsonLines) and once as `key:
+        value` text lines in the same field order. Centralizing that here
+        keeps the two renderings from drifting apart as new statuses are
+        added. The 'ok' status keeps its own branch — its Text rendering is
+        a multi-line `slice: |` block, not a flat field list.
+    .PARAMETER Data
+        Ordered field set; iteration order is the Text-line and (where the
+        renderer preserves it) Json key order. `status` is conventionally
+        the first key.
+    #>
+    param(
+        [Parameter(Mandatory)][int]$ExitCode,
+        [Parameter(Mandatory)][string]$Format,
+        [Parameter(Mandatory)][System.Collections.Specialized.OrderedDictionary]$Data
+    )
+
+    if ($Format -eq 'Json') {
+        return [pscustomobject]@{ ExitCode = $ExitCode; Lines = script:ConvertTo-FSCSpineLookupJsonLines -Data $Data }
+    }
+
+    $lines = [System.Collections.Generic.List[string]]::new()
+    foreach ($key in $Data.Keys) {
+        $lines.Add("${key}: $($Data[$key])") | Out-Null
+    }
+    return [pscustomobject]@{ ExitCode = $ExitCode; Lines = [string[]]$lines.ToArray() }
 }
 
 function script:Get-FSCSliceSiblingGeneratedAt {
@@ -496,35 +531,21 @@ function Invoke-FSCSpineLookupCli {
 
     $spineBlock = Get-FSCSpineBlock -CommentBody $commentBody
     if ($null -eq $spineBlock) {
-        if ($Format -eq 'Json') {
-            return [pscustomobject]@{ ExitCode = 1; Lines = script:ConvertTo-FSCSpineLookupJsonLines -Data @{ status = 'missing-spine' } }
-        }
-        $lines.Add('status: missing-spine') | Out-Null
-        return [pscustomobject]@{ ExitCode = 1; Lines = [string[]]$lines.ToArray() }
+        return script:New-FSCLookupStatusResult -ExitCode 1 -Format $Format -Data ([ordered]@{ status = 'missing-spine' })
     }
 
     $parsedSpine = ConvertFrom-FSCSpineYaml -SpineBlock $spineBlock
     if ($null -eq $parsedSpine) {
-        if ($Format -eq 'Json') {
-            return [pscustomobject]@{ ExitCode = 1; Lines = script:ConvertTo-FSCSpineLookupJsonLines -Data @{ status = 'invalid-spine' } }
-        }
-        $lines.Add('status: invalid-spine') | Out-Null
-        return [pscustomobject]@{ ExitCode = 1; Lines = [string[]]$lines.ToArray() }
+        return script:New-FSCLookupStatusResult -ExitCode 1 -Format $Format -Data ([ordered]@{ status = 'invalid-spine' })
     }
 
     $currentGeneratedAt = script:Get-FSCScalarValue -Block $spineBlock -Name 'generated_at'
     if ($currentGeneratedAt -ne $GeneratedAt) {
-        if ($Format -eq 'Json') {
-            return [pscustomobject]@{ ExitCode = 0; Lines = script:ConvertTo-FSCSpineLookupJsonLines -Data @{
-                status                  = 'stale-spine'
-                dispatched_generated_at = $GeneratedAt
-                current_generated_at    = $currentGeneratedAt
-            } }
-        }
-        $lines.Add('status: stale-spine') | Out-Null
-        $lines.Add("dispatched_generated_at: $GeneratedAt") | Out-Null
-        $lines.Add("current_generated_at: $currentGeneratedAt") | Out-Null
-        return [pscustomobject]@{ ExitCode = 0; Lines = [string[]]$lines.ToArray() }
+        return script:New-FSCLookupStatusResult -ExitCode 0 -Format $Format -Data ([ordered]@{
+            status                  = 'stale-spine'
+            dispatched_generated_at = $GeneratedAt
+            current_generated_at    = $currentGeneratedAt
+        })
     }
 
     # Spine/slice-sibling drift cross-check (863-D3/AC5). Body-content check only — no new
@@ -535,72 +556,49 @@ function Invoke-FSCSpineLookupCli {
     if (-not [string]::IsNullOrWhiteSpace($parsedSpine.SliceCommentId)) {
         $siblingGeneratedAt = script:Get-FSCSliceSiblingGeneratedAt -CommentBody $commentBody
         if ($null -eq $siblingGeneratedAt) {
-            if ($Format -eq 'Json') {
-                return [pscustomobject]@{ ExitCode = 1; Lines = script:ConvertTo-FSCSpineLookupJsonLines -Data @{
-                    status               = 'sibling-unstamped'
-                    slice_comment_id     = $parsedSpine.SliceCommentId
-                    current_generated_at = $currentGeneratedAt
-                } }
-            }
-            $lines.Add('status: sibling-unstamped') | Out-Null
-            $lines.Add("slice_comment_id: $($parsedSpine.SliceCommentId)") | Out-Null
-            $lines.Add("current_generated_at: $currentGeneratedAt") | Out-Null
-            return [pscustomobject]@{ ExitCode = 1; Lines = [string[]]$lines.ToArray() }
+            return script:New-FSCLookupStatusResult -ExitCode 1 -Format $Format -Data ([ordered]@{
+                status               = 'sibling-unstamped'
+                slice_comment_id     = $parsedSpine.SliceCommentId
+                current_generated_at = $currentGeneratedAt
+            })
         }
 
         if ($siblingGeneratedAt -ne $currentGeneratedAt) {
-            if ($Format -eq 'Json') {
-                return [pscustomobject]@{ ExitCode = 0; Lines = script:ConvertTo-FSCSpineLookupJsonLines -Data @{
-                    status               = 'stale-spine'
-                    current_generated_at = $currentGeneratedAt
-                    sibling_generated_at = $siblingGeneratedAt
-                } }
-            }
-            $lines.Add('status: stale-spine') | Out-Null
-            $lines.Add("current_generated_at: $currentGeneratedAt") | Out-Null
-            $lines.Add("sibling_generated_at: $siblingGeneratedAt") | Out-Null
-            return [pscustomobject]@{ ExitCode = 0; Lines = [string[]]$lines.ToArray() }
+            return script:New-FSCLookupStatusResult -ExitCode 0 -Format $Format -Data ([ordered]@{
+                status               = 'stale-spine'
+                current_generated_at = $currentGeneratedAt
+                sibling_generated_at = $siblingGeneratedAt
+            })
         }
     }
 
     $sliceBlocks = @(Get-FSCSliceBlocksByStepId -CommentBody $commentBody -StepId $StepId)
     if ($sliceBlocks.Count -eq 0) {
-        if ($Format -eq 'Json') {
-            return [pscustomobject]@{ ExitCode = 1; Lines = script:ConvertTo-FSCSpineLookupJsonLines -Data @{
-                status  = 'missing-slice'
-                step_id = $StepId
-            } }
-        }
-        $lines.Add('status: missing-slice') | Out-Null
-        $lines.Add("step_id: $StepId") | Out-Null
-        return [pscustomobject]@{ ExitCode = 1; Lines = [string[]]$lines.ToArray() }
+        return script:New-FSCLookupStatusResult -ExitCode 1 -Format $Format -Data ([ordered]@{
+            status  = 'missing-slice'
+            step_id = $StepId
+        })
     }
 
     # Duplicate step_id across the concatenated corpus (judge-sustained M10): the spine YAML
     # parser fails loud on a duplicate slice key (:230, invalid-spine); mirror that discipline
     # here instead of silently first-winning on $sliceBlocks[0].
     if ($sliceBlocks.Count -gt 1) {
-        if ($Format -eq 'Json') {
-            return [pscustomobject]@{ ExitCode = 1; Lines = script:ConvertTo-FSCSpineLookupJsonLines -Data @{
-                status  = 'duplicate-slice-id'
-                step_id = $StepId
-                count   = $sliceBlocks.Count
-            } }
-        }
-        $lines.Add('status: duplicate-slice-id') | Out-Null
-        $lines.Add("step_id: $StepId") | Out-Null
-        $lines.Add("count: $($sliceBlocks.Count)") | Out-Null
-        return [pscustomobject]@{ ExitCode = 1; Lines = [string[]]$lines.ToArray() }
+        return script:New-FSCLookupStatusResult -ExitCode 1 -Format $Format -Data ([ordered]@{
+            status  = 'duplicate-slice-id'
+            step_id = $StepId
+            count   = $sliceBlocks.Count
+        })
     }
 
     if ($Format -eq 'Json') {
         $sliceContent = script:ConvertTo-FSCNormalizedText -Text $sliceBlocks[0]
-        return [pscustomobject]@{ ExitCode = 0; Lines = script:ConvertTo-FSCSpineLookupJsonLines -Data @{
+        return [pscustomobject]@{ ExitCode = 0; Lines = script:ConvertTo-FSCSpineLookupJsonLines -Data ([ordered]@{
             status       = 'ok'
             step_id      = $StepId
             generated_at = $GeneratedAt
             slice        = $sliceContent
-        } }
+        }) }
     }
 
     $lines.Add('status: ok') | Out-Null

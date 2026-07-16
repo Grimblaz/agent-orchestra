@@ -117,14 +117,16 @@ plan-issue comment body.
 Always parse the JSON `status` field to determine the lookup outcome. Do not
 branch on exit code alone — `stale-spine` exits 0, not 1.
 
-| Status          | Exit code | Meaning                                                       |
-| --------------- | --------- | ------------------------------------------------------------- |
-| `ok`            | 0         | Slice retrieved successfully; `slice` field contains content. |
-| `stale-spine`   | 0         | Dispatched spine is no longer current; return to Conductor.   |
-| `missing-spine` | 1         | Comment body contains no `<!-- frame-spine -->` block.        |
-| `invalid-spine` | 1         | Spine block is present but malformed (parse error).           |
-| `missing-slice` | 1         | Spine is valid but the requested step id was not found.       |
-| `error`         | 1         | Unexpected error; `message` field contains the reason.        |
+| Status                | Exit code | Meaning                                                                                                    |
+| --------------------- | --------- | ------------------------------------------------------------------------------------------------------------ |
+| `ok`                  | 0         | Slice retrieved successfully; `slice` field contains content.                                             |
+| `stale-spine`         | 0         | Dispatched spine is no longer current, or the fetched sibling's `frame-slices-generated-at` stamp diverges from the spine's `generated_at`; return to Conductor. |
+| `missing-spine`       | 1         | Comment body contains no `<!-- frame-spine -->` block.                                                    |
+| `invalid-spine`       | 1         | Spine block is present but malformed (parse error).                                                       |
+| `sibling-unstamped`   | 1         | Spine carries `slice_comment_id` but the concatenated body has no `frame-slices-generated-at` marker — a writer defect, not legacy history (863-D3/AC5). |
+| `missing-slice`       | 1         | Spine is valid but the requested step id was not found.                                                   |
+| `duplicate-slice-id`  | 1         | The concatenated corpus carries two or more `<!-- frame-slice -->` blocks for the requested step id.      |
+| `error`               | 1         | Unexpected error; `message` field contains the reason.                                                    |
 
 Wrapper-level error codes (when the outer process fails before the script
 can run) are surfaced by the platform shim — see `platforms/copilot.md` and
