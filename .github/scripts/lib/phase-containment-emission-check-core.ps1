@@ -2320,6 +2320,44 @@ function Get-EmissionGap {
     $sawRealHeadCorrupt = $false
     $sawDecoyAmbiguous = $false
 
+    # 863-s3: the 811-D1 fallback below fires for a plan body carrying BOTH
+    # the `<!-- plan-issue-` pointer marker and the `**Plan Stress-Test**`
+    # heading with no real judge-rulings head of its OWN. Post-#863-split,
+    # `plan-authoring/SKILL.md` appends the phase-containment blocks and the
+    # judge-rulings head to a SIBLING comment, and only AFTER Post-Judge
+    # Reconciliation — so pointer-written/head-absent on the plan body is the
+    # plan's own MANDATED SEQUENCE, not a defect. Suppress this body's
+    # would-be head-missing contribution ONLY WHEN at least one OTHER body in
+    # this same -Bodies set already carries a real, vocab-gate-passing
+    # judge-rulings head (Get-RealJudgeRulingsHeadMatches) — never on the
+    # pointer's mere presence, since a pointer-present + sibling
+    # headless/deleted/corrupt corpus must still surface head-missing.
+    #
+    # This lives at the AGGREGATION SEAM (this function), never inside
+    # Test-EmissionMarkerPresent (judge-sustained M1): that function's
+    # parameter is a single [string]$Body and is structurally unable to ask
+    # "did some OTHER body on this issue supply the real head?" Mirrors the
+    # 817-D1 aggregation-seam precedent below (the CR-8 seam's own comment,
+    # "extend the unpinned sibling, never the pinned function").
+    #
+    # Computed once, up front, rather than per-body: a fallback-firing body
+    # is guaranteed to have zero real heads of its own (that is WHY the
+    # fallback fired — see $hasRealHead below), so "some OTHER body has a
+    # real head" and "ANY body in $Bodies has a real head" are equivalent
+    # for that body. Scoped to plan-stress-test only — the only surface
+    # whose Test-EmissionMarkerPresent has a fallback path at all (code-
+    # review and design-challenge marker presence is always backed by a
+    # real head or its own direct regex match).
+    $anySiblingHasRealHead = $false
+    if ($Surface -eq 'plan-stress-test') {
+        foreach ($candidateBody in $Bodies) {
+            if ((Get-RealJudgeRulingsHeadMatches -Body $candidateBody).Count -gt 0) {
+                $anySiblingHasRealHead = $true
+                break
+            }
+        }
+    }
+
     foreach ($body in $Bodies) {
         $bodyHasMarker = Test-EmissionMarkerPresent -Surface $Surface -Body $body
 
@@ -2364,8 +2402,8 @@ function Get-EmissionGap {
 
             $sustainedResult = Get-SustainedFindingCount -Surface $Surface -Body $body
             if ($sustainedResult.ParseStatus -eq 'could-not-verify') {
-                $anyCouldNotVerify = $true
                 if ($hasRealHead) {
+                    $anyCouldNotVerify = $true
                     if (-not $isDesignChallenge -and $realHeadMatches.Count -ge 2) {
                         # The M1 duplicate-head-guard case: 2+ real heads is
                         # exactly the condition Get-JudgeRulingsIsolatedRegion
@@ -2391,7 +2429,27 @@ function Get-EmissionGap {
                         $sawRealHeadCorrupt = $true
                     }
                 }
+                elseif ($anySiblingHasRealHead) {
+                    # 863-s3 suppression: this body's 811-D1 fallback fired
+                    # (pointer marker + prose heading present, no real head of
+                    # its OWN — $hasRealHead is false, so this branch is only
+                    # reachable for plan-stress-test, the fallback's only
+                    # surface), but at least one OTHER body in this -Bodies
+                    # set already carries a real, vocab-gate-passing
+                    # judge-rulings head. Post-#863-split this is the plan's
+                    # own mandated sequence (the ledger legitimately moved to
+                    # a sibling), not a defect — do NOT set
+                    # $anyCouldNotVerify or $sawFallbackFired for this body.
+                    # $sustainedResult.SustainedCount is always 0 on
+                    # could-not-verify (Get-SustainedFindingCount's own
+                    # invariant), so the unconditional accumulation below
+                    # cannot leak a spurious count from this suppressed body.
+                }
                 else {
+                    # No sibling supplies a real head either — the pointer is
+                    # unsubstantiated (sibling headless/deleted/corrupt, or a
+                    # genuinely orphaned plan). head-missing must stand.
+                    $anyCouldNotVerify = $true
                     $sawFallbackFired = $true
                 }
             }

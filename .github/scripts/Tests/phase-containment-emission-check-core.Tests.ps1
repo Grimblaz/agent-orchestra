@@ -443,6 +443,25 @@ $script:ProseOnlyPlanStressTestBody = @'
 - Challenge M2 (another finding) - Prosecution: SS med - Post-judge: **defense-sustained** - Disposition: **dismiss**.
 '@
 
+# 863-s3: the post-split shape — a plan comment carrying the pointer marker
+# (`phase-containment-ledger-ref`, per the s5 writer contract's expected
+# literal) AND the fallback-triggering plan-issue marker + heading, but with
+# its own judge-rulings head and phase-containment blocks moved OFF this body
+# entirely (co-moved to the sibling per 863-D4). The pointer's mere PRESENCE
+# must never be trusted on its own — Get-EmissionGap must check whether some
+# OTHER body in the same -Bodies set actually supplies a real head, not
+# whether this body merely claims one exists elsewhere.
+$script:PlanWithLedgerRefPointerBody = @'
+<!-- plan-issue-863 -->
+<!-- phase-containment-ledger-ref: 999001 -->
+
+## Plan: Split the plan comment by reader (#863)
+
+**Plan Stress-Test** (summary of Code-Critic review via `skills/adversarial-review/platforms/claude.md` `standard` adapter)
+
+Judge: 2 sustained, 1 defense-sustained. See sibling comment for the full judge-rulings block.
+'@
+
 # Chatter that merely discusses the "Plan Stress-Test" heading in prose
 # (e.g. explaining the convention) with NO `<!-- plan-issue-` marker at all.
 # Must NOT trigger the fallback (both conditions are required together).
@@ -2383,6 +2402,42 @@ Describe '811-D1: Get-EmissionGap Reason field (head-missing vs head-corrupt vs 
         $result = Get-EmissionGap -Bodies @($script:Pr775Body) -Id 775 -Surface 'code-review'
         $result.ParseStatus | Should -Be 'ok'
         $result.Reason | Should -Be 'ok'
+    }
+}
+
+Describe '863-s3: Get-EmissionGap suppresses head-missing ONLY when a sibling body passes the real judge-rulings vocab gate' {
+    It 'regression: a pointer marker (phase-containment-ledger-ref) on the plan body does NOT by itself suppress head-missing when no OTHER body in -Bodies supplies a real head (this is exactly what the REJECTED Test-EmissionMarkerPresent-based design would have gotten wrong: trusting the pointers mere presence would have reported this body as no-marker/ordinary-chatter and produced a false ok / sustained=0 / blocks=0)' {
+        $result = Get-EmissionGap -Bodies @($script:PlanWithLedgerRefPointerBody) -Id 863 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.Reason | Should -Be 'head-missing'
+    }
+
+    It 'regression: the pointer-bearing plan body plus an UNRELATED sibling that also has no real head still reports head-missing (an extra non-qualifying sibling must not accidentally suppress)' {
+        $result = Get-EmissionGap -Bodies @($script:PlanWithLedgerRefPointerBody, $script:ChatterMentioningHeadingNoMarkerBody) -Id 863 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.Reason | Should -Be 'head-missing'
+    }
+
+    It 'split-shape corpus: the pointer-bearing plan body PLUS a separate sibling body carrying a real, vocab-gate-passing judge-rulings head reports Reason ok, with SustainedCount reconciled to the sibling alone' {
+        $result = Get-EmissionGap -Bodies @($script:PlanWithLedgerRefPointerBody, $script:PlanStressTestBody) -Id 863 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Reason | Should -Be 'ok'
+        $result.SustainedCount | Should -Be 2
+        $result.BlockCount | Should -Be 0
+        $result.Gap | Should -Be 2
+    }
+
+    It 'split-shape corpus is order-independent: sibling-then-plan produces the identical ok/Reason/SustainedCount result' {
+        $result = Get-EmissionGap -Bodies @($script:PlanStressTestBody, $script:PlanWithLedgerRefPointerBody) -Id 863 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Reason | Should -Be 'ok'
+        $result.SustainedCount | Should -Be 2
+    }
+
+    It 'a sibling head that is present but fails to parse (head-corrupt) still counts as passing the vocab gate and suppresses the plan bodys head-missing (the contract keys off Get-RealJudgeRulingsHeadMatches, not off a successful parse) — the aggregate reports the siblings own head-corrupt instead' {
+        $result = Get-EmissionGap -Bodies @($script:PlanWithLedgerRefPointerBody, $script:UnknownVocabularyBody) -Id 863 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.Reason | Should -Be 'head-corrupt'
     }
 }
 
