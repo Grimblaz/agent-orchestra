@@ -7,7 +7,18 @@
     embedded YAML blocks. Uses a 1-hour cache. Falls back from GraphQL to REST
     when GraphQL fails. Returns an array of parsed attribution hashtables or a
     timed_out sentinel.
+
+    The fetch budget and cache TTL defaults live in lib/cost-telemetry-budgets.ps1
+    (issue #496), dot-sourced below. They are a GitHub-API budget and are NOT part
+    of the walker budget chain enforced by Tests/cost-telemetry-budgets.Tests.ps1;
+    #496 centralized the literals only and deliberately left the values unchanged.
 #>
+
+# Issue #496: budget/TTL constants. Dot-sourced by this file rather than by its
+# callers because it is a dependency-free set of constant assignments (so this is
+# idempotent), and because an unresolved constant would silently degrade the
+# fetch budget to 0 via [int]$null rather than failing loudly.
+. (Join-Path $PSScriptRoot 'cost-telemetry-budgets.ps1')
 
 # -------------------------------------------------------------------------
 # Private helpers (script-scope so tests can dot-source and call them)
@@ -538,7 +549,8 @@ function Get-CostRollingHistory {
         When set, deletes the cache and fetches fresh data even if within TTL.
     .PARAMETER TimeoutSeconds
         Per-run budget in seconds. If the budget is exceeded at a yield point,
-        returns the timed_out sentinel. Default: 10.
+        returns the timed_out sentinel. Default:
+        $script:CostRollingHistoryFetchBudgetSeconds (lib/cost-telemetry-budgets.ps1).
     .PARAMETER RepoRoot
         Absolute path to the repository root. Defaults to git rev-parse output.
     #>
@@ -548,7 +560,7 @@ function Get-CostRollingHistory {
         [int]$Limit = 30,
         [string]$CachePath = '',
         [switch]$ForceRefresh,
-        [int]$TimeoutSeconds = 10,
+        [int]$TimeoutSeconds = $script:CostRollingHistoryFetchBudgetSeconds,
         [string]$RepoRoot = ''
     )
 
@@ -576,7 +588,7 @@ function Get-CostRollingHistory {
         Remove-Item -LiteralPath $CachePath -Force -ErrorAction SilentlyContinue
     }
 
-    # ---- Cache hit: return if fresh (< 1 hour old) ----
+    # ---- Cache hit: return if fresh (younger than the TTL constant) ----
     if (-not $ForceRefresh -and (Test-Path -LiteralPath $CachePath)) {
         try {
             $cacheRaw = Get-Content -LiteralPath $CachePath -Raw -ErrorAction Stop
@@ -600,7 +612,7 @@ function Get-CostRollingHistory {
                     ? $generatedAt `
                     : $generatedAt.ToUniversalTime()
                 $age = (Get-Date).ToUniversalTime() - $generatedAtUtc
-                if ($age.TotalHours -lt 1.0) {
+                if ($age.TotalHours -lt $script:CostRollingHistoryCacheTtlHours) {
                     $cachedEntries = @()
                     if ($cacheData.ContainsKey('entries') -and $null -ne $cacheData['entries']) {
                         $cachedEntries = @($cacheData['entries'])

@@ -14,7 +14,8 @@
 
     Honours two test-only env-var hooks (see TEST HOOK CONTRACT):
       - FRAME_CREDIT_LEDGER_TEST_NO_SLEEP=1                 skip Start-Sleep on retry
-      - FRAME_CREDIT_LEDGER_TEST_BUDGET_SECONDS             override the 30s outer budget
+      - FRAME_CREDIT_LEDGER_TEST_BUDGET_SECONDS             override the outer budget
+                                                            (default: lib/cost-telemetry-budgets.ps1)
       - FRAME_CREDIT_LEDGER_TEST_SKIP_ACTIVATION_CUTOVER=1  bypass enforce-activation.yaml check
 
     `gh` is resolved via PATH/Get-Command so test mocks installed as
@@ -52,6 +53,14 @@ try {
     . (Join-Path $PSScriptRoot 'lib/find-or-upsert-comment.ps1')
     . (Join-Path $PSScriptRoot 'lib/frame-credit-ledger-core.ps1')
     . (Join-Path $PSScriptRoot 'lib/frame-spine-core.ps1')
+    # cost-telemetry-budgets.ps1 (issue #496): the cost-telemetry budget chain
+    # constants. Loaded HERE, in the hard-required block, rather than in the
+    # fail-open cost block below: the outer watchdog budget is consumed by the
+    # top-level execution block, which runs even when cost composition is
+    # disabled. If this load were fail-open, a cost-lib failure would leave
+    # $script:CostTelemetryOuterBudgetSeconds unset and silently collapse the
+    # outer budget to 0, killing the worker immediately.
+    . (Join-Path $PSScriptRoot 'lib/cost-telemetry-budgets.ps1')
 }
 catch {
     [Console]::Error.WriteLine("frame-credit-ledger: library load failed: $($_.Exception.Message)")
@@ -1387,7 +1396,11 @@ function Invoke-FrameCreditLedger {
 $isDotSourced = ($MyInvocation.InvocationName -eq '.')
 
 if (-not $isDotSourced) {
-    $budgetSeconds = 30
+    # Outer budget: the hard wall enforced by the WaitOne/Stop watchdog below.
+    # Default lives in lib/cost-telemetry-budgets.ps1 (issue #496) alongside the
+    # inner knobs it must contain — raising an inner budget without raising this
+    # one changes nothing, because this wall still stops the worker.
+    $budgetSeconds = $script:CostTelemetryOuterBudgetSeconds
     if (-not [string]::IsNullOrWhiteSpace($env:FRAME_CREDIT_LEDGER_TEST_BUDGET_SECONDS)) {
         $parsedBudget = 0
         if ([int]::TryParse($env:FRAME_CREDIT_LEDGER_TEST_BUDGET_SECONDS, [ref]$parsedBudget) -and $parsedBudget -gt 0) {

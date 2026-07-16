@@ -49,7 +49,28 @@
                                         post-review root-cause history)
     This file (cost-session-render.ps1) is dot-sourced last, after all of the
     above.
+
+    ONE EXCEPTION to caller-owns-dependencies: lib/cost-telemetry-budgets.ps1
+    (issue #496) is dot-sourced by this file itself, immediately below. That
+    file is a dependency-free set of constant assignments, so dot-sourcing it
+    here is idempotent and order-independent — and doing so means the budget
+    constants can never resolve to $null for a caller that did not know to load
+    them. That failure mode is not cosmetic: a $null default would fail the
+    mandatory [int] binding on Get-FCLCostWalkerTimeoutSeconds, throw, and get
+    swallowed by the fail-open catch inside this function, silently losing the
+    cost section. Callers therefore do NOT need to add it to the list above.
+
+    NOTE (apostrophe hygiene): comment prose added to this file should avoid
+    possessive apostrophes. audit-hub-artifact-paths.ps1 extracts PowerShell
+    path references using a naive single-quote pairing regex that treats EVERY
+    apostrophe — including one inside a comment — as a string delimiter, so
+    adding an odd number of them re-pairs every quoted span later in the file
+    and corrupts the extracted inventory. See the header of
+    lib/cost-telemetry-budgets.ps1 for the full explanation.
 #>
+
+# See the ONE EXCEPTION note above: dot-sourced here, not by the caller.
+. (Join-Path $PSScriptRoot 'cost-telemetry-budgets.ps1')
 
 function Invoke-CostSessionRender {
     <#
@@ -133,7 +154,7 @@ function Invoke-CostSessionRender {
         [Nullable[datetime]]$CorroborationWindowEnd = $null
     )
 
-    $costBudgetSeconds = 19
+    $costBudgetSeconds = $script:CostTelemetryCostSubBudgetSeconds
     $costStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 
     # $costSection and $degradedMarker are the only pre-declared locals here.
@@ -166,10 +187,13 @@ function Invoke-CostSessionRender {
     try {
         # Env override for the cost render budget (issue #825 CE Gate): on a
         # large-profile machine (large ~/.claude/projects) the walk can legitimately
-        # exceed the 19s default before step-6g composes the section, so the section
-        # can never be rendered without a bigger budget. Resolved INSIDE this try so an
-        # unreachable FCL helper degrades to the 19s default via the outer fail-open
-        # catch (preserving the #824 dependency-chain contract) instead of throwing.
+        # exceed the default before step-6g composes the section, so the section
+        # can never be rendered without a bigger budget. Issue #496 raised that
+        # default to 270s and moved it to lib/cost-telemetry-budgets.ps1, where it
+        # is kept large enough to contain both walker timeouts plus a render
+        # margin. Resolved INSIDE this try so an unreachable FCL helper degrades to
+        # the constant default via the outer fail-open catch (preserving the #824
+        # dependency-chain contract) instead of throwing.
         # Reuses Get-FCLCostWalkerTimeoutSeconds' exact shape, matching the walker-timeout
         # overrides below: env present + valid positive int -> use it; else the default.
         $costBudgetSeconds = script:Get-FCLCostWalkerTimeoutSeconds -EnvironmentVariableName 'FRAME_CREDIT_LEDGER_TEST_COST_BUDGET_SECONDS' -DefaultSeconds $costBudgetSeconds
@@ -238,8 +262,13 @@ function Invoke-CostSessionRender {
                 $walkParameters['IssueNumber'] = [int]$resolvedIssueNumber
             }
 
-            $claudeTimeoutSeconds = script:Get-FCLCostWalkerTimeoutSeconds -EnvironmentVariableName 'FRAME_CREDIT_LEDGER_TEST_CLAUDE_WALKER_TIMEOUT_SECONDS' -DefaultSeconds 10
-            $copilotTimeoutSeconds = script:Get-FCLCostWalkerTimeoutSeconds -EnvironmentVariableName 'FRAME_CREDIT_LEDGER_TEST_COPILOT_WALKER_TIMEOUT_SECONDS' -DefaultSeconds 6
+            # Walker ceilings (issue #496): defaults live in
+            # lib/cost-telemetry-budgets.ps1 and must sum, plus a render margin,
+            # to no more than $costBudgetSeconds above — see the header in that
+            # file and Tests/cost-telemetry-budgets.Tests.ps1 for the nesting
+            # contract.
+            $claudeTimeoutSeconds = script:Get-FCLCostWalkerTimeoutSeconds -EnvironmentVariableName 'FRAME_CREDIT_LEDGER_TEST_CLAUDE_WALKER_TIMEOUT_SECONDS' -DefaultSeconds $script:CostTelemetryClaudeWalkerTimeoutSeconds
+            $copilotTimeoutSeconds = script:Get-FCLCostWalkerTimeoutSeconds -EnvironmentVariableName 'FRAME_CREDIT_LEDGER_TEST_COPILOT_WALKER_TIMEOUT_SECONDS' -DefaultSeconds $script:CostTelemetryCopilotWalkerTimeoutSeconds
 
             $claudeWalk = script:Invoke-FCLCostWalkerWithTimeout `
                 -WalkerName 'claude' `
