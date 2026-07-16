@@ -422,6 +422,24 @@ families:
       normalized for path-family clustering. Any agent that tries to Read a path in this
       family when no session is active performs a wasted tool call."
 
+  "/tmp/*.md":
+    claude_resolves: none
+    copilot_resolves: none
+    requires_version_bump: false
+    experience: wasted-tool-call
+    examples:
+      - /tmp/plan-body.md
+      - /tmp/sibling-body.md
+      - /tmp/lookup-body.md
+    notes: "Local Bash-tool intermediate files used only within a single
+      frame-spine-lookup fetch sequence (issue #863 s6) — `gh api` writes a comment
+      body to one of these paths, an optional identity check and concatenation step
+      reads/combines them, and frame-spine-core.ps1 -Op Lookup consumes the result via
+      -CommentBodyPath. Ephemeral to that one Bash sequence on one machine; never a
+      durable artifact, never committed, and not resolvable across turns, sessions, or
+      specialists. An agent that tries to Read one of these paths outside the exact
+      fetch-then-lookup sequence that created it performs a wasted tool call."
+
   ".copilot-tracking/*.yml":
     claude_resolves: none
     copilot_resolves: none

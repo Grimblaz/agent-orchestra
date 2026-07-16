@@ -1,6 +1,6 @@
 <!-- audit-meta
-last-verified: cc027b0284f98c6f81b0ca3e1a15231819201341
-generated-at: 2026-07-05T17:28:30Z
+last-verified: cbcd3b14e05c201f559ac420cd9667aa38090b7b
+generated-at: 2026-07-16T21:39:16Z
 -->
 
 ## Purpose
@@ -343,6 +343,18 @@ Copilot always reads from the source tree in the hub repo. This dual-resolved be
   - `/memories/session/design-issue-{ID}.md`
   - `/memories/session/review-state-{ID}.md`
 - **notes**: Claude Code session-only memory files written during a live session. Not distribution artifacts and not committed to any repo. Placeholders {ID} and {N} are in the D2a set; {id} (lowercase), {scope}, {primary}, {secondary1}, {secondaryN} are session-scoped runtime tokens, not D2a-normalized. Only the canonical eight ({ID}, {PR}, {NUMBER}, {name}, {port}, {ISSUE_NUMBER}, {N}, {Surface}) are normalized for path-family clustering. Any agent that tries to Read a path in this family when no session is active performs a wasted tool call.
+
+### `/tmp/*.md`
+
+- **claude_resolves**: none
+- **copilot_resolves**: none
+- **requires_version_bump**: false
+- **experience**: wasted-tool-call
+- **examples**:
+  - `/tmp/plan-body.md`
+  - `/tmp/sibling-body.md`
+  - `/tmp/lookup-body.md`
+- **notes**: Local Bash-tool intermediate files used only within a single frame-spine-lookup fetch sequence (issue #863 s6) — `gh api` writes a comment body to one of these paths, an optional identity check and concatenation step reads/combines them, and frame-spine-core.ps1 -Op Lookup consumes the result via -CommentBodyPath. Ephemeral to that one Bash sequence on one machine; never a durable artifact, never committed, and not resolvable across turns, sessions, or specialists. An agent that tries to Read one of these paths outside the exact fetch-then-lookup sequence that created it performs a wasted tool call.
 
 ### `agents/*.agent.md`
 
