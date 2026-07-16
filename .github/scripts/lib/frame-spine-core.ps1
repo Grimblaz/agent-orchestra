@@ -187,6 +187,8 @@ function script:ConvertFrom-FSCSpineYamlInternal {
         $generatedAt = script:ConvertFrom-FSCGeneratedAt -Value $generatedAtValue
         if ($null -eq $generatedAt) { return $null }
 
+        $sliceCommentId = script:Get-FSCScalarValue -Block $normalized -Name 'slice_comment_id'
+
         $lines = $normalized -split "`n"
         $section = ''
         $portRawValues = [ordered]@{}
@@ -209,7 +211,7 @@ function script:ConvertFrom-FSCSpineYamlInternal {
                 continue
             }
 
-            if ($line -match '^(spine_schema_version|generated_at|coverage):\s*') {
+            if ($line -match '^(spine_schema_version|generated_at|coverage|slice_comment_id):\s*') {
                 continue
             }
 
@@ -318,11 +320,12 @@ function script:ConvertFrom-FSCSpineYamlInternal {
         }
 
         return [pscustomobject]@{
-            GeneratedAt   = $generatedAt
-            CanonicalYaml = $SpineBlock
-            Ports         = $ports
-            Slices        = [object[]]$slices.ToArray()
-            Metadata      = [pscustomobject]@{
+            GeneratedAt    = $generatedAt
+            CanonicalYaml  = $SpineBlock
+            Ports          = $ports
+            Slices         = [object[]]$slices.ToArray()
+            SliceCommentId = $sliceCommentId
+            Metadata       = [pscustomobject]@{
                 PortKeys      = [string[]]$portRawValues.Keys
                 PortRawValues = $portRawValues
                 SliceIds      = [string[]]$sliceOrder.ToArray()
@@ -412,10 +415,11 @@ function ConvertFrom-FSCSpineYaml {
     if ($null -eq $parsed) { return $null }
 
     return [pscustomobject]@{
-        GeneratedAt   = $parsed.GeneratedAt
-        CanonicalYaml = $parsed.CanonicalYaml
-        Ports         = $parsed.Ports
-        Slices        = $parsed.Slices
+        GeneratedAt    = $parsed.GeneratedAt
+        CanonicalYaml  = $parsed.CanonicalYaml
+        Ports          = $parsed.Ports
+        Slices         = $parsed.Slices
+        SliceCommentId = $parsed.SliceCommentId
     }
 }
 
