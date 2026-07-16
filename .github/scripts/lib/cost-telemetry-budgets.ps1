@@ -61,15 +61,50 @@
     it rather than reimplementing the shape.
 .NOTES
     Dot-sourced by (each dot-sources it directly rather than relying on a
-    caller, so the constants can never resolve to $null and silently degrade a
-    budget to 0):
-      - frame-credit-ledger.ps1        (outer budget; dot-sourced in the
-                                        hard-required lib block, NOT the
+    caller, so the constants resolve correctly wherever each site runs):
+      - frame-credit-ledger.ps1 (top level)   (outer budget; dot-sourced in
+                                        the hard-required lib block, NOT the
                                         fail-open cost block — the outer
                                         watchdog runs even when cost
                                         composition is disabled)
+      - frame-credit-ledger.ps1 (worker AddScript block)   (issue #496 C-1:
+                                        re-dot-sourced fresh INSIDE the cloned
+                                        worker runspace launched by
+                                        Invoke-FrameCreditLedger. The clone
+                                        built by New-FCLInitialSessionStateClone
+                                        copies function definitions and
+                                        `Get-Variable -Scope Global` only — it
+                                        never re-runs the top-level dot-source
+                                        statements of any given file. Under the
+                                        real `pwsh ./frame-credit-ledger.ps1`
+                                        child-script invocation shape, the
+                                        top-level $script: constants set by
+                                        this file are script-scoped, not
+                                        global, so without this second dot-
+                                        source site the worker would resolve
+                                        every constant to $null. A mandatory
+                                        [int] bound to $null does NOT throw:
+                                        it silently coerces to 0, so this gap
+                                        does not surface as an error — see the
+                                        header of cost-session-render.ps1 for
+                                        the full failure chain.)
       - lib/cost-session-render.ps1    (cost sub-budget, both walker timeouts)
       - lib/cost-rolling-history.ps1   (fetch budget, cache TTL)
+
+    IMPORTANT — this is NOT a blanket safety guarantee: the constants only
+    resolve correctly at a site that actually performs one of the dot-sources
+    above. A future call site that skips this file (a new runspace, a new
+    child process, a new caller that assumes some other site already loaded
+    it) can still observe $null-degraded-to-0 budgets exactly like the C-1
+    bug documented earlier in this header. Prefer dot-sourcing this file
+    directly at any new execution boundary over trusting that some caller
+    upstream already did it. Marshaling individual values through
+    Get-FCLCostScriptState (see cost-fcl-helpers.ps1, the #825/C3 precedent)
+    is the alternative mechanism, reserved for values living in function-heavy
+    files that are unsafe to re-source inside a worker (e.g. cost-walker.ps1)
+    — this constants-only file uses direct re-dot-sourcing instead because it
+    is side-effect-free and idempotent, so it is simpler and closes every
+    current and latent gap in this constant family at once.
 
     This file has no dependencies and assigns plain variables, so dot-sourcing
     it more than once in the same scope is idempotent and safe. The constants

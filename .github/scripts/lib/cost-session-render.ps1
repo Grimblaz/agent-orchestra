@@ -54,11 +54,17 @@
     (issue #496) is dot-sourced by this file itself, immediately below. That
     file is a dependency-free set of constant assignments, so dot-sourcing it
     here is idempotent and order-independent — and doing so means the budget
-    constants can never resolve to $null for a caller that did not know to load
-    them. That failure mode is not cosmetic: a $null default would fail the
-    mandatory [int] binding on Get-FCLCostWalkerTimeoutSeconds, throw, and get
-    swallowed by the fail-open catch inside this function, silently losing the
-    cost section. Callers therefore do NOT need to add it to the list above.
+    constants resolve correctly for a caller that did not know to load them
+    itself. That failure mode is not cosmetic: an unset constant resolves to
+    $null, and a $null bound to the mandatory [int] parameter on
+    Get-FCLCostWalkerTimeoutSeconds does NOT throw — PowerShell silently
+    coerces it to 0. No fail-open catch fires (nothing threw), so the resulting
+    0-second budget expires instantly and the cost section is dropped with no
+    error at all (issue #496 C-1: this is exactly how the worker-runspace clone
+    lost the cost section in production despite the dot-source in this file
+    being correct — see the worker AddScript block in frame-credit-ledger.ps1
+    for the runspace-boundary half of this same hazard). Callers therefore do
+    NOT need to add it to the list above.
 
     NOTE (apostrophe hygiene): comment prose added to this file should avoid
     possessive apostrophes. audit-hub-artifact-paths.ps1 extracts PowerShell
@@ -310,11 +316,14 @@ function Invoke-CostSessionRender {
         $costAttribution = Get-CostAttribution -Events $costEvents -RateTablePath (Join-Path $costScriptsDir 'lib/cost-rate-table.json')
         script:Set-FCLCostCoverageMetadata -Attribution $costAttribution -Events $costEvents -ClaudeWalk $claudeWalk -CopilotWalk $copilotWalk -CopilotOtelJsonlPath $copilotOtelJsonlPath
 
-        # 6c. Rolling history (has its own 10s timeout via Get-CostRollingHistory)
+        # 6c. Rolling history. The caller here overrides the default timeout of
+        # Get-CostRollingHistory with the centralized fetch-budget constant
+        # (capped to whatever cost budget remains) — the timeout does not come
+        # from the callee default.
         $rollingResult = @{ timed_out = $false; entries = @() }
         $remainingCostBudgetSeconds = script:Get-FCLRemainingCostBudgetSeconds -Stopwatch $costStopwatch -BudgetSeconds $costBudgetSeconds
         if ($remainingCostBudgetSeconds -gt 0) {
-            try { $rollingResult = Get-CostRollingHistory -TimeoutSeconds ([Math]::Min(10, $remainingCostBudgetSeconds)) }
+            try { $rollingResult = Get-CostRollingHistory -TimeoutSeconds ([Math]::Min($script:CostRollingHistoryFetchBudgetSeconds, $remainingCostBudgetSeconds)) }
             catch { $rollingResult = @{ timed_out = $true; entries = @() } }
         }
         script:Set-FCLRollingMetaCoverageCount -RollingResult $rollingResult -Attribution $costAttribution

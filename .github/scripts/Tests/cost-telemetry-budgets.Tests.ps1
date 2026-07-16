@@ -29,6 +29,7 @@ BeforeAll {
     # Dot-source the real constants file — no fixtures, no duplication of the
     # values. This test reads exactly what production reads.
     . $script:BudgetsPath
+    . (Join-Path $script:RepoRoot '.github/scripts/lib/cost-fcl-helpers.ps1')
 }
 
 Describe 'cost-telemetry budget chain contract (issue #496)' {
@@ -181,12 +182,25 @@ live in .github/scripts/lib/cost-telemetry-budgets.ps1.
             $content | Should -Match '\$TimeoutSeconds\s*=\s*\$script:CostRollingHistoryFetchBudgetSeconds'
             $content | Should -Match '\$age\.TotalHours\s+-lt\s+\$script:CostRollingHistoryCacheTtlHours'
         }
+
+        It 'resolves the rolling-history CALLER timeout in cost-session-render.ps1 from the constant (CR-1)' {
+            # The previous assertion above only checks the DEFINITION site
+            # (cost-rolling-history.ps1's own [TimeoutSeconds] parameter
+            # default). It never checked this CALLER site — the
+            # Get-CostRollingHistory call inside Invoke-CostSessionRender,
+            # which overrides that default with its own [Math]::Min(...)
+            # expression. A hardcoded literal 10 there silently bypassed the
+            # constant while every other assertion in this file stayed green,
+            # which is exactly how CR-1 shipped unnoticed.
+            $content = Get-Content -LiteralPath (Join-Path $script:RepoRoot '.github/scripts/lib/cost-session-render.ps1') -Raw
+            $content | Should -Match 'Get-CostRollingHistory\s+-TimeoutSeconds\s*\(\[Math\]::Min\(\s*\$script:CostRollingHistoryFetchBudgetSeconds\s*,' `
+                -Because 'the rolling-history caller in cost-session-render.ps1 must reference $script:CostRollingHistoryFetchBudgetSeconds, not a re-hardcoded literal'
+        }
     }
 
     Context 'env overrides still win over the constants (behavior preserved)' {
 
         It 'prefers a valid positive env override to the constant default' {
-            . (Join-Path $script:RepoRoot '.github/scripts/lib/cost-fcl-helpers.ps1')
             $previous = $env:FRAME_CREDIT_LEDGER_TEST_CLAUDE_WALKER_TIMEOUT_SECONDS
             try {
                 $env:FRAME_CREDIT_LEDGER_TEST_CLAUDE_WALKER_TIMEOUT_SECONDS = '7'
@@ -201,7 +215,6 @@ live in .github/scripts/lib/cost-telemetry-budgets.ps1.
         }
 
         It 'falls back to the constant default when the env override is absent or invalid' {
-            . (Join-Path $script:RepoRoot '.github/scripts/lib/cost-fcl-helpers.ps1')
             $previous = $env:FRAME_CREDIT_LEDGER_TEST_CLAUDE_WALKER_TIMEOUT_SECONDS
             try {
                 foreach ($invalid in @($null, '', 'not-an-int', '0', '-5')) {
@@ -221,6 +234,89 @@ live in .github/scripts/lib/cost-telemetry-budgets.ps1.
             finally {
                 $env:FRAME_CREDIT_LEDGER_TEST_CLAUDE_WALKER_TIMEOUT_SECONDS = $previous
             }
+        }
+    }
+}
+
+# Regression test for issue #496 C-1 (post-review fix). Every assertion above
+# either Should -Match's file TEXT or calls a function INLINE in this same
+# test process — neither crosses a runspace boundary, so neither could ever
+# have caught this bug class: 3818/3818 tests passed while production shipped
+# completely broken. This Describe block builds the SAME kind of runspace
+# clone frame-credit-ledger.ps1 builds for its worker, using the real
+# production clone function, and runs the LITERAL worker script-block text
+# extracted live from frame-credit-ledger.ps1 inside it. It is therefore RED
+# against the pre-fix file (the extracted block does not dot-source the
+# budgets file, so the constant is unset inside the clone) and GREEN after the
+# fix (the constant resolves to its real value).
+Describe 'cost-telemetry budget worker-runspace isolation (issue #496 C-1)' {
+
+    It 'resolves cost-telemetry budget constants inside the cloned worker runspace, not $null-degraded-to-0' {
+        $fclPath = Join-Path $script:RepoRoot '.github/scripts/frame-credit-ledger.ps1'
+        $fclContent = Get-Content -LiteralPath $fclPath -Raw
+
+        # Extract the worker AddScript({ ... }) block text via a balanced-
+        # brace scan (not a single-line regex) so this test tracks the real
+        # source even as the block grows across multiple lines.
+        $anchor = '$null = $worker.AddScript({'
+        $anchorIndex = $fclContent.IndexOf($anchor)
+        $anchorIndex | Should -BeGreaterThan -1 `
+            -Because 'the worker AddScript() call site must exist in frame-credit-ledger.ps1 — update this anchor if the worker construction is refactored'
+
+        $braceStart = $anchorIndex + $anchor.Length - 1
+        $depth = 0
+        $braceEnd = -1
+        for ($i = $braceStart; $i -lt $fclContent.Length; $i++) {
+            if ($fclContent[$i] -eq '{') { $depth++ }
+            elseif ($fclContent[$i] -eq '}') {
+                $depth--
+                if ($depth -eq 0) { $braceEnd = $i; break }
+            }
+        }
+        $braceEnd | Should -BeGreaterThan $braceStart -Because 'the worker AddScript() script block must have balanced braces'
+
+        $workerBlockText = $fclContent.Substring($braceStart, $braceEnd - $braceStart + 1)
+        $innerText = $workerBlockText.Substring(1, $workerBlockText.Length - 2)
+
+        # Swap the real pipeline call for a probe that reports back the
+        # resolved budget constant, so this test observes the SAME setup
+        # code (including the fix, if present) without running the full
+        # gh-dependent Invoke-FrameCreditLedger pipeline.
+        $probeMarker = 'Invoke-FrameCreditLedger -Pr $PrArg -Mode $ModeArg'
+        $innerText.Contains($probeMarker) | Should -BeTrue `
+            -Because 'the worker script block must still end by calling Invoke-FrameCreditLedger — update this probe marker if that call site changes'
+        $probeText = $innerText.Replace($probeMarker, 'return $script:CostTelemetryClaudeWalkerTimeoutSeconds')
+
+        # Real production clone mechanism (New-FCLInitialSessionStateClone,
+        # unmodified), real repo root, real marshaled cost-script state —
+        # exactly what frame-credit-ledger.ps1 builds for its own worker.
+        $costScriptState = script:Get-FCLCostScriptState
+        $iss = script:New-FCLInitialSessionStateClone
+        $rs = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace($iss)
+        $rs.Open()
+        $worker = [System.Management.Automation.PowerShell]::Create()
+        $worker.Runspace = $rs
+        try {
+            $null = $worker.AddScript($probeText).AddArgument(0).AddArgument('warn').AddArgument($script:RepoRoot).AddArgument($costScriptState)
+            $result = $worker.Invoke()
+
+            $worker.HadErrors | Should -BeFalse `
+                -Because ('worker probe threw: ' + (@($worker.Streams.Error) -join '; '))
+
+            $resolvedInsideWorker = @($result) | Select-Object -Last 1
+            $resolvedInsideWorker | Should -Be $script:CostTelemetryClaudeWalkerTimeoutSeconds -Because @"
+Inside the cloned worker runspace, `$script:CostTelemetryClaudeWalkerTimeoutSeconds
+must resolve to the same real constant value it has at the top level
+($($script:CostTelemetryClaudeWalkerTimeoutSeconds)s), not `$null (which
+silently coerces to 0 when bound to a mandatory [int] parameter, with no
+error). If this fails, the worker script block in frame-credit-ledger.ps1
+no longer re-dot-sources lib/cost-telemetry-budgets.ps1 before using the
+constants (issue #496 C-1).
+"@
+        }
+        finally {
+            try { $worker.Dispose() } catch { $null = $_ }
+            try { $rs.Close(); $rs.Dispose() } catch { $null = $_ }
         }
     }
 }

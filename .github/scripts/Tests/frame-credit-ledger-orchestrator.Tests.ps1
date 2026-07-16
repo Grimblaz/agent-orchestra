@@ -1596,6 +1596,13 @@ dispatch-cost-samples:
                 FRAME_CREDIT_LEDGER_TEST_NO_SLEEP              = '1'
                 FRAME_CREDIT_LEDGER_TEST_SKIP_ACTIVATION_CUTOVER = '1'
                 FRAME_ENFORCE                                  = '0'
+                # Issue #496 C-1 post-fix: this v4 body now engages the real
+                # cost walker inside the worker (previously it silently
+                # instant-timed-out due to the C-1 marshal bug). Bound both
+                # walker timeouts so this test stays fast regardless of the
+                # size of the local ~/.claude/projects transcript history.
+                FRAME_CREDIT_LEDGER_TEST_CLAUDE_WALKER_TIMEOUT_SECONDS  = '2'
+                FRAME_CREDIT_LEDGER_TEST_COPILOT_WALKER_TIMEOUT_SECONDS = '2'
             } `
                 -MockBootstrap $bootstrap
 
@@ -1683,6 +1690,9 @@ if (`$joined -match 'pr view \d+ --json body') {
                 -Pr 429 -Mode 'enforce' `
                 -Env @{
                 FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1'
+                # Issue #496 C-1 post-fix: see AC7 above for why this bound is needed now.
+                FRAME_CREDIT_LEDGER_TEST_CLAUDE_WALKER_TIMEOUT_SECONDS  = '2'
+                FRAME_CREDIT_LEDGER_TEST_COPILOT_WALKER_TIMEOUT_SECONDS = '2'
             } `
                 -MockBootstrap $bootstrap
 
@@ -1704,6 +1714,9 @@ if (`$joined -match 'pr view \d+ --json body') {
                 -Env @{
                 FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1'
                 PR_CREATED_AT                     = '2026-01-01T00:00:00Z'
+                # Issue #496 C-1 post-fix: see AC7 above for why this bound is needed now.
+                FRAME_CREDIT_LEDGER_TEST_CLAUDE_WALKER_TIMEOUT_SECONDS  = '2'
+                FRAME_CREDIT_LEDGER_TEST_COPILOT_WALKER_TIMEOUT_SECONDS = '2'
             } `
                 -MockBootstrap $bootstrap
 

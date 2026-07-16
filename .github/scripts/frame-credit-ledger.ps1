@@ -1503,6 +1503,24 @@ if (-not $isDotSourced) {
                     Set-Variable -Scope Script -Name $costStateName -Value $CostScriptStateArg[$costStateName]
                 }
                 $script:FrameCreditLedgerRepoRoot = $RepoRootArg
+                # C-1 fix (issue #496 post-review): New-FCLInitialSessionStateClone
+                # only copies function definitions and `Get-Variable -Scope Global`
+                # — it never re-runs any file's top-level dot-source statements.
+                # Under the real production invocation shape (`shell: pwsh` calling
+                # `./frame-credit-ledger.ps1` as a CHILD SCRIPT, not `pwsh -File`),
+                # the top-level `$script:CostTelemetry*` constants set by this
+                # file's own hard-required dot-source are script-scoped, not
+                # global, so they never reach this worker clone. A mandatory
+                # [int] parameter bound to the resulting $null does not throw —
+                # it silently coerces to 0, collapsing every walker budget to an
+                # instant timeout with no error. cost-telemetry-budgets.ps1 is a
+                # constants-only, side-effect-free file documented (see its own
+                # header) as safe to dot-source more than once in the same scope,
+                # so re-dot-source it fresh here rather than widening
+                # Get-FCLCostScriptState's marshal list (that pattern is reserved
+                # for values living in function-heavy files unsafe to re-source
+                # in a worker, e.g. cost-walker.ps1 — see the #825/C3 precedent).
+                . (Join-Path $RepoRootArg '.github/scripts/lib/cost-telemetry-budgets.ps1')
                 Invoke-FrameCreditLedger -Pr $PrArg -Mode $ModeArg
             }).AddArgument($Pr).AddArgument($Mode).AddArgument($resolvedRepoRoot).AddArgument($costScriptState)
 
