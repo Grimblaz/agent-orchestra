@@ -87,6 +87,26 @@ adapter body
 description: "this port file is missing the required id and kind fields"
 '@
 
+    # Issue #496 C-1 post-fix note: once the worker-runspace clone correctly
+    # resolves the cost-telemetry walker budgets (previously they silently
+    # degraded to 0 inside the worker, which made every real walk return
+    # instantly regardless of the local ~/.claude/projects size), these
+    # end-to-end child-process tests started exercising the REAL cost walker
+    # against whatever transcript history exists on the machine running the
+    # suite. On a maintainer machine with a large real profile that walk can
+    # legitimately take longer than this file's 60s process-timeout default,
+    # even though the orchestrator itself is still warn-mode fail-open and
+    # exits 0 well inside its own budget. These Trigger cases are not testing
+    # walker timing, so bound both walker timeouts down to a couple of
+    # seconds via the documented test-only env-var hooks (see
+    # lib/cost-telemetry-budgets.ps1) rather than depending on however large
+    # the runner's local transcript history happens to be.
+    $script:CostWalkerFastTimeoutEnv = @{
+        FRAME_CREDIT_LEDGER_TEST_NO_SLEEP                        = '1'
+        FRAME_CREDIT_LEDGER_TEST_CLAUDE_WALKER_TIMEOUT_SECONDS   = '2'
+        FRAME_CREDIT_LEDGER_TEST_COPILOT_WALKER_TIMEOUT_SECONDS  = '2'
+    }
+
     # Helper: invokes the orchestrator script in a child pwsh process so we can capture
     # exit codes + stderr deterministically. Mirrors InvokeOrchestrator from
     # frame-credit-ledger-orchestrator.Tests.ps1.
@@ -279,7 +299,7 @@ Describe 'frame-credit-ledger fail-open triggers (issue #429 §Fail-open trigger
 
             $result = & $script:InvokeOrchestrator `
                 -Pr 429 -Mode 'warn' `
-                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
+                -Env $script:CostWalkerFastTimeoutEnv `
                 -MockBootstrap $bootstrap
 
             $result.ExitCode | Should -Be 0 -Because 'warn-mode invariant: a missing frame/ports/ directory must not block PR creation'
@@ -298,7 +318,7 @@ Describe 'frame-credit-ledger fail-open triggers (issue #429 §Fail-open trigger
 
             $result = & $script:InvokeOrchestrator `
                 -Pr 429 -Mode 'warn' `
-                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
+                -Env $script:CostWalkerFastTimeoutEnv `
                 -MockBootstrap $bootstrap
 
             $result.ExitCode | Should -Be 0 -Because 'warn-mode invariant: per-port malformed YAML must not block PR creation'
@@ -314,7 +334,7 @@ Describe 'frame-credit-ledger fail-open triggers (issue #429 §Fail-open trigger
 
             $result = & $script:InvokeOrchestrator `
                 -Pr 429 -Mode 'warn' `
-                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
+                -Env $script:CostWalkerFastTimeoutEnv `
                 -MockBootstrap $bootstrap
 
             $result.ExitCode | Should -Be 0 -Because 'warn-mode invariant: an unparseable adapter must not block PR creation'
@@ -332,7 +352,7 @@ Describe 'frame-credit-ledger fail-open triggers (issue #429 §Fail-open trigger
 
             $result = & $script:InvokeOrchestrator `
                 -Pr 429 -Mode 'warn' `
-                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
+                -Env $script:CostWalkerFastTimeoutEnv `
                 -MockBootstrap $bootstrap
 
             $result.ExitCode | Should -Be 0 -Because 'warn-mode invariant: a malformed applies-when predicate must not block PR creation'
@@ -377,7 +397,7 @@ Describe 'frame-credit-ledger fail-open triggers (issue #429 §Fail-open trigger
 
             $result = & $script:InvokeOrchestrator `
                 -Pr 429 -Mode 'warn' `
-                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
+                -Env $script:CostWalkerFastTimeoutEnv `
                 -MockBootstrap $bootstrap
 
             $result.ExitCode | Should -Be 0 -Because 'warn-mode invariant: gh pr comment POST/PATCH failure must not block PR creation'

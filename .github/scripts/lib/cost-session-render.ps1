@@ -49,7 +49,34 @@
                                         post-review root-cause history)
     This file (cost-session-render.ps1) is dot-sourced last, after all of the
     above.
+
+    ONE EXCEPTION to caller-owns-dependencies: lib/cost-telemetry-budgets.ps1
+    (issue #496) is dot-sourced by this file itself, immediately below. That
+    file is a dependency-free set of constant assignments, so dot-sourcing it
+    here is idempotent and order-independent — and doing so means the budget
+    constants resolve correctly for a caller that did not know to load them
+    itself. That failure mode is not cosmetic: an unset constant resolves to
+    $null, and a $null bound to the mandatory [int] parameter on
+    Get-FCLCostWalkerTimeoutSeconds does NOT throw — PowerShell silently
+    coerces it to 0. No fail-open catch fires (nothing threw), so the resulting
+    0-second budget expires instantly and the cost section is dropped with no
+    error at all (issue #496 C-1: this is exactly how the worker-runspace clone
+    lost the cost section in production despite the dot-source in this file
+    being correct — see the worker AddScript block in frame-credit-ledger.ps1
+    for the runspace-boundary half of this same hazard). Callers therefore do
+    NOT need to add it to the list above.
+
+    NOTE (apostrophe hygiene): comment prose added to this file should avoid
+    possessive apostrophes. audit-hub-artifact-paths.ps1 extracts PowerShell
+    path references using a naive single-quote pairing regex that treats EVERY
+    apostrophe — including one inside a comment — as a string delimiter, so
+    adding an odd number of them re-pairs every quoted span later in the file
+    and corrupts the extracted inventory. See the header of
+    lib/cost-telemetry-budgets.ps1 for the full explanation.
 #>
+
+# See the ONE EXCEPTION note above: dot-sourced here, not by the caller.
+. (Join-Path $PSScriptRoot 'cost-telemetry-budgets.ps1')
 
 function Invoke-CostSessionRender {
     <#
@@ -133,7 +160,7 @@ function Invoke-CostSessionRender {
         [Nullable[datetime]]$CorroborationWindowEnd = $null
     )
 
-    $costBudgetSeconds = 19
+    $costBudgetSeconds = $script:CostTelemetryCostSubBudgetSeconds
     $costStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 
     # $costSection and $degradedMarker are the only pre-declared locals here.
@@ -166,10 +193,13 @@ function Invoke-CostSessionRender {
     try {
         # Env override for the cost render budget (issue #825 CE Gate): on a
         # large-profile machine (large ~/.claude/projects) the walk can legitimately
-        # exceed the 19s default before step-6g composes the section, so the section
-        # can never be rendered without a bigger budget. Resolved INSIDE this try so an
-        # unreachable FCL helper degrades to the 19s default via the outer fail-open
-        # catch (preserving the #824 dependency-chain contract) instead of throwing.
+        # exceed the default before step-6g composes the section, so the section
+        # can never be rendered without a bigger budget. Issue #496 raised that
+        # default to 270s and moved it to lib/cost-telemetry-budgets.ps1, where it
+        # is kept large enough to contain both walker timeouts plus a render
+        # margin. Resolved INSIDE this try so an unreachable FCL helper degrades to
+        # the constant default via the outer fail-open catch (preserving the #824
+        # dependency-chain contract) instead of throwing.
         # Reuses Get-FCLCostWalkerTimeoutSeconds' exact shape, matching the walker-timeout
         # overrides below: env present + valid positive int -> use it; else the default.
         $costBudgetSeconds = script:Get-FCLCostWalkerTimeoutSeconds -EnvironmentVariableName 'FRAME_CREDIT_LEDGER_TEST_COST_BUDGET_SECONDS' -DefaultSeconds $costBudgetSeconds
@@ -238,8 +268,13 @@ function Invoke-CostSessionRender {
                 $walkParameters['IssueNumber'] = [int]$resolvedIssueNumber
             }
 
-            $claudeTimeoutSeconds = script:Get-FCLCostWalkerTimeoutSeconds -EnvironmentVariableName 'FRAME_CREDIT_LEDGER_TEST_CLAUDE_WALKER_TIMEOUT_SECONDS' -DefaultSeconds 10
-            $copilotTimeoutSeconds = script:Get-FCLCostWalkerTimeoutSeconds -EnvironmentVariableName 'FRAME_CREDIT_LEDGER_TEST_COPILOT_WALKER_TIMEOUT_SECONDS' -DefaultSeconds 6
+            # Walker ceilings (issue #496): defaults live in
+            # lib/cost-telemetry-budgets.ps1 and must sum, plus a render margin,
+            # to no more than $costBudgetSeconds above — see the header in that
+            # file and Tests/cost-telemetry-budgets.Tests.ps1 for the nesting
+            # contract.
+            $claudeTimeoutSeconds = script:Get-FCLCostWalkerTimeoutSeconds -EnvironmentVariableName 'FRAME_CREDIT_LEDGER_TEST_CLAUDE_WALKER_TIMEOUT_SECONDS' -DefaultSeconds $script:CostTelemetryClaudeWalkerTimeoutSeconds
+            $copilotTimeoutSeconds = script:Get-FCLCostWalkerTimeoutSeconds -EnvironmentVariableName 'FRAME_CREDIT_LEDGER_TEST_COPILOT_WALKER_TIMEOUT_SECONDS' -DefaultSeconds $script:CostTelemetryCopilotWalkerTimeoutSeconds
 
             $claudeWalk = script:Invoke-FCLCostWalkerWithTimeout `
                 -WalkerName 'claude' `
@@ -281,11 +316,14 @@ function Invoke-CostSessionRender {
         $costAttribution = Get-CostAttribution -Events $costEvents -RateTablePath (Join-Path $costScriptsDir 'lib/cost-rate-table.json')
         script:Set-FCLCostCoverageMetadata -Attribution $costAttribution -Events $costEvents -ClaudeWalk $claudeWalk -CopilotWalk $copilotWalk -CopilotOtelJsonlPath $copilotOtelJsonlPath
 
-        # 6c. Rolling history (has its own 10s timeout via Get-CostRollingHistory)
+        # 6c. Rolling history. The caller here overrides the default timeout of
+        # Get-CostRollingHistory with the centralized fetch-budget constant
+        # (capped to whatever cost budget remains) — the timeout does not come
+        # from the callee default.
         $rollingResult = @{ timed_out = $false; entries = @() }
         $remainingCostBudgetSeconds = script:Get-FCLRemainingCostBudgetSeconds -Stopwatch $costStopwatch -BudgetSeconds $costBudgetSeconds
         if ($remainingCostBudgetSeconds -gt 0) {
-            try { $rollingResult = Get-CostRollingHistory -TimeoutSeconds ([Math]::Min(10, $remainingCostBudgetSeconds)) }
+            try { $rollingResult = Get-CostRollingHistory -TimeoutSeconds ([Math]::Min($script:CostRollingHistoryFetchBudgetSeconds, $remainingCostBudgetSeconds)) }
             catch { $rollingResult = @{ timed_out = $true; entries = @() } }
         }
         script:Set-FCLRollingMetaCoverageCount -RollingResult $rollingResult -Attribution $costAttribution
