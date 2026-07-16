@@ -34,6 +34,7 @@ Describe 'frame-spine-lookup skill contract' {
 
         # Research-Agent deferral: excluded because it has no execute/* grant; Copilot spine lookup deferred per #514 Step 12
         $script:ClaudePlatformPath = Join-Path $script:RepoRoot 'skills/frame-spine-lookup/platforms/claude.md'
+        $script:CopilotPlatformPath = Join-Path $script:RepoRoot 'skills/frame-spine-lookup/platforms/copilot.md'
 
         $script:ReadContent = {
             param([Parameter(Mandatory)][string]$Path)
@@ -108,6 +109,7 @@ Describe 'frame-spine-lookup skill contract' {
         BeforeAll {
             $script:SkillContent = & $script:ReadContent -Path $script:SkillPath
             $script:ClaudePlatformContent = & $script:ReadContent -Path $script:ClaudePlatformPath
+            $script:CopilotPlatformContent = & $script:ReadContent -Path $script:CopilotPlatformPath
         }
 
         It 'documents fetching the plan-issue comment body through the GitHub issue comments API' {
@@ -128,6 +130,37 @@ Describe 'frame-spine-lookup skill contract' {
             $script:SkillContent | Should -Match '(?is)F2\.2.{0,160}hash-elision\s+filter' -Because 'the stale check must respect the F2.2 hash-elision filter'
             $script:SkillContent | Should -Match '(?is)stale-spine' -Because 'the lookup result must use the stale-spine disposition'
             $script:SkillContent | Should -Match '(?is)return\s+control\s+to\s+Conductor.{0,160}re-dispatch|Conductor.{0,160}re-dispatch' -Because 'specialists must stop and let Conductor re-dispatch on stale spine'
+        }
+
+        It 'declares the sibling comment id as a second Dispatch Input sourced from the spine, not read by the shim (863 s6, judge-sustained M5)' {
+            $script:SkillContent | Should -Match '(?is)frame-slices-\{ID\}.{0,200}sibling.{0,200}slice_comment_id' -Because 'the sibling comment id must be documented as a Dispatch Input keyed off the spine''s slice_comment_id field'
+            $script:SkillContent | Should -Match '(?is)specialist\s+never\s+reads?\s+`?slice_comment_id`?|never\s+by\s+reading\s+the\s+spine\s+block' -Because 'the shim must not read slice_comment_id itself — Conductor supplies it as a Dispatch Input'
+        }
+
+        It 'documents the two-fetch concatenation contract with a concrete separator and the single-fetch legacy fallback' {
+            $script:SkillContent | Should -Match '(?is)concatenate.{0,200}blank\s+line' -Because 'the concatenation separator must be a concretely specified blank line, not left unspecified'
+            $script:SkillContent | Should -Match '(?is)no\s+sibling\s+id\s+was\s+dispatched.{0,200}(fetch\s+only\s+the\s+plan\s+comment|single-fetch)' -Because 'legacy plans with no slice_comment_id must keep the single-fetch behavior unchanged'
+        }
+
+        It 'documents the shim-level sibling identity check and sibling-identity-mismatch failure mode' {
+            $script:SkillContent | Should -Match '(?is)frame-slices-\{ID\}.{0,200}marker.{0,200}(match|matching)' -Because 'the fetched sibling must be verified against the dispatched issue number before use'
+            $script:SkillContent | Should -Match 'sibling-identity-mismatch' -Because 'a mismatched or missing sibling identity marker must surface a distinct failure rather than silently proceeding'
+        }
+
+        It 'documents the two-fetch shape concretely in both the Claude and Copilot platform shims (863 s6, judge-sustained M16/M23)' {
+            $script:ClaudePlatformContent | Should -Match ([regex]::Escape('gh api repos/{owner}/{repo}/issues/comments/{sibling-id}')) -Because 'the Claude shim must fetch the sibling by its own dispatched comment id'
+            $script:ClaudePlatformContent | Should -Match '(?is)concatenate' -Because 'the Claude shim must document concatenating the two fetched bodies'
+
+            Test-Path -LiteralPath $script:CopilotPlatformPath | Should -BeTrue -Because 'the Copilot platform shim file must exist'
+            $script:CopilotPlatformContent | Should -Not -BeNullOrEmpty -Because 'the Copilot shim content must be readable, not just present on disk (M16 gap: previously only Test-Path was asserted)'
+            $script:CopilotPlatformContent | Should -Match ([regex]::Escape('gh api repos/{owner}/{repo}/issues/comments/{sibling-id}')) -Because 'the Copilot shim must fetch the sibling by its own dispatched comment id'
+            $script:CopilotPlatformContent | Should -Match '(?is)concatenate' -Because 'the Copilot shim must document concatenating the two fetched bodies'
+            $script:CopilotPlatformContent | Should -Match '-CommentBodyPath' -Because 'a single gh api | pwsh pipeline cannot express two fetches; the two-fetch case must restructure to a path-based invocation on a concatenated temp file (M23)'
+        }
+
+        It 'preserves the pinned single-fetch command shape unchanged for the legacy (no-sibling) case' {
+            $script:ClaudePlatformContent | Should -Match ([regex]::Escape('gh api repos/{owner}/{repo}/issues/comments/{id}')) -Because 'the singular plan-comment fetch shape must survive for the no-sibling case'
+            $script:CopilotPlatformContent | Should -Match ([regex]::Escape('gh api repos/{owner}/{repo}/issues/comments/{id} --jq .body | pwsh')) -Because 'the original single-pipeline shape must survive unchanged when no sibling id is dispatched'
         }
 
         It 'documents Copilot spine lookup shipped in #514 and custom MCP server lookup as deferred non-goal' {

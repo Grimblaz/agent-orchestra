@@ -502,4 +502,80 @@ Describe 'frame-spine-core stdin and JSON output' -Tag 'unit' {
             $parsed.count | Should -Be 2
         }
     }
+
+    Context 'Case 9: shim two-fetch-and-concatenate simulation (863 s6, E2E(2)/E2E(3))' {
+
+        BeforeAll {
+            # Two INDEPENDENTLY authored bodies -- as the frame-spine-lookup shim would actually
+            # fetch them via two separate `gh api` calls -- concatenated with the SKILL.md-documented
+            # separator (a single blank line, plan body first) rather than one pre-built fixture
+            # string. This is distinct from Case 8's fixtures, which are authored as one literal.
+            $script:PlanOnlyFetchBody = @(
+                'Issue discussion before the durable handoff.'
+                ''
+                '<!-- frame-spine'
+                $script:CanonicalSpineBlockWithPointer
+                '-->'
+            ) -join "`n"
+
+            $script:SiblingOnlyFetchBodyFresh = @(
+                '<!-- frame-slices-4995965999 -->'
+                '<!-- frame-slices-generated-at: 2026-07-16T18:00:00Z -->'
+                ''
+                '<!-- frame-slice'
+                $script:S2SliceBlockWithPointer
+                '-->'
+            ) -join "`n"
+
+            $script:SiblingOnlyFetchBodyStale = @(
+                '<!-- frame-slices-4995965999 -->'
+                '<!-- frame-slices-generated-at: 2026-07-16T10:00:00Z -->'
+                ''
+                '<!-- frame-slice'
+                $script:S2SliceBlockWithPointer
+                '-->'
+            ) -join "`n"
+
+            # The shim's documented separator: "\n\n" between plan body and sibling body.
+            $script:ShimConcatenate = {
+                param([string]$PlanBody, [string]$SiblingBody)
+                return "$PlanBody`n`n$SiblingBody"
+            }
+        }
+
+        It 'E2E(2): a specialist dispatched with a plan-comment id and a sibling id resolves the slice correctly through the concatenated two-fetch path' {
+            $concatenated = & $script:ShimConcatenate -PlanBody $script:PlanOnlyFetchBody -SiblingBody $script:SiblingOnlyFetchBodyFresh
+            $commentFile = & $script:WriteCommentBody -Content $concatenated
+            $resolvedPath = (Resolve-Path -LiteralPath $commentFile).ProviderPath
+
+            $result = Invoke-FSCSpineLookupCli -CommentBodyPath $resolvedPath -Format Json -GeneratedAt '2026-07-16T18:00:00Z' -StepId 's2'
+
+            $result | Should -Not -BeNullOrEmpty
+            $result.ExitCode | Should -Be 0
+            $jsonText = ($result.Lines) -join "`n"
+            $parsed = $jsonText | ConvertFrom-Json
+
+            $parsed.status | Should -Be 'ok'
+            $parsed.step_id | Should -Be 's2'
+            $parsed.slice | Should -Match 'provides:\s*\[implement-code\]'
+        }
+
+        It 'E2E(3): a re-emitted spine without an updated sibling stamp returns stale-spine through the two-fetch-and-concatenate path, not only a synthetic single-body fixture' {
+            $concatenated = & $script:ShimConcatenate -PlanBody $script:PlanOnlyFetchBody -SiblingBody $script:SiblingOnlyFetchBodyStale
+            $commentFile = & $script:WriteCommentBody -Content $concatenated
+            $resolvedPath = (Resolve-Path -LiteralPath $commentFile).ProviderPath
+
+            $result = Invoke-FSCSpineLookupCli -CommentBodyPath $resolvedPath -Format Json -GeneratedAt '2026-07-16T18:00:00Z' -StepId 's2'
+
+            $result | Should -Not -BeNullOrEmpty
+            $result.ExitCode | Should -Be 0
+            $jsonText = ($result.Lines) -join "`n"
+            $parsed = $jsonText | ConvertFrom-Json
+
+            $parsed.status | Should -Be 'stale-spine'
+            $parsed.PSObject.Properties['sibling_generated_at'] | Should -Not -BeNullOrEmpty
+            $parsed.PSObject.Properties['current_generated_at'] | Should -Not -BeNullOrEmpty
+            $parsed.sibling_generated_at | Should -Not -Be $parsed.current_generated_at
+        }
+    }
 }
