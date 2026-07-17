@@ -384,7 +384,7 @@ function script:Test-CostRendererZeroActivityBucket {
         dispatches, a zero-or-null cost estimate, and all four token counts
         at zero (issue #489 s1, AC3/AC4). Anomaly-flag status is deliberately
         NOT part of this predicate — callers combine it with their own
-        anomaly check so a stage that should have run and didn't (an
+        anomaly check so a stage that should have run and did not (an
         anomaly-flagged zero row) is never treated as suppressible here.
     #>
     [OutputType([bool])]
@@ -445,7 +445,7 @@ function script:Format-CostPatternCoverageAnnotation {
     <#
     .SYNOPSIS
         Renders the coverage-annotation suffix appended to a populated header
-        when the walker's Tier-2 corroboration rejected one or more candidate
+        when the walker Tier-2 corroboration rejected one or more candidate
         directories (issue #825 s2, M6). Returns '' when RejectedDirCount is
         not positive, so callers can unconditionally append the result.
     #>
@@ -500,10 +500,10 @@ function script:Format-CostPatternUnknownHeader {
     }
 
     if ($degradedReason -eq 'budget-exceeded') {
-        return "## Cost Pattern `u{26A0} the local walk exceeded its time budget or stopped before finishing searching this PR's branch/session; if it was a timeout, retry the walk on this machine with a larger FRAME_CREDIT_LEDGER_TEST_COST_BUDGET_SECONDS override. cost-fields unavailable; this run is excluded from rolling-history aggregation"
+        return "## Cost Pattern `u{26A0} the local walk exceeded its time budget or stopped before finishing searching this PR branch/session; if it was a timeout, retry the walk on this machine with a larger FRAME_CREDIT_LEDGER_TEST_COST_BUDGET_SECONDS override. cost-fields unavailable; this run is excluded from rolling-history aggregation"
     }
 
-    return "## Cost Pattern `u{26A0} transcripts were searched on this machine and none matched this PR's branch/session; possible causes: the walk ran where transcripts are unavailable, the local walk never ran or exited before the cost step, a since-deleted sibling worktree held the events, the branch was created mid-session outside the phase-marker windows, or the linked issue could not be resolved from the branch name. cost-fields unavailable; this run is excluded from rolling-history aggregation"
+    return "## Cost Pattern `u{26A0} transcripts were searched on this machine and none matched this PR branch/session; possible causes: the walk ran where transcripts are unavailable, the local walk never ran or exited before the cost step, a since-deleted sibling worktree held the events, the branch was created mid-session outside the phase-marker windows, or the linked issue could not be resolved from the branch name. cost-fields unavailable; this run is excluded from rolling-history aggregation"
 }
 
 function script:Build-CostPatternHeader {
@@ -611,7 +611,7 @@ function script:Get-PortAnomalyNames {
             $flagPort = $_['port']
             $matchesPort = ($null -ne $flagPort -and $flagPort -eq $PortName) -or
             ($null -eq $flagPort -and [string]::IsNullOrEmpty($PortName))
-            # C14: a null/blank metric can't produce a real name — filter it out here
+            # C14: a null/blank metric cannot produce a real name — filter it out here
             # so it never contributes an empty entry to the joined name list below.
             # Without this, a port whose only "anomaly" is a malformed/blank metric
             # field would still read as "has an anomaly" downstream (via
@@ -642,7 +642,7 @@ function script:Get-PortAnomalyNames {
 function script:Test-CostRendererPortHasAnomaly {
     <#
     .SYNOPSIS
-        True when a port's anomaly-display string carries a real anomaly name
+        True when a port anomaly-display string carries a real anomaly name
         rather than the empty-anomaly sentinel returned by Get-PortAnomalyNames.
         Centralizes the sentinel comparison so both row-emitting branches in
         Build-CostPatternTable (in-attribution and not-in-attribution) derive
@@ -787,7 +787,7 @@ function script:Build-CostPatternTable {
     foreach ($p in $script:CostRendererPortOrder) {
         $allPortNames.Add($p)
     }
-    # Add ports present in attribution that aren't in canonical order (except special ones)
+    # Add ports present in attribution that are not in canonical order (except special ones)
     foreach ($p in $ports.Keys) {
         if ($allPortNames -notcontains $p -and
             $p -ne 'orchestrator-overhead' -and
@@ -856,7 +856,7 @@ function script:Build-CostPatternTable {
             # Port not in attribution — zero dispatches, dashes for everything.
             # Issue #489 s1: there is no bucket to read here, so suppress unless
             # an anomaly flag names this port (a stage that should have run and
-            # didn't is exactly the row a maintainer needs to see).
+            # did not is exactly the row a maintainer needs to see).
             $anomStr = script:Get-PortAnomalyNames -AnomalyFlags $AnomalyFlags -PortName $portName
             $hasAnomaly = script:Test-CostRendererPortHasAnomaly -AnomalyDisplay $anomStr
 
@@ -1160,7 +1160,7 @@ function Format-CostPatternYaml {
     # sourced from the eligibility result the caller passes in via $Completeness (added
     # in place by Resolve-BaselineEligibility); session_id/head_ref are capture-time
     # targeting keys the s4 harvest uses to re-walk and verify the originating transcript.
-    # Must render before the ports: block — the parser's ports loop treats the next
+    # Must render before the ports: block — the parser ports loop treats the next
     # zero-indent top-level key as the end of the block.
     $capturePointValue = if ($Completeness.ContainsKey('capture_point')) { [string]$Completeness['capture_point'] } else { 'n/a' }
     $null = $sb.AppendLine("capture_point: $capturePointValue")
@@ -1169,7 +1169,7 @@ function Format-CostPatternYaml {
 
     # Additive post-#487 fields (issue #487 s3, plan finding M16). Must render
     # before the ports: block for the same reason as the baseline-eligibility
-    # fields above — the parser's ports loop treats the next zero-indent
+    # fields above — the parser ports loop treats the next zero-indent
     # top-level key as the end of the block (cost-rolling-history.ps1:266).
     # unknown_models carries at most 10 sanitized, verbatim provider-qualified
     # strings — never the Note-only "+N more" overflow suffix (M12). This field

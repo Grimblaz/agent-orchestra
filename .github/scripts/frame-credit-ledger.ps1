@@ -47,18 +47,18 @@ $script:WarnModeOnly = ($Mode -eq 'warn')
 # cost-baseline-harvest.ps1; hoisted here per issue #489 post-review C2 fix,
 # secondary instance — the primary instance lives in
 # cost-baseline-harvest.ps1). Native `gh` stdout otherwise decodes with the
-# console's default (OS-default) code page on Windows, and a whole-body
+# console default (OS-default) code page on Windows, and a whole-body
 # `gh pr edit` write built from that stdout can permanently mangle
 # maintainer-authored non-ASCII prose elsewhere in the PR body. This is a
-# process-wide static, so it must be set before this file's EARLIEST gh
-# stdout read — Get-FrameCreditLedgerBaseRefOid's `gh pr view --json
-# baseRefOid` call and Step 2's `gh pr view --json body,comments` fetch both
+# process-wide static, so it must be set before this file EARLIEST gh
+# stdout read — Get-FrameCreditLedgerBaseRefOid `gh pr view --json
+# baseRefOid` call and Step 2 `gh pr view --json body,comments` fetch both
 # execute well before the old Step-7-adjacent location this pin used to live
-# at, and Step 2's fetch is exactly the "fresh-fetch-failure fallback path"
+# at, and Step 2 fetch is exactly the "fresh-fetch-failure fallback path"
 # body text that can end up written back later in this file. Setting the pin
 # here, before any dot-source or gh call in this file, guarantees every gh
 # read made anywhere in this process — including inside the worker-runspace
-# clone, which shares this process's Console static — observes UTF-8.
+# clone, which shares this process Console static — observes UTF-8.
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 
 # ---------------------------------------------------------------------------
@@ -102,8 +102,8 @@ try {
     . (Join-Path $PSScriptRoot 'lib/cost-completeness.ps1')
     . (Join-Path $PSScriptRoot 'lib/cost-pattern-renderer.ps1')
     # cost-fcl-helpers.ps1 (issue #824 post-review fix, Group 1): the
-    # script:-scoped FCL cost-pipeline helpers used by both this script's own
-    # Invoke-FrameCreditLedger below and cost-session-render.ps1's
+    # script:-scoped FCL cost-pipeline helpers used by both this script
+    # Invoke-FrameCreditLedger below and cost-session-render.ps1
     # Invoke-CostSessionRender (dot-sourced next). Must load before
     # cost-session-render.ps1 is invoked so both callers can resolve these
     # functions regardless of dot-source order within this try block.
@@ -139,7 +139,7 @@ catch {
 $_suppressFailedPosts = ($env:FCL_SUPPRESS_FAILED_POSTS -eq '1')
 
 # ---------------------------------------------------------------------------
-# Read a single scalar field from an adapter's frontmatter block.
+# Read a single scalar field from an adapter frontmatter block.
 # ---------------------------------------------------------------------------
 function script:Get-FCLAdapterFrontmatterScalar {
     param(
@@ -379,7 +379,7 @@ function Build-FrameCreditLedgerChangeset {
 # Resolve-FrameCreditLedgerApplicableMap
 #
 # Given a port name, its matching adapters, and a changeset descriptor,
-# evaluate each adapter's `applies-when` predicate and return a hashtable
+# evaluate each adapter `applies-when` predicate and return a hashtable
 # of adapter-name -> applicability ('true'|'false'|'unknown').
 #
 # Adapters with NO `applies-when` declaration default to 'true' (always
@@ -432,7 +432,7 @@ function Resolve-FrameCreditLedgerApplicableMap {
         # Normalize zero-arg call form to bare-identifier form for the
         # `changeset.touchesXxx()` family. Adapters in the wild declare
         # `applies-when: changeset.touchesPluginEntryPoint()` (call form),
-        # but the predicate evaluator's identifier-boolean resolver only
+        # but the predicate evaluator identifier-boolean resolver only
         # registers the bare identifier (`changeset.touchesPluginEntryPoint`).
         # The single-arg form `changeset.touches('glob')` IS handled as a
         # call by `Resolve-FVCallNode`, so we leave parameterized calls
@@ -894,14 +894,14 @@ function Update-FCLPrBodyDispatchCostSamples {
     return Update-DispatchCostSampleEvaluationInPrBody @updateParameters
 }
 
-# Translates Invoke-CostSessionRender's nested return shape into the flat
+# Translates Invoke-CostSessionRender nested return shape into the flat
 # hashtable Set-FCLPrBodyCostSummary/Update-FCLPrBodyCostSummary expect
 # (issue #489 s4 refactor pass). Field names read here are the render
-# pipeline's own (Attribution['totals']['cost_estimate_usd'], not
+# pipeline (Attribution['totals']['cost_estimate_usd'], not
 # 'cost_usd_total'; Completeness['capture_point'] nested inside Completeness,
 # not a peer of it) — this function is the one place that maps them to the
-# cost_summary schema's own field names, so Invoke-FrameCreditLedger's Step 7
-# body-edit flow doesn't have to interleave that translation with gh-call
+# cost_summary schema field names, so Invoke-FrameCreditLedger Step 7
+# body-edit flow does not have to interleave that translation with gh-call
 # plumbing. Returns $null (never an empty hashtable) when nothing mapped, so
 # callers can treat "$null" as "omit cost_summary" uniformly.
 function script:Build-FCLCostSummaryFromRenderResult {
@@ -923,7 +923,7 @@ function script:Build-FCLCostSummaryFromRenderResult {
         # represented by the KEY being present with an explicit $null value,
         # distinct from the key being absent entirely. The old `-and $null
         # -ne ...` guard treated both shapes identically (key omitted), so
-        # the writer's honest "unknown" rendering could never be reached —
+        # the writer honest "unknown" rendering could never be reached —
         # it silently fell back to a false $0.0000 headline instead. Presence
         # of the source key is now the only gate; the value (including an
         # explicit $null) passes through unchanged.
@@ -948,7 +948,7 @@ function script:Build-FCLCostSummaryFromRenderResult {
     #
     # C11 (issue #489 post-review fix): basic URL-shape validation, defense
     # in depth alongside the writer-side sanitization already applied in
-    # Set-FCLPrBodyCostSummary. The upsert's return value must look like an
+    # Set-FCLPrBodyCostSummary. The upsert return value must look like an
     # absolute http(s) URL with no embedded whitespace and no ')' character
     # (which would break a markdown `[text](url)` link if ever rendered
     # without escaping) before it is trusted here. Anything else — including
@@ -1030,7 +1030,7 @@ function Invoke-FrameCreditLedger {
     # only place that talks to `gh` for this purpose — Get-FCLOriginContext
     # stays a pure, no-gh predicate. Fail-quiet: if `gh pr view` errors or
     # returns nothing usable, leave $_prHeadRef exactly as it was and fall
-    # through to Get-FCLOriginContext's existing body-signal fallback, exactly
+    # through to Get-FCLOriginContext existing body-signal fallback, exactly
     # as today. Never throw — this whole hook is warn-only.
     # FALLBACK: PR body linked-issue signals.
     # If Get-FCLOriginContext is unavailable (predicate not dot-sourced), default
@@ -1139,7 +1139,7 @@ function Invoke-FrameCreditLedger {
     # completely unguarded. An exception anywhere in it propagated straight
     # to the outer worker-runspace catch, skipping Step 7 entirely —
     # including the stale-spine metric write, which used to run earlier and
-    # more resiliently before this PR's Step 7 consolidation. The catch
+    # more resiliently before this PR Step 7 consolidation. The catch
     # below always resets $reportsArray/$hasBlock/$atomicMarkerStatusValue to
     # their safe empty defaults on any exception (regardless of how far the
     # try got before throwing), and the try body always assigns them
@@ -1182,14 +1182,14 @@ function Invoke-FrameCreditLedger {
         }
 
         # Build a changeset descriptor from the diff between baseRefOid and HEAD.
-        # Used by Test-FVPredicateAgainstChangeset to evaluate each adapter's
+        # Used by Test-FVPredicateAgainstChangeset to evaluate each adapter
         # `applies-when` predicate. Failure to build the changeset is non-fatal —
         # we fall back to an empty changeset, which makes every predicate evaluate
         # to 'false' or 'unknown' (preserving warn-mode invariants).
         $changeset = Build-FrameCreditLedgerChangeset -BaseRefOid $baseRefOid
 
         # H1 fix (issue #441 judge): Populate JudgeScore on the changeset from the
-        # PR's judge-rulings comment so the review.sustainedCriticalOrHigh predicate
+        # PR judge-rulings comment so the review.sustainedCriticalOrHigh predicate
         # identifier resolves at runtime (not just in tests). Without this, the
         # post-fix-review predicate always falls through to the deferred-unknown path.
         if ($null -ne $script:PrComments) {
@@ -1201,7 +1201,7 @@ function Invoke-FrameCreditLedger {
         }
 
         # Track which (port, adapter) pairs have already emitted the deferred-
-        # identifier stderr note so we don't spam the log.
+        # identifier stderr note so we do not spam the log.
         $script:DeferredNotedPairs = @{}
 
         # Build per-port reports.
@@ -1288,7 +1288,7 @@ function Invoke-FrameCreditLedger {
         #   1. Status = 'NotCovered' (port has a gap — always blocks)
         #   2. Status = 'Inconclusive' AND it is a misconfiguration sub-reason (AdapterParseError,
         #      AdapterDiscoveryFailed) — always blocks regardless of BlockOnInconclusive
-        #   3. Status = 'Inconclusive' AND the port's BlockOnInconclusive = true (per-port flag)
+        #   3. Status = 'Inconclusive' AND the port BlockOnInconclusive = true (per-port flag)
         # Exception: ports with TriggerStatus = 'deferred' are NEVER included in the block set.
         $blockingReports = @($reportsArray | Where-Object {
             $r = $_
@@ -1421,7 +1421,7 @@ function Invoke-FrameCreditLedger {
     }
     catch {
         # C8 (issue #489 post-review fix): adapter discovery / port
-        # classification threw. Log to stderr (matching this file's
+        # classification threw. Log to stderr (matching this file
         # existing fail-open logging style) and degrade gracefully instead
         # of letting the exception propagate to the outer worker-runspace
         # catch — that would skip Step 7 entirely, including the
@@ -1447,7 +1447,7 @@ function Invoke-FrameCreditLedger {
     # render pipeline itself lives in Invoke-CostSessionRender (issue #824 s4a
     # extraction, lib/cost-session-render.ps1) so a future startup-harvest
     # caller can re-run the identical sequence against a different target. This
-    # block resolves the live session's own identity inputs, calls that
+    # block resolves the live session identity inputs, calls that
     # function, and — since the function never posts anything itself — performs
     # the two degraded-comment side posts (retraction/auto-post) using the
     # decision + body values it returns, exactly as this block did inline
@@ -1490,7 +1490,7 @@ function Invoke-FrameCreditLedger {
             }
         }
         catch {
-            # Mirrors Invoke-CostSessionRender's own internal fail-open catch: this
+            # Mirrors Invoke-CostSessionRender internal fail-open catch: this
             # outer layer only needs to cover the caller-side identity resolution
             # ($slug / $costBranch) that happens before the call, since the function
             # itself already fails open (returns CostSection = '') for anything that
@@ -1513,12 +1513,12 @@ function Invoke-FrameCreditLedger {
     # Step 7: Consolidated PR-body edit (issue #489 s4).
     #
     # Exactly ONE body write happens per run, performed here — after the
-    # breakdown-comment upsert above, so a successful upsert's html_url is
+    # breakdown-comment upsert above, so a successful upsert html_url is
     # available to thread into the cost-summary section as source_comment.
     #
     # Read-side UTF-8 pin: hoisted to the top of this file (issue #489
-    # post-review C2 fix, secondary instance) so it covers Step 1's and Step
-    # 2's earlier gh reads too, not only the re-fetch below. See the pin's
+    # post-review C2 fix, secondary instance) so it covers Step 1 and Step
+    # 2 earlier gh reads too, not only the re-fetch below. See the pin
     # own comment near the top of this file for the full rationale.
     #
     # The body is RE-FETCHED here rather than reusing $prBody (fetched once
@@ -1544,14 +1544,14 @@ function Invoke-FrameCreditLedger {
         }
         catch {
             # Fail open: fall back to the run-opening body rather than losing
-            # this run's edit entirely.
+            # this run edit entirely.
             $freshPrBody = $prBody
         }
     }
 
     # Stale-spine transform first (pure, unchanged from :808-819) — it
     # appends at zero indent after trying its own dispatch-fallback-events/
-    # credits anchors, so the cost-summary transform's after-the-list-
+    # credits anchors, so the cost-summary transform after-the-list-
     # sections anchor must be computed against the POST-stale-spine text.
     $staleSpinePrBody = script:Update-FCLPrBodyStaleSpineFallbackMetric -PrBody $freshPrBody
 
@@ -1560,7 +1560,7 @@ function Invoke-FrameCreditLedger {
         # catch path, both of which run unconditionally today) — the
         # stale-spine update must still land. Route through
         # Update-FCLPrBodyMetricsBestEffort directly rather than
-        # Update-FCLPrBodyCostSummary: that writer's own no-op guard
+        # Update-FCLPrBodyCostSummary: that writer no-op guard
         # compares its output only against the text it is given, so if the
         # cost-summary transform were called here and turned out to be a
         # fixed point, the stale-spine change already folded into
@@ -1574,21 +1574,21 @@ function Invoke-FrameCreditLedger {
         # honest "unavailable" line rather than fabricated totals.
         $degraded = [bool]$costResult['ShouldPostDegraded']
 
-        # Translation from Invoke-CostSessionRender's nested return shape to
+        # Translation from Invoke-CostSessionRender nested return shape to
         # the flat cost_summary schema lives in
         # script:Build-FCLCostSummaryFromRenderResult (see its definition for
         # the field-name mapping rationale) — Set-FCLPrBodyCostSummary maps
-        # the result onto the cost_summary schema's own field names.
+        # the result onto the cost_summary schema field names.
         $costSummary = script:Build-FCLCostSummaryFromRenderResult -CostResult $costResult -BreakdownCommentUrl $breakdownCommentUrl
 
         # C1 (issue #489 post-review fix): -PrBody is $staleSpinePrBody — text
         # already mutated by the stale-spine transform above — so the
-        # writer's no-op guard must compare its final output against
+        # writer no-op guard must compare its final output against
         # -OriginalBody ($freshPrBody, the true GitHub-fetched body from
         # BEFORE any local transform) rather than against $staleSpinePrBody
         # itself. Without this, a cost-summary transform that happens to be a
         # fixed point on the already-mutated text silently drops the
-        # stale-spine metric change along with it. The writer's own return
+        # stale-spine metric change along with it. The writer return
         # value ($outcome, a { Outcome = 'edited' | 'noop' | 'failed' }
         # hashtable) is intentionally discarded here — no caller at this
         # site currently branches on write outcome.
@@ -1625,9 +1625,9 @@ if (-not $isDotSourced) {
     $exitCode = 0
     try {
         # Strategy: run the main flow on a background thread (in this same
-        # process) so it can see the test harness's `function global:gh`
+        # process) so it can see the test harness `function global:gh`
         # mock. We use a manually-constructed Runspace cloned from the
-        # current default runspace's InitialSessionState — that way,
+        # current default runspace InitialSessionState — that way,
         # functions defined in the parent (including the gh mock) and
         # script-scoped functions defined above (Invoke-FrameCreditLedger)
         # are visible inside the worker runspace.
@@ -1706,7 +1706,7 @@ if (-not $isDotSourced) {
         $worker.Runspace = $rs
 
         # Resolve repo root in the parent scope (where $PSCommandPath is set)
-        # and pass it through so the worker doesn't need to re-derive it.
+        # and pass it through so the worker does not need to re-derive it.
         $resolvedRepoRoot = script:Resolve-FCLRepoRoot -ScriptPath $PSCommandPath
 
         $costScriptState = script:Get-FCLCostScriptState
@@ -1719,11 +1719,11 @@ if (-not $isDotSourced) {
                 $script:FrameCreditLedgerRepoRoot = $RepoRootArg
                 # C-1 fix (issue #496 post-review): New-FCLInitialSessionStateClone
                 # only copies function definitions and `Get-Variable -Scope Global`
-                # — it never re-runs any file's top-level dot-source statements.
+                # — it never re-runs any file top-level dot-source statements.
                 # Under the real production invocation shape (`shell: pwsh` calling
                 # `./frame-credit-ledger.ps1` as a CHILD SCRIPT, not `pwsh -File`),
                 # the top-level `$script:CostTelemetry*` constants set by this
-                # file's own hard-required dot-source are script-scoped, not
+                # file hard-required dot-source are script-scoped, not
                 # global, so they never reach this worker clone. A mandatory
                 # [int] parameter bound to the resulting $null does not throw —
                 # it silently coerces to 0, collapsing every walker budget to an
@@ -1731,7 +1731,7 @@ if (-not $isDotSourced) {
                 # constants-only, side-effect-free file documented (see its own
                 # header) as safe to dot-source more than once in the same scope,
                 # so re-dot-source it fresh here rather than widening
-                # Get-FCLCostScriptState's marshal list (that pattern is reserved
+                # Get-FCLCostScriptState marshal list (that pattern is reserved
                 # for values living in function-heavy files unsafe to re-source
                 # in a worker, e.g. cost-walker.ps1 — see the #825/C3 precedent).
                 . (Join-Path $RepoRootArg '.github/scripts/lib/cost-telemetry-budgets.ps1')

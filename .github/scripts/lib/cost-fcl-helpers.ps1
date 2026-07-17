@@ -6,11 +6,11 @@
 .DESCRIPTION
     Pure relocation of the `script:`-scoped helper functions that
     Invoke-CostSessionRender (cost-session-render.ps1) and its own dependency
-    chain need, out of frame-credit-ledger.ps1's own script scope and into
+    chain need, out of frame-credit-ledger.ps1 script scope and into
     this shared lib file.
 
     Before this extraction, all of these functions were defined only inside
-    frame-credit-ledger.ps1's top-level script body. That worked for the live
+    frame-credit-ledger.ps1 top-level script body. That worked for the live
     PR-creation path (frame-credit-ledger.ps1 dot-sources cost-session-render.ps1
     directly, then defines these helpers later in its own script scope before
     Invoke-CostSessionRender is ever actually called), but it silently broke
@@ -21,14 +21,14 @@
     (skills/session-startup/platforms/claude.md Step 7d) never included
     frame-credit-ledger.ps1. Every FCL-scoped call inside
     Invoke-CostSessionRender threw CommandNotFoundException, caught by that
-    function's own internal try/catch, silently returning an empty
+    function internal try/catch, silently returning an empty
     CostSection — the harvest mechanism shipped as a permanent, invisible
     no-op.
 
     Function bodies below are unmodified from their frame-credit-ledger.ps1
     originals (pure relocation, not a rewrite). They stay `script:`-scoped in
     this new home — the scoping was never the problem, only the fact that the
-    file defining them was unreachable from the harvest's dependency chain.
+    file defining them was unreachable from the harvest dependency chain.
 
     This file also relocates the transitive helpers those 10 originally-named
     functions themselves call (New-FCLCostWalkerResult,
@@ -41,24 +41,24 @@
 
     C17 (issue #489 post-review fix): despite the "pure relocation" framing
     above, this file is not exclusively a relocation target for
-    Invoke-CostSessionRender's dependency chain. Set-FCLPrBodyCostSummary and
+    Invoke-CostSessionRender dependency chain. Set-FCLPrBodyCostSummary and
     Update-FCLPrBodyCostSummary (issue #489 s3) are a real, independently-
     added PR-body cost-summary writer: Update-FCLPrBodyCostSummary performs
     actual I/O (`gh pr edit --body-file`) and is NOT one of
-    Invoke-CostSessionRender's dependencies — it is the shared writer
+    Invoke-CostSessionRender dependencies — it is the shared writer
     consumed separately by the pipeline hook (frame-credit-ledger.ps1) and
     the baseline harvest (cost-baseline-harvest.ps1).
 
 .NOTES
     Empirical verification (issue #824 post-review fix) also found that
-    Invoke-CostSessionRender's OWN dependency chain needs several whole lib
+    Invoke-CostSessionRender OWN dependency chain needs several whole lib
     files that were likewise absent from the documented Step 7d dot-source
     list: path-normalize.ps1, cost-walker-copilot.ps1, cost-attribution.ps1,
     cost-anomaly.ps1, cost-checkpoint-core.ps1, cost-completeness.ps1, and
     cost-pattern-renderer.ps1. Those files are unrelated to THIS extraction
     (their functions were never trapped in frame-credit-ledger.ps1 — they are
     normal top-level functions in their own lib files); the defect there was
-    purely that Step 7d's list never included them. See cost-session-render.ps1
+    purely that Step 7d list never included them. See cost-session-render.ps1
     for the now-authoritative full dependency list, and
     skills/session-startup/platforms/claude.md Step 7d for the corrected
     dot-source set that mirrors it.
@@ -312,12 +312,12 @@ function script:Get-FCLCostWalkerTimeoutSeconds {
 }
 
 # Issue #794 s4 (sub-observation 4): detects the `frame-enforce.yml` CI landmine
-# case (documented at that workflow's "Run frame credit enforce" step) where
+# case (documented at that workflow "Run frame credit enforce" step) where
 # ~/.claude/projects — the Claude cost-transcript root Invoke-CostTranscriptWalk
 # defaults to — does not exist on ubuntu-latest. This is the SAME root
 # Invoke-CostTranscriptWalk resolves internally when no -ProjectsRoot is
 # supplied (cost-walker.ps1 line ~374); we re-resolve it here rather than
-# threading a new return value through the walker, so the walker's own
+# threading a new return value through the walker, so the walker
 # multi-turn traversal logic (out of scope; re-homed to #491) is untouched.
 # Test-only override mirrors the existing FRAME_CREDIT_LEDGER_TEST_* convention
 # so Pester can simulate both the present-and-empty and absent-root cases
@@ -437,8 +437,8 @@ function script:Set-FCLCostCoverageMetadata {
     $copilotTimedOut = ($null -ne $CopilotWalk -and $CopilotWalk.TimedOut -eq $true)
     $copilotFailed = ($null -ne $CopilotWalk -and $CopilotWalk.Failed -eq $true)
     # Issue #794 s4 (sub-observation 4): the #790 recurrence was specifically a
-    # CLAUDE walker timeout — read Claude's own TimedOut/Failed flags too, not
-    # only Copilot's, so degraded_reason below can be derived from EITHER walker.
+    # CLAUDE walker timeout — read Claude TimedOut/Failed flags too, not
+    # only Copilot, so degraded_reason below can be derived from EITHER walker.
     $claudeTimedOut = ($null -ne $ClaudeWalk -and $ClaudeWalk.TimedOut -eq $true)
     $claudeFailed = ($null -ne $ClaudeWalk -and $ClaudeWalk.Failed -eq $true)
 
@@ -499,13 +499,13 @@ function script:Compose-FCLDegradedCostComment {
     $inv = [System.Globalization.CultureInfo]::InvariantCulture
     $generatedAt = [System.DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ', $inv)
 
-    # Distinct discovery marker (own hidden comment line) so Find-OrUpsertComment's
+    # Distinct discovery marker (own hidden comment line) so Find-OrUpsertComment
     # substring lookup identifies THIS standalone degraded comment across re-runs
     # without colliding with the bare '<!-- cost-pattern-data' substring that is
     # always embedded inside the main frame-credit-ledger-{Pr} comment (Format-
     # CostPatternYaml unconditionally emits that literal, even for empty walks).
     # Kept on its own line (not appended to the YAML open tag) because
-    # Get-CostPatternDataFromComment's extraction regex requires a newline
+    # Get-CostPatternDataFromComment extraction regex requires a newline
     # directly after 'cost-pattern-data' with nothing else on that line.
     $discoveryMarker = "<!-- cost-pattern-data-degraded-$Pr -->"
 
@@ -560,7 +560,7 @@ function script:Get-FCLTokenSumFromBucket {
     return $sum
 }
 
-# Predicate for issue #824 DD7's recurrence guard: warns when the current
+# Predicate for issue #824 DD7 recurrence guard: warns when the current
 # capture is baseline-ineligible AND the rolling history is healthy (fetched,
 # non-empty, not timed out, not a partial fetch) AND every entry in that
 # history is also excluded — i.e. no recent capture has been eligible, which
@@ -593,12 +593,12 @@ function script:Test-FCLRecurrenceGuardShouldWarn {
 
 # ===========================================================================
 # Set-FCLPrBodyCostSummary / Update-FCLPrBodyCostSummary (issue #489 s3 —
-# AC1's forward-compat half, AC2's transform half, AC5's body half).
+# AC1 forward-compat half, AC2 transform half, AC5 body half).
 #
-# Stamps a `cost_summary` additive v4 field into a PR body's hidden
+# Stamps a `cost_summary` additive v4 field into a PR body hidden
 # pipeline-metrics YAML block, plus a visible one-line dollar headline
 # wrapped in <!-- cost-summary:begin/end --> sentinels immediately before
-# that block. Two functions, matching this repo's file-local precedent that
+# that block. Two functions, matching this repo file-local precedent that
 # splits a pure text transform from its effectful writer
 # (script:Update-FCLPrBodyStaleSpineFallbackMetric vs
 # script:Update-FCLPrBodyMetricsBestEffort, frame-credit-ledger.ps1:808/822):
@@ -609,9 +609,9 @@ function script:Test-FCLRecurrenceGuardShouldWarn {
 #
 # All constants (regexes, sentinel strings) are LOCAL to these two function
 # bodies by design — never new top-level $script: constants. This call site
-# runs inside the pipeline hook's outer worker-runspace clone
+# runs inside the pipeline hook outer worker-runspace clone
 # (frame-credit-ledger.ps1:1487-1525), which copies function definitions and
-# global variables but never re-runs a file's top-level dot-sources. A new
+# global variables but never re-runs a file top-level dot-sources. A new
 # top-level $script: constant would silently marshal as $null there (shipped
 # twice: #825 C3, #487).
 # ===========================================================================
@@ -643,11 +643,11 @@ function script:Set-FCLPrBodyCostSummary {
     # exactly-three-backtick pattern left tilde (~~~) fences and 4+-backtick
     # fences un-redacted, so a `<!-- pipeline-metrics -->` example inside such
     # a fence could be mis-anchored as the real block. This is the exact
-    # mirror of cost-baseline-harvest.ps1's Get-CostBaselineHarvestBodyCostSummaryField
+    # mirror of cost-baseline-harvest.ps1 Get-CostBaselineHarvestBodyCostSummaryField
     # copy — the two are kept file-local (never a shared top-level $script:
-    # constant) on purpose: this call site runs inside the pipeline hook's
+    # constant) on purpose: this call site runs inside the pipeline hook
     # worker-runspace clone, where a new top-level $script: constant marshals
-    # as $null (shipped twice: #825 C3, #487); see this file's header .NOTES.
+    # as $null (shipped twice: #825 C3, #487); see this file header .NOTES.
     $fencePattern = '(?s)(`{3,}|~{3,}).*?\1'
     $markerPattern = '(?s)(?<open><!--\s*pipeline-metrics\s*)(?<block>.*?)(?<close>\s*-->)'
     $redactFences = {
@@ -659,7 +659,7 @@ function script:Set-FCLPrBodyCostSummary {
     $markerMatch = [regex]::Match($redacted, $markerPattern)
     if (-not $markerMatch.Success) {
         # No real (non-fenced) pipeline-metrics block to anchor against.
-        # Fail open as a no-op — the writer's no-op guard skips the write.
+        # Fail open as a no-op — the writer no-op guard skips the write.
         return $PrBody
     }
 
@@ -667,10 +667,10 @@ function script:Set-FCLPrBodyCostSummary {
     $blockText = $normalizedBody.Substring($blockGroup.Index, $blockGroup.Length)
     $blockLines = @($blockText -split "`n")
 
-    # ---- Local helper: bounds of a top-level (column-0) key's subtree.
+    # ---- Local helper: bounds of a top-level (column-0) key subtree.
     # Blank and '#'-comment lines are continuation, not a terminator — the
     # subtree ends at the next column-0, non-blank, non-comment line.
-    # Matches this codebase's one consistent precedent (Get-FCLEntryChunks
+    # Matches this codebase one consistent precedent (Get-FCLEntryChunks
     # :351-354 guards blanks before its break check; Get-FCLNestedScalar
     # :73-75 and Test-FCLYamlSane agree). ----
     $findTopLevelKeySubtreeBounds = {
@@ -752,13 +752,13 @@ function script:Set-FCLPrBodyCostSummary {
         }
         # Issue #489 CE Gate follow-up (S4/AC5): optional structured value
         # @{ median_usd = [double]; sample_size = [int] } populated by the
-        # baseline harvest's two CostSummary constructors from already-
+        # baseline harvest two CostSummary constructors from already-
         # fetched rolling history (script:Get-CostBaselineHarvestRollingBaseline,
         # cost-baseline-harvest.ps1). Never populated by the pipeline hook
         # (frame-credit-ledger.ps1) — at PR-creation time there is no
         # meaningful rolling history for the PR being created yet. Visible-
         # line-only (not re-emitted into the hidden YAML section — see that
-        # helper's own doc comment for the rationale): the graceful-
+        # helper doc comment for the rationale): the graceful-
         # degradation default below (absent key) renders the line exactly as
         # it did before this feature.
         $rollingBaselineUsd = $null
@@ -767,8 +767,8 @@ function script:Set-FCLPrBodyCostSummary {
         }
 
         if ($costUnknown) {
-            # Bare, unquoted YAML null — matches this repo's existing
-            # convention for a null cost field (cost-pattern-renderer.ps1's
+            # Bare, unquoted YAML null — matches this repo existing
+            # convention for a null cost field (cost-pattern-renderer.ps1
             # Format-CostRendererNullableCostYaml). Escape-FCLScalar is
             # skipped here: the literal 'null' never needs YAML quoting
             # (no ':', '#', or leading/trailing whitespace), so bypassing it
@@ -805,7 +805,7 @@ function script:Set-FCLPrBodyCostSummary {
     # then credits:, in that preference order since dispatch-cost-samples
     # always renders after credits when both are present); append at the end
     # of the block when neither list section exists. An indent-0 key placed
-    # here correctly terminates Get-FCLEntryChunks's list scan; nested
+    # here correctly terminates Get-FCLEntryChunks list scan; nested
     # children placed before that terminator would be silently consumed as
     # fields of the last credit entry. ----
     $insertIdx = $blockLines.Count
@@ -874,7 +874,7 @@ function script:Set-FCLPrBodyCostSummary {
         # Issue #489 CE Gate follow-up: "vs $X.XXXX median, last N PRs" —
         # only when the current cost is a real number (never compare a known
         # figure against "unknown") AND a rolling_baseline_usd value was
-        # actually supplied. $rollingBaselineUsd's numeric values are
+        # actually supplied. $rollingBaselineUsd numeric values are
         # internally computed (never attacker-controlled text), so this
         # clause needs no sentinel/link sanitization like the string fields
         # above.
@@ -907,7 +907,7 @@ function script:Set-FCLPrBodyCostSummary {
         -FencePattern $fencePattern `
         -MarkerPattern $markerPattern
 
-    # ---- Restore the body's original EOL convention. ----
+    # ---- Restore the body original EOL convention. ----
     return ($finalNormalized -replace "`n", $eol)
 }
 
@@ -919,11 +919,11 @@ function script:Set-FCLPrBodyCostSummary {
 # renders. The hidden YAML section is authoritative — the visible span is
 # always regenerated from it, never merged with stale visible text.
 #
-# Orphan handling is intentionally asymmetric and bounded: this writer's own
+# Orphan handling is intentionally asymmetric and bounded: this writer
 # span is always exactly 3 lines (begin, one content line, end), so an orphan
 # BEGIN with no end anywhere in the document most plausibly means the
 # terminating end was lost mid-write — the single line right after the begin
-# is presumed to be that lost span's stale content and is removed too. An
+# is presumed to be that lost span stale content and is removed too. An
 # orphan END has no such reliable direction to look (any content that
 # belonged to it may already be gone, and the line immediately before it may
 # be unrelated prose), so only the marker line itself is removed for that
@@ -960,10 +960,10 @@ function script:Repair-FCLCostSummarySentinelSpan {
     $lines = @($Body -split "`n")
     $beginPattern = '^\s*<!--\s*cost-summary:begin\s*-->\s*$'
     $endPattern = '^\s*<!--\s*cost-summary:end\s*-->\s*$'
-    # C3: this writer's own visible line always starts with this exact
+    # C3: this writer visible line always starts with this exact
     # literal (see the visible-line composition in Set-FCLPrBodyCostSummary,
     # both the degraded and non-degraded branches). Only a line matching this
-    # shape is presumed to be this writer's own lost span content.
+    # shape is presumed to be this writer lost span content.
     $visibleLineShapePattern = '^\s*\*\*Session cost\*\*:'
     $toRemove = [System.Collections.Generic.HashSet[int]]::new()
     $openStack = [System.Collections.Generic.List[int]]::new()
@@ -1056,13 +1056,13 @@ function script:Update-FCLPrBodyCostSummary {
         # mutation — was silently skipped. When supplied, the no-op decision
         # compares the final text against -OriginalBody (what GitHub
         # currently actually has) instead of -PrBody. Omitted by default so
-        # any caller not yet updated keeps today's exact behavior.
+        # any caller not yet updated keeps today exact behavior.
         [AllowEmptyString()][string]$OriginalBody = $null
     )
 
     # Local helper: both failure return points below need the identical
     # "log to stderr, then classify as a failed outcome" shape (matches this
-    # file's existing convention of small local scriptblocks for a repeated
+    # file existing convention of small local scriptblocks for a repeated
     # shape — see $redactFences / $findTopLevelKeySubtreeBounds /
     # $sanitizeForVisibleLine above in Set-FCLPrBodyCostSummary).
     $newFailedOutcome = {
