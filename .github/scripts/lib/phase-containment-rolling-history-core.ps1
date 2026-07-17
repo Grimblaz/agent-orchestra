@@ -421,8 +421,14 @@ function Invoke-PhaseContainmentCommentScan {
         that do not carry author provenance.
     .OUTPUTS
         [PSCustomObject] with:
-          Entries           [array] — parsed, validated entry hashtables with appended metadata.
-          InvalidEntryCount [int]   — count of blocks dropped (parse failure + every validation failure).
+          Entries             [array] — parsed, validated entry hashtables with appended metadata.
+          InvalidEntryCount   [int]   — count of blocks dropped (parse failure + every validation failure).
+          Matched             [int]   — count of bodies that passed the author gate and were scanned
+                                        for phase-containment blocks (issue #842 M8). Equals
+                                        CommentBodies.Count when -JudgeLogin is not supplied (no gate).
+          AuthorFilteredCount [int]   — count of bodies dropped by the author gate before ever being
+                                        scanned (issue #842 M8), so a caller can distinguish "the judge
+                                        filter matched nothing" from "genuinely empty window."
     #>
     [CmdletBinding()]
     [OutputType([PSCustomObject])]
@@ -438,6 +444,8 @@ function Invoke-PhaseContainmentCommentScan {
     $results = [System.Collections.Generic.List[hashtable]]::new()
     $id      = [string]$IssueOrPrNumber
     $invalidEntryCount = 0
+    $matched = 0
+    $authorFilteredCount = 0
     $gateOnAuthor = -not [string]::IsNullOrWhiteSpace($JudgeLogin)
 
     for ($i = 0; $i -lt $CommentBodies.Count; $i++) {
@@ -447,9 +455,12 @@ function Invoke-PhaseContainmentCommentScan {
         if ($gateOnAuthor) {
             $authorLogin = if ($i -lt $AuthorLogins.Count) { $AuthorLogins[$i] } else { '' }
             if (-not (Test-PhaseContainmentCommentAuthoredByJudge -AuthorLogin $authorLogin -JudgeLogin $JudgeLogin)) {
+                $authorFilteredCount++
                 continue
             }
         }
+
+        $matched++
 
         # M4 fix (issue #772/#831 post-fix review): thread the D6 pair-match
         # skip count out of Get-PhaseContainmentBlock so a malformed/
@@ -492,8 +503,10 @@ function Invoke-PhaseContainmentCommentScan {
     }
 
     return [PSCustomObject]@{
-        Entries           = $results.ToArray()
-        InvalidEntryCount = $invalidEntryCount
+        Entries             = $results.ToArray()
+        InvalidEntryCount   = $invalidEntryCount
+        Matched             = $matched
+        AuthorFilteredCount = $authorFilteredCount
     }
 }
 
@@ -557,7 +570,13 @@ function script:Write-PhaseContainmentCache {
     param(
         [Parameter(Mandatory)][string]$CachePath,
         [Parameter(Mandatory)][array]$Entries,
-        [int]$InvalidEntryCount = 0
+        [int]$InvalidEntryCount = 0,
+        # Issue #842 M2 fix: persist the window-level author-gate accounting
+        # so a subsequent cache-hit run can restore it instead of hardcoding
+        # both fields to 0 (which previously rendered "Judge filter: matched
+        # 0 of 0" beside a non-empty, cache-served stage render).
+        [int]$Matched = 0,
+        [int]$AuthorFilteredCount = 0
     )
     try {
         $cacheDir = Split-Path -Parent $CachePath
@@ -565,11 +584,21 @@ function script:Write-PhaseContainmentCache {
             New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null
         }
         $payload = @{
-            generated_at        = (Get-Date).ToUniversalTime().ToString('o')
-            entries             = $Entries
-            invalid_entry_count = $InvalidEntryCount
+            generated_at          = (Get-Date).ToUniversalTime().ToString('o')
+            entries               = $Entries
+            invalid_entry_count   = $InvalidEntryCount
+            matched               = $Matched
+            author_filtered_count = $AuthorFilteredCount
         }
-        $payload | ConvertTo-Json -Depth 20 | Set-Content -Path $CachePath -Encoding UTF8
+        # M7 fix (issue #842 post-review): the cache filename embeds
+        # $JudgeLogin verbatim (see Get-PhaseContainmentHistory's CachePath
+        # resolution above) and Read-PhaseContainmentCache reads it back via
+        # -LiteralPath. Set-Content -Path interprets wildcard characters --
+        # a bracketed identity like 'github-actions[bot]' makes the path a
+        # (silently non-matching) wildcard pattern, so the write here would
+        # otherwise silently no-op. Use -LiteralPath for consistency with
+        # the reader.
+        $payload | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $CachePath -Encoding UTF8
     }
     catch {
         Write-Warning "phase-containment-rolling-history-core: failed to write cache to '$CachePath': $_"
@@ -887,11 +916,13 @@ function script:Get-SurfaceAEntriesGraphQL {
         -Stopwatch $Stopwatch -TimeoutSeconds $TimeoutSeconds
 
     if ($corpusResult.IsError) {
-        return [PSCustomObject]@{ Entries = @(); Truncated = $false; InvalidEntryCount = 0; IsError = $true }
+        return [PSCustomObject]@{ Entries = @(); Truncated = $false; InvalidEntryCount = 0; Matched = 0; AuthorFilteredCount = 0; IsError = $true }
     }
 
     $entries = [System.Collections.Generic.List[hashtable]]::new()
     $invalidEntryCount = 0
+    $matched = 0
+    $authorFilteredCount = 0
     foreach ($tuple in $corpusResult.Tuples) {
         # M7 fix (issue #782 post-review): restore per-item isolation. A
         # single malformed tuple (e.g. Number/Bodies/CreatedAtValues that
@@ -912,6 +943,8 @@ function script:Get-SurfaceAEntriesGraphQL {
 
             foreach ($e in $scanResult.Entries) { $entries.Add($e) }
             $invalidEntryCount += $scanResult.InvalidEntryCount
+            $matched += $scanResult.Matched
+            $authorFilteredCount += $scanResult.AuthorFilteredCount
         }
         catch {
             Write-Warning "phase-containment-rolling-history-core: Surface A tuple scan failed for Number='$($tuple['Number'])': $_"
@@ -919,10 +952,12 @@ function script:Get-SurfaceAEntriesGraphQL {
     }
 
     return [PSCustomObject]@{
-        Entries           = $entries.ToArray()
-        Truncated         = $corpusResult.Truncated
-        InvalidEntryCount = $invalidEntryCount
-        IsError           = $false
+        Entries             = $entries.ToArray()
+        Truncated           = $corpusResult.Truncated
+        InvalidEntryCount   = $invalidEntryCount
+        Matched             = $matched
+        AuthorFilteredCount = $authorFilteredCount
+        IsError             = $false
     }
 }
 
@@ -1211,11 +1246,13 @@ function script:Get-SurfaceBEntriesGraphQL {
         -Stopwatch $Stopwatch -TimeoutSeconds $TimeoutSeconds
 
     if ($corpusResult.IsError) {
-        return [PSCustomObject]@{ Entries = @(); Truncated = $false; InvalidEntryCount = 0; IsError = $true }
+        return [PSCustomObject]@{ Entries = @(); Truncated = $false; InvalidEntryCount = 0; Matched = 0; AuthorFilteredCount = 0; IsError = $true }
     }
 
     $entries = [System.Collections.Generic.List[hashtable]]::new()
     $invalidEntryCount = 0
+    $matched = 0
+    $authorFilteredCount = 0
     foreach ($tuple in $corpusResult.Tuples) {
         # M7 fix (issue #782 post-review): see Get-SurfaceAEntriesGraphQL's
         # identical per-item try/catch for the rationale.
@@ -1232,6 +1269,8 @@ function script:Get-SurfaceBEntriesGraphQL {
 
             foreach ($e in $scanResult.Entries) { $entries.Add($e) }
             $invalidEntryCount += $scanResult.InvalidEntryCount
+            $matched += $scanResult.Matched
+            $authorFilteredCount += $scanResult.AuthorFilteredCount
         }
         catch {
             Write-Warning "phase-containment-rolling-history-core: Surface B tuple scan failed for Number='$($tuple['Number'])': $_"
@@ -1239,10 +1278,12 @@ function script:Get-SurfaceBEntriesGraphQL {
     }
 
     return [PSCustomObject]@{
-        Entries           = $entries.ToArray()
-        Truncated         = $corpusResult.Truncated
-        InvalidEntryCount = $invalidEntryCount
-        IsError           = $false
+        Entries             = $entries.ToArray()
+        Truncated           = $corpusResult.Truncated
+        InvalidEntryCount   = $invalidEntryCount
+        Matched             = $matched
+        AuthorFilteredCount = $authorFilteredCount
+        IsError             = $false
     }
 }
 
@@ -1481,6 +1522,8 @@ function script:Get-PhaseContainmentEntriesRest {
 
     $entries = [System.Collections.Generic.List[hashtable]]::new()
     $invalidEntryCount = 0
+    $matched = 0
+    $authorFilteredCount = 0
     foreach ($tuple in $corpusResult.Tuples) {
         # M7 fix (issue #782 post-review): see Get-SurfaceAEntriesGraphQL's
         # identical per-item try/catch for the rationale.
@@ -1497,6 +1540,8 @@ function script:Get-PhaseContainmentEntriesRest {
 
             foreach ($e in $scanResult.Entries) { $entries.Add($e) }
             $invalidEntryCount += $scanResult.InvalidEntryCount
+            $matched += $scanResult.Matched
+            $authorFilteredCount += $scanResult.AuthorFilteredCount
         }
         catch {
             Write-Warning "phase-containment-rolling-history-core: REST tuple scan failed for Number='$($tuple['Number'])': $_"
@@ -1504,10 +1549,12 @@ function script:Get-PhaseContainmentEntriesRest {
     }
 
     return [PSCustomObject]@{
-        Entries           = $entries.ToArray()
-        Truncated         = $corpusResult.Truncated
-        InvalidEntryCount = $invalidEntryCount
-        IsError           = $false
+        Entries             = $entries.ToArray()
+        Truncated           = $corpusResult.Truncated
+        InvalidEntryCount   = $invalidEntryCount
+        Matched             = $matched
+        AuthorFilteredCount = $authorFilteredCount
+        IsError             = $false
     }
 }
 
@@ -1738,7 +1785,7 @@ function Get-PhaseContainmentHistory {
         GitHub token. Currently unused (gh CLI uses ambient auth). Reserved for future use.
     .PARAMETER CachePath
         Absolute path to the cache file. Defaults to
-        $env:TEMP\.phase-containment-cache-{RepoOwner}-{RepoName}.json
+        [System.IO.Path]::GetTempPath()\.phase-containment-cache-{RepoOwner}-{RepoName}-{JudgeLogin}.json
     .PARAMETER TimeoutSeconds
         Per-run budget in seconds. Default: 30.
     .PARAMETER JudgeLogin
@@ -1751,10 +1798,25 @@ function Get-PhaseContainmentHistory {
         coverage/dispositions tally. Left empty (the default), no gating is
         applied — existing direct callers/tests that do not pass a judge
         identity keep their prior unfiltered behavior.
+    .PARAMETER SkipCacheWrite
+        Issue #842 M5 fix: when set, suppresses the 1-hour cache write this
+        function otherwise performs after a successful, non-truncated fetch.
+        Intended for callers that construct a throwaway/bypass CachePath
+        (e.g. a GUID-named path under $env:TEMP used to force a same-run-
+        fresh fetch) -- without this switch, every such bypass run still
+        wrote a full-content orphan cache JSON to that throwaway path with
+        no cleanup, on every default run. Does not affect cache reads.
     .OUTPUTS
         PSCustomObject with Entries, FetchedAt, Source, CacheAge, Truncated,
-        InvalidEntryCount. Truncated/InvalidEntryCount are always present
-        (issue #772 D1) so StrictMode consumers never throw reading them.
+        InvalidEntryCount, Matched, AuthorFilteredCount. Truncated/
+        InvalidEntryCount/Matched/AuthorFilteredCount are always present
+        (issue #772 D1, extended by issue #842 M11) so StrictMode consumers
+        never throw reading them. Matched/AuthorFilteredCount (issue #842
+        M8) are the window-level totals aggregated across every scanned
+        surface; a degradation path that never attempted a scan (timeout,
+        repo-resolution-failed) reports both as 0. A cache hit restores
+        both from the persisted payload (issue #842 M2), defaulting to 0
+        only for a legacy cache file written before that field existed.
     #>
     [CmdletBinding()]
     [OutputType([PSCustomObject])]
@@ -1765,7 +1827,8 @@ function Get-PhaseContainmentHistory {
         [string]$Token        = '',
         [string]$CachePath    = '',
         [int]$TimeoutSeconds  = 30,
-        [AllowEmptyString()][string]$JudgeLogin = ''
+        [AllowEmptyString()][string]$JudgeLogin = '',
+        [switch]$SkipCacheWrite
     )
 
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
@@ -1775,12 +1838,14 @@ function Get-PhaseContainmentHistory {
         if ($stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
             Write-Warning "phase-containment-rolling-history-core: timed out before repo resolution"
             return [PSCustomObject]@{
-                Entries           = @()
-                FetchedAt         = (Get-Date)
-                Source            = 'timeout'
-                CacheAge          = [timespan]::Zero
-                Truncated         = $false
-                InvalidEntryCount = 0
+                Entries             = @()
+                FetchedAt           = (Get-Date)
+                Source              = 'timeout'
+                CacheAge            = [timespan]::Zero
+                Truncated           = $false
+                InvalidEntryCount   = 0
+                Matched             = 0
+                AuthorFilteredCount = 0
             }
         }
         # PF2-F2 fix: use 2>$null, not 2>&1 — see Get-SurfaceACorpusGraphQL
@@ -1792,12 +1857,14 @@ function Get-PhaseContainmentHistory {
         if ($LASTEXITCODE -ne 0) {
             Write-Warning "phase-containment-rolling-history-core: gh repo view failed (exit $LASTEXITCODE)"
             return [PSCustomObject]@{
-                Entries           = @()
-                FetchedAt         = (Get-Date)
-                Source            = 'repo-resolution-failed'
-                CacheAge          = [timespan]::Zero
-                Truncated         = $false
-                InvalidEntryCount = 0
+                Entries             = @()
+                FetchedAt           = (Get-Date)
+                Source              = 'repo-resolution-failed'
+                CacheAge            = [timespan]::Zero
+                Truncated           = $false
+                InvalidEntryCount   = 0
+                Matched             = 0
+                AuthorFilteredCount = 0
             }
         }
         try {
@@ -1808,19 +1875,25 @@ function Get-PhaseContainmentHistory {
         catch {
             Write-Warning "phase-containment-rolling-history-core: failed to parse repo view: $_"
             return [PSCustomObject]@{
-                Entries           = @()
-                FetchedAt         = (Get-Date)
-                Source            = 'repo-resolution-failed'
-                CacheAge          = [timespan]::Zero
-                Truncated         = $false
-                InvalidEntryCount = 0
+                Entries             = @()
+                FetchedAt           = (Get-Date)
+                Source              = 'repo-resolution-failed'
+                CacheAge            = [timespan]::Zero
+                Truncated           = $false
+                InvalidEntryCount   = 0
+                Matched             = 0
+                AuthorFilteredCount = 0
             }
         }
     }
 
     # ---- Resolve cache path ----
+    # Issue #842: the identity component is part of the cache key -- without
+    # it, a later run under a DIFFERENT -JudgeLogin would silently read back
+    # cache entries computed and author-filtered under a PRIOR identity
+    # (cache poisoning across judge identities).
     if (-not $CachePath) {
-        $CachePath = Join-Path $env:TEMP ".phase-containment-cache-$RepoOwner-$RepoName.json"  # host-path-ok
+        $CachePath = Join-Path ([System.IO.Path]::GetTempPath()) ".phase-containment-cache-$RepoOwner-$RepoName-$JudgeLogin.json"  # host-path-ok
     }
 
     # ---- Cache hit ----
@@ -1837,6 +1910,18 @@ function Get-PhaseContainmentHistory {
         if ($cacheData.ContainsKey('invalid_entry_count') -and $null -ne $cacheData['invalid_entry_count']) {
             $cachedInvalidEntryCount = [int]$cacheData['invalid_entry_count']
         }
+        # M2 fix (issue #842 post-review): restore the persisted Matched/
+        # AuthorFilteredCount window-level totals on a cache hit. Default to
+        # 0 only when reading a LEGACY cache file written before this field
+        # existed (ContainsKey guard), not for a fresh write.
+        $cachedMatched = 0
+        if ($cacheData.ContainsKey('matched') -and $null -ne $cacheData['matched']) {
+            $cachedMatched = [int]$cacheData['matched']
+        }
+        $cachedAuthorFilteredCount = 0
+        if ($cacheData.ContainsKey('author_filtered_count') -and $null -ne $cacheData['author_filtered_count']) {
+            $cachedAuthorFilteredCount = [int]$cacheData['author_filtered_count']
+        }
         # Compute cache age
         try {
             $genAt = [datetime]::Parse((script:ConvertTo-PhaseContainmentIsoString -Value $cacheData['generated_at']), [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind)
@@ -1847,32 +1932,42 @@ function Get-PhaseContainmentHistory {
             $cacheAge = [timespan]::Zero
         }
         return [PSCustomObject]@{
-            Entries           = $cachedEntries
-            FetchedAt         = (Get-Date)
-            Source            = 'cache'
-            CacheAge          = $cacheAge
+            Entries             = $cachedEntries
+            FetchedAt           = (Get-Date)
+            Source              = 'cache'
+            CacheAge            = $cacheAge
             # A truncated run is never cached (see the cache-write guard
             # below), so a cache hit is by construction a complete snapshot.
-            Truncated         = $false
-            InvalidEntryCount = $cachedInvalidEntryCount
+            Truncated           = $false
+            InvalidEntryCount   = $cachedInvalidEntryCount
+            # M2 fix (issue #842 post-review): restored from the cache
+            # payload (see above) rather than hardcoded to 0 -- a legacy
+            # cache file written before this field existed still degrades
+            # to 0 via the ContainsKey guard above.
+            Matched             = $cachedMatched
+            AuthorFilteredCount = $cachedAuthorFilteredCount
         }
     }
 
     # ---- GraphQL fetch ----
-    $useRest           = $false
-    $rawEntries        = [System.Collections.Generic.List[hashtable]]::new()
-    $truncated         = $false
-    $invalidEntryCount = 0
+    $useRest             = $false
+    $rawEntries          = [System.Collections.Generic.List[hashtable]]::new()
+    $truncated           = $false
+    $invalidEntryCount   = 0
+    $matched             = 0
+    $authorFilteredCount = 0
 
     if ($stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
         Write-Warning "phase-containment-rolling-history-core: timed out before GraphQL fetch"
         return [PSCustomObject]@{
-            Entries           = @()
-            FetchedAt         = (Get-Date)
-            Source            = 'timeout'
-            CacheAge          = [timespan]::Zero
-            Truncated         = $false
-            InvalidEntryCount = 0
+            Entries             = @()
+            FetchedAt           = (Get-Date)
+            Source              = 'timeout'
+            CacheAge            = [timespan]::Zero
+            Truncated           = $false
+            InvalidEntryCount   = 0
+            Matched             = 0
+            AuthorFilteredCount = 0
         }
     }
 
@@ -1886,7 +1981,9 @@ function Get-PhaseContainmentHistory {
     else {
         foreach ($e in $surfaceAResult.Entries) { $rawEntries.Add($e) }
         if ($surfaceAResult.Truncated) { $truncated = $true }
-        $invalidEntryCount += $surfaceAResult.InvalidEntryCount
+        $invalidEntryCount   += $surfaceAResult.InvalidEntryCount
+        $matched             += $surfaceAResult.Matched
+        $authorFilteredCount += $surfaceAResult.AuthorFilteredCount
     }
 
     if (-not $useRest) {
@@ -1898,12 +1995,14 @@ function Get-PhaseContainmentHistory {
             Write-Warning "phase-containment-rolling-history-core: timed out before Surface B fetch — returning Surface A partials (Truncated)"
             $dedupedPartial = Invoke-PhaseContainmentDedup -RawEntries $rawEntries.ToArray() -InvalidEntryCount ([ref]$invalidEntryCount)
             return [PSCustomObject]@{
-                Entries           = $dedupedPartial
-                FetchedAt         = (Get-Date)
-                Source            = 'graphql'
-                CacheAge          = [timespan]::Zero
-                Truncated         = $true
-                InvalidEntryCount = $invalidEntryCount
+                Entries             = $dedupedPartial
+                FetchedAt           = (Get-Date)
+                Source              = 'graphql'
+                CacheAge            = [timespan]::Zero
+                Truncated           = $true
+                InvalidEntryCount   = $invalidEntryCount
+                Matched             = $matched
+                AuthorFilteredCount = $authorFilteredCount
             }
         }
 
@@ -1918,7 +2017,9 @@ function Get-PhaseContainmentHistory {
         else {
             foreach ($e in $surfaceBResult.Entries) { $rawEntries.Add($e) }
             if ($surfaceBResult.Truncated) { $truncated = $true }
-            $invalidEntryCount += $surfaceBResult.InvalidEntryCount
+            $invalidEntryCount   += $surfaceBResult.InvalidEntryCount
+            $matched             += $surfaceBResult.Matched
+            $authorFilteredCount += $surfaceBResult.AuthorFilteredCount
         }
     }
 
@@ -1928,12 +2029,14 @@ function Get-PhaseContainmentHistory {
         if ($stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
             Write-Warning "phase-containment-rolling-history-core: timed out before REST fallback"
             return [PSCustomObject]@{
-                Entries           = @()
-                FetchedAt         = (Get-Date)
-                Source            = 'timeout'
-                CacheAge          = [timespan]::Zero
-                Truncated         = $false
-                InvalidEntryCount = 0
+                Entries             = @()
+                FetchedAt           = (Get-Date)
+                Source              = 'timeout'
+                CacheAge            = [timespan]::Zero
+                Truncated           = $false
+                InvalidEntryCount   = 0
+                Matched             = 0
+                AuthorFilteredCount = 0
             }
         }
 
@@ -1948,30 +2051,37 @@ function Get-PhaseContainmentHistory {
         # overwritten here, not combined — the REST run owns its own state.
         $rawEntries.Clear()
         foreach ($e in $restResult.Entries) { $rawEntries.Add($e) }
-        $truncated         = $restResult.Truncated
-        $invalidEntryCount = $restResult.InvalidEntryCount
-        $sourceLabel       = 'rest'
+        $truncated           = $restResult.Truncated
+        $invalidEntryCount   = $restResult.InvalidEntryCount
+        $matched             = $restResult.Matched
+        $authorFilteredCount = $restResult.AuthorFilteredCount
+        $sourceLabel         = 'rest'
     }
 
     # ---- Dedup ----
     $dedupedEntries = Invoke-PhaseContainmentDedup -RawEntries $rawEntries.ToArray() -InvalidEntryCount ([ref]$invalidEntryCount)
 
-    # ---- Write cache (only if non-empty AND not truncated) ----
+    # ---- Write cache (only if non-empty AND not truncated AND not a bypass run) ----
     # P7: a truncated run must not poison the 1-hour cache with an incomplete
     # snapshot — skipping the write here is what lets M2's reset-on-discard
     # actually matter (a fully-completed REST run after a discarded
     # truncated GraphQL attempt reports Truncated=$false and DOES cache).
-    if ($dedupedEntries.Count -gt 0 -and -not $truncated) {
-        script:Write-PhaseContainmentCache -CachePath $CachePath -Entries $dedupedEntries -InvalidEntryCount $invalidEntryCount
+    # M5 fix (issue #842 post-review): -SkipCacheWrite suppresses the write
+    # entirely for a caller-signaled bypass/throwaway CachePath, so that path
+    # is never populated with an orphan cache JSON.
+    if ($dedupedEntries.Count -gt 0 -and -not $truncated -and -not $SkipCacheWrite) {
+        script:Write-PhaseContainmentCache -CachePath $CachePath -Entries $dedupedEntries -InvalidEntryCount $invalidEntryCount -Matched $matched -AuthorFilteredCount $authorFilteredCount
     }
 
     return [PSCustomObject]@{
-        Entries           = $dedupedEntries
-        FetchedAt         = (Get-Date)
-        Source            = $sourceLabel
-        CacheAge          = [timespan]::Zero
-        Truncated         = $truncated
-        InvalidEntryCount = $invalidEntryCount
+        Entries             = $dedupedEntries
+        FetchedAt           = (Get-Date)
+        Source              = $sourceLabel
+        CacheAge            = [timespan]::Zero
+        Truncated           = $truncated
+        InvalidEntryCount   = $invalidEntryCount
+        Matched             = $matched
+        AuthorFilteredCount = $authorFilteredCount
     }
 }
 
@@ -2562,12 +2672,23 @@ function Format-PhaseContainmentReport {
         writing them out (e.g. via Write-Output).
     .PARAMETER Context
         A hashtable or PSCustomObject with fields:
-          Rollup            [PSCustomObject] — Get-PhaseContainmentRollup return object
-          Source            [string]         — 'graphql' | 'rest' | 'timeout' | 'repo-resolution-failed'
-          Truncated         [bool]
-          WindowDays        [int]
-          FetchedAt         [datetime]
-          InvalidEntryCount [int]
+          Rollup              [PSCustomObject] — Get-PhaseContainmentRollup return object
+          Source              [string]         — 'graphql' | 'rest' | 'timeout' | 'repo-resolution-failed'
+          Truncated           [bool]
+          WindowDays          [int]
+          FetchedAt           [datetime]
+          InvalidEntryCount   [int]
+          Matched             [int]    — issue #842 M22: window-level count of comment bodies that
+                                         passed the judge-authorship gate. Default 0 (inert no-op) when
+                                         omitted, matching every pre-existing caller of this function.
+          CommentBodyCount    [int]    — window-level total comment bodies fetched (Matched +
+                                         AuthorFilteredCount). Default 0 when omitted.
+          AuthorFilteredCount [int]    — window-level count of bodies dropped by the judge-authorship
+                                         gate. Default 0 when omitted.
+          JudgeLogin          [string] — the judge identity the gate compared against. Default
+                                         'github-actions[bot]' when omitted.
+          JudgeLoginSource    [string] — provenance of JudgeLogin ('resolved from gh auth' or
+                                         'from -JudgeLogin'). Default 'resolved from gh auth' when omitted.
     .OUTPUTS
         [string[]] — the report lines.
     #>
@@ -2578,12 +2699,37 @@ function Format-PhaseContainmentReport {
     )
 
     # Normalize field access for both hashtable and PSCustomObject
-    $rollup            = if ($Context -is [hashtable]) { $Context['Rollup'] }            else { $Context.Rollup }
-    $source            = if ($Context -is [hashtable]) { $Context['Source'] }            else { $Context.Source }
-    $truncated         = if ($Context -is [hashtable]) { $Context['Truncated'] }         else { $Context.Truncated }
-    $windowDays        = if ($Context -is [hashtable]) { $Context['WindowDays'] }        else { $Context.WindowDays }
-    $fetchedAt         = if ($Context -is [hashtable]) { $Context['FetchedAt'] }         else { $Context.FetchedAt }
-    $invalidEntryCount = if ($Context -is [hashtable]) { $Context['InvalidEntryCount'] } else { $Context.InvalidEntryCount }
+    $rollup             = if ($Context -is [hashtable]) { $Context['Rollup'] }              else { $Context.Rollup }
+    $source             = if ($Context -is [hashtable]) { $Context['Source'] }              else { $Context.Source }
+    $truncated          = if ($Context -is [hashtable]) { $Context['Truncated'] }           else { $Context.Truncated }
+    $windowDays         = if ($Context -is [hashtable]) { $Context['WindowDays'] }          else { $Context.WindowDays }
+    $fetchedAt          = if ($Context -is [hashtable]) { $Context['FetchedAt'] }           else { $Context.FetchedAt }
+    $invalidEntryCount  = if ($Context -is [hashtable]) { $Context['InvalidEntryCount'] }   else { $Context.InvalidEntryCount }
+    # Issue #842 M22: always-on judge-filter disclosure fields. Every field
+    # below defaults to an inert value when the caller (any pre-existing
+    # caller of this function) does not supply it.
+    # Issue #842 M9 fix: these five fields are the NEWER Context members --
+    # a PSCustomObject Context built before this disclosure feature existed
+    # (or any fixture that omits them) has no such property at all. Bare
+    # dot-access on a PSCustomObject missing a property throws
+    # PropertyNotFoundException under this file's Set-StrictMode -Version
+    # Latest, contradicting this function's own docstring claim that these
+    # fields are an inert no-op when omitted -- that claim was only true for
+    # the hashtable branch (indexer returns $null on a missing key). Route
+    # every PSCustomObject read through a PSObject.Properties presence check
+    # so a missing field degrades to $null (then to the 0/default literals
+    # below), matching the hashtable branch's behavior instead of throwing.
+    $matched             = if ($Context -is [hashtable]) { $Context['Matched'] }             else { $prop = $Context.PSObject.Properties['Matched'];             if ($null -ne $prop) { $prop.Value } else { $null } }
+    $commentBodyCount    = if ($Context -is [hashtable]) { $Context['CommentBodyCount'] }    else { $prop = $Context.PSObject.Properties['CommentBodyCount'];    if ($null -ne $prop) { $prop.Value } else { $null } }
+    $authorFilteredCount = if ($Context -is [hashtable]) { $Context['AuthorFilteredCount'] } else { $prop = $Context.PSObject.Properties['AuthorFilteredCount']; if ($null -ne $prop) { $prop.Value } else { $null } }
+    $judgeLogin          = if ($Context -is [hashtable]) { $Context['JudgeLogin'] }          else { $prop = $Context.PSObject.Properties['JudgeLogin'];          if ($null -ne $prop) { $prop.Value } else { $null } }
+    $judgeLoginSource    = if ($Context -is [hashtable]) { $Context['JudgeLoginSource'] }    else { $prop = $Context.PSObject.Properties['JudgeLoginSource'];    if ($null -ne $prop) { $prop.Value } else { $null } }
+
+    if ($null -eq $matched) { $matched = 0 }
+    if ($null -eq $commentBodyCount) { $commentBodyCount = 0 }
+    if ($null -eq $authorFilteredCount) { $authorFilteredCount = 0 }
+    if ([string]::IsNullOrEmpty($judgeLogin)) { $judgeLogin = 'github-actions[bot]' }
+    if ([string]::IsNullOrEmpty($judgeLoginSource)) { $judgeLoginSource = 'resolved from gh auth' }
 
     $lines = [System.Collections.Generic.List[string]]::new()
 
@@ -2596,8 +2742,12 @@ function Format-PhaseContainmentReport {
     $lines.Add("Window: ${windowDays}d | Fetched: $($fetchedAt.ToUniversalTime().ToString('yyyy-MM-dd HH:mm:ss')) UTC | Source: $source$headerSuffix")
     $lines.Add("Total entries processed: $($rollup.WindowEntryCount) | Apparatus-meta entries: $($rollup.ApparatusMetaCount)")
     if ($invalidEntryCount -gt 0) {
-        $lines.Add("WARNING: $invalidEntryCount phase-containment block(s) dropped as invalid/unparseable during this fetch — see gh Action run logs for details.")
+        # Issue #842 s6 (Task 4): no workflow runs this report -- there are no
+        # "gh Action run logs" to see. Re-running the command locally is the
+        # only way a maintainer can actually inspect the dropped bodies.
+        $lines.Add("WARNING: $invalidEntryCount phase-containment block(s) dropped as invalid/unparseable during this fetch — re-run this command locally to inspect the dropped comment bodies.")
     }
+    $lines.Add("Judge filter: matched $matched of $commentBodyCount comment bodies (identity: $judgeLogin, $judgeLoginSource)")
     $lines.Add('')
 
     # ---- Render per-stage results ----
@@ -2627,12 +2777,66 @@ function Format-PhaseContainmentReport {
         if ($stage.DenominatorZero) {
             $lines.Add("  Escape rate:        N/A (denominator=0)")
             $lines.Add("  Irreducible rate:   N/A")
-            $lines.Add("  Relaxation signal:  WITHHELD (denominator=0)")
+
+            # Issue #842 M7/M9: four-state discrimination of the
+            # DenominatorZero branch. Precedence matters -- checked in this
+            # exact order:
+            #   1. matched==0 AND AuthorFilteredCount>0 -> FILTERED-EMPTY
+            #      (the judge filter itself matched nothing; checked FIRST
+            #      so it wins over a coincidentally-nonzero InvalidEntryCount
+            #      or a contradictory CommentBodyCount).
+            #   2. entries==0 (this branch) AND InvalidEntryCount>0 AND the
+            #      WINDOW itself is empty ($rollup.WindowEntryCount -eq 0) ->
+            #      INVALID-EMPTY. Keyed on InvalidEntryCount, NEVER on
+            #      matched>0 alone -- a null Get-PhaseContainmentBlock return
+            #      (zero blocks found) increments no counter, so matched>0
+            #      alone would misrender "zero blocks found" as "all
+            #      rejected".
+            #      M3 fix (issue #842 post-review): $invalidEntryCount and
+            #      $commentBodyCount are WINDOW-level totals read once above
+            #      the per-stage loop, not scoped to this stage. Without the
+            #      WindowEntryCount==0 guard, a stage that is empty purely
+            #      from DATA ABSENCE (real entries exist in a SIBLING stage,
+            #      plus an unrelated invalid block dropped somewhere else in
+            #      the window) would falsely render "every parsed block
+            #      failed validation" for a stage that never had any block
+            #      to begin with. When the window has entries elsewhere,
+            #      this stage's own emptiness is legitimate data-absence --
+            #      fall through to the bare, unqualified WITHHELD below
+            #      rather than explaining it via invalid/filtered accounting
+            #      that does not actually belong to this stage.
+            #   3. CommentBodyCount>0 (bodies were fetched, matched
+            #      something, nothing dropped) AND the window itself is
+            #      empty -> the honest genuinely-measured-but-empty state:
+            #      bare "WITHHELD (denominator=0)" gains an appended
+            #      matched/N detail suffix. Same M3 window-emptiness guard
+            #      as state 2, for the same reason -- CommentBodyCount>0
+            #      does not imply THIS stage was the one measured empty.
+            #   4. CommentBodyCount==0 -> the pre-existing, UNCHANGED bare
+            #      "WITHHELD (denominator=0)" (no bodies fetched at all).
+            if ($matched -eq 0 -and $authorFilteredCount -gt 0) {
+                $lines.Add("  Relaxation signal:  FILTERED-EMPTY — judge filter matched $matched of $commentBodyCount bodies (looked for '$judgeLogin'); check -JudgeLogin")
+            }
+            elseif ($invalidEntryCount -gt 0 -and $rollup.WindowEntryCount -eq 0) {
+                $lines.Add("  Relaxation signal:  INVALID-EMPTY — $matched of $commentBodyCount bodies matched but every parsed block failed validation ($invalidEntryCount dropped); see WARNINGs above")
+            }
+            elseif ($commentBodyCount -gt 0 -and $rollup.WindowEntryCount -eq 0) {
+                $lines.Add("  Relaxation signal:  WITHHELD (denominator=0) — $matched of $commentBodyCount bodies matched; none carried a phase-containment block")
+            }
+            else {
+                $lines.Add("  Relaxation signal:  WITHHELD (denominator=0)")
+            }
         }
         elseif ($stage.InsufficientData) {
             $lines.Add("  Escape rate:        INSUFFICIENT DATA (n=$($stage.N) < 5)")
             $lines.Add("  Irreducible rate:   INSUFFICIENT DATA")
             $lines.Add("  Relaxation signal:  WITHHELD (n<5)")
+            if ($authorFilteredCount -gt 0) {
+                # Issue #842 M22: a filter-induced drop below n=5 must not
+                # read as an innocuous "we need more data" -- disclose the
+                # filtered count here too, not just in the header.
+                $lines.Add("  ($authorFilteredCount comment body/bodies filtered by the judge-authorship gate)")
+            }
         }
         elseif ($stage.DataUntrustworthy) {
             $escapeDisplay      = if ($null -ne $stage.EscapeRate)      { '{0:P1}' -f $stage.EscapeRate }      else { 'N/A' }
@@ -2640,6 +2844,12 @@ function Format-PhaseContainmentReport {
             $lines.Add("  Escape rate:        $escapeDisplay")
             $lines.Add("  Irreducible rate:   $irreducibleDisplay")
             $lines.Add("  Relaxation signal:  WITHHELD (data untrustworthy)")
+            if ($authorFilteredCount -gt 0) {
+                # Issue #842 M10 fix: InsufficientData and the clean render
+                # both carry this always-on M22 disclosure line; DataUntrustworthy
+                # was the one sibling branch missing it.
+                $lines.Add("  ($authorFilteredCount comment body/bodies filtered by the judge-authorship gate)")
+            }
         }
         else {
             $escapeCount      = [int][Math]::Round($stage.EscapeRate      * $stage.Denominator)
@@ -2650,6 +2860,13 @@ function Format-PhaseContainmentReport {
 
             $lines.Add("  Escape rate:        $escapeDisplay")
             $lines.Add("  Irreducible rate:   $irreducibleDisplay")
+
+            if ($authorFilteredCount -gt 0) {
+                # Issue #842 M22: a 16-body window with 10 identity-dropped
+                # must not silently narrow the denominator without
+                # disclosure, even on a clean-looking non-empty render.
+                $lines.Add("  ($authorFilteredCount comment body/bodies filtered by the judge-authorship gate)")
+            }
 
             if ($null -eq $stage.RelaxationEligible) {
                 $lines.Add("  Relaxation signal:  WITHHELD")

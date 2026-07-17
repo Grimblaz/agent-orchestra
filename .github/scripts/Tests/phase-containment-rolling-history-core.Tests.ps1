@@ -3406,6 +3406,45 @@ Describe 'Get-PhaseContainmentCommentCorpus — T1 partial-preservation on inter
     }
 }
 
+Describe 'Get-PhaseContainmentHistory — issue #876 F1: default CachePath construction survives $env:TEMP being unset (PowerShell Core / Linux / macOS)' {
+    BeforeEach {
+        $script:SavedEnvTemp876 = $env:TEMP
+        Remove-Item Env:\TEMP -ErrorAction SilentlyContinue
+    }
+
+    AfterEach {
+        if ($null -ne $script:SavedEnvTemp876) {
+            $env:TEMP = $script:SavedEnvTemp876
+        }
+        else {
+            Remove-Item Env:\TEMP -ErrorAction SilentlyContinue
+        }
+        if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {
+            Remove-Item -Path Function:gh -ErrorAction SilentlyContinue
+        }
+        $defaultCache = Join-Path ([System.IO.Path]::GetTempPath()) '.phase-containment-cache-Grimblaz-agent-orchestra-.json'
+        if (Test-Path -LiteralPath $defaultCache) { Remove-Item -LiteralPath $defaultCache -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'does not throw a null-binding error building the default CachePath when $env:TEMP is unset and no -CachePath is supplied' {
+        # Only Windows conventionally sets $env:TEMP; PowerShell Core on
+        # Linux/macOS leaves it unset by default. A prior version called
+        # `Join-Path $env:TEMP "..."` for the default CachePath, which
+        # throws a terminating parameter-binding error the instant
+        # $env:TEMP is $null -- reproducible even on this Windows host once
+        # the variable is cleared (confirmed manually).
+        # [System.IO.Path]::GetTempPath() resolves TMPDIR/TEMP/TMP
+        # cross-platform without ever needing $env:TEMP directly.
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $global:LASTEXITCODE = 0
+            return '{}'
+        }
+
+        { Get-PhaseContainmentHistory -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 30 -TimeoutSeconds 30 3>$null } | Should -Not -Throw
+    }
+}
+
 Describe 'Get-PhaseContainmentHistory — T1 partial-preservation on inter-surface timeout' {
     AfterEach {
         if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {
@@ -3767,6 +3806,264 @@ Describe 'Get-PhaseContainmentHistory — M1 cache-write guard (issue #772/#831 
         $result.Truncated | Should -Be $true -Because 'issue #1602''s post-marker-find pagination failure must surface as Truncated'
         $result.Entries   | Should -HaveCount 1 -Because 'issue #1601''s valid block must still be present despite issue #1602''s pagination failure (partial preservation)'
         Test-Path -LiteralPath $script:CachePathM1 | Should -Be $false -Because 'a truncated/degraded run must never be written to the 1-hour cache -- writing it would serve the degraded snapshot as "clean" for up to an hour'
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Issue #842 M2 (post-review fix): the cache-hit path previously hardcoded
+# Matched/AuthorFilteredCount to 0 with no writer support at all. Prove a
+# nonzero Matched/AuthorFilteredCount round-trips through a real write +
+# cache-hit read.
+# ---------------------------------------------------------------------------
+
+Describe 'Get-PhaseContainmentHistory — Matched/AuthorFilteredCount cache-survival (issue #842 M2)' {
+    BeforeAll {
+        $script:CachePathM2 = Join-Path $env:TEMP '.phase-containment-cache-Grimblaz-agent-orchestra-m2round.json'
+    }
+
+    AfterEach {
+        if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {
+            Remove-Item -Path Function:gh -ErrorAction SilentlyContinue
+        }
+        if (Test-Path -LiteralPath $script:CachePathM2) { Remove-Item -LiteralPath $script:CachePathM2 -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'persists nonzero Matched/AuthorFilteredCount into the cache payload and returns them on the subsequent cache-hit' {
+        # One judge-authored comment (carries the real block, contributes to
+        # Matched) and one non-judge-authored comment (contributes to
+        # AuthorFilteredCount) on the same issue, so -JudgeLogin produces a
+        # real, nonzero split between the two counts.
+        $judgeBody = "<!-- plan-issue-1700 -->`n<!-- phase-containment-1700 -->`nfinding_key: plan-stress-test:1700:F1`nintroduced_phase: plan`ncatchable_phase: plan`ncaught_stage: plan-stress-test`nescape_distance: 0`nseverity: low`nsystemic_fix_type: plan-template`ncategory: pattern`napparatus_meta: false`n<!-- /phase-containment-1700 -->"
+        $otherBody = '<!-- phase-containment-1700 -->' + "`nfinding_key: plan-stress-test:1700:FORGED`n" + '<!-- /phase-containment-1700 -->'
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match 'is:issue') {
+                $payload = @{
+                    data = @{
+                        search = @{
+                            pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                            nodes    = @(
+                                @{
+                                    number   = 1700
+                                    comments = @{
+                                        nodes    = @(
+                                            @{ author = @{ login = 'github-actions[bot]' }; body = $judgeBody; createdAt = '2024-01-01T12:00:00Z' },
+                                            @{ author = @{ login = 'someone-else' }; body = $otherBody; createdAt = '2024-01-01T12:05:00Z' }
+                                        )
+                                        pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+                return ($payload | ConvertTo-Json -Depth 12)
+            }
+            if ($joined -match 'is:pr') {
+                $payload = @{ data = @{ search = @{ pageInfo = @{ hasNextPage = $false; endCursor = $null }; nodes = @() } } }
+                return ($payload | ConvertTo-Json -Depth 12)
+            }
+            return '{}'
+        }
+
+        $first = Get-PhaseContainmentHistory -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 30 -CachePath $script:CachePathM2 -JudgeLogin 'github-actions[bot]' 3>$null
+
+        $first.Source             | Should -Be 'graphql'
+        $first.Matched             | Should -Be 1
+        $first.AuthorFilteredCount | Should -Be 1
+        Test-Path -LiteralPath $script:CachePathM2 | Should -Be $true
+
+        # Second call within the fresh cache window must hit cache and
+        # return the SAME Matched/AuthorFilteredCount, not silently default
+        # to 0 (the pre-fix hardcoded behavior).
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            throw 'gh must not be called on a cache hit'
+        }
+
+        $second = Get-PhaseContainmentHistory -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 30 -CachePath $script:CachePathM2 -JudgeLogin 'github-actions[bot]' 3>$null
+
+        $second.Source             | Should -Be 'cache'
+        $second.Matched             | Should -Be 1 -Because 'M2 fix: a cache-hit must restore Matched from the persisted payload, not hardcode 0'
+        $second.AuthorFilteredCount | Should -Be 1 -Because 'M2 fix: a cache-hit must restore AuthorFilteredCount from the persisted payload, not hardcode 0'
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Issue #842 M5 (post-review fix): the bypass-path (a GUID-named throwaway
+# CachePath under $env:TEMP, as constructed by phase-containment-report.ps1's
+# -SkipCacheWrite-signaled bypass path) must not be populated with a
+# full-content orphan cache JSON with no cleanup.
+# ---------------------------------------------------------------------------
+
+Describe 'Get-PhaseContainmentHistory — SkipCacheWrite suppresses the bypass-path orphan cache file (issue #842 M5)' {
+    BeforeAll {
+        $script:BypassCachePathM5 = Join-Path $env:TEMP "phase-containment-bypass-$([guid]::NewGuid().ToString('N')).json"  # host-path-ok
+    }
+
+    AfterEach {
+        if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {
+            Remove-Item -Path Function:gh -ErrorAction SilentlyContinue
+        }
+        if (Test-Path -LiteralPath $script:BypassCachePathM5) { Remove-Item -LiteralPath $script:BypassCachePathM5 -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'leaves no cache file on disk after a successful, non-truncated fetch when -SkipCacheWrite is set' {
+        $validBody = "<!-- plan-issue-1800 -->`n<!-- phase-containment-1800 -->`nfinding_key: plan-stress-test:1800:F1`nintroduced_phase: plan`ncatchable_phase: plan`ncaught_stage: plan-stress-test`nescape_distance: 0`nseverity: low`nsystemic_fix_type: plan-template`ncategory: pattern`napparatus_meta: false`n<!-- /phase-containment-1800 -->"
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match 'is:issue') {
+                $payload = @{
+                    data = @{
+                        search = @{
+                            pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                            nodes    = @(
+                                @{
+                                    number   = 1800
+                                    comments = @{
+                                        nodes    = @(@{ body = $validBody; createdAt = '2024-01-01T12:00:00Z' })
+                                        pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+                return ($payload | ConvertTo-Json -Depth 12)
+            }
+            if ($joined -match 'is:pr') {
+                $payload = @{ data = @{ search = @{ pageInfo = @{ hasNextPage = $false; endCursor = $null }; nodes = @() } } }
+                return ($payload | ConvertTo-Json -Depth 12)
+            }
+            return '{}'
+        }
+
+        $result = Get-PhaseContainmentHistory -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 30 -CachePath $script:BypassCachePathM5 -SkipCacheWrite 3>$null
+
+        $result.Source  | Should -Be 'graphql'
+        $result.Entries | Should -HaveCount 1
+        Test-Path -LiteralPath $script:BypassCachePathM5 | Should -Be $false -Because 'a bypass/throwaway CachePath must never be populated with an orphan cache JSON when -SkipCacheWrite is set'
+    }
+
+    It 'DOES write the cache file when -SkipCacheWrite is NOT set, on the same successful fetch shape (control case)' {
+        $controlCachePath = Join-Path $env:TEMP "phase-containment-bypass-control-$([guid]::NewGuid().ToString('N')).json"  # host-path-ok
+        try {
+            $validBody = "<!-- plan-issue-1801 -->`n<!-- phase-containment-1801 -->`nfinding_key: plan-stress-test:1801:F1`nintroduced_phase: plan`ncatchable_phase: plan`ncaught_stage: plan-stress-test`nescape_distance: 0`nseverity: low`nsystemic_fix_type: plan-template`ncategory: pattern`napparatus_meta: false`n<!-- /phase-containment-1801 -->"
+
+            function global:gh {
+                param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+                $joined = $Args -join ' '
+                $global:LASTEXITCODE = 0
+                if ($joined -match 'is:issue') {
+                    $payload = @{
+                        data = @{
+                            search = @{
+                                pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                                nodes    = @(
+                                    @{
+                                        number   = 1801
+                                        comments = @{
+                                            nodes    = @(@{ body = $validBody; createdAt = '2024-01-01T12:00:00Z' })
+                                            pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    return ($payload | ConvertTo-Json -Depth 12)
+                }
+                if ($joined -match 'is:pr') {
+                    $payload = @{ data = @{ search = @{ pageInfo = @{ hasNextPage = $false; endCursor = $null }; nodes = @() } } }
+                    return ($payload | ConvertTo-Json -Depth 12)
+                }
+                return '{}'
+            }
+
+            $result = Get-PhaseContainmentHistory -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 30 -CachePath $controlCachePath 3>$null
+
+            $result.Source | Should -Be 'graphql'
+            Test-Path -LiteralPath $controlCachePath | Should -Be $true -Because 'without -SkipCacheWrite, the existing cache-write behavior is unchanged'
+        }
+        finally {
+            if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {
+                Remove-Item -Path Function:gh -ErrorAction SilentlyContinue
+            }
+            if (Test-Path -LiteralPath $controlCachePath) { Remove-Item -LiteralPath $controlCachePath -Force -ErrorAction SilentlyContinue }
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Issue #842 M7 (post-review fix): the cache filename embeds $JudgeLogin
+# verbatim. The writer previously used Set-Content -Path (wildcard-
+# interpreting) while the reader uses -LiteralPath -- a bracketed identity
+# like 'github-actions[bot]' made the write silently no-op.
+# ---------------------------------------------------------------------------
+
+Describe 'Get-PhaseContainmentHistory — bracketed cache filename write/read consistency (issue #842 M7)' {
+    BeforeAll {
+        $script:CachePathM7 = Join-Path $env:TEMP '.phase-containment-cache-Grimblaz-agent-orchestra-github-actions[bot].json'  # host-path-ok
+    }
+
+    AfterEach {
+        if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {
+            Remove-Item -Path Function:gh -ErrorAction SilentlyContinue
+        }
+        if (Test-Path -LiteralPath $script:CachePathM7) { Remove-Item -LiteralPath $script:CachePathM7 -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'writes the cache file to a bracketed path and serves a subsequent call from cache (proving the write actually landed)' {
+        $validBody = "<!-- plan-issue-1900 -->`n<!-- phase-containment-1900 -->`nfinding_key: plan-stress-test:1900:F1`nintroduced_phase: plan`ncatchable_phase: plan`ncaught_stage: plan-stress-test`nescape_distance: 0`nseverity: low`nsystemic_fix_type: plan-template`ncategory: pattern`napparatus_meta: false`n<!-- /phase-containment-1900 -->"
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match 'is:issue') {
+                $payload = @{
+                    data = @{
+                        search = @{
+                            pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                            nodes    = @(
+                                @{
+                                    number   = 1900
+                                    comments = @{
+                                        nodes    = @(@{ body = $validBody; createdAt = '2024-01-01T12:00:00Z' })
+                                        pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+                return ($payload | ConvertTo-Json -Depth 12)
+            }
+            if ($joined -match 'is:pr') {
+                $payload = @{ data = @{ search = @{ pageInfo = @{ hasNextPage = $false; endCursor = $null }; nodes = @() } } }
+                return ($payload | ConvertTo-Json -Depth 12)
+            }
+            return '{}'
+        }
+
+        $first = Get-PhaseContainmentHistory -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 30 -CachePath $script:CachePathM7 3>$null
+        $first.Source | Should -Be 'graphql'
+
+        Test-Path -LiteralPath $script:CachePathM7 | Should -Be $true -Because 'Set-Content -LiteralPath must actually create the bracketed file, unlike the prior -Path (wildcard-interpreting) write which silently no-op''d'
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            throw 'gh must not be called on a cache hit'
+        }
+
+        $second = Get-PhaseContainmentHistory -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 30 -CachePath $script:CachePathM7 3>$null
+        $second.Source | Should -Be 'cache' -Because 'the write must have actually landed at the bracketed LiteralPath for the reader (-LiteralPath) to find it on the second call'
     }
 }
 

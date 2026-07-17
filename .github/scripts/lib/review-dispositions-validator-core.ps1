@@ -166,10 +166,13 @@ foreach ($body in $rawBodies) {
             if ([string]::IsNullOrWhiteSpace($entry.disposition_rationale)) {
                 Add-RdvFinding "review-dispositions-${PullRequestNumber}: $entryLabel missing required disposition_rationale"
             }
-            # v4: reviewer_source is writer-mandatory on every entry (same requirement as v3,
-            # but v3 has never enforced it here -- this check is new and applies to v4 only).
-            if ($payload.schema_version -eq 4 -and [string]::IsNullOrWhiteSpace($entry.reviewer_source)) {
-                Add-RdvFinding "review-dispositions-${PullRequestNumber}: $entryLabel (v4) missing required reviewer_source"
+            # v3/v4: reviewer_source is writer-mandatory on every entry, matching the
+            # schema's if/then at review-dispositions.schema.json:132-144 (schema_version
+            # in [3, 4]). CM14 fix (issue #842, owner decision d-842-cm14-redisposition):
+            # this check used to enforce -eq 4 only, silently under-enforcing v3 entries
+            # even though the schema itself has always required reviewer_source on v3 too.
+            if ($payload.schema_version -in @(3, 4) -and [string]::IsNullOrWhiteSpace($entry.reviewer_source)) {
+                Add-RdvFinding "review-dispositions-${PullRequestNumber}: $entryLabel (v$($payload.schema_version)) missing required reviewer_source"
             }
             # v2/v3/v4: ac_cross_check required on >=medium dismiss/defer entries.
             # G-C2 fix: the v4 sweep (above) added reviewer_source enforcement to

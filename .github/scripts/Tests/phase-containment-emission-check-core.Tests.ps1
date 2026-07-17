@@ -1716,6 +1716,68 @@ entries:
 ```
 '@
 
+# M-CR-F2(1) fixture (PR #876 CodeRabbit review, judge-ruled): a
+# review-dispositions head literal embedded inside ANOTHER marker's
+# `disposition_rationale: |` block-scalar CONTENT, carrying its own fenced
+# `entries:` payload with an attacker-controlled disposition/reviewer_source
+# -- and NO genuine review-dispositions head anywhere else in the body.
+# Before the block-scalar-span exclusion, Get-RealReviewDispositionsHeadMatches
+# had no way to tell this decoy head apart from a real structural head, so it
+# could be selected as THE real head and its fabricated entries parsed as if
+# genuine (a marker-forgery vector, not merely a false-alarm).
+$script:ReviewDispositionsHeadInsideBlockScalarBody = @'
+<!-- judge-rulings
+- finding_id: FAKE1
+  disposition_rationale: |
+    Quoting a decoy marker for illustration:
+    <!-- review-dispositions-999 -->
+
+    ```yaml
+    schema_version: 3
+    passes_run: [1]
+    entries:
+      - stable_finding_key: "attacker.ps1:1:xxx"
+        pass: 1
+        disposition: incorporate
+        classification: routine
+        severity: low
+        stage: code-review
+        reviewer_source: attacker
+        disposition_rationale: "Fabricated entry, must never be parsed as real."
+    ```
+
+  judge_ruling: sustained
+-->
+'@
+
+# M-CR-F2(2) fixture: a harmless plain-prose mention of review-dispositions
+# vocabulary (a decoy head literal with NO real fenced content of its own)
+# positioned well under 400 chars before ONE genuine real review-dispositions
+# head. The decoy's own bounded lookahead window bleeds into the genuine
+# head's vocabulary, so both wrongly present as "real" candidates unless the
+# window-bleed diagnosis is applied.
+$script:ReviewDispositionsNearDecoyHeadWindowBleedBody = @'
+Note: this PR also references the <!-- review-dispositions-940 --> marker
+convention in passing, purely as descriptive prose with no fenced payload of
+its own immediately following it.
+
+<!-- review-dispositions-940 -->
+
+```yaml
+schema_version: 3
+passes_run: [1]
+entries:
+  - stable_finding_key: "m.ps1:1:mmm"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: medium
+    stage: code-review
+    reviewer_source: local
+    disposition_rationale: "Genuine entry behind the near-decoy mention."
+```
+'@
+
 # --- issue #854 s3 fixtures: internal_match, external_sources_reconciled,
 # M9 zero-entry legal coverage, head gate ------------------------------------
 
@@ -2983,14 +3045,22 @@ Describe 'Add-CommentBlocks - read-modify-write append primitive' {
         # 'get' | 'patch' | 'verify-truncated' |
         # 'verify-marker-missing' | 'verify-blocks-missing' | ''
         $script:simulateFailure = ''
-        # Sized well above the NewContent block below so a body that echoes
-        # only the original content (verify-blocks-missing) does not also
-        # trip the gross-truncation guard — that scenario is specifically
-        # testing the missing-new-block check, not the truncation check.
-        $script:mockOriginalBody = "## Judge Rulings`n`nSome long-form prose summary of the review outcome that mirrors a real judge-rulings comment body in size.`n`n<!-- judge-rulings`n- id: F1`n  judge_ruling: sustained`n-->"
+        # Sized well above the NewContent block below (which grew to a full
+        # schema-valid phase-containment block after the 842 s4 validate-
+        # before-post fix) so a body that echoes only the original content
+        # (verify-blocks-missing) does not also trip the gross-truncation
+        # guard — that scenario is specifically testing the missing-new-
+        # block check, not the truncation check.
+        $script:mockOriginalBody = "## Judge Rulings`n`nSome long-form prose summary of the review outcome that mirrors a real judge-rulings comment body in size, padded further still so the fixture comfortably clears the gross-truncation guard's 50% threshold against the schema-valid, appended_at-stamped NewContent block below, with margin to spare for the stamp itself.`n`n<!-- judge-rulings`n- id: F1`n  judge_ruling: sustained`n-->"
         # Real caller shape: NewContent carries a phase-containment block, not
         # arbitrary text, so post-write verify has a block to positively prove.
-        $script:mockNewContent = "`n<!-- phase-containment-775 -->`nfinding_id: GF-1`nverdict: sustained`n<!-- /phase-containment-775 -->"
+        # Schema-valid (842 s4): the new validate-before-post check in
+        # Add-CommentBlocks runs Test-PhaseContainmentEntry on every parsed
+        # block, so this fixture must satisfy the real schema (finding_key,
+        # introduced_phase, catchable_phase, caught_stage, escape_distance,
+        # severity, systemic_fix_type, category), not just a shorthand
+        # finding_id/verdict pair.
+        $script:mockNewContent = "`n" + (New-ValidPhaseContainmentBlockText -Id '775' -Surface 'plan-stress-test' -FindingSuffix 'GF-1')
 
         function global:gh {
             param([Parameter(ValueFromRemainingArguments = $true)]$Args)
@@ -3152,6 +3222,69 @@ Describe 'Add-CommentBlocks - read-modify-write append primitive' {
         $result = Add-CommentBlocks -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 999 -ExpectedMarker '<!-- judge-rulings' -NewContent "`n<!-- phase-containment-ledger-863 -->"
         $result.Success | Should -Be $false
         $result.Reason | Should -Match 'no-op'
+    }
+
+    It '842 (s3, RED): refuses when the new block is unclosed (SkippedCount > 0 shape) even though a PRE-EXISTING well-formed block of the same id already satisfies the post-write verify null guard' {
+        # #842 vacuous-pass precondition (M16): the post-write verify's null
+        # guard at :2798 (if ($null -eq $verifyBlocks) { return Success=$false })
+        # runs BEFORE :2803 computes $expectedCount. A naive fixture (an
+        # unclosed new block with NO prior block of that id anywhere) fails
+        # loud at the null guard for the WRONG reason — it never reaches the
+        # vacuous-pass code path this test targets. $verifyBlocks must
+        # already be non-null via a PRE-EXISTING, well-formed, CLOSED
+        # phase-containment-775 block already present in the original body
+        # (built with New-ValidPhaseContainmentBlockText, the same helper the
+        # schema-valid fixtures elsewhere in this file use), so :2804 is
+        # false and :2819's foreach over $expectedBlocks ($null, because the
+        # NEW block never closes) iterates zero times to :2827
+        # Success=$true. This is the real production shape that produced the
+        # 8 live malformed blocks (#824, #811, #785 x2, #777 x2, #776 x2).
+        $script:mockOriginalBody = "## Judge Rulings`n`n<!-- judge-rulings`n- id: F1`n  judge_ruling: sustained`n-->`n`n" + (New-ValidPhaseContainmentBlockText -Id '775' -Surface 'plan-stress-test' -FindingSuffix 'prior')
+        $unclosedNewBlock = "`n<!-- phase-containment-775 -->`nfinding_key: plan-stress-test:775:new`nintroduced_phase: implementation`ncatchable_phase: implementation`ncaught_stage: plan-stress-test`nescape_distance: 0`nseverity: low`nsystemic_fix_type: none`ncategory: pattern`napparatus_meta: false`nseed: false"
+        # Deliberately no closing `<!-- /phase-containment-775 --> tag: this
+        # is the unclosed-final-block shape (phase-containment-core.ps1:243-251)
+        # that increments SkippedCount when a caller passes -SkippedCount —
+        # which Add-CommentBlocks currently never does.
+        $result = Add-CommentBlocks -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 999 -ExpectedMarker '<!-- judge-rulings' -NewContent $unclosedNewBlock
+        $result.Success | Should -Be $false
+    }
+
+    It '842 (s3, RED, M15): refuses on a zero-parsed-blocks/SkippedCount==0 append — a block-scalar-embedded marker-shaped substring is not a real block, yet the same PRE-EXISTING well-formed block of that id satisfies the null guard' {
+        # M15: keying refusal on SkippedCount > 0 ALONE (the scenario above)
+        # is not sufficient. Get-PhaseContainmentBlock also silently skips
+        # (no warning, no SkippedCount increment) a marker-shaped substring
+        # whose start index falls inside another key's YAML block-scalar
+        # (`key: |`) CONTENT span (phase-containment-core.ps1:206-217,
+        # "block-scalar gating"). The RAW, non-gated regex Add-CommentBlocks
+        # uses to discover new block ids (:2788, and the M10 preflight regex
+        # at :2710) has no such gating, so it still believes this NewContent
+        # carries a real phase-containment-776 block and does not refuse it
+        # as a no-op. Get-PhaseContainmentBlock, which IS gated, parses ZERO
+        # real blocks out of NewContent for id 776 — with SkippedCount
+        # staying 0, never incrementing — so a fix that only checks
+        # `SkippedCount > 0` would miss this class entirely.
+        $script:mockOriginalBody = "## Judge Rulings`n`n<!-- judge-rulings`n- id: F1`n  judge_ruling: sustained`n-->`n`n" + (New-ValidPhaseContainmentBlockText -Id '776' -Surface 'plan-stress-test' -FindingSuffix 'prior')
+        $phantomNewContent = "`nnote: |`n  Draft placeholder -- remember to append <!-- phase-containment-776 --> before merging.`n"
+        $result = Add-CommentBlocks -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 999 -ExpectedMarker '<!-- judge-rulings' -NewContent $phantomNewContent
+        $result.Success | Should -Be $false
+    }
+
+    It '842 (s3, RED): refuses when a well-formed, closed, single new block fails entry-validation ordering Rule 9 (Test-PhaseContainmentEntry, phase-containment-core.ps1:474-501)' {
+        # Add-CommentBlocks' post-write positive proof (:2794-2824) only
+        # checks that the parsed block's raw content is PRESENT and
+        # content-identical between NewContent and the verify body — it
+        # never calls Test-PhaseContainmentEntry (Rules 1-12) on the parsed
+        # fields at all, so a syntactically well-formed, fully-closed block
+        # whose field VALUES violate an ordering constraint currently
+        # succeeds unchanged. This entry deliberately sets
+        # introduced_phase='implementation' (ordinal 3) with
+        # catchable_phase='design' (ordinal 1): Rule 9 requires
+        # introduced_phase's ordinal <= catchable_phase's ordinal, rejected
+        # (not clamped) when violated — exactly the "Ordering constraint
+        # violated" error text Test-PhaseContainmentEntry produces.
+        $newBlockWithOrderingViolation = "`n<!-- phase-containment-779 -->`nfinding_key: plan-stress-test:779:ordering-violation`nintroduced_phase: implementation`ncatchable_phase: design`ncaught_stage: code-review`nescape_distance: 2`nseverity: low`nsystemic_fix_type: none`ncategory: pattern`napparatus_meta: false`nseed: false`n<!-- /phase-containment-779 -->"
+        $result = Add-CommentBlocks -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 999 -ExpectedMarker '<!-- judge-rulings' -NewContent $newBlockWithOrderingViolation
+        $result.Success | Should -Be $false
     }
 }
 
@@ -3386,6 +3519,59 @@ Describe 'Add-JudgeRulingsBlock - sibling append primitive with entry-level posi
         $script:getCallCount | Should -Be 0
     }
 
+    It "842 (s3, RED, owner decision d-842-judge-rulings-validator/M17): refuses when Get-DispositionTally -Surface 'plan-stress-test' cannot parse NewContent (unrecognized judge_ruling value)" {
+        # judge_ruling is a closed 2-value enum (sustained | defense-sustained,
+        # phase-containment-emission-check-core.ps1:1898-1918). A third value
+        # here ('overturned') makes Get-DispositionTally -Surface
+        # 'plan-stress-test' -Body NewContent return ParseStatus
+        # 'could-not-verify' (:919, :1916-1918). Add-JudgeRulingsBlock's own
+        # preflight only requires >=1 `judge_ruling:` entry (M8/D5,
+        # :2925-2929) and its post-write verify only checks raw substring
+        # occurrence COUNTS (:3036-3067) — it never asks Get-DispositionTally
+        # whether the vocabulary itself is parseable, so this
+        # unrecognized-value append currently succeeds.
+        $newContentUnrecognized = "`n<!-- judge-rulings`n- id: M1`n  judge_ruling: sustained`n- id: M2`n  judge_ruling: overturned`n-->`n"
+
+        # Sanity-check the fixture is grounded in real Get-DispositionTally
+        # behavior (this call already exists and is expected to pass today).
+        $tally = Get-DispositionTally -Surface 'plan-stress-test' -Body $newContentUnrecognized
+        $tally.ParseStatus | Should -Be 'could-not-verify'
+
+        $script:mockFullNewContent = $newContentUnrecognized
+        $result = Add-JudgeRulingsBlock -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 794 -ExpectedMarker '<!-- plan-issue-811' -NewContent $newContentUnrecognized
+        $result.Success | Should -Be $false
+    }
+
+    It "842 (s3, RED, M17): refuses when Get-DispositionTally's SustainedCount + DefenseSustainedCount disagrees with the raw judge_ruling: entry count assembled (required_fixes: decoy list)" {
+        # required_fixes: is a parallel decoy list (PR #775 intake-mode
+        # shape) that Get-JudgeRulingsSustainedCountInternal strips BEFORE
+        # counting (phase-containment-emission-check-core.ps1:1823-1829) —
+        # entries inside it never contribute to Get-DispositionTally's
+        # SustainedCount/DefenseSustainedCount. Add-JudgeRulingsBlock's own
+        # raw judge_ruling: regex (:2914) has no such awareness and counts
+        # every occurrence in NewContent, decoy included. This NewContent
+        # carries 3 raw judge_ruling: occurrences (2 real + 1 inside
+        # required_fixes:) but Get-DispositionTally only tallies the 2 real
+        # ones (plan-stress-test surface returns no Entries — :1013-1018 —
+        # so the check is SustainedCount + DefenseSustainedCount, not a
+        # per-entry list compare) — a genuine count disagreement
+        # Add-JudgeRulingsBlock currently never checks for.
+        $newContentWithDecoyList = "`n<!-- judge-rulings`n- id: M1`n  judge_ruling: sustained`n- id: M2`n  judge_ruling: defense-sustained`nrequired_fixes:`n  - id: M3`n    judge_ruling: sustained`n-->`n"
+
+        # Sanity-check the fixture is grounded in real behavior (both calls
+        # already exist and are expected to pass today).
+        $tally = Get-DispositionTally -Surface 'plan-stress-test' -Body $newContentWithDecoyList
+        $tally.ParseStatus | Should -Be 'ok'
+        ($tally.SustainedCount + $tally.DefenseSustainedCount) | Should -Be 2
+
+        $rawEntryCount = ([regex]::Matches($newContentWithDecoyList, '(?m)^\s*(?:-\s+)?judge_ruling\s*:\s*\S+')).Count
+        $rawEntryCount | Should -Be 3
+
+        $script:mockFullNewContent = $newContentWithDecoyList
+        $result = Add-JudgeRulingsBlock -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 794 -ExpectedMarker '<!-- plan-issue-811' -NewContent $newContentWithDecoyList
+        $result.Success | Should -Be $false
+    }
+
     It 'does not call Add-CommentBlocks (independent sibling function, prose mentions of the name are fine)' {
         $srcPath = Join-Path $PSScriptRoot '..' 'lib' 'phase-containment-emission-check-core.ps1'
         $src = Get-Content -LiteralPath $srcPath -Raw
@@ -3458,15 +3644,35 @@ Describe 'Add-JudgeRulingsBlock - sibling append primitive with entry-level posi
 # than reaching across functions for one of the existing four. This is a
 # tracked, expected addition (the same kind of evolution the GH-5 and 811 M1
 # fixes above went through), not untracked drift.
+#
+# CM10 fix (issue #842): the guard rises from five to six literal copies and
+# widens from a single-file scan to a multi-file scan. Test-JudgeRulingsHasDefenseSustainedConcept
+# (phase-containment-cost-core.ps1) declares its own local $keyAnchor copy of
+# the SAME literal (cost-core.ps1:124) to re-check a judge-rulings body's
+# disposition vocabulary against the isolated region Get-JudgeRulingsIsolatedRegion
+# returns — this copy existed since issue #768 s4 but was never added to this
+# guard's scan, so a drift in either file's copy would have gone undetected.
+# Restructured to scan BOTH files' raw source text.
 # ---------------------------------------------------------------------------
 
 Describe 'Key-anchor pattern — all literal copies stay byte-identical (PF2-F1 drift guard)' {
-    It 'finds exactly five literal copies of the key-anchor pattern, all byte-identical' {
-        $srcPath = Join-Path $PSScriptRoot '..' 'lib' 'phase-containment-emission-check-core.ps1'
-        $src = Get-Content -LiteralPath $srcPath -Raw
-        $copies = [regex]::Matches($src, [regex]::Escape('(?:^\s*(?:-\s+)?|[{,]\s*)'))
-        $copies.Count | Should -Be 5
-        @($copies.Value | Select-Object -Unique).Count | Should -Be 1
+    It 'finds exactly six literal copies of the key-anchor pattern across both files, all byte-identical' {
+        # M11 fix (issue #842 post-review): the search itself is
+        # [regex]::Escape(...) of a fixed literal, so every match this scan
+        # can possibly find is already byte-identical to that literal by
+        # construction -- a separate "@($copies.Value | Select-Object
+        # -Unique).Count | Should -Be 1" assertion can never fail regardless
+        # of what the real source contains, and added no coverage beyond the
+        # Count assertion below (which is the actual guard: it drops below 6
+        # the moment any one of the six copies drifts to a different value,
+        # since the literal search would then no longer find it there).
+        # Removed rather than replaced, since asserting the same hard-coded
+        # literal a second time would be equally circular.
+        $emissionCheckSrcPath = Join-Path $PSScriptRoot '..' 'lib' 'phase-containment-emission-check-core.ps1'
+        $costCoreSrcPath = Join-Path $PSScriptRoot '..' 'lib' 'phase-containment-cost-core.ps1'
+        $combinedSrc = (Get-Content -LiteralPath $emissionCheckSrcPath -Raw) + (Get-Content -LiteralPath $costCoreSrcPath -Raw)
+        $copies = [regex]::Matches($combinedSrc, [regex]::Escape('(?:^\s*(?:-\s+)?|[{,]\s*)'))
+        $copies.Count | Should -Be 6
     }
 }
 
@@ -3682,6 +3888,357 @@ Describe 'Get-DispositionTally - code-review surface decoy hardening (M3, judge-
         $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsProseMentionOnlyBody
         $result.ParseStatus | Should -Be 'could-not-verify'
         $result.Entries.Count | Should -Be 0
+    }
+}
+
+Describe 'Get-DispositionTally - code-review surface CM19 (issue #842): fails loud on >=2 real review-dispositions heads, matching the judge-rulings sibling' {
+    It 'returns could-not-verify (not first-head-wins) when two genuinely real review-dispositions heads exist in one body' {
+        # Get-RealJudgeRulingsHeadMatches / Get-JudgeRulingsIsolatedRegion
+        # already fail loud (could-not-verify) when 2+ real judge-rulings
+        # heads exist in one body (811-D1 owner decision M1) rather than
+        # silently picking one. Get-ReviewDispositionsRealHeadMatch had no
+        # equivalent guard -- it picked the FIRST vocab-gate-passing head via
+        # a plain foreach/return, so a body with two genuinely real
+        # review-dispositions blocks silently parsed only the first one
+        # (first-head-wins) instead of surfacing the same genuine anomaly
+        # signal its judge-rulings sibling does.
+        $firstRealHead = @'
+<!-- review-dispositions-960 -->
+
+```yaml
+schema_version: 3
+passes_run: [1]
+entries:
+  - stable_finding_key: "a.ts:1:aaa"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: low
+    stage: code-review
+    reviewer_source: local
+    disposition_rationale: "First round."
+```
+'@
+        $secondRealHead = @'
+<!-- review-dispositions-960 -->
+
+```yaml
+schema_version: 3
+passes_run: [1]
+entries:
+  - stable_finding_key: "b.ts:2:bbb"
+    pass: 1
+    disposition: dismiss
+    classification: routine
+    severity: low
+    stage: code-review
+    reviewer_source: local
+    disposition_rationale: "Second round, re-posted."
+```
+'@
+        # Padding well past the 400-character lookahead window so the two
+        # real heads cannot overlap each other's vocab-gate windows.
+        $padding = "`n`n" + ('padding prose ' * 40) + "`n`n"
+        $twoRealHeadsBody = $firstRealHead + $padding + $secondRealHead
+        $result = Get-DispositionTally -Surface 'code-review' -Body $twoRealHeadsBody
+        $result.ParseStatus | Should -Be 'could-not-verify'
+    }
+}
+
+Describe 'Get-RealReviewDispositionsHeadMatches - M-CR-F2(1) regression (PR #876 CodeRabbit review, judge-ruled): block-scalar-span exclusion (ports Get-RealJudgeRulingsHeadMatches''s CM4 protection)' {
+    It 'excludes a review-dispositions head embedded inside another marker''s disposition_rationale block scalar from candidacy' {
+        $realHeads = Get-RealReviewDispositionsHeadMatches -Body $script:ReviewDispositionsHeadInsideBlockScalarBody
+        $realHeads.Count | Should -Be 0
+    }
+
+    It 'reports could-not-verify (no-heads) via Get-DispositionTally instead of parsing the fabricated block-scalar-interior entry' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsHeadInsideBlockScalarBody
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.Entries | Should -BeNullOrEmpty
+    }
+
+    It 'Test-ReviewDispositionsHeadPresent reports no real head for the block-scalar-embedded decoy' {
+        Test-ReviewDispositionsHeadPresent -Body $script:ReviewDispositionsHeadInsideBlockScalarBody | Should -BeFalse
+    }
+}
+
+Describe 'Get-ReviewDispositionsDuplicateDiagnosis - M-CR-F2(2) regression (PR #876 CodeRabbit review, judge-ruled): window-bleed rescue (ports Get-JudgeRulingsDuplicateDiagnosis)' {
+    It 'diagnoses a near-decoy plain-prose mention bleeding into one genuine head as window-bleed, not a genuine duplicate' {
+        $realHeads = Get-RealReviewDispositionsHeadMatches -Body $script:ReviewDispositionsNearDecoyHeadWindowBleedBody
+        # Confirms the bleed: without truncation, both the decoy mention and
+        # the genuine head pass the (untruncated) candidacy vocab gate.
+        $realHeads.Count | Should -Be 2
+
+        $diagnosis = Get-ReviewDispositionsDuplicateDiagnosis -Body $script:ReviewDispositionsNearDecoyHeadWindowBleedBody
+        $diagnosis.Diagnosis | Should -Be 'window-bleed'
+        $diagnosis.Survivor | Should -Not -BeNullOrEmpty
+    }
+
+    It 'Get-DispositionTally resolves the near-decoy body to exactly one real head and parses its genuine entry (not a false 2-heads could-not-verify)' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsNearDecoyHeadWindowBleedBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 1
+        $result.Entries[0].StableFindingKey | Should -Be 'm.ps1:1:mmm'
+        $result.Entries[0].Disposition | Should -Be 'incorporate'
+    }
+
+    It 'still reports genuine-duplicate (could-not-verify) for two genuinely real, well-separated review-dispositions heads (CM19 regression unaffected)' {
+        # Same two-genuine-heads shape as the CM19 test above -- the
+        # window-bleed rescue must never soften an actual duplicate.
+        $firstRealHead = @'
+<!-- review-dispositions-965 -->
+
+```yaml
+schema_version: 3
+passes_run: [1]
+entries:
+  - stable_finding_key: "c.ts:1:ccc"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: low
+    stage: code-review
+    reviewer_source: local
+    disposition_rationale: "First round."
+```
+'@
+        $secondRealHead = @'
+<!-- review-dispositions-965 -->
+
+```yaml
+schema_version: 3
+passes_run: [1]
+entries:
+  - stable_finding_key: "d.ts:2:ddd"
+    pass: 1
+    disposition: dismiss
+    classification: routine
+    severity: low
+    stage: code-review
+    reviewer_source: local
+    disposition_rationale: "Second round, re-posted."
+```
+'@
+        $padding = "`n`n" + ('padding prose ' * 40) + "`n`n"
+        $twoRealHeadsBody = $firstRealHead + $padding + $secondRealHead
+        $diagnosis = Get-ReviewDispositionsDuplicateDiagnosis -Body $twoRealHeadsBody
+        $diagnosis.Diagnosis | Should -Be 'genuine-duplicate'
+        $result = Get-DispositionTally -Surface 'code-review' -Body $twoRealHeadsBody
+        $result.ParseStatus | Should -Be 'could-not-verify'
+    }
+}
+
+Describe 'F3 regression (R2 revalidate cycle, judge-sustained): Get-ReviewDispositionsDuplicateDiagnosis must not mislabel a lone real head (ports the sibling M4 backstop test)' {
+    It 'called directly with exactly 1 real head, returns the conservative genuine-duplicate label instead of window-bleed' {
+        $oneRealHeadBody = @'
+<!-- review-dispositions-971 -->
+
+```yaml
+schema_version: 3
+passes_run: [1]
+entries:
+  - stable_finding_key: "a.ts:1:aaa"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: low
+    stage: code-review
+    reviewer_source: local
+    disposition_rationale: "Single head."
+```
+'@
+        $realHeads = Get-RealReviewDispositionsHeadMatches -Body $oneRealHeadBody
+        $realHeads.Count | Should -Be 1
+
+        $diagnosis = Get-ReviewDispositionsDuplicateDiagnosis -Body $oneRealHeadBody
+        $diagnosis.Diagnosis | Should -Be 'genuine-duplicate'
+        $diagnosis.Survivor | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'F3 regression (R2 revalidate cycle, judge-sustained): Get-ReviewDispositionsDuplicateDiagnosis in isolation with block-scalar-only vocab (ports the sibling M10 direct-isolation test)' {
+    It 'called directly with 2 candidates whose only vocabulary lives inside block scalars, returns genuine-duplicate (the conservative 0-survivor fallback) without throwing' {
+        $firstHead = @'
+<!-- review-dispositions-972 -->
+
+  disposition_rationale: |
+    This note mentions a decoy fake vocabulary line below, purely as prose
+    content inside a block scalar, testing whether interior vocabulary
+    wrongly counts as real.
+    stable_finding_key: "fake.ts:1:fake"
+'@
+        $secondHead = @'
+<!-- review-dispositions-972 -->
+
+  disposition_rationale: |
+    This note also mentions a decoy fake vocabulary line below, purely as
+    prose content inside a block scalar, testing whether interior
+    vocabulary wrongly counts as real.
+    stable_finding_key: "fake2.ts:1:fake2"
+'@
+        $padding = "`n`n" + ('padding prose ' * 40) + "`n`n"
+        $bothHeadsBlockScalarOnlyVocabBody = $firstHead + $padding + $secondHead
+
+        $realHeads = Get-RealReviewDispositionsHeadMatches -Body $bothHeadsBlockScalarOnlyVocabBody
+        $realHeads.Count | Should -Be 2
+
+        { $script:f3ReviewDispositionsDiagnosis = Get-ReviewDispositionsDuplicateDiagnosis -Body $bothHeadsBlockScalarOnlyVocabBody } | Should -Not -Throw
+        $script:f3ReviewDispositionsDiagnosis.Diagnosis | Should -Be 'genuine-duplicate'
+        $script:f3ReviewDispositionsDiagnosis.Survivor | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Get-DispositionTally - code-review surface CM21 (issue #842): length-caps and control-char-strips reviewer_source before it is used as a cost-table grouping key' {
+    It 'strips embedded control characters and caps an oversized reviewer_source value' {
+        # reviewer_source\s*:\s*(\S+) has no upper bound and \S matches any
+        # non-whitespace byte, including control characters -- an
+        # attacker-influenced value could smuggle control bytes (corrupting
+        # rendered report output) or an unbounded-length run (bloating the
+        # per-source cost table Get-ReviewCostRollup groups on).
+        $bellChar = [string][char]7
+        $oversizedValue = ('a' * 200) + $bellChar + ('b' * 50)
+        $fence = '```'
+        $body = @"
+<!-- review-dispositions-961 -->
+
+${fence}yaml
+schema_version: 3
+passes_run: [1]
+entries:
+  - stable_finding_key: "z.ts:1:zzz"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: low
+    stage: code-review
+    reviewer_source: $oversizedValue
+    disposition_rationale: "Oversized/control-char reviewer_source."
+${fence}
+"@
+        $result = Get-DispositionTally -Surface 'code-review' -Body $body
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 1
+        $sanitized = $result.Entries[0].ReviewerSource
+        $sanitized.Length | Should -BeLessOrEqual 64
+        $sanitized | Should -Not -Match ([regex]::Escape($bellChar))
+    }
+
+    It 'strips a Unicode bidi-override character from reviewer_source (M12, issue #842 post-review)' {
+        # A bidi-override character (e.g. U+202E RIGHT-TO-LEFT OVERRIDE) left
+        # unstripped in an interpolated reviewer_source value could visually
+        # reorder surrounding rendered report text in a terminal or editor --
+        # a Trojan-Source-class attack. The pre-M12 sanitizer stripped only
+        # ASCII control characters (0x00-0x1F, 0x7F), leaving this class of
+        # Unicode character untouched.
+        $rtlOverride = [string][char]0x202E
+        $poisonedValue = 'local' + $rtlOverride + 'evil'
+        $fence = '```'
+        $body = @"
+<!-- review-dispositions-962 -->
+
+${fence}yaml
+schema_version: 3
+passes_run: [1]
+entries:
+  - stable_finding_key: "z.ts:1:zzz"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: low
+    stage: code-review
+    reviewer_source: $poisonedValue
+    disposition_rationale: "Bidi-override reviewer_source."
+${fence}
+"@
+        $result = Get-DispositionTally -Surface 'code-review' -Body $body
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 1
+        $sanitized = $result.Entries[0].ReviewerSource
+        $sanitized | Should -Not -Match ([regex]::Escape($rtlOverride))
+        $sanitized | Should -Be 'localevil'
+    }
+}
+
+Describe 'ConvertTo-SanitizedReviewerSource - M-CR-F1 regression (PR #876 CodeRabbit review, judge-ruled): stripping must not launder attacker input into a reserved sentinel' {
+    It 'escapes a zero-width-space-laundered "local" to "ext-local" instead of the bare reserved sentinel' {
+        # loc<ZWSP>al strips down to the literal "local" -- colliding with the
+        # reserved pipeline-native sentinel Get-ExternalSourceNovelSustainedCount
+        # checks via exact equality (-eq 'local'). Left unescaped, this would
+        # undercount DispositionsNovelExternalCount (fail-closed direction,
+        # but still a real defect feeding the escape-arm relaxation math).
+        $zwsp = [string][char]0x200B
+        $sanitized = ConvertTo-SanitizedReviewerSource -Value ('loc' + $zwsp + 'al')
+        $sanitized | Should -Be 'ext-local'
+    }
+
+    It 'leaves a legitimate, untouched "local" value unescaped (nothing was stripped, so no collision was CAUSED by stripping)' {
+        # This is the load-bearing counter-case: a genuine pipeline-native
+        # reviewer_source: local value has no unsafe characters to strip, so
+        # $stripped -eq $Value and the sentinel-collision escape must NOT
+        # fire. Escaping every real 'local' would flip legitimate local
+        # entries to external and corrupt the relaxation math in the
+        # opposite direction.
+        $sanitized = ConvertTo-SanitizedReviewerSource -Value 'local'
+        $sanitized | Should -Be 'local'
+    }
+
+    It 'applies the same laundering-guard treatment to both reserved sentinels ("local" and "unresolved")' {
+        $rtlOverride = [string][char]0x202E
+        $zwsp = [string][char]0x200B
+        $sanitizedLocal = ConvertTo-SanitizedReviewerSource -Value ('local' + $rtlOverride)
+        $sanitizedUnresolved = ConvertTo-SanitizedReviewerSource -Value ('unre' + $zwsp + 'solved')
+        $sanitizedLocal | Should -Be 'ext-local'
+        $sanitizedUnresolved | Should -Be 'ext-unresolved'
+    }
+
+    It 'end-to-end via Get-DispositionTally: a zero-width-space-laundered "local" reviewer_source is escaped before it reaches the entry' {
+        $zwsp = [string][char]0x200B
+        $poisonedValue = 'loc' + $zwsp + 'al'
+        $fence = '```'
+        $body = @"
+<!-- review-dispositions-963 -->
+
+${fence}yaml
+schema_version: 3
+passes_run: [1]
+entries:
+  - stable_finding_key: "z.ts:1:zzz"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: low
+    stage: code-review
+    reviewer_source: $poisonedValue
+    disposition_rationale: "Zero-width-space-laundered reviewer_source."
+${fence}
+"@
+        $result = Get-DispositionTally -Surface 'code-review' -Body $body
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 1
+        $result.Entries[0].ReviewerSource | Should -Be 'ext-local'
+    }
+
+    It 'F1 regression (R2 revalidate cycle, judge-sustained): leaves an already-escaped "ext-"-prefixed value unescaped when a stray zero-width char elsewhere is stripped (a pre-existing legitimate value, not a collision CAUSED by stripping)' {
+        # 'ext-someu<ZWSP>ser' strips to 'ext-someuser', which already started
+        # with 'ext-' BEFORE stripping too -- this is not a caused collision,
+        # it's a genuine already-escaped external login with one stray
+        # zero-width char. The old code's bare
+        # `$stripped.StartsWith('ext-')` disjunct fired on ANY stripping
+        # change to a value that already started with 'ext-', double-
+        # escaping this to 'ext-ext-someuser'.
+        $zwsp = [string][char]0x200B
+        $sanitized = ConvertTo-SanitizedReviewerSource -Value ('ext-someu' + $zwsp + 'ser')
+        $sanitized | Should -Be 'ext-someuser'
+    }
+
+    It 'F1 regression (R2 revalidate cycle, judge-sustained): still escapes the genuine laundering case where stripping CAUSES the "ext-" prefix to newly appear' {
+        # 'ext<ZWSP>-user' does NOT start with 'ext-' before stripping (the
+        # 4th character is the zero-width space, not '-'), but strips down to
+        # 'ext-user', which DOES start with 'ext-'. This is a real collision
+        # CAUSED by stripping and must still be escaped to 'ext-ext-user'.
+        $zwsp = [string][char]0x200B
+        $sanitized = ConvertTo-SanitizedReviewerSource -Value ('ext' + $zwsp + '-user')
+        $sanitized | Should -Be 'ext-ext-user'
     }
 }
 

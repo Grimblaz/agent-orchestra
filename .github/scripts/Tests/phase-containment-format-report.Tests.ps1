@@ -28,26 +28,38 @@ BeforeAll {
     $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
 
     function script:New-PC772FixtureEntries {
+        # Issue #842 s1: -OmitCodeReview drops the code-review bucket
+        # entirely (code-review stage N=0 -> DenominatorZero) while leaving
+        # the plan-stress-test and design-challenge buckets untouched, so
+        # the four-state render-discrimination tests can exercise a single
+        # zero'd stage alongside two normally-rendering stages in the SAME
+        # report -- proving the new states don't leak across stages. Purely
+        # additive: the no-args call below is byte-identical to before, so
+        # every pre-existing pinned count/assertion is unaffected.
+        param([switch]$OmitCodeReview)
+
         $entries = [System.Collections.Generic.List[hashtable]]::new()
 
         # code-review bucket (catchable_phase=implementation, n=4 -> InsufficientData)
-        foreach ($pair in @(
-            @{ key = 'code-review:4832813258'; intro = 'design';         sev = 'high';   fix = 'instruction'; cat = 'pattern'               },
-            @{ key = 'code-review:4832813940'; intro = 'implementation'; sev = 'medium'; fix = 'instruction'; cat = 'implementation-clarity' },
-            @{ key = 'code-review:4832814488'; intro = 'plan';           sev = 'medium'; fix = 'skill';       cat = 'documentation-audit'   },
-            @{ key = 'code-review:4832815057'; intro = 'design';         sev = 'medium'; fix = 'instruction'; cat = 'documentation-audit'   }
-        )) {
-            $entries.Add(@{
-                finding_key       = $pair.key
-                introduced_phase  = $pair.intro
-                catchable_phase   = 'implementation'
-                caught_stage      = 'code-review'
-                escape_distance   = 0
-                severity          = $pair.sev
-                systemic_fix_type = $pair.fix
-                category          = $pair.cat
-                apparatus_meta    = $false
-            })
+        if (-not $OmitCodeReview) {
+            foreach ($pair in @(
+                @{ key = 'code-review:4832813258'; intro = 'design';         sev = 'high';   fix = 'instruction'; cat = 'pattern'               },
+                @{ key = 'code-review:4832813940'; intro = 'implementation'; sev = 'medium'; fix = 'instruction'; cat = 'implementation-clarity' },
+                @{ key = 'code-review:4832814488'; intro = 'plan';           sev = 'medium'; fix = 'skill';       cat = 'documentation-audit'   },
+                @{ key = 'code-review:4832815057'; intro = 'design';         sev = 'medium'; fix = 'instruction'; cat = 'documentation-audit'   }
+            )) {
+                $entries.Add(@{
+                    finding_key       = $pair.key
+                    introduced_phase  = $pair.intro
+                    catchable_phase   = 'implementation'
+                    caught_stage      = 'code-review'
+                    escape_distance   = 0
+                    severity          = $pair.sev
+                    systemic_fix_type = $pair.fix
+                    category          = $pair.cat
+                    apparatus_meta    = $false
+                })
+            }
         }
 
         # plan-stress-test bucket (catchable_phase=plan, n=6, all escape_distance=0 -> RelaxationEligible)
@@ -115,15 +127,33 @@ BeforeAll {
         param(
             [Parameter(Mandatory)][object]$Rollup,
             [bool]$Truncated = $false,
-            [int]$InvalidEntryCount = 0
+            [int]$InvalidEntryCount = 0,
+            # Issue #842 s1: the always-on judge-filter disclosure fields.
+            # Matched/CommentBodyCount/AuthorFilteredCount are window-level
+            # (computed once per fetch, not per-stage) and feed both the
+            # always-on header disclosure and the four-state
+            # DenominatorZero-branch discrimination (FILTERED-EMPTY /
+            # INVALID-EMPTY / genuinely-empty / N==0). Defaults (all 0,
+            # default identity) are inert no-ops for every pre-existing
+            # test in this file that does not pass them.
+            [int]$Matched = 0,
+            [int]$CommentBodyCount = 0,
+            [int]$AuthorFilteredCount = 0,
+            [string]$JudgeLogin = 'github-actions[bot]',
+            [string]$JudgeLoginSource = 'resolved from gh auth'
         )
         return @{
-            Rollup            = $Rollup
-            Source            = 'graphql'
-            Truncated         = $Truncated
-            WindowDays        = 90
-            FetchedAt         = [datetime]::new(2026, 7, 10, 0, 0, 0, [DateTimeKind]::Utc)
-            InvalidEntryCount = $InvalidEntryCount
+            Rollup              = $Rollup
+            Source              = 'graphql'
+            Truncated           = $Truncated
+            WindowDays          = 90
+            FetchedAt           = [datetime]::new(2026, 7, 10, 0, 0, 0, [DateTimeKind]::Utc)
+            InvalidEntryCount   = $InvalidEntryCount
+            Matched             = $Matched
+            CommentBodyCount    = $CommentBodyCount
+            AuthorFilteredCount = $AuthorFilteredCount
+            JudgeLogin          = $JudgeLogin
+            JudgeLoginSource    = $JudgeLoginSource
         }
     }
 }
@@ -587,7 +617,7 @@ Describe 'Format-PhaseContainmentReport — InvalidEntryCount warning render' {
     It 'renders the WARNING line when InvalidEntryCount is nonzero' {
         $context     = New-PC772Context -Rollup $script:BaselineRollup -InvalidEntryCount 3
         $reportText  = (Format-PhaseContainmentReport -Context $context) -join "`n"
-        $reportText.Contains('WARNING: 3 phase-containment block(s) dropped as invalid/unparseable during this fetch — see gh Action run logs for details.') | Should -BeTrue -Because (
+        $reportText.Contains('WARNING: 3 phase-containment block(s) dropped as invalid/unparseable during this fetch — re-run this command locally to inspect the dropped comment bodies.') | Should -BeTrue -Because (
             "Actual report:`n$reportText"
         )
     }
@@ -598,5 +628,288 @@ Describe 'Format-PhaseContainmentReport — InvalidEntryCount warning render' {
         $reportText.Contains('phase-containment block(s) dropped as invalid/unparseable') | Should -BeFalse -Because (
             "a clean fetch must not render the invalid-entry warning.`nActual report:`n$reportText"
         )
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Issue #842 s1 (RED): four-state DenominatorZero-branch discrimination,
+# branch precedence, and always-on judge-filter disclosure. None of Matched/
+# CommentBodyCount/AuthorFilteredCount/JudgeLogin/JudgeLoginSource are
+# consulted by production Format-PhaseContainmentReport yet -- every
+# assertion below is expected to be assertion-RED against today's generic
+# "WITHHELD (denominator=0)" / no-header-disclosure render.
+# ---------------------------------------------------------------------------
+
+Describe 'Format-PhaseContainmentReport — four-state DenominatorZero discrimination (issue #842 M7/M9)' {
+    BeforeAll {
+        function script:Get-PC842StageBlock {
+            # Extracts a single stage's own rendered block (from its "Stage:
+            # {name}" line up to, but not including, the next "Stage:" line
+            # or the leakage-matrix header) so state-discrimination
+            # assertions stay scoped to the stage under test and cannot be
+            # satisfied by text belonging to a DIFFERENT stage's block.
+            param([Parameter(Mandatory)][string]$ReportText, [Parameter(Mandatory)][string]$StageName)
+            $allLines   = $ReportText -split "`n"
+            $startIdx   = ($allLines | Select-String -Pattern "^Stage: $StageName$" | Select-Object -First 1).LineNumber
+            if ($null -eq $startIdx) { return '' }
+            $startIdx = $startIdx - 1
+            $endIdx = $allLines.Count - 1
+            for ($i = $startIdx + 1; $i -lt $allLines.Count; $i++) {
+                if ($allLines[$i] -match '^Stage: ' -or $allLines[$i] -match '^Leakage matrix') {
+                    $endIdx = $i - 1
+                    break
+                }
+            }
+            return ($allLines[$startIdx..$endIdx] -join "`n")
+        }
+
+        # code-review stage is zero'd (N=0 -> DenominatorZero); plan-stress-
+        # test (n=6) and design-challenge (n=7) render normally alongside
+        # it, so these tests also prove the new states don't leak across
+        # stages.
+        #
+        # NOTE (issue #842 M3 post-review fix): this rollup's WINDOW is NOT
+        # empty overall (design-challenge and plan-stress-test both carry
+        # real entries) -- only the code-review STAGE is zero'd. That makes
+        # this fixture the exact M3 boundary case: a stage that is empty
+        # from DATA ABSENCE (a sibling stage has the real entries), not from
+        # every parsed block failing validation. Use $script:FullyEmptyRollup
+        # below for the true-positive INVALID-EMPTY / WITHHELD-detail cases
+        # (window genuinely has zero entries anywhere).
+        $script:ZeroedRollup = Get-PhaseContainmentRollup -Entries (New-PC772FixtureEntries -OmitCodeReview) -WindowLabel '90d'
+
+        # A window with ZERO entries in every stage (WindowEntryCount -eq 0)
+        # -- the only shape where INVALID-EMPTY / WITHHELD-detail are
+        # legitimately about THIS stage's own data, not a sibling's.
+        $script:FullyEmptyRollup = Get-PhaseContainmentRollup -Entries @() -WindowLabel '90d'
+    }
+
+    It 'renders FILTERED-EMPTY when the judge filter matched 0 bodies but some were author-filtered' {
+        $context = New-PC772Context -Rollup $script:ZeroedRollup -Matched 0 -CommentBodyCount 5 -AuthorFilteredCount 5 -JudgeLogin 'alice'
+        $reportText = (Format-PhaseContainmentReport -Context $context) -join "`n"
+        $codeReviewBlock = Get-PC842StageBlock -ReportText $reportText -StageName 'code-review'
+
+        $codeReviewBlock.Contains("Relaxation signal:  FILTERED-EMPTY — judge filter matched 0 of 5 bodies (looked for 'alice'); check -JudgeLogin") | Should -BeTrue -Because (
+            "a judge filter that matched zero bodies must never be indistinguishable from a genuinely-empty window.`nActual code-review block:`n$codeReviewBlock"
+        )
+    }
+
+    It 'renders INVALID-EMPTY when bodies matched but every parsed block failed validation, in a window that is genuinely empty everywhere' {
+        # Uses $script:FullyEmptyRollup (WindowEntryCount -eq 0), not
+        # $script:ZeroedRollup -- INVALID-EMPTY is only a legitimate
+        # explanation for THIS stage's own emptiness when the whole window
+        # has zero entries. See the M3 Describe block below for the
+        # boundary case where a sibling stage has real entries.
+        $context = New-PC772Context -Rollup $script:FullyEmptyRollup -Matched 3 -CommentBodyCount 3 -AuthorFilteredCount 0 -InvalidEntryCount 2
+        $reportText = (Format-PhaseContainmentReport -Context $context) -join "`n"
+        $codeReviewBlock = Get-PC842StageBlock -ReportText $reportText -StageName 'code-review'
+
+        $codeReviewBlock.Contains('Relaxation signal:  INVALID-EMPTY — 3 of 3 bodies matched but every parsed block failed validation (2 dropped); see WARNINGs above') | Should -BeTrue -Because (
+            "a window where every parsed block failed validation must never render as an unqualified 'nothing here' -- the WARNINGs above must be pointed to explicitly.`nActual code-review block:`n$codeReviewBlock"
+        )
+    }
+
+    It 'renders WITHHELD (denominator=0) with the matched/N detail when bodies matched but none carried a phase-containment block, in a window that is genuinely empty everywhere' {
+        # Uses $script:FullyEmptyRollup for the same reason as the
+        # INVALID-EMPTY test immediately above.
+        $context = New-PC772Context -Rollup $script:FullyEmptyRollup -Matched 4 -CommentBodyCount 4 -AuthorFilteredCount 0 -InvalidEntryCount 0
+        $reportText = (Format-PhaseContainmentReport -Context $context) -join "`n"
+        $codeReviewBlock = Get-PC842StageBlock -ReportText $reportText -StageName 'code-review'
+
+        $codeReviewBlock.Contains('Relaxation signal:  WITHHELD (denominator=0) — 4 of 4 bodies matched; none carried a phase-containment block') | Should -BeTrue -Because (
+            "a genuinely-measured-but-empty window is a DIFFERENT state from N==0 (no bodies fetched at all) and must say so.`nActual code-review block:`n$codeReviewBlock"
+        )
+    }
+
+    It 'renders the UNCHANGED bare WITHHELD (denominator=0), with no appended detail, when N==0 (no comment bodies fetched at all)' {
+        $context = New-PC772Context -Rollup $script:ZeroedRollup -Matched 0 -CommentBodyCount 0 -AuthorFilteredCount 0 -InvalidEntryCount 0
+        $reportText = (Format-PhaseContainmentReport -Context $context) -join "`n"
+        $codeReviewBlock = Get-PC842StageBlock -ReportText $reportText -StageName 'code-review'
+
+        $codeReviewBlock.Contains('Relaxation signal:  WITHHELD (denominator=0)') | Should -BeTrue -Because "Actual code-review block:`n$codeReviewBlock"
+        $codeReviewBlock.Contains('WITHHELD (denominator=0) —') | Should -BeFalse -Because (
+            "N==0 is the pre-existing, unchanged degenerate state -- it must NOT gain the new matched/N detail suffix (that suffix is reserved for the genuinely-measured-but-empty state).`nActual code-review block:`n$codeReviewBlock"
+        )
+    }
+
+    Context 'M3 fix (issue #842 post-review): a stage that is empty from DATA ABSENCE (a sibling stage has the real entries in this window) must never render INVALID-EMPTY or the WITHHELD-with-detail variant' {
+        It 'does NOT render INVALID-EMPTY for code-review when design-challenge/plan-stress-test carry real entries elsewhere in the SAME window, even though a window-wide invalid block was dropped' {
+            # $script:ZeroedRollup: code-review N=0 (DenominatorZero), but
+            # design-challenge (n=7) and plan-stress-test (n=6) both have
+            # real entries -- WindowEntryCount is NOT 0. InvalidEntryCount=2
+            # is a window-level total unrelated to code-review's own
+            # emptiness. Before the M3 fix this falsely rendered
+            # INVALID-EMPTY for code-review; the empty stage here is
+            # legitimate data-absence, not a parse failure.
+            $context = New-PC772Context -Rollup $script:ZeroedRollup -Matched 3 -CommentBodyCount 3 -AuthorFilteredCount 0 -InvalidEntryCount 2
+            $reportText = (Format-PhaseContainmentReport -Context $context) -join "`n"
+            $codeReviewBlock = Get-PC842StageBlock -ReportText $reportText -StageName 'code-review'
+
+            $codeReviewBlock.Contains('INVALID-EMPTY') | Should -BeFalse -Because (
+                "code-review's own emptiness is data-absence (design-challenge/plan-stress-test carry the window's real entries), not a parse failure the WARNINGs above explain.`nActual code-review block:`n$codeReviewBlock"
+            )
+            $codeReviewBlock.Contains('Relaxation signal:  WITHHELD (denominator=0)') | Should -BeTrue -Because (
+                "must fall through to the bare, unqualified WITHHELD instead.`nActual code-review block:`n$codeReviewBlock"
+            )
+        }
+
+        It 'does NOT render the WITHHELD-with-detail variant for code-review when a sibling stage carries the window''s real entries' {
+            # Same window shape as above, but with InvalidEntryCount=0 so
+            # state 3 (CommentBodyCount>0, "none carried a phase-containment
+            # block") would otherwise fire. WindowEntryCount is still
+            # nonzero (design-challenge/plan-stress-test), so this must also
+            # fall through to the bare WITHHELD, not the appended-detail form.
+            $context = New-PC772Context -Rollup $script:ZeroedRollup -Matched 4 -CommentBodyCount 4 -AuthorFilteredCount 0 -InvalidEntryCount 0
+            $reportText = (Format-PhaseContainmentReport -Context $context) -join "`n"
+            $codeReviewBlock = Get-PC842StageBlock -ReportText $reportText -StageName 'code-review'
+
+            $codeReviewBlock.Contains('WITHHELD (denominator=0) —') | Should -BeFalse -Because (
+                "the matched/N detail suffix implies this STAGE was measured empty, but the sibling stages carry the window's real entries -- this stage's emptiness is data-absence.`nActual code-review block:`n$codeReviewBlock"
+            )
+            $codeReviewBlock.Contains('Relaxation signal:  WITHHELD (denominator=0)') | Should -BeTrue -Because "Actual code-review block:`n$codeReviewBlock"
+        }
+    }
+
+    It 'does not perturb the normally-rendering plan-stress-test and design-challenge stages while code-review is zeroed' {
+        $context = New-PC772Context -Rollup $script:ZeroedRollup -Matched 0 -CommentBodyCount 5 -AuthorFilteredCount 5 -JudgeLogin 'alice'
+        $reportText = (Format-PhaseContainmentReport -Context $context) -join "`n"
+
+        $reportText.Contains('Relaxation signal:  ELIGIBLE (escape_rate ~0, no critical/high findings)') | Should -BeTrue -Because (
+            "plan-stress-test (n=6, untouched by -OmitCodeReview) must still render its normal ELIGIBLE verdict.`nActual report:`n$reportText"
+        )
+        $reportText.Contains('Relaxation signal:  NOT ELIGIBLE (escape_rate > 0)') | Should -BeTrue -Because (
+            "design-challenge (n=7, untouched by -OmitCodeReview) must still render its normal NOT ELIGIBLE verdict.`nActual report:`n$reportText"
+        )
+    }
+
+    Context 'branch precedence (issue #842 M7/M9 -- state 1 checked before state 2, state 1 before state 4)' {
+        It 'renders FILTERED-EMPTY, not the unchanged bare WITHHELD, when matched==0/AuthorFilteredCount>0 is asserted alongside a contradictory CommentBodyCount=0' {
+            # Deliberately contradictory input (CommentBodyCount cannot
+            # legitimately be 0 while AuthorFilteredCount is nonzero) --
+            # this pins that the FILTERED-EMPTY check runs BEFORE the N==0
+            # check, not the other way around.
+            $context = New-PC772Context -Rollup $script:ZeroedRollup -Matched 0 -CommentBodyCount 0 -AuthorFilteredCount 3 -JudgeLogin 'alice'
+            $reportText = (Format-PhaseContainmentReport -Context $context) -join "`n"
+            $codeReviewBlock = Get-PC842StageBlock -ReportText $reportText -StageName 'code-review'
+
+            $codeReviewBlock.Contains("Relaxation signal:  FILTERED-EMPTY — judge filter matched 0 of 0 bodies (looked for 'alice'); check -JudgeLogin") | Should -BeTrue -Because (
+                "Actual code-review block:`n$codeReviewBlock"
+            )
+        }
+
+        It 'renders FILTERED-EMPTY, not INVALID-EMPTY, when both conditions are simultaneously true' {
+            $context = New-PC772Context -Rollup $script:ZeroedRollup -Matched 0 -CommentBodyCount 4 -AuthorFilteredCount 4 -InvalidEntryCount 2 -JudgeLogin 'alice'
+            $reportText = (Format-PhaseContainmentReport -Context $context) -join "`n"
+            $codeReviewBlock = Get-PC842StageBlock -ReportText $reportText -StageName 'code-review'
+
+            $codeReviewBlock.Contains("Relaxation signal:  FILTERED-EMPTY — judge filter matched 0 of 4 bodies (looked for 'alice'); check -JudgeLogin") | Should -BeTrue -Because "Actual code-review block:`n$codeReviewBlock"
+            $codeReviewBlock.Contains('INVALID-EMPTY') | Should -BeFalse -Because "Actual code-review block:`n$codeReviewBlock"
+        }
+    }
+}
+
+Describe 'Format-PhaseContainmentReport — always-on judge-filter disclosure (issue #842 M22)' {
+    BeforeAll {
+        $script:PopulatedRollup = Get-PhaseContainmentRollup -Entries (New-PC772FixtureEntries) -WindowLabel '90d'
+    }
+
+    It 'renders the header disclosure line unconditionally, naming the identity resolved from gh auth' {
+        $context = New-PC772Context -Rollup $script:PopulatedRollup -Matched 8 -CommentBodyCount 10 -JudgeLogin 'github-actions[bot]' -JudgeLoginSource 'resolved from gh auth'
+        $reportText = (Format-PhaseContainmentReport -Context $context) -join "`n"
+
+        $reportText.Contains('Judge filter: matched 8 of 10 comment bodies (identity: github-actions[bot], resolved from gh auth)') | Should -BeTrue -Because (
+            "a maintainer must always see how much of the fetched corpus was actually attributable to the judge, regardless of which relaxation branch renders below.`nActual report:`n$reportText"
+        )
+    }
+
+    It 'renders the header disclosure line naming the identity from an explicit -JudgeLogin' {
+        $context = New-PC772Context -Rollup $script:PopulatedRollup -Matched 8 -CommentBodyCount 10 -JudgeLogin 'alice' -JudgeLoginSource 'from -JudgeLogin'
+        $reportText = (Format-PhaseContainmentReport -Context $context) -join "`n"
+
+        $reportText.Contains('Judge filter: matched 8 of 10 comment bodies (identity: alice, from -JudgeLogin)') | Should -BeTrue -Because "Actual report:`n$reportText"
+    }
+
+    It 'discloses the filtered count inside the plan-stress-test stage''s own NON-EMPTY (ELIGIBLE) render, not just the header' {
+        $context = New-PC772Context -Rollup $script:PopulatedRollup -Matched 6 -CommentBodyCount 16 -AuthorFilteredCount 10
+        $reportText = (Format-PhaseContainmentReport -Context $context) -join "`n"
+        $planStressBlock = Get-PC842StageBlock -ReportText $reportText -StageName 'plan-stress-test'
+
+        $planStressBlock | Should -Match '(?i)filtered' -Because (
+            "a 16-body window with 10 identity-dropped must not silently narrow the denominator without disclosure, even on a clean-looking ELIGIBLE stage.`nActual plan-stress-test block:`n$planStressBlock"
+        )
+        $planStressBlock | Should -Match '10' -Because "the disclosure must name the actual filtered count (10).`nActual plan-stress-test block:`n$planStressBlock"
+    }
+
+    It 'discloses the filtered count inside the code-review stage''s own INSUFFICIENT DATA (WITHHELD n<5) render, not just the header' {
+        $context = New-PC772Context -Rollup $script:PopulatedRollup -Matched 4 -CommentBodyCount 14 -AuthorFilteredCount 10
+        $reportText = (Format-PhaseContainmentReport -Context $context) -join "`n"
+        $codeReviewBlock = Get-PC842StageBlock -ReportText $reportText -StageName 'code-review'
+
+        $codeReviewBlock.Contains('Relaxation signal:  WITHHELD (n<5)') | Should -BeTrue -Because "Actual code-review block:`n$codeReviewBlock"
+        $codeReviewBlock | Should -Match '(?i)filtered' -Because (
+            "a filter-induced drop below n=5 must not read as an innocuous 'we need more data' -- the WITHHELD (n<5) branch must ALSO disclose the filtered count, not just the header.`nActual code-review block:`n$codeReviewBlock"
+        )
+        $codeReviewBlock | Should -Match '10' -Because "the disclosure must name the actual filtered count (10).`nActual code-review block:`n$codeReviewBlock"
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Issue #842 M9 (post-review fix): a PSCustomObject Context lacking the five
+# newer disclosure fields (Matched, CommentBodyCount, AuthorFilteredCount,
+# JudgeLogin, JudgeLoginSource) must degrade to the same 0/default literals
+# as an equivalent hashtable Context, not throw PropertyNotFoundException
+# under this file's Set-StrictMode -Version Latest.
+# ---------------------------------------------------------------------------
+
+Describe 'Format-PhaseContainmentReport — PSCustomObject Context missing the newer disclosure fields (issue #842 M9)' {
+    BeforeAll {
+        $script:M9Rollup = Get-PhaseContainmentRollup -Entries (New-PC772FixtureEntries) -WindowLabel '90d'
+
+        # Deliberately built WITHOUT Matched/CommentBodyCount/AuthorFilteredCount/
+        # JudgeLogin/JudgeLoginSource -- mirrors a Context built before the M22
+        # disclosure feature existed (or any caller that omits them).
+        $script:M9Context = [PSCustomObject]@{
+            Rollup            = $script:M9Rollup
+            Source            = 'graphql'
+            Truncated         = $false
+            WindowDays        = 90
+            FetchedAt         = [datetime]::new(2026, 7, 10, 0, 0, 0, [DateTimeKind]::Utc)
+            InvalidEntryCount = 0
+        }
+    }
+
+    It 'does not throw when the PSCustomObject Context omits the five newer fields' {
+        { Format-PhaseContainmentReport -Context $script:M9Context } | Should -Not -Throw
+    }
+
+    It 'renders the same inert-default header disclosure as the equivalent hashtable Context' {
+        $reportText = (Format-PhaseContainmentReport -Context $script:M9Context) -join "`n"
+        $reportText.Contains("Judge filter: matched 0 of 0 comment bodies (identity: github-actions[bot], resolved from gh auth)") | Should -BeTrue -Because (
+            "a missing PSCustomObject property must degrade to the same 0/default literals the hashtable branch already uses for an omitted key.`nActual report:`n$reportText"
+        )
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Issue #842 M10 (post-review fix): the DataUntrustworthy branch is the one
+# sibling of InsufficientData/clean-render missing the always-on M22
+# filtered-count disclosure line.
+# ---------------------------------------------------------------------------
+
+Describe 'Format-PhaseContainmentReport — DataUntrustworthy branch filtered-count disclosure (issue #842 M10)' {
+    BeforeAll {
+        $script:M10Rollup = Get-PhaseContainmentRollup -Entries (New-PC772FixtureEntries) -WindowLabel '90d' -SustainedCounts @{ 'design-challenge' = 99 }
+    }
+
+    It 'discloses the filtered count inside the design-challenge stage''s own DATA UNTRUSTWORTHY render, matching InsufficientData/clean-render siblings' {
+        $context = New-PC772Context -Rollup $script:M10Rollup -AuthorFilteredCount 10
+        $reportText = (Format-PhaseContainmentReport -Context $context) -join "`n"
+        $designChallengeBlock = Get-PC842StageBlock -ReportText $reportText -StageName 'design-challenge'
+
+        $designChallengeBlock.Contains('Relaxation signal:  WITHHELD (data untrustworthy)') | Should -BeTrue -Because "Actual design-challenge block:`n$designChallengeBlock"
+        $designChallengeBlock | Should -Match '(?i)filtered' -Because (
+            "InsufficientData and the clean render both carry this always-on M22 disclosure line; DataUntrustworthy must not be the one sibling that omits it.`nActual design-challenge block:`n$designChallengeBlock"
+        )
+        $designChallengeBlock | Should -Match '10' -Because "the disclosure must name the actual filtered count (10).`nActual design-challenge block:`n$designChallengeBlock"
     }
 }
