@@ -44,7 +44,8 @@
                                        Invoke-CostSessionRender's own
                                        transitive need for the rest of that
                                        lib file's contents)
-      - Read-PRMetricsBlock, Test-FCLYamlSane, script:Escape-FCLScalar
+      - Read-PRMetricsBlock, Test-FCLYamlSane, script:Escape-FCLScalar,
+        script:Get-FCLScalar, script:Get-FCLNestedScalar
                                        (frame-credit-ledger-core.ps1 — issue
                                        #489 s2: the reader, validator, and
                                        scalar-escaper that s3's shared
@@ -55,7 +56,21 @@
                                        cost-fcl-helpers.ps1; previously
                                        absent from the harvest's chain, which
                                        reproduced the #824 silent-no-op
-                                       mechanism for any core-lib call)
+                                       mechanism for any core-lib call.
+                                       script:Get-FCLScalar/
+                                       script:Get-FCLNestedScalar are s5's
+                                       own additions to this list: the
+                                       reconcile path's readers for the
+                                       comment's gated Cost Pattern section
+                                       and the PR body's advisory-only
+                                       cost_summary.capture_point)
+      - script:Set-FCLPrBodyCostSummary, script:Update-FCLPrBodyCostSummary
+                                       (cost-fcl-helpers.ps1 — issue #489 s3's
+                                       pure transform and effectful writer;
+                                       s5 calls both directly from
+                                       script:Invoke-CostBaselineHarvestBodySummaryWrite
+                                       for the refresh-on-promotion and
+                                       reconcile paths)
 
     NOTE (issue #824 post-review fix M6): this file's own private
     script:Get-CostBaselineHarvestRestCommentId deliberately MIRRORS (rather
@@ -371,8 +386,15 @@ function script:Test-CostBaselineHarvestCandidateGate {
         to the narrower identity-only resolution and silently reintroduces
         the worktree-origin blind spot M3 exists to close.
     .OUTPUTS
-        [hashtable] @{ Passed = [bool]; LiveHeadRef = [string] }
-        LiveHeadRef is only meaningful when Passed is $true.
+        [hashtable] @{ Passed = [bool]; LiveHeadRef = [string]; LiveBody = [string] }
+        LiveHeadRef and LiveBody are only meaningful when Passed is $true.
+        LiveBody (issue #489 s5) rides the SAME `gh pr view` call that
+        already fetches state/mergedAt/mergeCommit/headRefName here — a
+        zero-round-trip addition, matching the combined-fetch convention
+        this codebase already uses twice (:881 in this file,
+        frame-credit-ledger.ps1:906-910) — so the caller can pass it
+        straight to the s5 refresh-on-promotion write without a second
+        `gh pr view` call.
     #>
     param(
         [Parameter(Mandatory)][int]$CandidatePr,
@@ -384,7 +406,7 @@ function script:Test-CostBaselineHarvestCandidateGate {
         [AllowEmptyString()][string]$Slug = ''
     )
 
-    $failedGate = @{ Passed = $false; LiveHeadRef = '' }
+    $failedGate = @{ Passed = $false; LiveHeadRef = ''; LiveBody = '' }
 
     # Verify-then-select (M14): a session id with no local transcript on
     # this machine is skipped WITHOUT spending a gh call or the re-walk
@@ -407,7 +429,7 @@ function script:Test-CostBaselineHarvestCandidateGate {
     # check before acting, and use the LIVE headRefName (not the
     # comment's) as the walk key below.
     $liveJson = $null
-    try { $liveJson = & gh pr view $CandidatePr --json 'state,mergedAt,mergeCommit,headRefName' 2>$null }
+    try { $liveJson = & gh pr view $CandidatePr --json 'state,mergedAt,mergeCommit,headRefName,body' 2>$null }
     catch { $liveJson = $null }
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($liveJson)) { return $failedGate }
 
@@ -419,7 +441,7 @@ function script:Test-CostBaselineHarvestCandidateGate {
     $liveHeadRef = [string]$liveInfo.headRefName
     if ([string]::IsNullOrWhiteSpace($liveHeadRef)) { return $failedGate }
 
-    return @{ Passed = $true; LiveHeadRef = $liveHeadRef }
+    return @{ Passed = $true; LiveHeadRef = $liveHeadRef; LiveBody = [string]$liveInfo.body }
 }
 
 function script:Merge-CostBaselineHarvestSection {
@@ -508,6 +530,352 @@ function script:Test-CostBaselineHarvestSectionStillCurrent {
 }
 
 # ---------------------------------------------------------------------------
+# PR body refresh-on-promotion + reconcile (issue #489 s5)
+# ---------------------------------------------------------------------------
+
+function script:ConvertTo-CostBaselineHarvestSummaryFromRenderResult {
+    <#
+    .SYNOPSIS
+        Builds the script:Update-FCLPrBodyCostSummary CostSummary hashtable
+        from a fresh Invoke-CostSessionRender result (issue #489 s5
+        refresh-on-promotion).
+    .DESCRIPTION
+        Sourced entirely from the SAME re-walk that already promoted the
+        composite comment above — never a second re-count, never the
+        untrusted PR body. Missing/absent Attribution or Completeness
+        sub-keys degrade to zero/empty defaults rather than throwing, since
+        some render-result shapes (including several existing test doubles)
+        omit them.
+    .OUTPUTS
+        [hashtable] shaped for script:Set-FCLPrBodyCostSummary /
+        script:Update-FCLPrBodyCostSummary's -CostSummary parameter.
+    #>
+    param([Parameter(Mandatory)][hashtable]$RenderResult)
+
+    $attribution = $RenderResult['Attribution']
+    $totals = if ($null -ne $attribution -and $attribution -is [hashtable] -and $attribution['totals'] -is [hashtable]) { $attribution['totals'] } else { @{} }
+    $tokens = if ($totals['tokens'] -is [hashtable]) { $totals['tokens'] } else { @{} }
+
+    $completeness = $RenderResult['Completeness']
+    $sessionCompleteness = if ($completeness -is [hashtable] -and $null -ne $completeness['completeness']) { [string]$completeness['completeness'] } else { '' }
+    $capturePoint = if ($completeness -is [hashtable] -and $null -ne $completeness['capture_point']) { [string]$completeness['capture_point'] } else { '' }
+
+    return @{
+        cost_usd_total        = if ($null -ne $totals['cost_estimate_usd']) { [double]$totals['cost_estimate_usd'] } else { 0.0 }
+        tokens                = @{
+            input          = if ($null -ne $tokens['input']) { [long]$tokens['input'] } else { 0L }
+            output         = if ($null -ne $tokens['output']) { [long]$tokens['output'] } else { 0L }
+            cache_creation = if ($null -ne $tokens['cache_creation']) { [long]$tokens['cache_creation'] } else { 0L }
+            cache_read     = if ($null -ne $tokens['cache_read']) { [long]$tokens['cache_read'] } else { 0L }
+        }
+        session_completeness  = $sessionCompleteness
+        capture_point         = $capturePoint
+    }
+}
+
+function script:ConvertTo-CostBaselineHarvestSummaryFromSection {
+    <#
+    .SYNOPSIS
+        Builds the script:Update-FCLPrBodyCostSummary CostSummary hashtable
+        from an already-gated composite comment's Cost Pattern section text
+        (issue #489 s5 reconcile path).
+    .DESCRIPTION
+        Reuses the hoisted script:Get-FCLScalar / script:Get-FCLNestedScalar
+        readers (reachable via s2's dot-source chain extension) against the
+        exact YAML shape Format-CostPatternYaml emits (cost-pattern-
+        renderer.ps1): session_completeness/capture_point are flat
+        top-level scalars, and totals.tokens.{input,output,cache_creation,
+        cache_read} plus totals.cost_estimate_usd sit one level under the
+        terminal totals: block. Spends no re-count budget: this reads the
+        comment's OWN already-computed numbers — never a re-walk, never the
+        untrusted PR body.
+    .OUTPUTS
+        [hashtable] shaped for script:Set-FCLPrBodyCostSummary /
+        script:Update-FCLPrBodyCostSummary's -CostSummary parameter.
+    #>
+    param([Parameter(Mandatory)][string]$Section)
+
+    $costUsdTotalRaw = script:Get-FCLNestedScalar -Block $Section -ParentKey 'totals' -ChildKey 'cost_estimate_usd'
+    $inputRaw = script:Get-FCLNestedScalar -Block $Section -ParentKey 'totals' -ChildKey 'input'
+    $outputRaw = script:Get-FCLNestedScalar -Block $Section -ParentKey 'totals' -ChildKey 'output'
+    $cacheCreationRaw = script:Get-FCLNestedScalar -Block $Section -ParentKey 'totals' -ChildKey 'cache_creation'
+    $cacheReadRaw = script:Get-FCLNestedScalar -Block $Section -ParentKey 'totals' -ChildKey 'cache_read'
+
+    return @{
+        cost_usd_total        = if ([string]::IsNullOrWhiteSpace($costUsdTotalRaw)) { 0.0 } else { [double]$costUsdTotalRaw }
+        tokens                = @{
+            input          = if ([string]::IsNullOrWhiteSpace($inputRaw)) { 0L } else { [long]$inputRaw }
+            output         = if ([string]::IsNullOrWhiteSpace($outputRaw)) { 0L } else { [long]$outputRaw }
+            cache_creation = if ([string]::IsNullOrWhiteSpace($cacheCreationRaw)) { 0L } else { [long]$cacheCreationRaw }
+            cache_read     = if ([string]::IsNullOrWhiteSpace($cacheReadRaw)) { 0L } else { [long]$cacheReadRaw }
+        }
+        session_completeness  = [string](script:Get-FCLScalar -Block $Section -Name 'session_completeness')
+        capture_point         = [string](script:Get-FCLScalar -Block $Section -Name 'capture_point')
+    }
+}
+
+function script:Get-CostBaselineHarvestBodyCapturePoint {
+    <#
+    .SYNOPSIS
+        Advisory-only read of a PR body's cost_summary.capture_point (issue
+        #489 s5 reconcile detector).
+    .DESCRIPTION
+        Locates the pipeline-metrics block with the same fence-agnostic
+        marker regex Read-PRMetricsBlock uses (frame-credit-ledger-
+        core.ps1:750), then reads the nested cost_summary.capture_point
+        scalar via the hoisted script:Get-FCLNestedScalar reader. Returns
+        $null when the pipeline-metrics block itself is absent, when no
+        cost_summary subtree exists inside it (the watchdog-kill,
+        first-write-lost case the reconcile detector exists to catch), or
+        when capture_point is present but blank.
+
+        TRUST BOUNDARY (issue #489 s5, load-bearing): the PR body is
+        untrusted input — one author, potentially an arbitrary external
+        contributor on a fork PR. The value returned here is ADVISORY ONLY:
+        it decides whether a reconcile write is attempted, and is NEVER
+        treated as authoritative and NEVER written back into the body. The
+        totals a reconcile write actually uses always come from the
+        composite comment's own fail-closed-gated data (mirrors the
+        forgery threat model Get-CostBaselineHarvestCompositeComment's own
+        .DESCRIPTION documents).
+    #>
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$PrBody)
+
+    if ([string]::IsNullOrEmpty($PrBody)) { return $null }
+
+    $normalized = $PrBody -replace "`r`n", "`n" -replace "`r", "`n"
+    $blockMatch = [regex]::Match($normalized, '(?s)<!--\s*pipeline-metrics\s*(?<block>.*?)\s*-->')
+    if (-not $blockMatch.Success) { return $null }
+
+    return script:Get-FCLNestedScalar -Block $blockMatch.Groups['block'].Value -ParentKey 'cost_summary' -ChildKey 'capture_point'
+}
+
+function script:Test-CostBaselineHarvestBodySummaryStale {
+    <#
+    .SYNOPSIS
+        Reconcile eligibility predicate (issue #489 s5): does a PR body's
+        advisory-only cost_summary.capture_point look stale against a
+        comment that already reads end-of-session?
+    .DESCRIPTION
+        Mirrors the shape of the existing
+        script:Test-CostBaselineHarvestSectionStillCurrent precedent (a
+        single, narrowly-scoped predicate) rather than folding this check
+        into a larger function. "Stale" covers three cases: a
+        never-refreshed mid-session value, the degraded-write sentinel
+        (`unavailable`), and the block-absent case — no cost_summary
+        subtree at all, the watchdog-kill first-write-lost scenario.
+    .OUTPUTS
+        [bool]
+    #>
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$PrBody)
+
+    $bodyCapturePoint = script:Get-CostBaselineHarvestBodyCapturePoint -PrBody $PrBody
+    if ([string]::IsNullOrWhiteSpace($bodyCapturePoint)) { return $true }
+
+    return $bodyCapturePoint -in @('pr-creation-mid-session', 'unavailable')
+}
+
+function script:Invoke-CostBaselineHarvestBodySummaryWrite {
+    <#
+    .SYNOPSIS
+        Shared body-only cost_summary write wrapper for the s5
+        refresh-on-promotion and reconcile paths (issue #489 s5).
+    .DESCRIPTION
+        Both callers write real (non-degraded) totals sourced from an
+        already-gated composite comment or a fresh re-walk — never from the
+        untrusted PR body (see this file's other s5 functions'
+        .DESCRIPTIONs for the trust boundary). This is the single place
+        both paths call script:Update-FCLPrBodyCostSummary (the s3 writer)
+        from, so the mandated one-line stderr audit record — naming the PR
+        and the outcome (refreshed / reconciled / skipped-no-op /
+        failed: {reason}) — is emitted exactly once per attempted write.
+
+        Previews the transform via script:Set-FCLPrBodyCostSummary (pure,
+        no I/O) SOLELY to classify the audit outcome. This is not a
+        duplicate gate: script:Update-FCLPrBodyCostSummary is still always
+        called when the preview shows a real change, and ITS OWN no-op
+        guard (issue #489 s3) remains the one thing deciding whether the
+        `gh pr edit` call actually fires — this function never
+        short-circuits that decision differently than the writer would.
+
+        Resets $global:LASTEXITCODE immediately before calling the writer
+        (only on the non-no-op path) so the post-call check reflects THIS
+        call's own `gh pr edit`, not a stale exit code left over from an
+        earlier native command in the same loop iteration (the composite
+        comment fetch, Find-OrUpsertComment) — the writer itself never
+        surfaces gh's exit code to its caller.
+
+        Fail-open in both directions: any exception here — including one
+        from a malformed CostSummary hashtable or a test double standing in
+        for the writer — is caught and logged, never rethrown. This must
+        never revert, block, or un-stamp a prior successful comment
+        promotion, and must never surface an error at startup (stderr only).
+    #>
+    param(
+        [Parameter(Mandatory)][int]$Pr,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$PrBody,
+        [Parameter(Mandatory)][hashtable]$CostSummary,
+        [Parameter(Mandatory)][ValidateSet('refreshed', 'reconciled')][string]$Outcome
+    )
+
+    try {
+        $preview = script:Set-FCLPrBodyCostSummary -PrBody $PrBody -Degraded $false -CostSummary $CostSummary
+        if ($preview -eq $PrBody) {
+            [Console]::Error.WriteLine("cost-baseline-harvest: PR body cost-summary write for #$Pr — skipped-no-op")
+            return
+        }
+
+        $global:LASTEXITCODE = 0
+        script:Update-FCLPrBodyCostSummary -Pr $Pr -PrBody $PrBody -Degraded $false -CostSummary $CostSummary
+
+        if ($global:LASTEXITCODE -ne 0) {
+            [Console]::Error.WriteLine("cost-baseline-harvest: PR body cost-summary write for #$Pr — failed: gh pr edit exited $global:LASTEXITCODE")
+        }
+        else {
+            [Console]::Error.WriteLine("cost-baseline-harvest: PR body cost-summary write for #$Pr — $Outcome")
+        }
+    }
+    catch {
+        [Console]::Error.WriteLine("cost-baseline-harvest: PR body cost-summary write for #$Pr — failed: $($_.Exception.Message)")
+    }
+}
+
+function script:Select-CostBaselineHarvestReconcileCandidates {
+    <#
+    .SYNOPSIS
+        Filters already-fetched rolling-history entries down to the s5
+        reconcile candidate class (issue #489 s5) — a SEPARATE, additive
+        population from script:Select-CostBaselineHarvestCandidates' own
+        promotion-eligibility filter. Does NOT call, modify, or otherwise
+        touch that function.
+    .DESCRIPTION
+        script:Select-CostBaselineHarvestCandidates filters TO
+        capture_point == 'pr-creation-mid-session' and excludes any entry
+        already carrying a non-empty upgrade_attempted_at — so a PR whose
+        comment was ALREADY promoted to end-of-session (in this run or a
+        prior one) can never appear in that function's output. This
+        function is the deliberate mirror: it filters TO capture_point ==
+        'end-of-session' and does not consult upgrade_attempted_at at all,
+        since a promoted comment is exactly the population whose body may
+        still be stale.
+
+        This is a cheap, UNGATED shortlist only — cost-rolling-history.ps1
+        applies no authorship check when it parses PR comments (unlike
+        script:Get-CostBaselineHarvestCompositeComment below). It exists
+        solely to avoid a `gh` call per merged PR in the horizon. The
+        caller MUST still re-fetch and re-validate each shortlisted PR
+        through the fail-closed script:Get-CostBaselineHarvestCompositeComment
+        gate before trusting anything about it — never trust this
+        shortlist's own capture_point or totals values directly.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowNull()][object[]]$Entries,
+        [Parameter(Mandatory)][int]$HorizonDays
+    )
+
+    $cutoffUtc = (Get-Date).ToUniversalTime().AddDays(-1 * $HorizonDays)
+    $candidates = [System.Collections.Generic.List[hashtable]]::new()
+
+    foreach ($entry in @($Entries)) {
+        if ($null -eq $entry -or $entry -isnot [hashtable]) { continue }
+        if ([string]$entry['capture_point'] -ne 'end-of-session') { continue }
+
+        $generatedAtUtc = script:ConvertTo-CostBaselineHarvestUtcDate -Value $entry['generated_at']
+        if ($null -eq $generatedAtUtc -or $generatedAtUtc -lt $cutoffUtc) { continue }
+
+        if ($null -eq $entry['pr']) { continue }
+
+        $candidates.Add($entry)
+    }
+
+    return , $candidates.ToArray()
+}
+
+function script:Invoke-CostBaselineHarvestReconcileCandidate {
+    <#
+    .SYNOPSIS
+        Reconciles ONE shortlisted PR's body against its own composite
+        comment (issue #489 s5).
+    .DESCRIPTION
+        Re-fetches the composite comment through the SAME fail-closed
+        authorship gate every other write path in this file uses — the
+        rolling-history shortlist that selected this PR carries no such
+        gate (see script:Select-CostBaselineHarvestReconcileCandidates), so
+        this re-fetch IS the real eligibility bound, not an optional extra.
+        Only when the gated section confirms capture_point: end-of-session,
+        and the PR body's (advisory-only) value looks stale, is a reconcile
+        write attempted — reusing that SAME gated section's own
+        already-computed totals; the untrusted body is never a data source,
+        only a trigger. Spends no re-count budget: never calls
+        Invoke-CostSessionRender. Fully fail-open: any failure along this
+        path (gh call failure, unparseable JSON, no matching section) is a
+        silent no-op, never a throw.
+    #>
+    param([Parameter(Mandatory)][int]$Pr)
+
+    $fetchResult = script:Get-CostBaselineHarvestCompositeComment -Pr $Pr
+    if ($null -eq $fetchResult -or -not $fetchResult['Found']) { return }
+
+    $sectionMatch = [regex]::Match($fetchResult['Body'], $script:FCLCostPatternSectionRegex)
+    if (-not $sectionMatch.Success) { return }
+
+    $section = $sectionMatch.Groups['section'].Value
+    if ((script:Get-FCLScalar -Block $section -Name 'capture_point') -ne 'end-of-session') { return }
+
+    $liveJson = $null
+    try { $liveJson = & gh pr view $Pr --json 'body' 2>$null } catch { $liveJson = $null }
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($liveJson)) {
+        [Console]::Error.WriteLine("cost-baseline-harvest: reconcile for #$Pr — failed: gh pr view (body) failed")
+        return
+    }
+
+    $liveInfo = $null
+    try { $liveInfo = ($liveJson | Out-String) | ConvertFrom-Json -ErrorAction Stop } catch { $liveInfo = $null }
+    if ($null -eq $liveInfo) {
+        [Console]::Error.WriteLine("cost-baseline-harvest: reconcile for #$Pr — failed: unparseable gh pr view response")
+        return
+    }
+    $liveBody = [string]$liveInfo.body
+
+    if (-not (script:Test-CostBaselineHarvestBodySummaryStale -PrBody $liveBody)) { return }
+
+    $costSummary = script:ConvertTo-CostBaselineHarvestSummaryFromSection -Section $section
+    script:Invoke-CostBaselineHarvestBodySummaryWrite -Pr $Pr -PrBody $liveBody -CostSummary $costSummary -Outcome 'reconciled'
+}
+
+function script:Invoke-CostBaselineHarvestReconcilePass {
+    <#
+    .SYNOPSIS
+        Runs the s5 reconcile candidate class over already-fetched
+        rolling-history entries (issue #489 s5).
+    .DESCRIPTION
+        Additive and unbounded by the promotion path's
+        one-re-walk-per-call budget — see
+        script:Select-CostBaselineHarvestReconcileCandidates and
+        script:Invoke-CostBaselineHarvestReconcileCandidate. Each candidate
+        is processed independently and fail-open, so one candidate's
+        failure never blocks another's.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowNull()][object[]]$Entries,
+        [Parameter(Mandatory)][int]$HorizonDays
+    )
+
+    $reconcileCandidates = script:Select-CostBaselineHarvestReconcileCandidates -Entries $Entries -HorizonDays $HorizonDays
+    foreach ($candidate in $reconcileCandidates) {
+        $candidatePr = 0
+        if (-not [int]::TryParse([string]$candidate['pr'], [ref]$candidatePr)) { continue }
+
+        try {
+            script:Invoke-CostBaselineHarvestReconcileCandidate -Pr $candidatePr
+        }
+        catch {
+            [Console]::Error.WriteLine("cost-baseline-harvest: reconcile for #$candidatePr — failed: $($_.Exception.Message)")
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------
 # Public function
 # ---------------------------------------------------------------------------
 
@@ -548,6 +916,26 @@ function Invoke-CostBaselineHarvest {
            earlier; a changed section is treated as a failed write and
            skipped rather than risking a last-write-wins clobber of a
            concurrent change (issue #824 post-review fix M15).
+        7. Refresh-on-promotion (issue #489 s5): after step 5 successfully
+           promotes a candidate's composite comment, mirrors that SAME
+           re-walk's upgraded totals into the candidate PR's body (the s3
+           cost_summary transform/writer), sourcing the body from the
+           SAME `gh pr view` call step 3 already made — no extra
+           round-trip. Fail-open in both directions: a failed body write
+           never reverts, blocks, or un-stamps the comment promotion in
+           step 5, and never surfaces an error at startup (stderr only).
+        8. Reconcile pass (issue #489 s5): on every call, independent of
+           steps 1-7's outcome, runs a SEPARATE, additive candidate class
+           over PRs whose comment already reads capture_point:
+           end-of-session (already promoted, possibly by a prior run) but
+           whose body's cost_summary.capture_point still reads a stale
+           mid-session value, reads `unavailable` (the degraded-write
+           case), or is missing entirely (a watchdog kill lost the very
+           first write). Spends no re-count budget — reuses the comment's
+           own already-computed totals for a body-only write. The PR
+           body's own capture_point value is read-only advisory input that
+           decides whether to fire this reconcile; it is never treated as
+           authoritative and never echoed back into the body.
 
         Every failure path is fail-open: this function never throws to its
         caller and never leaves a partial/corrupt write.
@@ -599,6 +987,18 @@ function Invoke-CostBaselineHarvest {
         $entries = @($rollingResult['entries'])
         if ($entries.Count -eq 0) { return $result }
 
+        # s5: additive reconcile pass — always runs when there are entries at
+        # all, independent of the promotion outcome below (it is a SEPARATE
+        # candidate class, not another slot in the one-re-walk-per-call
+        # budget), and is itself fully fail-open — see
+        # script:Invoke-CostBaselineHarvestReconcilePass.
+        try {
+            script:Invoke-CostBaselineHarvestReconcilePass -Entries $entries -HorizonDays $HorizonDays
+        }
+        catch {
+            [Console]::Error.WriteLine("cost-baseline-harvest: reconcile pass failed (fail-open, no-op): $($_.Exception.Message)")
+        }
+
         $candidates = script:Select-CostBaselineHarvestCandidates -Entries $entries -HorizonDays $HorizonDays
         if ($candidates.Count -eq 0) { return $result }
 
@@ -618,6 +1018,7 @@ function Invoke-CostBaselineHarvest {
                 -Slug $Slug
             if (-not $gate['Passed']) { continue }
             $liveHeadRef = $gate['LiveHeadRef']
+            $liveBody = $gate['LiveBody']
 
             # Budget cap: this candidate is now selected. Exactly one expensive
             # re-walk fires per Invoke-CostBaselineHarvest call, whatever the
@@ -730,6 +1131,20 @@ function Invoke-CostBaselineHarvest {
                     try { $null = Get-CostRollingHistory -ForceRefresh } catch { }
                     $result.Promoted = $true
                     $result.Signal = "upgraded #$candidatePr to end-of-session"
+
+                    # s5: refresh-on-promotion — mirror the upgraded totals
+                    # into the PR body via the shared writer wrapper. Wrapped
+                    # separately (not relying on the outer function-level
+                    # catch) so an unexpected failure here can NEVER revert
+                    # $result.Promoted back to $false or un-stamp the
+                    # comment promotion that already succeeded above.
+                    try {
+                        $costSummary = script:ConvertTo-CostBaselineHarvestSummaryFromRenderResult -RenderResult $renderResult
+                        script:Invoke-CostBaselineHarvestBodySummaryWrite -Pr $candidatePr -PrBody $liveBody -CostSummary $costSummary -Outcome 'refreshed'
+                    }
+                    catch {
+                        [Console]::Error.WriteLine("cost-baseline-harvest: PR body refresh for #$candidatePr — failed: $($_.Exception.Message)")
+                    }
                 }
                 else {
                     $result.Signal = "upgrade expected for #$candidatePr — composite comment write failed"
