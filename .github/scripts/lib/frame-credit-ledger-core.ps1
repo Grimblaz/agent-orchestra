@@ -2880,6 +2880,66 @@ function Invoke-CreditInputHarvest {
 }
 
 # ===========================================================================
+# Escape-FCLScalar (issue #489 s2 — hoisted from New-PipelineMetricsV4Block
+# to file scope so the escaper is reachable by callers other than that
+# composer, e.g. the cost-baseline-harvest dot-source chain).
+#
+# Escape a scalar value so it is safe inside an HTML comment and survives
+# the reader's first-':' split + quote-strip in Get-FCLScalar.
+#
+# Escape rules:
+#   1. --> -> --&gt;          (would terminate the HTML comment early)
+#   2. <!-- pipeline-metrics -> <!-- pipeline&#8208;metrics (avoid nested opener)
+#   3. ``` -> &#96;&#96;&#96; (avoids confusing Markdown renderers)
+#
+# YAML quoting rule: quote scalars containing ':', '#', leading/trailing
+# spaces, or quote characters so Get-FCLScalar can read them without
+# truncation at the first ':'.
+# ===========================================================================
+function script:Escape-FCLScalar {
+    param([AllowEmptyString()][string]$Value)
+
+    if ([string]::IsNullOrEmpty($Value)) { return $Value }
+
+    # Fold embedded newlines to space — YAML single-line scalar constraint.
+    # Multi-line values split key: value pairs across physical lines, truncating evidence.
+    $v = $Value -replace '\r\n', ' ' -replace '\r', ' ' -replace '\n', ' '
+
+    # Escaping
+    $v = $v -replace '-->', '--&gt;'
+    $v = $v -replace '<!--\s*pipeline-metrics', '<!-- pipeline&#8208;metrics'
+    $v = $v -replace '```', '&#96;&#96;&#96;'
+
+    # YAML quoting: wrap in single quotes when the value contains ':',
+    # '#', a leading/trailing space, or a single/double quote character.
+    # Use double-quote wrapping when the value already contains a single
+    # quote (escape the double quotes inside as \").
+    $needsQuoting = ($v -match ':') -or
+                    ($v -match '#') -or
+                    ($v -match "^[ \t]") -or
+                    ($v -match "[ \t]$") -or
+                    ($v -match "^['""]") -or
+                    ($v -match "['""]$")
+
+    if ($needsQuoting) {
+        if ($v.Contains("'")) {
+            # Use double-quote wrapping; YAML double-quoted scalars escape a
+            # literal backslash as \\ and a literal " as \" (escape the
+            # backslash first so the \" introduced below isn't re-escaped).
+            # Note: in PowerShell's -replace, a replacement string of '\\'
+            # (two backslash chars) already emits a literal \\ — '\\\\'
+            # (four chars) would double-escape and emit four backslashes.
+            $v = $v -replace '\\', '\\'
+            $v = $v -replace '"', '\"'
+            return '"' + $v + '"'
+        }
+        return "'" + $v + "'"
+    }
+
+    return $v
+}
+
+# ===========================================================================
 # New-PipelineMetricsV4Block (issue #739 s2 — AC1)
 #
 # Builds a canonical <!-- pipeline-metrics ... --> v4 HTML-comment block
@@ -2964,62 +3024,6 @@ function New-PipelineMetricsV4Block {
         $_.PSObject.Properties | ForEach-Object { $ht[$_.Name] = $_.Value }
         $ht
     })
-
-    # -----------------------------------------------------------------------
-    # Helper: escape a scalar value so it is safe inside an HTML comment and
-    # survives the reader's first-':' split + quote-strip in Get-FCLScalar.
-    #
-    # Escape rules:
-    #   1. --> -> --&gt;          (would terminate the HTML comment early)
-    #   2. <!-- pipeline-metrics -> <!-- pipeline&#8208;metrics (avoid nested opener)
-    #   3. ``` -> &#96;&#96;&#96; (avoids confusing Markdown renderers)
-    #
-    # YAML quoting rule: quote scalars containing ':', '#', leading/trailing
-    # spaces, or quote characters so Get-FCLScalar can read them without
-    # truncation at the first ':'.
-    # -----------------------------------------------------------------------
-    function script:Escape-FCLScalar {
-        param([AllowEmptyString()][string]$Value)
-
-        if ([string]::IsNullOrEmpty($Value)) { return $Value }
-
-        # Fold embedded newlines to space — YAML single-line scalar constraint.
-        # Multi-line values split key: value pairs across physical lines, truncating evidence.
-        $v = $Value -replace '\r\n', ' ' -replace '\r', ' ' -replace '\n', ' '
-
-        # Escaping
-        $v = $v -replace '-->', '--&gt;'
-        $v = $v -replace '<!--\s*pipeline-metrics', '<!-- pipeline&#8208;metrics'
-        $v = $v -replace '```', '&#96;&#96;&#96;'
-
-        # YAML quoting: wrap in single quotes when the value contains ':',
-        # '#', a leading/trailing space, or a single/double quote character.
-        # Use double-quote wrapping when the value already contains a single
-        # quote (escape the double quotes inside as \").
-        $needsQuoting = ($v -match ':') -or
-                        ($v -match '#') -or
-                        ($v -match "^[ \t]") -or
-                        ($v -match "[ \t]$") -or
-                        ($v -match "^['""]") -or
-                        ($v -match "['""]$")
-
-        if ($needsQuoting) {
-            if ($v.Contains("'")) {
-                # Use double-quote wrapping; YAML double-quoted scalars escape a
-                # literal backslash as \\ and a literal " as \" (escape the
-                # backslash first so the \" introduced below isn't re-escaped).
-                # Note: in PowerShell's -replace, a replacement string of '\\'
-                # (two backslash chars) already emits a literal \\ — '\\\\'
-                # (four chars) would double-escape and emit four backslashes.
-                $v = $v -replace '\\', '\\'
-                $v = $v -replace '"', '\"'
-                return '"' + $v + '"'
-            }
-            return "'" + $v + "'"
-        }
-
-        return $v
-    }
 
     # -----------------------------------------------------------------------
     # Helper: render a single credit hashtable as YAML list entry lines.

@@ -44,6 +44,18 @@
                                        Invoke-CostSessionRender's own
                                        transitive need for the rest of that
                                        lib file's contents)
+      - Read-PRMetricsBlock, Test-FCLYamlSane, script:Escape-FCLScalar
+                                       (frame-credit-ledger-core.ps1 — issue
+                                       #489 s2: the reader, validator, and
+                                       scalar-escaper that s3's shared
+                                       cost-summary transform and s5's
+                                       body-refresh/reconcile paths need are
+                                       reachable only once this file is
+                                       dot-sourced ahead of
+                                       cost-fcl-helpers.ps1; previously
+                                       absent from the harvest's chain, which
+                                       reproduced the #824 silent-no-op
+                                       mechanism for any core-lib call)
 
     NOTE (issue #824 post-review fix M6): this file's own private
     script:Get-CostBaselineHarvestRestCommentId deliberately MIRRORS (rather
