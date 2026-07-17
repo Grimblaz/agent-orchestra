@@ -32,9 +32,19 @@ BeforeAll {
     $script:FclHelpersLibPath = Join-Path $script:RepoRoot '.github/scripts/lib/cost-fcl-helpers.ps1'
     $script:LibPath = Join-Path $script:RepoRoot '.github/scripts/lib/cost-baseline-harvest.ps1'
     $script:RendererLibPath = Join-Path $script:RepoRoot '.github/scripts/lib/cost-pattern-renderer.ps1'
+    # Issue #489 CE Gate follow-up: the rolling_baseline_usd median helper
+    # (script:Get-CostBaselineHarvestRollingBaseline, cost-baseline-harvest.ps1)
+    # reuses script:Get-Median rather than reimplementing median math — must be
+    # dot-sourced before cost-baseline-harvest.ps1, matching production's own
+    # Step 7d dependency order (skills/session-startup/platforms/claude.md),
+    # which already dot-sources cost-anomaly.ps1 ahead of cost-baseline-harvest.ps1.
+    $script:AnomalyLibPath = Join-Path $script:RepoRoot '.github/scripts/lib/cost-anomaly.ps1'
 
     if (Test-Path $script:CoreLibPath) {
         . $script:CoreLibPath
+    }
+    if (Test-Path $script:AnomalyLibPath) {
+        . $script:AnomalyLibPath
     }
     if (Test-Path $script:FclHelpersLibPath) {
         . $script:FclHelpersLibPath
@@ -1742,6 +1752,126 @@ Describe 'Invoke-CostBaselineHarvest — post-review fixes (C2/C6/C9/C10/C13)' {
             (@($script:GhCalls | Where-Object { $_ -match 'pr edit' })).Count | Should -Be 1
             $script:GhBodyFileContent | Should -Not -BeNullOrEmpty
             $script:GhBodyFileContent | Should -Match 'cost_usd_total: 2\.71'
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Rolling baseline (issue #489 CE Gate follow-up, S4/AC5): closes the "cost
+# trend answerable from GitHub alone" intent gap — the visible cost-summary
+# line showed only the current PR's own dollar figure, with no baseline to
+# judge it against. script:Get-CostBaselineHarvestRollingBaseline computes a
+# median + sample size from already-fetched rolling-history entries; the two
+# CostSummary constructors below (FromRenderResult, FromSection) populate the
+# optional rolling_baseline_usd key from it.
+# ---------------------------------------------------------------------------
+Describe 'Rolling baseline (issue #489 CE Gate follow-up)' {
+
+    Context 'script:Get-CostBaselineHarvestRollingBaseline' {
+        It 'computes the median and sample size from usable entries, excluding the current PR''s own entry' {
+            $entries = @(
+                @{ pr = 100; totals = @{ cost_estimate_usd = 1.00 } }
+                @{ pr = 101; totals = @{ cost_estimate_usd = 2.00 } }
+                @{ pr = 102; totals = @{ cost_estimate_usd = 3.00 } }
+                @{ pr = 999; totals = @{ cost_estimate_usd = 999.00 } }
+            )
+
+            $result = script:Get-CostBaselineHarvestRollingBaseline -Entries $entries -ExcludePr 999
+
+            $result | Should -Not -BeNullOrEmpty
+            $result.median_usd | Should -Be 2.00
+            $result.sample_size | Should -Be 3
+        }
+
+        It 'skips entries with an absent or explicitly-null cost_estimate_usd rather than folding them in as $0' {
+            $entries = @(
+                @{ pr = 100; totals = @{ cost_estimate_usd = 4.00 } }
+                @{ pr = 101; totals = @{ cost_estimate_usd = 6.00 } }
+                @{ pr = 102; totals = @{ cost_estimate_usd = 8.00 } }
+                @{ pr = 103; totals = @{ cost_estimate_usd = $null } }
+                @{ pr = 104; totals = @{} }
+            )
+
+            $result = script:Get-CostBaselineHarvestRollingBaseline -Entries $entries -ExcludePr 0
+
+            $result.sample_size | Should -Be 3 -Because 'the null and absent entries must not count toward the sample'
+            $result.median_usd | Should -Be 6.00
+        }
+
+        It 'returns $null when fewer than the minimum sample size of usable entries remain' {
+            $entries = @(
+                @{ pr = 100; totals = @{ cost_estimate_usd = 1.00 } }
+                @{ pr = 101; totals = @{ cost_estimate_usd = 2.00 } }
+            )
+
+            script:Get-CostBaselineHarvestRollingBaseline -Entries $entries -ExcludePr 0 | Should -Be $null
+        }
+
+        It 'returns $null when rolling history is entirely unavailable (null or empty entries)' {
+            script:Get-CostBaselineHarvestRollingBaseline -Entries $null -ExcludePr 0 | Should -Be $null
+            script:Get-CostBaselineHarvestRollingBaseline -Entries @() -ExcludePr 0 | Should -Be $null
+        }
+    }
+
+    Context 'ConvertTo-CostBaselineHarvestSummaryFromRenderResult' {
+        It 'populates rolling_baseline_usd when sufficient rolling history is supplied' {
+            $renderResult = @{
+                Attribution  = @{ totals = @{ cost_estimate_usd = 5.00; tokens = @{ input = 1; output = 1; cache_creation = 0; cache_read = 0 } } }
+                Completeness = @{ completeness = 'complete'; capture_point = 'end-of-session' }
+            }
+            $entries = @(
+                @{ pr = 200; totals = @{ cost_estimate_usd = 1.00 } }
+                @{ pr = 201; totals = @{ cost_estimate_usd = 2.00 } }
+                @{ pr = 202; totals = @{ cost_estimate_usd = 3.00 } }
+            )
+
+            $result = script:ConvertTo-CostBaselineHarvestSummaryFromRenderResult -RenderResult $renderResult -Pr 555 -RollingHistoryEntries $entries
+
+            $result.ContainsKey('rolling_baseline_usd') | Should -Be $true
+            $result.rolling_baseline_usd.median_usd | Should -Be 2.00
+            $result.rolling_baseline_usd.sample_size | Should -Be 3
+        }
+
+        It 'omits rolling_baseline_usd when rolling history is insufficient or absent' {
+            $renderResult = @{
+                Attribution  = @{ totals = @{ cost_estimate_usd = 5.00; tokens = @{ input = 1; output = 1; cache_creation = 0; cache_read = 0 } } }
+                Completeness = @{ completeness = 'complete'; capture_point = 'end-of-session' }
+            }
+
+            $withNoEntries = script:ConvertTo-CostBaselineHarvestSummaryFromRenderResult -RenderResult $renderResult -Pr 555 -RollingHistoryEntries $null
+            $withNoEntries.ContainsKey('rolling_baseline_usd') | Should -Be $false
+
+            $tooFewEntries = @(@{ pr = 200; totals = @{ cost_estimate_usd = 1.00 } })
+            $withTooFew = script:ConvertTo-CostBaselineHarvestSummaryFromRenderResult -RenderResult $renderResult -Pr 555 -RollingHistoryEntries $tooFewEntries
+            $withTooFew.ContainsKey('rolling_baseline_usd') | Should -Be $false
+        }
+    }
+
+    Context 'ConvertTo-CostBaselineHarvestSummaryFromSection' {
+        It 'populates rolling_baseline_usd when sufficient rolling history is supplied' {
+            $section = "## Cost Pattern`n<!-- cost-pattern-data`nsession_completeness: complete`ncapture_point: end-of-session`nports:`n  - name: implement-code`ntotals:`n  tokens:`n    input: 100`n    output: 50`n    cache_creation: 0`n    cache_read: 0`n  cost_estimate_usd: 5.00`n-->"
+            $entries = @(
+                @{ pr = 300; totals = @{ cost_estimate_usd = 1.00 } }
+                @{ pr = 301; totals = @{ cost_estimate_usd = 2.00 } }
+                @{ pr = 302; totals = @{ cost_estimate_usd = 3.00 } }
+            )
+
+            $result = script:ConvertTo-CostBaselineHarvestSummaryFromSection -Section $section -Pr 777 -RollingHistoryEntries $entries
+
+            $result.ContainsKey('rolling_baseline_usd') | Should -Be $true
+            $result.rolling_baseline_usd.median_usd | Should -Be 2.00
+            $result.rolling_baseline_usd.sample_size | Should -Be 3
+        }
+
+        It 'omits rolling_baseline_usd when rolling history is insufficient or absent' {
+            $section = "## Cost Pattern`n<!-- cost-pattern-data`nsession_completeness: complete`ncapture_point: end-of-session`nports:`n  - name: implement-code`ntotals:`n  tokens:`n    input: 100`n    output: 50`n    cache_creation: 0`n    cache_read: 0`n  cost_estimate_usd: 5.00`n-->"
+
+            $withNoEntries = script:ConvertTo-CostBaselineHarvestSummaryFromSection -Section $section -Pr 777 -RollingHistoryEntries $null
+            $withNoEntries.ContainsKey('rolling_baseline_usd') | Should -Be $false
+
+            $tooFewEntries = @(@{ pr = 300; totals = @{ cost_estimate_usd = 1.00 } })
+            $withTooFew = script:ConvertTo-CostBaselineHarvestSummaryFromSection -Section $section -Pr 777 -RollingHistoryEntries $tooFewEntries
+            $withTooFew.ContainsKey('rolling_baseline_usd') | Should -Be $false
         }
     }
 }

@@ -71,6 +71,11 @@
                                        script:Invoke-CostBaselineHarvestBodySummaryWrite
                                        for the refresh-on-promotion and
                                        reconcile paths)
+      - script:Get-Median               (cost-anomaly.ps1 — issue #467's
+                                       existing statistical-median helper,
+                                       reused (not reimplemented) by
+                                       script:Get-CostBaselineHarvestRollingBaseline
+                                       below, issue #489 CE Gate follow-up)
 
     NOTE (issue #824 post-review fix M6): this file's own private
     script:Get-CostBaselineHarvestRestCommentId deliberately MIRRORS (rather
@@ -534,6 +539,91 @@ function script:Test-CostBaselineHarvestSectionStillCurrent {
 }
 
 # ---------------------------------------------------------------------------
+# Rolling-baseline visible-line clause (issue #489 CE Gate follow-up, S4/AC5):
+# closes the "cost trend answerable from GitHub alone" intent gap the CE
+# judge and prosecution both flagged at PASS/partial — the visible cost
+# headline showed only the current PR's own dollar figure, with no baseline
+# to judge it against. The two CostSummary constructors below already run
+# inside Invoke-CostBaselineHarvest, which has ALREADY fetched the rolling-
+# history entries (Get-CostRollingHistory, used for the s4 candidate
+# selection and s5 reconcile scan) — this reuses that same in-memory data
+# rather than a second fetch.
+# ---------------------------------------------------------------------------
+
+# Minimum usable-entry sample size before a median is trusted enough to show
+# on the visible line. 3 is deliberately small: early in a project's
+# lifetime (or right after this feature ships) there may be only a handful
+# of merged, cost-tracked PRs at all, and a 1- or 2-PR "median" is really
+# just one PR's number wearing a statistical label — noise, not a trend. 3
+# is the smallest sample where "median" stops being a synonym for "the last
+# PR's cost" (with 2 entries the median is the mean of the only two points;
+# with 3, the middle value is at least chosen FROM the data rather than
+# averaged across it). This is intentionally far below cost-anomaly.ps1's
+# own N thresholds (Rule A needs N>=10, Rule B needs N>=5) — those gate a
+# STATISTICAL ANOMALY CLAIM ("this run is unusual"), a much stronger claim
+# than this feature's own "here's roughly what recent PRs have cost, for
+# context" framing.
+$script:CostBaselineHarvestRollingBaselineMinimumSampleSize = 3
+
+function script:Get-CostBaselineHarvestRollingBaseline {
+    <#
+    .SYNOPSIS
+        Computes the rolling_baseline_usd structured value (median cost +
+        sample size) from already-fetched rolling-history entries (issue
+        #489 CE Gate follow-up).
+    .DESCRIPTION
+        Reuses script:Get-Median (cost-anomaly.ps1, issue #467) rather than
+        reimplementing median math — matches this codebase's one existing
+        statistical-baseline convention instead of inventing a second one.
+
+        Excludes the entry (if any) belonging to $ExcludePr — the rolling
+        history returned by Get-CostRollingHistory can legitimately already
+        contain the very PR being harvested (e.g. a re-run after an earlier
+        promotion). Entries with no parsed totals.cost_estimate_usd — either
+        the key is absent, or it carries the renderer's own "genuinely
+        unknown" null (cost-pattern-renderer.ps1's
+        Format-CostRendererNullableCostYaml) — are skipped rather than
+        folded in as $0.00, which would silently understate the median.
+
+        Returns $null (never a zero-sample hashtable) when fewer than
+        $MinimumSampleSize usable entries remain after exclusion/filtering,
+        so callers can omit rolling_baseline_usd entirely — the same
+        graceful-degradation shape this file already uses for every other
+        optional CostSummary field.
+    .OUTPUTS
+        [hashtable] @{ median_usd = [double]; sample_size = [int] } or $null
+    #>
+    param(
+        [AllowNull()][object[]]$Entries,
+        [int]$ExcludePr = 0,
+        [int]$MinimumSampleSize = $script:CostBaselineHarvestRollingBaselineMinimumSampleSize
+    )
+
+    $costs = [System.Collections.Generic.List[double]]::new()
+    foreach ($entry in @($Entries)) {
+        if ($null -eq $entry -or $entry -isnot [hashtable]) { continue }
+
+        if ($ExcludePr -gt 0 -and $entry.ContainsKey('pr') -and $null -ne $entry['pr']) {
+            $entryPr = 0
+            if ([int]::TryParse([string]$entry['pr'], [ref]$entryPr) -and $entryPr -eq $ExcludePr) { continue }
+        }
+
+        $totals = $entry['totals']
+        if ($null -eq $totals -or $totals -isnot [hashtable]) { continue }
+        if (-not $totals.ContainsKey('cost_estimate_usd') -or $null -eq $totals['cost_estimate_usd']) { continue }
+
+        $costs.Add([double]$totals['cost_estimate_usd'])
+    }
+
+    if ($costs.Count -lt $MinimumSampleSize) { return $null }
+
+    return @{
+        median_usd  = script:Get-Median -Values $costs.ToArray()
+        sample_size = $costs.Count
+    }
+}
+
+# ---------------------------------------------------------------------------
 # PR body refresh-on-promotion + reconcile (issue #489 s5)
 # ---------------------------------------------------------------------------
 
@@ -562,11 +652,24 @@ function script:ConvertTo-CostBaselineHarvestSummaryFromRenderResult {
         collapsed to a false-confident 0.0, matching
         script:Set-FCLPrBodyCostSummary's own C7 costUnknown handling so
         this constructor and the writer agree on what "unknown" means.
+
+        Issue #489 CE Gate follow-up: -Pr/-RollingHistoryEntries are
+        optional. When both are supplied, script:Get-CostBaselineHarvestRollingBaseline
+        computes a median+sample-size baseline from the caller's already-
+        fetched rolling history and — only when the sample clears the
+        minimum size — the returned hashtable carries an additional
+        rolling_baseline_usd key. Omitting either parameter (or supplying
+        too little history) leaves that key absent entirely, matching this
+        constructor's existing degrade-to-absent convention.
     .OUTPUTS
         [hashtable] shaped for script:Set-FCLPrBodyCostSummary /
         script:Update-FCLPrBodyCostSummary's -CostSummary parameter.
     #>
-    param([Parameter(Mandatory)][hashtable]$RenderResult)
+    param(
+        [Parameter(Mandatory)][hashtable]$RenderResult,
+        [int]$Pr = 0,
+        [AllowNull()][object[]]$RollingHistoryEntries = $null
+    )
 
     $attribution = $RenderResult['Attribution']
     $totals = if ($null -ne $attribution -and $attribution -is [hashtable] -and $attribution['totals'] -is [hashtable]) { $attribution['totals'] } else { @{} }
@@ -587,7 +690,7 @@ function script:ConvertTo-CostBaselineHarvestSummaryFromRenderResult {
         }
     }
 
-    return @{
+    $summary = @{
         cost_usd_total        = if ($costUnknown) { $null } else { $costUsdTotal }
         tokens                = @{
             input          = if ($null -ne $tokens['input']) { [long]$tokens['input'] } else { 0L }
@@ -598,6 +701,13 @@ function script:ConvertTo-CostBaselineHarvestSummaryFromRenderResult {
         session_completeness  = $sessionCompleteness
         capture_point         = $capturePoint
     }
+
+    $rollingBaseline = script:Get-CostBaselineHarvestRollingBaseline -Entries $RollingHistoryEntries -ExcludePr $Pr
+    if ($null -ne $rollingBaseline) {
+        $summary['rolling_baseline_usd'] = $rollingBaseline
+    }
+
+    return $summary
 }
 
 function script:ConvertTo-CostBaselineHarvestLongOrDefault {
@@ -667,11 +777,19 @@ function script:ConvertTo-CostBaselineHarvestSummaryFromSection {
         blank-value convention (0.0) via TryParse rather than throwing —
         the same graceful-degradation shape already established for blank
         values, just extended to cover malformed ones too.
+
+        Issue #489 CE Gate follow-up: -Pr/-RollingHistoryEntries are
+        optional, mirroring the sibling FromRenderResult constructor's own
+        addition — see that function's doc comment for the full contract.
     .OUTPUTS
         [hashtable] shaped for script:Set-FCLPrBodyCostSummary /
         script:Update-FCLPrBodyCostSummary's -CostSummary parameter.
     #>
-    param([Parameter(Mandatory)][string]$Section)
+    param(
+        [Parameter(Mandatory)][string]$Section,
+        [int]$Pr = 0,
+        [AllowNull()][object[]]$RollingHistoryEntries = $null
+    )
 
     $costUsdTotalRaw = script:Get-FCLNestedScalar -Block $Section -ParentKey 'totals' -ChildKey 'cost_estimate_usd'
     $inputRaw = script:Get-FCLNestedScalar -Block $Section -ParentKey 'totals' -ChildKey 'input'
@@ -702,7 +820,7 @@ function script:ConvertTo-CostBaselineHarvestSummaryFromSection {
         0.0
     }
 
-    return @{
+    $summary = @{
         cost_usd_total        = $costUsdTotal
         tokens                = @{
             input          = script:ConvertTo-CostBaselineHarvestLongOrDefault -Raw $inputRaw
@@ -713,6 +831,13 @@ function script:ConvertTo-CostBaselineHarvestSummaryFromSection {
         session_completeness  = [string](script:Get-FCLScalar -Block $Section -Name 'session_completeness')
         capture_point         = [string](script:Get-FCLScalar -Block $Section -Name 'capture_point')
     }
+
+    $rollingBaseline = script:Get-CostBaselineHarvestRollingBaseline -Entries $RollingHistoryEntries -ExcludePr $Pr
+    if ($null -ne $rollingBaseline) {
+        $summary['rolling_baseline_usd'] = $rollingBaseline
+    }
+
+    return $summary
 }
 
 function script:Get-CostBaselineHarvestBodyCostSummaryField {
@@ -1040,8 +1165,17 @@ function script:Invoke-CostBaselineHarvestReconcileCandidate {
         budget: never calls Invoke-CostSessionRender. Fully fail-open: any
         failure along this path (gh call failure, unparseable JSON, no
         matching section) is a silent no-op, never a throw.
+
+        Issue #489 CE Gate follow-up: -RollingHistoryEntries is optional —
+        threaded straight through to script:ConvertTo-CostBaselineHarvestSummaryFromSection
+        so the reconcile write can also populate rolling_baseline_usd from
+        the SAME already-fetched rolling history the caller (script:Invoke-CostBaselineHarvestReconcilePass)
+        already holds; never a second Get-CostRollingHistory fetch.
     #>
-    param([Parameter(Mandatory)][int]$Pr)
+    param(
+        [Parameter(Mandatory)][int]$Pr,
+        [AllowNull()][object[]]$RollingHistoryEntries = $null
+    )
 
     $liveJson = $null
     try { $liveJson = & gh pr view $Pr --json 'body' 2>$null } catch { $liveJson = $null }
@@ -1069,7 +1203,7 @@ function script:Invoke-CostBaselineHarvestReconcileCandidate {
     $section = $sectionMatch.Groups['section'].Value
     if ((script:Get-FCLScalar -Block $section -Name 'capture_point') -ne 'end-of-session') { return }
 
-    $costSummary = script:ConvertTo-CostBaselineHarvestSummaryFromSection -Section $section
+    $costSummary = script:ConvertTo-CostBaselineHarvestSummaryFromSection -Section $section -Pr $Pr -RollingHistoryEntries $RollingHistoryEntries
     script:Invoke-CostBaselineHarvestBodySummaryWrite -Pr $Pr -PrBody $liveBody -CostSummary $costSummary -Outcome 'reconciled'
 }
 
@@ -1097,7 +1231,7 @@ function script:Invoke-CostBaselineHarvestReconcilePass {
         if (-not [int]::TryParse([string]$candidate['pr'], [ref]$candidatePr)) { continue }
 
         try {
-            script:Invoke-CostBaselineHarvestReconcileCandidate -Pr $candidatePr
+            script:Invoke-CostBaselineHarvestReconcileCandidate -Pr $candidatePr -RollingHistoryEntries $Entries
         }
         catch {
             [Console]::Error.WriteLine("cost-baseline-harvest: reconcile for #$candidatePr — failed: $($_.Exception.Message)")
@@ -1385,7 +1519,7 @@ function Invoke-CostBaselineHarvest {
                     # $result.Promoted back to $false or un-stamp the
                     # comment promotion that already succeeded above.
                     try {
-                        $costSummary = script:ConvertTo-CostBaselineHarvestSummaryFromRenderResult -RenderResult $renderResult
+                        $costSummary = script:ConvertTo-CostBaselineHarvestSummaryFromRenderResult -RenderResult $renderResult -Pr $candidatePr -RollingHistoryEntries $entries
                         script:Invoke-CostBaselineHarvestBodySummaryWrite -Pr $candidatePr -PrBody $liveBody -CostSummary $costSummary -Outcome 'refreshed'
                     }
                     catch {

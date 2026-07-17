@@ -496,6 +496,51 @@ Describe 'Set-FCLPrBodyCostSummary — pure transform (issue #489 s3)' {
     }
 }
 
+Describe 'Set-FCLPrBodyCostSummary — rolling_baseline_usd visible-line clause (issue #489 CE Gate follow-up)' {
+    # S4/AC5 CE Gate finding: the visible cost-summary line showed only the
+    # current PR's own dollar figure, with no baseline to judge it against.
+    # rolling_baseline_usd is an OPTIONAL CostSummary key — a structured
+    # @{ median_usd = [double]; sample_size = [int] } value the harvest's two
+    # constructors populate from already-fetched rolling history. Absence
+    # (the common case: no harvest has run yet, or too little history exists)
+    # must render the visible line EXACTLY as it does today — the same
+    # graceful-degradation contract as source_comment/capture_point above.
+
+    It 'appends a "vs median, last N PRs" clause to the visible line when rolling_baseline_usd is present and cost is known' {
+        $body = & $script:NewV4Body $script:BaseYaml
+        $summary = $script:NewCostSummary.Clone()
+        $summary['rolling_baseline_usd'] = @{ median_usd = 9.8765; sample_size = 12 }
+
+        $result = script:Set-FCLPrBodyCostSummary -PrBody $body -Degraded $false -CostSummary $summary
+
+        $visibleLineMatch = [regex]::Match($result, '\*\*Session cost\*\*:[^\r\n]*')
+        $visibleLineMatch.Value | Should -Match '\$13\.4269 \(complete, end-of-session\) - vs \$9\.8765 median, last 12 PRs' -Because 'the baseline clause must land right after the cost/parenthetical and before the full-breakdown link'
+        $visibleLineMatch.Value | Should -Match '\[full breakdown\]' -Because 'the baseline clause must not displace the existing source_comment link'
+    }
+
+    It 'omits the baseline clause entirely when rolling_baseline_usd is absent (graceful degradation — no harvest has run yet)' {
+        $body = & $script:NewV4Body $script:BaseYaml
+        $result = script:Set-FCLPrBodyCostSummary -PrBody $body -Degraded $false -CostSummary $script:NewCostSummary
+
+        $visibleLineMatch = [regex]::Match($result, '\*\*Session cost\*\*:[^\r\n]*')
+        $visibleLineMatch.Value | Should -Not -Match 'vs \$' -Because 'no rolling_baseline_usd key means the line must render exactly as it did before this feature'
+        $visibleLineMatch.Value | Should -Match '\$13\.4269 \(complete, end-of-session\) - \[full breakdown\]'
+    }
+
+    It 'omits the baseline clause when cost_usd_total is unknown, even though a rolling_baseline_usd value is present (never compares a real number against "unknown")' {
+        $body = & $script:NewV4Body $script:BaseYaml
+        $summary = $script:NewCostSummary.Clone()
+        $summary['cost_usd_total'] = $null
+        $summary['rolling_baseline_usd'] = @{ median_usd = 9.8765; sample_size = 12 }
+
+        $result = script:Set-FCLPrBodyCostSummary -PrBody $body -Degraded $false -CostSummary $summary
+
+        $visibleLineMatch = [regex]::Match($result, '\*\*Session cost\*\*:[^\r\n]*')
+        $visibleLineMatch.Value | Should -Match '\*\*Session cost\*\*: unknown'
+        $visibleLineMatch.Value | Should -Not -Match 'vs \$' -Because 'an unknown current cost has nothing meaningful to compare against a baseline'
+    }
+}
+
 Describe 'Set-FCLPrBodyCostSummary — degraded decision table (issue #489 s3, item 10)' {
 
     It 'degraded + no prior cost_summary -> writes the honest unavailable line and a capture_point: unavailable YAML section' {

@@ -738,6 +738,21 @@ function script:Set-FCLPrBodyCostSummary {
         if ($summary.ContainsKey('source_comment') -and $null -ne $summary['source_comment']) {
             $sourceComment = [string]$summary['source_comment']
         }
+        # Issue #489 CE Gate follow-up (S4/AC5): optional structured value
+        # @{ median_usd = [double]; sample_size = [int] } populated by the
+        # baseline harvest's two CostSummary constructors from already-
+        # fetched rolling history (script:Get-CostBaselineHarvestRollingBaseline,
+        # cost-baseline-harvest.ps1). Never populated by the pipeline hook
+        # (frame-credit-ledger.ps1) — at PR-creation time there is no
+        # meaningful rolling history for the PR being created yet. Visible-
+        # line-only (not re-emitted into the hidden YAML section — see that
+        # helper's own doc comment for the rationale): the graceful-
+        # degradation default below (absent key) renders the line exactly as
+        # it did before this feature.
+        $rollingBaselineUsd = $null
+        if ($summary.ContainsKey('rolling_baseline_usd') -and $null -ne $summary['rolling_baseline_usd']) {
+            $rollingBaselineUsd = $summary['rolling_baseline_usd']
+        }
 
         if ($costUnknown) {
             # Bare, unquoted YAML null — matches this repo's existing
@@ -844,7 +859,23 @@ function script:Set-FCLPrBodyCostSummary {
             $parenthetical = " ($visibleSessionCompleteness, $visibleCapturePoint)"
         }
 
-        $visibleLine = "**Session cost**: $costMarkdown$parenthetical"
+        # Issue #489 CE Gate follow-up: "vs $X.XXXX median, last N PRs" —
+        # only when the current cost is a real number (never compare a known
+        # figure against "unknown") AND a rolling_baseline_usd value was
+        # actually supplied. $rollingBaselineUsd's numeric values are
+        # internally computed (never attacker-controlled text), so this
+        # clause needs no sentinel/link sanitization like the string fields
+        # above.
+        $baselineClause = ''
+        if (-not $costUnknown -and $rollingBaselineUsd -is [hashtable] -and
+            $rollingBaselineUsd.ContainsKey('median_usd') -and $null -ne $rollingBaselineUsd['median_usd'] -and
+            $rollingBaselineUsd.ContainsKey('sample_size') -and $null -ne $rollingBaselineUsd['sample_size']) {
+            $medianMarkdown = script:Format-Cost -Value ([double]$rollingBaselineUsd['median_usd'])
+            $sampleSize = [int]$rollingBaselineUsd['sample_size']
+            $baselineClause = " - vs $medianMarkdown median, last $sampleSize PRs"
+        }
+
+        $visibleLine = "**Session cost**: $costMarkdown$parenthetical$baselineClause"
         if (-not [string]::IsNullOrWhiteSpace($visibleSourceComment)) {
             $visibleLine += " - [full breakdown]($visibleSourceComment)"
         }
