@@ -1588,7 +1588,7 @@ function Invoke-FrameCreditLedger {
         # so an env-absent CI re-run cannot overwrite a good prior body figure
         # with a fake $0.0000. It can never catch a legitimate partial/real
         # capture because degraded_reason is null the instant any event is
-        # attributed. Line 1483's comment retract/post logic reads
+        # attributed. The separate comment retract/post logic reads
         # ShouldPostDegraded directly and is intentionally unaffected.
         $attributionForDegraded = $costResult['Attribution']
         $hasDegradedReason = ($null -ne $attributionForDegraded) -and
