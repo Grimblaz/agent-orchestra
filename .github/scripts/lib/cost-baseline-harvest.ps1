@@ -715,30 +715,32 @@ function script:ConvertTo-CostBaselineHarvestSummaryFromSection {
     }
 }
 
-function script:Get-CostBaselineHarvestBodyCapturePoint {
+function script:Get-CostBaselineHarvestBodyCostSummaryField {
     <#
     .SYNOPSIS
-        Advisory-only read of a PR body's cost_summary.capture_point (issue
-        #489 s5 reconcile detector).
+        Shared fence-aware pipeline-metrics cost_summary child-key reader
+        (issue #489 refactor pass — extracted from
+        script:Get-CostBaselineHarvestBodyCapturePoint and
+        script:Get-CostBaselineHarvestBodySourceComment below, which each
+        carried an identical copy of this fence-redaction + block-match +
+        nested-scalar-read sequence, differing only in which cost_summary
+        child key they read).
     .DESCRIPTION
         Locates the pipeline-metrics block with the same fence-agnostic
         marker regex Read-PRMetricsBlock uses (frame-credit-ledger-
-        core.ps1:750), then reads the nested cost_summary.capture_point
+        core.ps1:750), then reads the requested nested cost_summary.<ChildKey>
         scalar via the hoisted script:Get-FCLNestedScalar reader. Returns
         $null when the pipeline-metrics block itself is absent, when no
         cost_summary subtree exists inside it (the watchdog-kill,
         first-write-lost case the reconcile detector exists to catch), or
-        when capture_point is present but blank.
+        when the requested child key is present but blank.
 
         TRUST BOUNDARY (issue #489 s5, load-bearing): the PR body is
         untrusted input — one author, potentially an arbitrary external
-        contributor on a fork PR. The value returned here is ADVISORY ONLY:
-        it decides whether a reconcile write is attempted, and is NEVER
-        treated as authoritative and NEVER written back into the body. The
-        totals a reconcile write actually uses always come from the
-        composite comment's own fail-closed-gated data (mirrors the
-        forgery threat model Get-CostBaselineHarvestCompositeComment's own
-        .DESCRIPTION documents).
+        contributor on a fork PR. The value returned here is ADVISORY ONLY.
+        See each wrapper function's own .DESCRIPTION for how it uses its
+        specific field; neither treats this return value as authoritative
+        or writes it back into the body unvalidated.
 
         C10 (issue #489 post-review fix): applies the same fence-aware
         marker lookup discipline the writer already uses
@@ -746,17 +748,20 @@ function script:Get-CostBaselineHarvestBodyCapturePoint {
         ```-fenced regions to a same-length filler before searching for the
         pipeline-metrics marker, so a fenced documentation example of a
         pipeline-metrics block earlier in the body can never be mismatched
-        as the real block. The technique is replicated locally (same
-        length-preserving-filler approach) rather than pulled in as a
-        cross-file dependency — it is private/inline in
-        Set-FCLPrBodyCostSummary itself (a local scriptblock, not an
-        exported function), matching this file's own established precedent
-        for a small, self-contained algorithm kept in sync by comment
-        cross-reference rather than a hard dependency (see this file's top
-        .NOTES on script:Get-CostBaselineHarvestRestCommentId's identical
-        mirror-not-depend choice).
+        as the real block. This is now the ONE place in this file that
+        technique lives for body-side reads (the writer's own copy in
+        Set-FCLPrBodyCostSummary remains a separate, cross-file mirror per
+        this file's top .NOTES on script:Get-CostBaselineHarvestRestCommentId's
+        mirror-not-depend choice — that choice is about avoiding a
+        cross-file dot-source dependency that would shadow Pester mocks,
+        which does not apply to this intra-file, same-scope extraction).
+    .OUTPUTS
+        [string] or $null
     #>
-    param([Parameter(Mandatory)][AllowEmptyString()][string]$PrBody)
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$PrBody,
+        [Parameter(Mandatory)][string]$ChildKey
+    )
 
     if ([string]::IsNullOrEmpty($PrBody)) { return $null }
 
@@ -775,7 +780,59 @@ function script:Get-CostBaselineHarvestBodyCapturePoint {
     $blockGroup = $blockMatch.Groups['block']
     $blockText = $normalized.Substring($blockGroup.Index, $blockGroup.Length)
 
-    return script:Get-FCLNestedScalar -Block $blockText -ParentKey 'cost_summary' -ChildKey 'capture_point'
+    return script:Get-FCLNestedScalar -Block $blockText -ParentKey 'cost_summary' -ChildKey $ChildKey
+}
+
+function script:Get-CostBaselineHarvestBodyCapturePoint {
+    <#
+    .SYNOPSIS
+        Advisory-only read of a PR body's cost_summary.capture_point (issue
+        #489 s5 reconcile detector).
+    .DESCRIPTION
+        Thin wrapper over script:Get-CostBaselineHarvestBodyCostSummaryField
+        (issue #489 refactor pass) — see that function for the shared
+        fence-aware block-location mechanics and trust-boundary contract.
+
+        The value returned here decides whether a reconcile write is
+        attempted, and is NEVER treated as authoritative and NEVER written
+        back into the body. The totals a reconcile write actually uses
+        always come from the composite comment's own fail-closed-gated data
+        (mirrors the forgery threat model
+        Get-CostBaselineHarvestCompositeComment's own .DESCRIPTION
+        documents).
+    .OUTPUTS
+        [string] or $null
+    #>
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$PrBody)
+
+    return script:Get-CostBaselineHarvestBodyCostSummaryField -PrBody $PrBody -ChildKey 'capture_point'
+}
+
+function script:Get-CostBaselineHarvestBodySourceComment {
+    <#
+    .SYNOPSIS
+        Advisory-only read of a PR body's EXISTING cost_summary.source_comment
+        (issue #489 post-review fix, F1, judge-sustained).
+    .DESCRIPTION
+        Thin wrapper over script:Get-CostBaselineHarvestBodyCostSummaryField
+        (issue #489 refactor pass) — see that function for the shared
+        fence-aware block-location mechanics and trust-boundary contract.
+
+        Used by script:Invoke-CostBaselineHarvestBodySummaryWrite to preserve
+        an existing "full breakdown" link across a full-subtree cost_summary
+        replace: script:Set-FCLPrBodyCostSummary only re-emits
+        source_comment when the incoming CostSummary hashtable itself
+        already carries that key, so a caller that never read the PRIOR
+        body's link would silently erase it on every write. Returns $null
+        when the pipeline-metrics block, the cost_summary subtree, or the
+        source_comment child key itself is absent — the caller treats a
+        $null/blank result as "nothing to preserve", never as an error.
+    .OUTPUTS
+        [string] or $null
+    #>
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$PrBody)
+
+    return script:Get-CostBaselineHarvestBodyCostSummaryField -PrBody $PrBody -ChildKey 'source_comment'
 }
 
 function script:Test-CostBaselineHarvestBodySummaryStale {
@@ -843,6 +900,26 @@ function script:Invoke-CostBaselineHarvestBodySummaryWrite {
         for the writer — is caught and logged, never rethrown. This must
         never revert, block, or un-stamp a prior successful comment
         promotion, and must never surface an error at startup (stderr only).
+
+        F1 (issue #489 post-review fix, judge-sustained): neither
+        ConvertTo-CostBaselineHarvestSummaryFromRenderResult nor
+        ConvertTo-CostBaselineHarvestSummaryFromSection ever populates
+        source_comment, and script:Set-FCLPrBodyCostSummary does a full
+        cost_summary subtree REPLACE, re-emitting source_comment only when
+        the incoming CostSummary hashtable carries it — so an un-enriched
+        write here silently erases an existing "full breakdown" link on
+        every refresh/reconcile pass. Before the preview call, this function
+        reads the LIVE PrBody's own EXISTING cost_summary.source_comment
+        (via script:Get-CostBaselineHarvestBodySourceComment) and, when
+        present and the caller-supplied CostSummary does not already carry
+        the key, seeds it onto CostSummary. Enrichment happens BEFORE the
+        preview so the no-op classification and the real write see the
+        identical, already-enriched summary — enriching only before the
+        real write (after the preview) would let the preview's no-op
+        decision diverge from what actually gets written. A $null
+        CostSummary (the degraded-with-nothing-else-to-report case) is left
+        untouched — this never fabricates a summary hashtable just to carry
+        a link.
     #>
     param(
         [Parameter(Mandatory)][int]$Pr,
@@ -852,14 +929,26 @@ function script:Invoke-CostBaselineHarvestBodySummaryWrite {
     )
 
     try {
+        $existingSourceComment = script:Get-CostBaselineHarvestBodySourceComment -PrBody $PrBody
+        if (-not [string]::IsNullOrWhiteSpace($existingSourceComment) -and $null -ne $CostSummary -and -not $CostSummary.ContainsKey('source_comment')) {
+            $CostSummary['source_comment'] = $existingSourceComment
+        }
+
         $preview = script:Set-FCLPrBodyCostSummary -PrBody $PrBody -Degraded $false -CostSummary $CostSummary
         if ($preview -eq $PrBody) {
             [Console]::Error.WriteLine("cost-baseline-harvest: PR body cost-summary write for #$Pr — skipped-no-op")
             return
         }
 
+        # F2 (issue #489 post-review fix, judge-sustained): capture and
+        # discard Update-FCLPrBodyCostSummary's { Outcome = ... } return
+        # value — mirrors frame-credit-ledger.ps1's identical sibling call
+        # site. An uncaptured bare call here leaks the hashtable into this
+        # wrapper's own implicit output, which propagates uncaptured through
+        # every remaining call layer and corrupts Invoke-CostBaselineHarvest's
+        # documented single-hashtable `return $result` contract.
         $global:LASTEXITCODE = 0
-        script:Update-FCLPrBodyCostSummary -Pr $Pr -PrBody $PrBody -Degraded $false -CostSummary $CostSummary
+        $null = script:Update-FCLPrBodyCostSummary -Pr $Pr -PrBody $PrBody -Degraded $false -CostSummary $CostSummary
 
         if ($global:LASTEXITCODE -ne 0) {
             [Console]::Error.WriteLine("cost-baseline-harvest: PR body cost-summary write for #$Pr — failed: gh pr edit exited $global:LASTEXITCODE")

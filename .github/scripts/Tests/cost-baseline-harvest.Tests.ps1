@@ -1747,6 +1747,135 @@ Describe 'Invoke-CostBaselineHarvest — post-review fixes (C2/C6/C9/C10/C13)' {
 }
 
 # ---------------------------------------------------------------------------
+# F1/F2 (issue #489 lite verification review, judge-sustained): F1 preserves
+# an existing PR-body cost_summary.source_comment link across a
+# refresh-on-promotion write; F2 guards Invoke-CostBaselineHarvest's own
+# documented single-hashtable return contract against a leaked, uncaptured
+# Update-FCLPrBodyCostSummary return value polluting the output stream.
+# ---------------------------------------------------------------------------
+Describe 'Invoke-CostBaselineHarvest — post-review fixes (F1/F2)' {
+
+    BeforeAll {
+        function global:New-S5PrBody {
+            param([string]$CostSummarySubtree = '')
+            $extraLine = if ([string]::IsNullOrEmpty($CostSummarySubtree)) { '' } else { "$CostSummarySubtree`n" }
+            return @"
+## Summary
+This PR does something orchestrated.
+
+<!-- pipeline-metrics
+metrics_version: 4
+credits:
+  - port: implement-code
+    adapter: agents/Code-Smith.agent.md
+    status: complete
+$extraLine-->
+"@
+        }
+    }
+
+    Context 'F1: source_comment preservation across cost_summary full-subtree replace' {
+        It 'preserves an existing PR-body cost_summary.source_comment link when the promoted write does not itself carry one' {
+            $pr = 48940
+            $sourceCommentLink = 'https://github.com/example/repo/pull/48940#issuecomment-90011'
+            $originalBody = New-S5PrBody -CostSummarySubtree "cost_summary:`n  capture_point: pr-creation-mid-session`n  source_comment: $sourceCommentLink"
+            $compositeBody = New-HarvestCompositeCommentBody -Pr $pr
+
+            function global:Get-CostRollingHistory {
+                return @{ timed_out = $false; entries = @(New-HarvestCandidateEntry -Pr $pr) }
+            }
+            function global:Get-CostTranscriptSlug { param($CwdPath) return 'test-slug' }
+            function global:Test-CostWalkerSessionTranscriptExists { return $true }
+            $script:GhBodyFileContent = $null
+            function global:gh {
+                param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+                $joined = $Args -join ' '
+                $global:LASTEXITCODE = 0
+                if ($joined -match "pr view $pr --json state") {
+                    return (@{ state = 'MERGED'; mergedAt = '2026-06-01T00:00:00Z'; mergeCommit = @{ oid = 'abc' }; headRefName = 'feature/f1-preserve'; body = $originalBody } | ConvertTo-Json -Depth 6 -Compress)
+                }
+                if ($joined -match "pr view $pr --json comments") {
+                    return (@{ comments = @(@{ body = $compositeBody; authorAssociation = 'OWNER' }) } | ConvertTo-Json -Depth 6 -Compress)
+                }
+                if ($joined -match 'pr edit') {
+                    $idx = [Array]::IndexOf($Args, '--body-file')
+                    if ($idx -ge 0 -and $idx + 1 -lt $Args.Count) {
+                        $script:GhBodyFileContent = Get-Content -LiteralPath ([string]$Args[$idx + 1]) -Raw
+                    }
+                    return ''
+                }
+                return ''
+            }
+            function global:Invoke-CostSessionRender {
+                param($Pr, $Branch, $Slug, $ParentCwd, $RepoRoot)
+                return @{
+                    CostSection  = "## Cost Pattern`n<!-- cost-pattern-data`ncapture_point: end-of-session`nports:`n  - name: implement-code`n-->"
+                    Completeness = @{ completeness = 'complete'; capture_point = 'end-of-session' }
+                    TokenSum     = 999
+                    Attribution  = @{ totals = @{ cost_estimate_usd = 5.55; tokens = @{ input = 10; output = 5; cache_creation = 0; cache_read = 0 } } }
+                }
+            }
+            function global:Find-OrUpsertComment { return $null }
+
+            $result = Invoke-CostBaselineHarvest -ParentCwd 'C:\fake\cwd' -RepoRoot 'C:\fake\repo'
+
+            $result.Promoted | Should -Be $true
+            $script:GhBodyFileContent | Should -Not -BeNullOrEmpty
+            $script:GhBodyFileContent | Should -Match ([regex]::Escape($sourceCommentLink))
+            $script:GhBodyFileContent | Should -Match 'cost_usd_total: 5\.55'
+        }
+    }
+
+    Context 'F2: Update-FCLPrBodyCostSummary return value is captured, not leaked' {
+        It 'returns a genuine single [hashtable] from Invoke-CostBaselineHarvest when a real (non-no-op) body write fires' {
+            $pr = 48941
+            $originalBody = New-S5PrBody
+            $compositeBody = New-HarvestCompositeCommentBody -Pr $pr
+
+            function global:Get-CostRollingHistory {
+                return @{ timed_out = $false; entries = @(New-HarvestCandidateEntry -Pr $pr) }
+            }
+            function global:Get-CostTranscriptSlug { param($CwdPath) return 'test-slug' }
+            function global:Test-CostWalkerSessionTranscriptExists { return $true }
+            function global:gh {
+                param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+                $joined = $Args -join ' '
+                $global:LASTEXITCODE = 0
+                if ($joined -match "pr view $pr --json state") {
+                    return (@{ state = 'MERGED'; mergedAt = '2026-06-01T00:00:00Z'; mergeCommit = @{ oid = 'abc' }; headRefName = 'feature/f2-return-shape'; body = $originalBody } | ConvertTo-Json -Depth 6 -Compress)
+                }
+                if ($joined -match "pr view $pr --json comments") {
+                    return (@{ comments = @(@{ body = $compositeBody; authorAssociation = 'OWNER' }) } | ConvertTo-Json -Depth 6 -Compress)
+                }
+                if ($joined -match 'pr edit') { return '' }
+                return ''
+            }
+            function global:Invoke-CostSessionRender {
+                param($Pr, $Branch, $Slug, $ParentCwd, $RepoRoot)
+                return @{
+                    CostSection  = "## Cost Pattern`n<!-- cost-pattern-data`ncapture_point: end-of-session`nports:`n  - name: implement-code`n-->"
+                    Completeness = @{ completeness = 'complete'; capture_point = 'end-of-session' }
+                    TokenSum     = 999
+                    Attribution  = @{ totals = @{ cost_estimate_usd = 8.01; tokens = @{ input = 20; output = 10; cache_creation = 0; cache_read = 0 } } }
+                }
+            }
+            function global:Find-OrUpsertComment { return $null }
+
+            $result = Invoke-CostBaselineHarvest -ParentCwd 'C:\fake\cwd' -RepoRoot 'C:\fake\repo'
+
+            # Would fail as a 2-element array (this result hashtable plus the
+            # leaked { Outcome = 'edited' } hashtable from
+            # Update-FCLPrBodyCostSummary) if the bare, uncaptured call
+            # regressed.
+            $result -is [hashtable] | Should -Be $true
+            @($result).Count | Should -Be 1
+            $result.Promoted | Should -Be $true
+            $result.Signal | Should -Be "upgraded #$pr to end-of-session"
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------
 # Invoke-CostAttributionRepair (issue #825, Step 3) — targeted, maintainer-
 # invoked single-PR re-attribution repair. Deliberately a SEPARATE Describe
 # from Invoke-CostBaselineHarvest above: this function is not part of, and
