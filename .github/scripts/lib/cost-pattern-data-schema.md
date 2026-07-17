@@ -10,6 +10,8 @@ This document defines the schema for the `<!-- cost-pattern-data ... -->` YAML b
 
 ## Top-Level Fields
 
+**Cross-reference (issue #489)**: a subset of this schema's fields — `session_completeness`, `capture_point`, and the four `ports[].tokens.*` categories (aggregated) — is projected into the PR body itself as `cost_summary` for headline visibility, alongside a new `cost_usd_total` and a `source_comment` link back to this comment. See `frame/pipeline-metrics-v4-schema.md` § `cost_summary` for the projection's field table and provenance note. This file remains the normative owner of the projected fields' semantics; the PR-body copy is additive and does not change anything documented below.
+
 | Field | Type | Description |
 | --- | --- | --- |
 | `version` | string | Payload format version string (e.g., `"1"`). |
