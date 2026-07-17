@@ -1770,6 +1770,83 @@ dispatch-fallback-events:
             $ip.UpdatedPrBody | Should -Match '(?m)^\s*capture_point:\s*unavailable\s*$'
         }
 
+        It 'C12: env-absent (degraded_reason set, ShouldPostDegraded $false) still renders the honest unavailable line, not a false $0.0000 headline' {
+            # The routine CI shape: frame-enforce.yml runs on ubuntu-latest with
+            # no Claude transcript root, so the walk attributes ZERO events and
+            # degraded_reason='env-absent'. That reason is deliberately EXCLUDED
+            # from ShouldPostDegraded (it gates only the standalone comment post,
+            # not the body). Before C12 the body-degraded signal was tied to
+            # ShouldPostDegraded, so env-absent wrote a confident '$0.0000
+            # (unknown, n/a)' headline — a false zero. The body signal now keys
+            # on degraded_reason instead.
+            $prBody = & $script:NewV4PrBodyWithFallbackMetrics -MetricsPrelude '' -CreditRows @'
+  - port: implement-test
+    status: passed
+    evidence: "tests passed"
+'@
+            $bodyJson = (@{ body = $prBody } | ConvertTo-Json -Compress)
+
+            $ip = & $script:InvokeOrchestratorInProcess -Pr 429 -Mode 'warn' `
+                -PrBodyJson $bodyJson `
+                -CostSessionRenderOverride {
+                    & $script:NewFCLCostSessionResult -CostSection 'env-absent cost data' -ShouldPostDegraded $false `
+                        -Attribution @{ totals = @{ cost_estimate_usd = 0.0; tokens = @{ input = 0; output = 0; cache_creation = 0; cache_read = 0 } }; degraded_reason = 'env-absent'; coverage = 'claude-only' } `
+                        -Completeness @{ completeness = 'unknown'; capture_point = 'n/a' }
+                }
+
+            $ip.Result.ExitCode | Should -Be 0
+            $ip.UpdatedPrBody | Should -Match '\*\*Session cost\*\*: unavailable \(attribution degraded\)' `
+                -Because 'env-absent means zero events attributed, so a dollar headline is fabricated; the honest line must render'
+            $ip.UpdatedPrBody | Should -Not -Match '\*\*Session cost\*\*: \$0\.0000' `
+                -Because 'a confident $0.0000 headline is a false claim when no cost was attributable'
+        }
+
+        It 'C12: env-absent must NOT clobber a good prior body cost_summary with a fabricated $0.0000 (data-loss regression)' {
+            # A prior orchestration run wrote a real end-of-session figure to the
+            # body. A later env-absent CI re-run of frame-enforce must leave it
+            # intact — the writer no-clobber guard only fires when -Degraded is
+            # $true, so the C12 signal fix is what protects the good figure here.
+            $prBody = & $script:NewV4PrBodyWithFallbackMetrics -MetricsPrelude @'
+cost_summary:
+  cost_usd_total: 13.4269
+  tokens:
+    input: 100
+    output: 200
+    cache_creation: 0
+    cache_read: 0
+  session_completeness: complete
+  capture_point: end-of-session
+'@ -CreditRows @'
+  - port: implement-test
+    status: passed
+    evidence: "tests passed"
+'@
+            $bodyJson = (@{ body = $prBody } | ConvertTo-Json -Compress)
+
+            $ip = & $script:InvokeOrchestratorInProcess -Pr 429 -Mode 'warn' `
+                -PrBodyJson $bodyJson `
+                -CostSessionRenderOverride {
+                    & $script:NewFCLCostSessionResult -CostSection 'env-absent cost data' -ShouldPostDegraded $false `
+                        -Attribution @{ totals = @{ cost_estimate_usd = 0.0; tokens = @{ input = 0; output = 0; cache_creation = 0; cache_read = 0 } }; degraded_reason = 'env-absent'; coverage = 'claude-only' } `
+                        -Completeness @{ completeness = 'unknown'; capture_point = 'n/a' }
+                }
+
+            $ip.Result.ExitCode | Should -Be 0
+            # Post-fix the env-absent run no-ops (writer no-clobber guard fires
+            # under -Degraded $true), so NO body edit is emitted and the good
+            # prior figure stays in the untouched body -> GetUpdatedPrBody is
+            # $null. Pre-fix it rewrote the body to a fabricated $0.0000,
+            # destroying the 13.4269 figure -> the emitted body carried the
+            # false zero and dropped the good figure. Both guards below fail on
+            # the pre-fix code and pass on the fix.
+            $ip.UpdatedPrBody | Should -Not -Match '\*\*Session cost\*\*: \$0\.0000' `
+                -Because 'an env-absent re-run must never overwrite a good prior figure with a fabricated $0.0000'
+            if (-not [string]::IsNullOrEmpty($ip.UpdatedPrBody)) {
+                $ip.UpdatedPrBody | Should -Match 'cost_usd_total: 13\.4269' `
+                    -Because 'if any edit is emitted it must preserve the good prior figure, not drop it'
+            }
+        }
+
         It 'populates source_comment from the breakdown-comment upsert html_url on success' {
             $prBody = & $script:NewV4PrBodyWithFallbackMetrics -MetricsPrelude '' -CreditRows @'
   - port: implement-test

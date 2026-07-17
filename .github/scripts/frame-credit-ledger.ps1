@@ -1572,7 +1572,28 @@ function Invoke-FrameCreditLedger {
     else {
         # Thread the degraded signal explicitly so a degraded run emits the
         # honest "unavailable" line rather than fabricated totals.
-        $degraded = [bool]$costResult['ShouldPostDegraded']
+        #
+        # C12 (issue #489 post-review fix): the BODY-degraded signal keys on
+        # degraded_reason being non-empty, NOT on ShouldPostDegraded.
+        # ShouldPostDegraded gates the standalone cost-pattern-data COMMENT
+        # post and deliberately EXCLUDES the routine env-absent CI shape (see
+        # cost-session-render.ps1 $genuineDegradation) — but the BODY must not
+        # inherit that exclusion. degraded_reason (env-absent | budget-exceeded
+        # | no-transcript-found) is populated ONLY when the walk attributed
+        # ZERO events (cost-fcl-helpers.ps1 Set-FCLCostCoverageMetadata, guarded
+        # on $Events.Count -eq 0), so any of the three means the cost figure
+        # would be a fabricated $0.0000. Keying the body signal here (a)
+        # renders the honest "unavailable (attribution degraded)" line instead
+        # of a false-zero headline, and (b) trips the writer no-clobber guard
+        # so an env-absent CI re-run cannot overwrite a good prior body figure
+        # with a fake $0.0000. It can never catch a legitimate partial/real
+        # capture because degraded_reason is null the instant any event is
+        # attributed. Line 1483's comment retract/post logic reads
+        # ShouldPostDegraded directly and is intentionally unaffected.
+        $attributionForDegraded = $costResult['Attribution']
+        $hasDegradedReason = ($null -ne $attributionForDegraded) -and
+            (-not [string]::IsNullOrEmpty([string]$attributionForDegraded['degraded_reason']))
+        $degraded = [bool]$costResult['ShouldPostDegraded'] -or $hasDegradedReason
 
         # Translation from Invoke-CostSessionRender nested return shape to
         # the flat cost_summary schema lives in
