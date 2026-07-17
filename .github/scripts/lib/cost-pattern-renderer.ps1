@@ -377,6 +377,33 @@ function script:Test-CostRendererCopilotRateUnavailable {
     return ((script:Test-CostRendererHasKey -Bucket $copilot -Key 'rate_unavailable') -and $copilot['rate_unavailable'] -eq $true)
 }
 
+function script:Test-CostRendererZeroActivityBucket {
+    <#
+    .SYNOPSIS
+        True when a per-port row carries no attributed activity: zero
+        dispatches, a zero-or-null cost estimate, and all four token counts
+        at zero (issue #489 s1, AC3/AC4). Anomaly-flag status is deliberately
+        NOT part of this predicate — callers combine it with their own
+        anomaly check so a stage that should have run and didn't (an
+        anomaly-flagged zero row) is never treated as suppressible here.
+    #>
+    [OutputType([bool])]
+    param(
+        [int]$DispatchCount,
+        [AllowNull()][object]$Cost,
+        [int]$InputTokens,
+        [int]$OutputTokens,
+        [int]$CacheCreationTokens,
+        [int]$CacheReadTokens
+    )
+
+    $costIsZeroOrNull = ($null -eq $Cost) -or ([double]$Cost -eq 0.0)
+
+    return ($DispatchCount -eq 0) -and $costIsZeroOrNull -and
+    ($InputTokens -eq 0) -and ($OutputTokens -eq 0) -and
+    ($CacheCreationTokens -eq 0) -and ($CacheReadTokens -eq 0)
+}
+
 function script:Get-CostRendererCoverage {
     param([Parameter(Mandatory)][hashtable]$Attribution)
 
@@ -605,6 +632,22 @@ function script:Get-PortAnomalyNames {
     return (' ' + ($names -join ', ') + ' ').TrimEnd()
 }
 
+function script:Test-CostRendererPortHasAnomaly {
+    <#
+    .SYNOPSIS
+        True when a port's anomaly-display string carries a real anomaly name
+        rather than the empty-anomaly sentinel returned by Get-PortAnomalyNames.
+        Centralizes the sentinel comparison so both row-emitting branches in
+        Build-CostPatternTable (in-attribution and not-in-attribution) derive
+        "has an anomaly" the same way — used to override the issue #489 s1
+        zero-activity suppression guard.
+    #>
+    [OutputType([bool])]
+    param([Parameter(Mandatory)][string]$AnomalyDisplay)
+
+    return $AnomalyDisplay -ne ' — '
+}
+
 function script:Get-CostRendererIntValue {
     param(
         [AllowNull()][object]$Bucket,
@@ -721,6 +764,7 @@ function script:Build-CostPatternTable {
     $lines = [System.Collections.Generic.List[string]]::new()
     $hasCopilotCacheMetricFootnote = $false
     $hasCopilotRateFootnote = $false
+    $suppressedPortCount = 0
 
     # Header row
     $lines.Add('| Port | Dispatches | Input Tokens | Output Tokens | Cache Creation | Cache Read | Cache Hit% | Cost (USD) | Anomalies |')
@@ -780,16 +824,41 @@ function script:Build-CostPatternTable {
             $ratioStr = if ($copilotCacheUnavailable) { 'n/a *' } else { script:Format-CostRendererRatioCell -InputTokens $inputTok -CacheCreationTokens $cc -CacheReadTokens $cr -Ratio $ratio }
             $costStr = if ($copilotRateUnavailable) { '' } else { script:Format-CostRendererCostCell -Value $cost }
             $anomStr = script:Get-PortAnomalyNames -AnomalyFlags $AnomalyFlags -PortName $portName
+            $hasAnomaly = script:Test-CostRendererPortHasAnomaly -AnomalyDisplay $anomStr
 
             if ($copilotCacheUnavailable) { $hasCopilotCacheMetricFootnote = $true }
             if ($copilotRateUnavailable) { $hasCopilotRateFootnote = $true }
 
-            $lines.Add("| $displayPortName | $dc | $inputStr | $outputStr | $ccStr | $crStr | $ratioStr | $costStr |$anomStr|")
+            # Issue #489 s1 (AC3/AC4): suppress a fully zero-activity in-attribution
+            # row from the visible table. Guarded only here at the $lines.Add call —
+            # never a `continue` at the loop top — so the Copilot footnote latches
+            # above still fire even when the row itself ends up suppressed.
+            $isZeroActivity = script:Test-CostRendererZeroActivityBucket `
+                -DispatchCount $dc -Cost $cost `
+                -InputTokens $inputTok -OutputTokens $outputTok `
+                -CacheCreationTokens $cc -CacheReadTokens $cr
+
+            if ($isZeroActivity -and -not $hasAnomaly) {
+                $suppressedPortCount++
+            }
+            else {
+                $lines.Add("| $displayPortName | $dc | $inputStr | $outputStr | $ccStr | $crStr | $ratioStr | $costStr |$anomStr|")
+            }
         }
         else {
-            # Port not in attribution — zero dispatches, dashes for everything
+            # Port not in attribution — zero dispatches, dashes for everything.
+            # Issue #489 s1: there is no bucket to read here, so suppress unless
+            # an anomaly flag names this port (a stage that should have run and
+            # didn't is exactly the row a maintainer needs to see).
             $anomStr = script:Get-PortAnomalyNames -AnomalyFlags $AnomalyFlags -PortName $portName
-            $lines.Add("| $portName | 0 | — | — | — | — | — | — |$anomStr|")
+            $hasAnomaly = script:Test-CostRendererPortHasAnomaly -AnomalyDisplay $anomStr
+
+            if ($hasAnomaly) {
+                $lines.Add("| $portName | 0 | — | — | — | — | — | — |$anomStr|")
+            }
+            else {
+                $suppressedPortCount++
+            }
         }
     }
 
@@ -891,6 +960,16 @@ function script:Build-CostPatternTable {
     if ($hasCopilotRateFootnote) {
         $lines.Add('')
         $lines.Add('Copilot per-token rates not published; cost figures excluded for Copilot rows.')
+    }
+
+    if ($suppressedPortCount -gt 0) {
+        $lines.Add('')
+        if ($suppressedPortCount -eq 1) {
+            $lines.Add('1 port had zero attributed cost and is omitted from this table.')
+        }
+        else {
+            $lines.Add("$suppressedPortCount ports had zero attributed cost and are omitted from this table.")
+        }
     }
 
     return $lines -join "`n"
