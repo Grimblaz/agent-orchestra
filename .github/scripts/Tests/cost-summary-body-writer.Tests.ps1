@@ -207,6 +207,48 @@ credits:
 -->
 '@
 
+    # A matched begin/end pair sitting at a distance with FOREIGN maintainer
+    # content between them (not this writer's visible-line shape) — the
+    # matched-pair branch must not blanket-delete the whole span (G7,
+    # PR #870 judge-accepted fix, mirroring the orphan-begin precedent at
+    # cost-fcl-helpers.ps1:995-1001).
+    $script:BodyWithMatchedPairAndForeignContent = @'
+## Summary
+
+<!-- cost-summary:begin -->
+This maintainer note landed between the sentinels by coincidence and must not be deleted.
+<!-- cost-summary:end -->
+
+<!-- pipeline-metrics
+metrics_version: 4
+frame_version: 1
+credits:
+  - port: implement-code
+    status: passed
+-->
+'@
+
+    # A non-fenced decoy `pipeline-metrics-v4` comment precedes the real
+    # `pipeline-metrics` block — the marker regex used to lack a boundary
+    # after the literal `pipeline-metrics`, so it could mis-anchor on this
+    # decoy's `-v4` suffix (G6, PR #870 judge-accepted fix).
+    $script:BodyWithNonFencedDecoyMarkerPrefix = @'
+## Summary
+
+<!-- pipeline-metrics-v4
+some: unrelated
+block: true
+-->
+
+<!-- pipeline-metrics
+metrics_version: 4
+frame_version: 1
+credits:
+  - port: implement-code
+    status: passed
+-->
+'@
+
     $script:NewCostSummary = @{
         cost_usd_total        = 13.4269
         tokens                = @{ input = 1000; output = 500; cache_creation = 20; cache_read = 300 }
@@ -494,6 +536,25 @@ Describe 'Set-FCLPrBodyCostSummary — pure transform (issue #489 s3)' {
         $result | Should -Not -Match '\$1\.0000'
         $result | Should -Not -Match '\$2\.0000'
         $result | Should -Match '\$13\.4269'
+    }
+
+    It 'preserves foreign maintainer content sitting between a matched but non-canonical sentinel pair, removing only the stray markers (G7 foreign-content-survives)' {
+        $result = script:Set-FCLPrBodyCostSummary -PrBody $script:BodyWithMatchedPairAndForeignContent -Degraded $false -CostSummary $script:NewCostSummary
+
+        $result | Should -Match 'This maintainer note landed between the sentinels by coincidence and must not be deleted\.' -Because 'a matched begin/end pair with non-writer-shaped content between them is foreign maintainer content, not lost span content'
+        ([regex]::Matches($result, '<!-- cost-summary:begin -->')).Count | Should -Be 1
+        ([regex]::Matches($result, '<!-- cost-summary:end -->')).Count | Should -Be 1
+        $result | Should -Match '\$13\.4269' -Because 'a real fresh span must still be spliced with current data'
+    }
+
+    It 'anchors on the real pipeline-metrics block, not a preceding decoy pipeline-metrics-v4 comment (G6 decoy-marker-not-selected)' {
+        $result = script:Set-FCLPrBodyCostSummary -PrBody $script:BodyWithNonFencedDecoyMarkerPrefix -Degraded $false -CostSummary $script:NewCostSummary
+
+        $result | Should -Match '<!-- pipeline-metrics-v4' -Because 'the decoy block must remain untouched'
+        $result | Should -Match '\$13\.4269' -Because 'the fresh span must be spliced using the real block data'
+        $decoyIndex = $result.IndexOf('pipeline-metrics-v4')
+        $sentinelIndex = $result.IndexOf('<!-- cost-summary:begin -->')
+        $sentinelIndex | Should -BeGreaterThan $decoyIndex -Because 'the writer must anchor on the real pipeline-metrics block, which follows the decoy, not mis-match the decoy itself'
     }
 
     It 'AC1 forward-compat: adding cost_summary does not change credit parsing for Read-PRMetricsBlock or Test-PipelineMetricsV4Block' {

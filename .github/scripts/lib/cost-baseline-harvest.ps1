@@ -939,7 +939,7 @@ function script:Get-CostBaselineHarvestBodyCostSummaryField {
     $fencePattern = '(?s)(`{3,}|~{3,}).*?\1'
     $redacted = [regex]::Replace($normalized, $fencePattern, { param($m) [string]::new('x', $m.Value.Length) })
 
-    $blockMatch = [regex]::Match($redacted, '(?s)<!--\s*pipeline-metrics\s*(?<block>.*?)\s*-->')
+    $blockMatch = [regex]::Match($redacted, '(?s)<!--\s*pipeline-metrics(?![\w-])\s*(?<block>.*?)\s*-->')
     if (-not $blockMatch.Success) { return $null }
 
     $blockGroup = $blockMatch.Groups['block']
@@ -1073,15 +1073,9 @@ function script:Test-CostBaselineHarvestBodySummaryStale {
         Mirrors the shape of the existing
         script:Test-CostBaselineHarvestSectionStillCurrent precedent (a
         single, narrowly-scoped predicate) rather than folding this check
-        into a larger function. "Stale" covers four cases: a
-        never-refreshed mid-session value, the degraded-write sentinel
-        (`unavailable`), the documented `n/a` value (issue #489
-        post-review fix, C13 — `capture_point: n/a` means "excluded from
-        rolling-baseline aggregation" per cost-pattern-data-schema.md, and a
-        body stamped `n/a` under an already-promoted comment is equally
-        eligible for reconcile as any other non-current value), and the
-        block-absent case — no cost_summary subtree at all, the
-        watchdog-kill first-write-lost scenario.
+        into a larger function. Any capture_point other than
+        `end-of-session` is treated as stale (safe inverse, matching the
+        rolling-baseline eligibility precedent at :605-623).
     .OUTPUTS
         [bool]
     #>
@@ -1090,7 +1084,7 @@ function script:Test-CostBaselineHarvestBodySummaryStale {
     $bodyCapturePoint = script:Get-CostBaselineHarvestBodyCapturePoint -PrBody $PrBody
     if ([string]::IsNullOrWhiteSpace($bodyCapturePoint)) { return $true }
 
-    return $bodyCapturePoint -in @('pr-creation-mid-session', 'unavailable', 'n/a')
+    return $bodyCapturePoint -ne 'end-of-session'
 }
 
 function script:Get-CostBaselineHarvestLivePrBody {
@@ -1231,17 +1225,19 @@ function script:Invoke-CostBaselineHarvestBodySummaryWrite {
         }
 
         # F2 (issue #489 post-review fix, judge-sustained): capture and
-        # discard Update-FCLPrBodyCostSummary { Outcome = ... } return
+        # classify Update-FCLPrBodyCostSummary { Outcome = ... } return
         # value — mirrors frame-credit-ledger.ps1 identical sibling call
         # site. An uncaptured bare call here leaks the hashtable into this
         # wrapper implicit output, which propagates uncaptured through
         # every remaining call layer and corrupts Invoke-CostBaselineHarvest
         # documented single-hashtable `return $result` contract.
-        $global:LASTEXITCODE = 0
-        $null = script:Update-FCLPrBodyCostSummary -Pr $Pr -PrBody $writeBody -Degraded $false -CostSummary $CostSummary
+        $writeOutcome = script:Update-FCLPrBodyCostSummary -Pr $Pr -PrBody $writeBody -Degraded $false -CostSummary $CostSummary
 
-        if ($global:LASTEXITCODE -ne 0) {
-            [Console]::Error.WriteLine("cost-baseline-harvest: PR body cost-summary write for #$Pr — failed: gh pr edit exited $global:LASTEXITCODE")
+        if ($null -ne $writeOutcome -and $writeOutcome.Outcome -eq 'failed') {
+            [Console]::Error.WriteLine("cost-baseline-harvest: PR body cost-summary write for #$Pr — failed: $($writeOutcome.Reason)")
+        }
+        elseif ($null -ne $writeOutcome -and $writeOutcome.Outcome -eq 'noop') {
+            [Console]::Error.WriteLine("cost-baseline-harvest: PR body cost-summary write for #$Pr — skipped-no-op")
         }
         else {
             [Console]::Error.WriteLine("cost-baseline-harvest: PR body cost-summary write for #$Pr — $Outcome")

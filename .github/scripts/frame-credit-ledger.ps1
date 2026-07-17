@@ -59,7 +59,12 @@ $script:WarnModeOnly = ($Mode -eq 'warn')
 # here, before any dot-source or gh call in this file, guarantees every gh
 # read made anywhere in this process — including inside the worker-runspace
 # clone, which shares this process Console static — observes UTF-8.
-[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+try {
+    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+}
+catch {
+    [Console]::Error.WriteLine("frame-credit-ledger: warn: console UTF-8 pin failed: $($_.Exception.Message)")
+}
 
 # ---------------------------------------------------------------------------
 # Library dot-sources (wrapped: a parse-time error in any lib file would

@@ -4,7 +4,7 @@ This document defines the schema for the `<!-- cost-pattern-data ... -->` YAML b
 
 ## Schema Versioning
 
-- `schema_version` is always `1` for v1 payloads.
+- `version` is always `1` for v1 payloads.
 - Additive-only rule (design D12): new fields may be added without a version bump. Readers encountering unknown fields treat them as `null`.
 - Breaking changes (removing, renaming, or retyping existing fields) require a new field name or a `schema_version` increment. Existing v1 readers are not expected to handle v2 payloads.
 
@@ -14,8 +14,7 @@ This document defines the schema for the `<!-- cost-pattern-data ... -->` YAML b
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `version` | string | Payload format version string (e.g., `"1"`). |
-| `schema_version` | integer | Always `1` for v1. Used by readers to detect format incompatibility. |
+| `version` | string | Payload format version string (e.g., `"1"`). Used by readers to detect format incompatibility. |
 | `session_completeness` | string | Completeness indicator for the session (e.g., `"complete"`, `"partial"`, `"unknown"`). |
 | `excluded_from_rolling_baseline` | boolean | When `true`, this PR's data is excluded from rolling-baseline calculations (e.g., partial sessions, anomalous runs). |
 | `generated_at` | string (ISO-8601) | UTC timestamp when the payload was generated (e.g., `"2026-04-30T12:00:00Z"`). |

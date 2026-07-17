@@ -649,7 +649,7 @@ function script:Set-FCLPrBodyCostSummary {
     # worker-runspace clone, where a new top-level $script: constant marshals
     # as $null (shipped twice: #825 C3, #487); see this file header .NOTES.
     $fencePattern = '(?s)(`{3,}|~{3,}).*?\1'
-    $markerPattern = '(?s)(?<open><!--\s*pipeline-metrics\s*)(?<block>.*?)(?<close>\s*-->)'
+    $markerPattern = '(?s)(?<open><!--\s*pipeline-metrics(?![\w-])\s*)(?<block>.*?)(?<close>\s*-->)'
     $redactFences = {
         param([string]$Text, [string]$Pattern)
         return [regex]::Replace($Text, $Pattern, { param($m) [string]::new('x', $m.Value.Length) })
@@ -985,7 +985,26 @@ function script:Repair-FCLCostSummarySentinelSpan {
             if ($openStack.Count -gt 0) {
                 $beginIdx = $openStack[$openStack.Count - 1]
                 $openStack.RemoveAt($openStack.Count - 1)
-                for ($k = $beginIdx; $k -le $i; $k++) { [void]$toRemove.Add($k) }
+                $pairSpan = $i - $beginIdx
+                if ($pairSpan -eq 1) {
+                    # Adjacent pair, nothing between — safe to remove both markers.
+                    [void]$toRemove.Add($beginIdx)
+                    [void]$toRemove.Add($i)
+                }
+                elseif ($pairSpan -eq 2 -and $lines[$beginIdx + 1] -match $visibleLineShapePattern) {
+                    # Canonical writer shape: begin / visible cost line / end.
+                    for ($k = $beginIdx; $k -le $i; $k++) { [void]$toRemove.Add($k) }
+                }
+                else {
+                    # Foreign content sits between a distant pair — remove only
+                    # the markers (and the writer visible line immediately
+                    # after begin, if present), preserving everything else.
+                    [void]$toRemove.Add($beginIdx)
+                    [void]$toRemove.Add($i)
+                    if ($lines[$beginIdx + 1] -match $visibleLineShapePattern) {
+                        [void]$toRemove.Add($beginIdx + 1)
+                    }
+                }
             }
             else {
                 [void]$toRemove.Add($i)
