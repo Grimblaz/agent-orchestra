@@ -249,6 +249,26 @@ Describe 'Set-FCLPrBodyCostSummary — pure transform (issue #489 s3)' {
         $result | Should -Match '(?s)```text.*?credits: \[\].*?```' -Because 'the fenced decoy content must remain untouched'
     }
 
+    It 'ignores a <Label>-fenced decoy pipeline-metrics example above the real block (F8)' -TestCases @(
+        @{ Label = 'TILDE (~~~)'; FenceChar = [char]0x7E; FenceLength = 3 }
+        @{ Label = '4-backtick'; FenceChar = [char]96; FenceLength = 4 }
+    ) {
+        param([string]$Label, [char]$FenceChar, [int]$FenceLength)
+
+        $fence = [string]::new($FenceChar, $FenceLength)
+        $realBlockYaml = "metrics_version: 4`nframe_version: 1`ncredits:`n  - port: implement-code`n    status: passed"
+        $body = "## Summary`n`nExample fenced documentation:`n`n$fence`n<!-- pipeline-metrics`nmetrics_version: 4`nframe_version: 1`ncredits: []`n-->`n$fence`n`n<!-- pipeline-metrics`n$realBlockYaml`n-->"
+
+        $result = script:Set-FCLPrBodyCostSummary -PrBody $body -Degraded $false -CostSummary $script:NewCostSummary
+
+        $costSummaryIndex = $result.IndexOf('cost_summary:')
+        $costSummaryIndex | Should -BeGreaterThan -1
+        $before = $result.Substring(0, $costSummaryIndex)
+        $fenceCount = ([regex]::Matches($before, [regex]::Escape($fence))).Count
+        ($fenceCount % 2) | Should -Be 0 -Because "cost_summary must land in the real block, past the closed $Label fence — not inside the decoy"
+        $result | Should -Match ([regex]::Escape('credits: []')) -Because "the $Label-fenced decoy content must remain untouched"
+    }
+
     It 'positions cost_summary after credits: when no dispatch-cost-samples section exists (item 3)' {
         $body = & $script:NewV4Body $script:BaseYaml
         $result = script:Set-FCLPrBodyCostSummary -PrBody $body -Degraded $false -CostSummary $script:NewCostSummary

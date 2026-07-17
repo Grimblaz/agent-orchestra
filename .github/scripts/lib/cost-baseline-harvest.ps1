@@ -606,6 +606,22 @@ function script:Get-CostBaselineHarvestRollingBaseline {
     foreach ($entry in @($Entries)) {
         if ($null -eq $entry -or $entry -isnot [hashtable]) { continue }
 
+        # F6 (issue #489 lite re-verification, judge-sustained): only
+        # end-of-session captures are eligible for rolling-baseline
+        # aggregation. Mid-session ('pr-creation-mid-session'), degraded
+        # ('unavailable'), and explicitly-excluded ('n/a') captures all carry
+        # real-but-INELIGIBLE costs that would contaminate the customer-facing
+        # trend baseline — the C13 rule documented both in
+        # script:Test-CostBaselineHarvestBodySummaryStale below and in
+        # cost-pattern-data-schema.md ('capture_point: n/a' == "excluded from
+        # rolling-baseline aggregation"). Allowlisting the single eligible
+        # value ('end-of-session', the only capture_point the completeness
+        # gate ever stamps as eligible — Resolve-BaselineEligibility,
+        # cost-completeness.ps1) rather than denylisting the known-bad ones
+        # also excludes an absent/unknown capture_point by default, which is
+        # the safe direction for an untrusted rolling-history cache.
+        if ([string]$entry['capture_point'] -ne 'end-of-session') { continue }
+
         if ($ExcludePr -gt 0 -and $entry.ContainsKey('pr') -and $null -ne $entry['pr']) {
             $entryPr = 0
             if ([int]::TryParse([string]$entry['pr'], [ref]$entryPr) -and $entryPr -eq $ExcludePr) { continue }
@@ -812,10 +828,16 @@ function script:ConvertTo-CostBaselineHarvestSummaryFromSection {
             $parsedCost
         }
         else {
-            # Malformed, non-numeric, non-'null' value: graceful default,
-            # matching the existing blank-value convention rather than
-            # throwing.
-            0.0
+            # F7 (issue #489 lite re-verification, judge-sustained): a
+            # MALFORMED, non-numeric, non-'null' value is genuinely unknown,
+            # NOT free. Returning 0.0 here rendered a corrupted/garbage cost
+            # as a confident "$0.00" headline (reads as "free session"),
+            # while the literal-'null' branch below already renders honestly
+            # as "unknown". Map malformed to the same explicit $null so the
+            # existing unknown-cost rendering (script:Set-FCLPrBodyCostSummary's
+            # C7 "unknown" path) stays honest for corrupted values too. Only a
+            # genuinely BLANK/absent value keeps the 0.0 default below.
+            $null
         }
     }
     elseif ($costUsdTotalRaw -ceq 'null') {
@@ -897,11 +919,24 @@ function script:Get-CostBaselineHarvestBodyCostSummaryField {
 
     $normalized = $PrBody -replace "`r`n", "`n" -replace "`r", "`n"
 
-    # ---- Fence-aware marker lookup: redact ```-fenced regions to a
-    # same-length filler (so byte offsets stay aligned with $normalized)
-    # before searching for the pipeline-metrics marker — mirrors
-    # cost-fcl-helpers.ps1's Set-FCLPrBodyCostSummary exactly. ----
-    $fencePattern = '(?s)```.*?```'
+    # ---- Fence-aware marker lookup: redact fenced regions to a same-length
+    # filler (so byte offsets stay aligned with $normalized) before searching
+    # for the pipeline-metrics marker — mirrors cost-fcl-helpers.ps1's
+    # Set-FCLPrBodyCostSummary exactly (F8: both mirror sites broadened
+    # identically; see that function for why the two copies stay file-local
+    # rather than being hoisted to a shared $script: helper). ----
+    #
+    # F8 (issue #489 lite re-verification, judge-sustained): the fence
+    # delimiter is a run of 3-or-more backticks OR 3-or-more tildes, closed by
+    # a run of the same character and length (\1 backreference). The prior
+    # exactly-three-backtick pattern left tilde (~~~) fences and 4+-backtick
+    # fences un-redacted, so a `<!-- pipeline-metrics -->` example inside such
+    # a fence could be mis-anchored as the real block. Same-char/same-length
+    # is a pragmatic CommonMark approximation (a longer-than-open closing
+    # fence is not matched) — sufficient for the realistic documentation-
+    # example cases, and it preserves the same-length-filler byte-offset
+    # invariant the marker Substring below relies on.
+    $fencePattern = '(?s)(`{3,}|~{3,}).*?\1'
     $redacted = [regex]::Replace($normalized, $fencePattern, { param($m) [string]::new('x', $m.Value.Length) })
 
     $blockMatch = [regex]::Match($redacted, '(?s)<!--\s*pipeline-metrics\s*(?<block>.*?)\s*-->')
@@ -965,6 +1000,69 @@ function script:Get-CostBaselineHarvestBodySourceComment {
     return script:Get-CostBaselineHarvestBodyCostSummaryField -PrBody $PrBody -ChildKey 'source_comment'
 }
 
+function script:Test-CostBaselineHarvestSourceCommentUrl {
+    <#
+    .SYNOPSIS
+        Validates a PR-body-derived cost_summary.source_comment URL before it
+        is re-emitted into a regenerated cost_summary (issue #489 lite
+        re-verification fix, F9, judge-sustained).
+    .DESCRIPTION
+        The source_comment read by script:Get-CostBaselineHarvestBodySourceComment
+        comes from the UNTRUSTED PR body (one author, potentially an arbitrary
+        external fork-PR contributor). script:Invoke-CostBaselineHarvestBodySummaryWrite
+        seeds it onto the outgoing CostSummary when the fresh summary lacks
+        one, and script:Set-FCLPrBodyCostSummary re-emits it through
+        Escape-FCLScalar (YAML-escape only) — no URL-shape or same-repo/same-PR
+        check. Re-emitting it unvalidated would let an author plant an
+        arbitrary "full breakdown" link into the trusted-looking cost_summary
+        on every refresh/reconcile pass, contradicting this file's own
+        trust-boundary discipline (see Get-CostBaselineHarvestBodyCostSummaryField's
+        TRUST BOUNDARY note).
+
+        A legitimate source_comment is always the html_url of THIS repo's own
+        cost-breakdown comment for THIS PR — shaped exactly like
+        https://github.com/<owner>/<repo>/(pull|issues)/<Pr>#issuecomment-<id>
+        (Find-OrUpsertComment's returned html_url; see frame-credit-ledger.ps1's
+        own C11 sibling validation). This predicate requires that exact shape:
+
+          - an absolute https://github.com/ URL with no embedded whitespace
+            and no ')' (which would break a markdown [text](url) link),
+          - whose <owner>/<repo> segment matches THIS repo (resolved from the
+            git remote, locally, without a gh call — same derivation as
+            find-or-upsert-comment.ps1), and
+          - whose PR number matches $Pr (this PR's own comment namespace).
+
+        Fail-safe: if the repo cannot be resolved from the git remote, the URL
+        is treated as un-validatable and REJECTED (omit rather than propagate
+        an unconfirmable author-controlled link).
+    .OUTPUTS
+        [bool]
+    #>
+    param(
+        [Parameter(Mandatory)][AllowNull()][AllowEmptyString()][string]$Url,
+        [Parameter(Mandatory)][int]$Pr
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Url)) { return $false }
+    # Basic shape gate: absolute github.com https URL, no whitespace, no ')'.
+    if ($Url -notmatch '(?i)^https://github\.com/\S+$') { return $false }
+    if ($Url -match '\)') { return $false }
+
+    # Resolve THIS repo's owner/repo from the git remote (local, no gh) —
+    # mirrors find-or-upsert-comment.ps1's own derivation regex exactly.
+    $remoteUrl = $null
+    try { $remoteUrl = (& git config --get remote.origin.url) 2>$null } catch { $remoteUrl = $null }
+    $ownerRepo = $null
+    if ($remoteUrl -and ([string]$remoteUrl -match '[:/]([^/:]+)/([^/]+?)(?:\.git)?\s*$')) {
+        $ownerRepo = "$($Matches[1])/$($Matches[2])"
+    }
+    if ([string]::IsNullOrWhiteSpace($ownerRepo)) { return $false }
+
+    # Must be this repo's own PR/issue comment namespace for THIS PR.
+    $expected = '(?i)^https://github\.com/' + [regex]::Escape($ownerRepo) + '/(pull|issues)/' + [string]$Pr + '(#issuecomment-\d+)?$'
+    return ($Url -match $expected)
+}
+
 function script:Test-CostBaselineHarvestBodySummaryStale {
     <#
     .SYNOPSIS
@@ -993,6 +1091,37 @@ function script:Test-CostBaselineHarvestBodySummaryStale {
     if ([string]::IsNullOrWhiteSpace($bodyCapturePoint)) { return $true }
 
     return $bodyCapturePoint -in @('pr-creation-mid-session', 'unavailable', 'n/a')
+}
+
+function script:Get-CostBaselineHarvestLivePrBody {
+    <#
+    .SYNOPSIS
+        Fetches a PR's current body via `gh pr view --json body`, fail-open
+        (issue #489 lite re-verification fix, F2/F10 support).
+    .DESCRIPTION
+        A single cheap `gh pr view <pr> --json body` round-trip, parsed the
+        same way script:Invoke-CostBaselineHarvestReconcileCandidate parses its
+        own body fetch. Used by script:Invoke-CostBaselineHarvestBodySummaryWrite
+        to re-read the live body IMMEDIATELY before the write so a concurrent
+        edit during the caller's snapshot->write window is not clobbered.
+        Returns $null on any failure (gh non-zero, empty/unparseable JSON) so
+        the caller can fall back to its own snapshot rather than skipping the
+        write. The [Console]::OutputEncoding UTF-8 pin established at the top
+        of Invoke-CostBaselineHarvest already covers this `gh` call.
+    .OUTPUTS
+        [string] the live PR body, or $null on failure.
+    #>
+    param([Parameter(Mandatory)][int]$Pr)
+
+    $liveJson = $null
+    try { $liveJson = & gh pr view $Pr --json 'body' 2>$null } catch { return $null }
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($liveJson)) { return $null }
+
+    $liveInfo = $null
+    try { $liveInfo = ($liveJson | Out-String) | ConvertFrom-Json -ErrorAction Stop } catch { return $null }
+    if ($null -eq $liveInfo) { return $null }
+
+    return [string]$liveInfo.body
 }
 
 function script:Invoke-CostBaselineHarvestBodySummaryWrite {
@@ -1059,13 +1188,44 @@ function script:Invoke-CostBaselineHarvestBodySummaryWrite {
     )
 
     try {
-        $existingSourceComment = script:Get-CostBaselineHarvestBodySourceComment -PrBody $PrBody
-        if (-not [string]::IsNullOrWhiteSpace($existingSourceComment) -and $null -ne $CostSummary -and -not $CostSummary.ContainsKey('source_comment')) {
+        # F2/F10 (issue #489 lite re-verification, judge-sustained): re-fetch
+        # the live PR body IMMEDIATELY before the write. The caller's $PrBody
+        # snapshot was captured BEFORE a long Invoke-CostSessionRender re-walk
+        # (refresh path: snapshot at the candidate gate, write after the
+        # re-walk) or a composite-comment fetch (reconcile path), so a
+        # concurrent human/automation PR-body edit during that window would be
+        # silently clobbered by Update-FCLPrBodyCostSummary's whole-body
+        # `gh pr edit --body-file` replace. The comment-write path already has
+        # a pre-write concurrency guard (Test-CostBaselineHarvestSectionStillCurrent);
+        # this body-write path had none. Re-transform against the FRESH body
+        # (option a — the summary still lands, and any concurrent edit
+        # elsewhere in the body survives; matches frame-credit-ledger.ps1
+        # Step 7's "re-fetch immediately before write" shape) rather than
+        # aborting. Fail-open: if the re-fetch itself fails, fall back to the
+        # caller's snapshot rather than skipping the useful write.
+        $writeBody = $PrBody
+        $freshBody = script:Get-CostBaselineHarvestLivePrBody -Pr $Pr
+        if ($null -ne $freshBody) { $writeBody = $freshBody }
+
+        # F1 + F9 (issue #489, judge-sustained): preserve an existing "full
+        # breakdown" link across the full-subtree cost_summary replace, but
+        # ONLY when it validates as THIS repo's own comment URL for THIS PR
+        # (F9 — the PR body is untrusted input; an author-controlled off-repo,
+        # malformed, or wrong-PR link must not be re-emitted into the
+        # trusted-looking cost_summary). An invalid link is dropped, exactly
+        # like the "nothing to preserve" path. Read the source_comment from
+        # the SAME fresh body the write targets, so what is preserved matches
+        # what is written.
+        $existingSourceComment = script:Get-CostBaselineHarvestBodySourceComment -PrBody $writeBody
+        if (-not [string]::IsNullOrWhiteSpace($existingSourceComment) -and
+            $null -ne $CostSummary -and
+            -not $CostSummary.ContainsKey('source_comment') -and
+            (script:Test-CostBaselineHarvestSourceCommentUrl -Url $existingSourceComment -Pr $Pr)) {
             $CostSummary['source_comment'] = $existingSourceComment
         }
 
-        $preview = script:Set-FCLPrBodyCostSummary -PrBody $PrBody -Degraded $false -CostSummary $CostSummary
-        if ($preview -eq $PrBody) {
+        $preview = script:Set-FCLPrBodyCostSummary -PrBody $writeBody -Degraded $false -CostSummary $CostSummary
+        if ($preview -eq $writeBody) {
             [Console]::Error.WriteLine("cost-baseline-harvest: PR body cost-summary write for #$Pr — skipped-no-op")
             return
         }
@@ -1078,7 +1238,7 @@ function script:Invoke-CostBaselineHarvestBodySummaryWrite {
         # every remaining call layer and corrupts Invoke-CostBaselineHarvest's
         # documented single-hashtable `return $result` contract.
         $global:LASTEXITCODE = 0
-        $null = script:Update-FCLPrBodyCostSummary -Pr $Pr -PrBody $PrBody -Degraded $false -CostSummary $CostSummary
+        $null = script:Update-FCLPrBodyCostSummary -Pr $Pr -PrBody $writeBody -Degraded $false -CostSummary $CostSummary
 
         if ($global:LASTEXITCODE -ne 0) {
             [Console]::Error.WriteLine("cost-baseline-harvest: PR body cost-summary write for #$Pr — failed: gh pr edit exited $global:LASTEXITCODE")
@@ -1179,8 +1339,24 @@ function script:Invoke-CostBaselineHarvestReconcileCandidate {
     #>
     param(
         [Parameter(Mandatory)][int]$Pr,
-        [AllowNull()][object[]]$RollingHistoryEntries = $null
+        [AllowNull()][object[]]$RollingHistoryEntries = $null,
+        [AllowNull()][System.Diagnostics.Stopwatch]$Stopwatch = $null,
+        [int]$TimeoutSeconds = 0
     )
+
+    # F11: cooperative per-pass wall-clock budget check, evaluated before each
+    # of this candidate's `gh` calls (matching cost-rolling-history.ps1's
+    # between-call check granularity). When the pass budget is exhausted this
+    # candidate is deferred to a later scan rather than starting more `gh`
+    # work. A $null Stopwatch / non-positive TimeoutSeconds disables the check
+    # (direct callers and tests that do not thread a budget).
+    $isBudgetExhausted = {
+        return ($null -ne $Stopwatch -and $TimeoutSeconds -gt 0 -and $Stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds)
+    }
+    if (& $isBudgetExhausted) {
+        [Console]::Error.WriteLine("cost-baseline-harvest: reconcile for #$Pr — deferred: pass wall-clock budget (${TimeoutSeconds}s) exhausted")
+        return
+    }
 
     $liveJson = $null
     try { $liveJson = & gh pr view $Pr --json 'body' 2>$null } catch { $liveJson = $null }
@@ -1199,6 +1375,13 @@ function script:Invoke-CostBaselineHarvestReconcileCandidate {
 
     if (-not (script:Test-CostBaselineHarvestBodySummaryStale -PrBody $liveBody)) { return }
 
+    # F11: re-check the pass budget before the heavier authorship-gated
+    # composite-comment fetch (`gh pr view --json comments`).
+    if (& $isBudgetExhausted) {
+        [Console]::Error.WriteLine("cost-baseline-harvest: reconcile for #$Pr — deferred: pass wall-clock budget (${TimeoutSeconds}s) exhausted")
+        return
+    }
+
     $fetchResult = script:Get-CostBaselineHarvestCompositeComment -Pr $Pr
     if ($null -eq $fetchResult -or -not $fetchResult['Found']) { return }
 
@@ -1212,18 +1395,43 @@ function script:Invoke-CostBaselineHarvestReconcileCandidate {
     script:Invoke-CostBaselineHarvestBodySummaryWrite -Pr $Pr -PrBody $liveBody -CostSummary $costSummary -Outcome 'reconciled'
 }
 
+# F11 (issue #489 lite re-verification, judge-sustained): bound the reconcile
+# pass so a large merge history or a stalled `gh` CLI cannot block session
+# startup — the function's documented bounded/fail-open contract.
+#
+# (a) Per-pass candidate CAP: a hard, deterministic upper bound on how many
+#     candidates one pass processes. A reconcile is a cheap body-only write
+#     (no expensive re-walk), so 5 lets a single startup catch up on a small
+#     backlog of stale PR bodies while bounding the worst-case `gh`-call count
+#     to a handful of candidates (each does up to 3 sequential `gh` calls).
+#     Remaining candidates are left for a later startup scan.
+# (b) Per-pass wall-clock BUDGET: a cooperative [Stopwatch] budget checked
+#     before each candidate AND (threaded into the candidate) between that
+#     candidate's own `gh` calls. This is the established gh-bounding
+#     convention in this codebase — cost-rolling-history.ps1 and
+#     phase-containment-rolling-history-core.ps1 both check a Stopwatch
+#     between `gh` calls rather than hard-killing a single in-flight call
+#     (no per-command hard-kill wrapper exists anywhere in this repo). It
+#     bounds how much wall-clock the pass spends starting new `gh` work; a
+#     single already-hung call is a pre-existing, repo-wide limitation of the
+#     cooperative model, not introduced here. 20s matches the order of
+#     magnitude of cost-rolling-history.ps1's own single-pass fetch budget.
+$script:CostBaselineHarvestReconcileMaxCandidatesPerPass = 5
+$script:CostBaselineHarvestReconcilePassBudgetSeconds = 20
+
 function script:Invoke-CostBaselineHarvestReconcilePass {
     <#
     .SYNOPSIS
         Runs the s5 reconcile candidate class over already-fetched
-        rolling-history entries (issue #489 s5).
+        rolling-history entries (issue #489 s5), bounded per F11.
     .DESCRIPTION
-        Additive and unbounded by the promotion path's
-        one-re-walk-per-call budget — see
-        script:Select-CostBaselineHarvestReconcileCandidates and
-        script:Invoke-CostBaselineHarvestReconcileCandidate. Each candidate
-        is processed independently and fail-open, so one candidate's
-        failure never blocks another's.
+        Additive to the promotion path's one-re-walk-per-call budget (it is a
+        SEPARATE candidate class) but itself bounded by a per-pass candidate
+        cap and a cooperative wall-clock budget (F11 — see the constants
+        above). Each candidate is processed independently and fail-open, so
+        one candidate's failure never blocks another's, and hitting the cap or
+        the budget simply defers the remaining candidates to a later startup
+        scan rather than throwing.
     #>
     param(
         [Parameter(Mandatory)][AllowNull()][object[]]$Entries,
@@ -1231,16 +1439,30 @@ function script:Invoke-CostBaselineHarvestReconcilePass {
     )
 
     $reconcileCandidates = script:Select-CostBaselineHarvestReconcileCandidates -Entries $Entries -HorizonDays $HorizonDays
+
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    $processed = 0
     foreach ($candidate in $reconcileCandidates) {
+        if ($processed -ge $script:CostBaselineHarvestReconcileMaxCandidatesPerPass) {
+            $deferred = @($reconcileCandidates).Count - $processed
+            [Console]::Error.WriteLine("cost-baseline-harvest: reconcile pass hit per-pass cap ($script:CostBaselineHarvestReconcileMaxCandidatesPerPass); $deferred candidate(s) deferred to a later scan")
+            break
+        }
+        if ($stopwatch.Elapsed.TotalSeconds -ge $script:CostBaselineHarvestReconcilePassBudgetSeconds) {
+            [Console]::Error.WriteLine("cost-baseline-harvest: reconcile pass hit wall-clock budget ($($script:CostBaselineHarvestReconcilePassBudgetSeconds)s); remaining candidate(s) deferred to a later scan")
+            break
+        }
+
         $candidatePr = 0
         if (-not [int]::TryParse([string]$candidate['pr'], [ref]$candidatePr)) { continue }
 
         try {
-            script:Invoke-CostBaselineHarvestReconcileCandidate -Pr $candidatePr -RollingHistoryEntries $Entries
+            script:Invoke-CostBaselineHarvestReconcileCandidate -Pr $candidatePr -RollingHistoryEntries $Entries -Stopwatch $stopwatch -TimeoutSeconds $script:CostBaselineHarvestReconcilePassBudgetSeconds
         }
         catch {
             [Console]::Error.WriteLine("cost-baseline-harvest: reconcile for #$candidatePr — failed: $($_.Exception.Message)")
         }
+        $processed++
     }
 }
 

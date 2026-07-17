@@ -164,7 +164,7 @@ A companion visible markdown line, wrapped in `<!-- cost-summary:begin -->` / `<
 Field notes for this section:
 
 - `cost_usd_total` (number) — the headline dollar figure for the PR's session cost. New to this block; not projected from elsewhere.
-- `tokens.input`, `tokens.output`, `tokens.cache_creation`, `tokens.cache_read` (integer) — projected from the owning schema's per-port `tokens.*` fields; see `.github/scripts/lib/cost-pattern-data-schema.md` (`ports` § Field table) for the normative semantics of each token category.
+- `tokens.input`, `tokens.output`, `tokens.cache_creation`, `tokens.cache_read` (integer) — read from the owning schema's session-wide `totals.tokens.*` aggregate (the sum across all ports **and** orchestrator overhead), not a per-port projection (which would exclude orchestrator overhead); see `.github/scripts/lib/cost-pattern-data-schema.md` (`totals` § Field table) for the normative semantics of each token category.
 - `session_completeness` (string) — projected from the owning schema's top-level `session_completeness` field; see `.github/scripts/lib/cost-pattern-data-schema.md` (Top-Level Fields table) for the normative enum and semantics.
 - `capture_point` (string) — projected from the owning schema's top-level `capture_point` field; see `.github/scripts/lib/cost-pattern-data-schema.md` (Top-Level Fields table) for the normative enum and semantics.
 - `source_comment` (string, URL) — a link-by-reference to the full cost-breakdown PR comment (the `<!-- cost-pattern-data ... -->` block's host comment) carrying the complete per-port breakdown. New to this block; not projected from elsewhere. Omitted when the breakdown-comment link is unavailable at write time.

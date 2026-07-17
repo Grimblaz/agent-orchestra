@@ -1627,8 +1627,16 @@ Describe 'Invoke-CostBaselineHarvest — post-review fixes (C2/C6/C9/C10/C13)' {
             $result.tokens.input | Should -Be 100
         }
 
-        It 'gracefully degrades a malformed non-numeric, non-null cost_estimate_usd instead of throwing (existing blank-value convention)' {
+        It 'maps a malformed non-numeric, non-null cost_estimate_usd to an explicit $null (unknown), not a confident $0.00 (F7)' {
             $section = "## Cost Pattern`n<!-- cost-pattern-data`nsession_completeness: complete`ncapture_point: end-of-session`nports:`n  - name: implement-code`ntotals:`n  tokens:`n    input: 10`n    output: 5`n    cache_creation: 0`n    cache_read: 0`n  cost_estimate_usd: not-a-number`n-->"
+
+            $result = script:ConvertTo-CostBaselineHarvestSummaryFromSection -Section $section
+
+            $result.cost_usd_total | Should -Be $null -Because 'a malformed/corrupted cost is genuinely unknown, not a free ($0.00) session'
+        }
+
+        It 'still degrades a genuinely BLANK cost_estimate_usd to 0.0 (unchanged blank-value convention, distinct from malformed)' {
+            $section = "## Cost Pattern`n<!-- cost-pattern-data`nsession_completeness: complete`ncapture_point: end-of-session`nports:`n  - name: implement-code`ntotals:`n  tokens:`n    input: 10`n    output: 5`n    cache_creation: 0`n    cache_read: 0`n  cost_estimate_usd: `n-->"
 
             $result = script:ConvertTo-CostBaselineHarvestSummaryFromSection -Section $section
 
@@ -1700,8 +1708,14 @@ Describe 'Invoke-CostBaselineHarvest — post-review fixes (C2/C6/C9/C10/C13)' {
     }
 
     Context 'C10: fence-aware capture_point lookup' {
-        It 'reads capture_point from the REAL pipeline-metrics block, not a fenced documentation example that appears earlier in the body' {
-            $fence = [string]::new([char]96, 3)
+        It 'reads capture_point from the REAL block, not a <Label>-fenced documentation example above it' -TestCases @(
+            @{ Label = '3-backtick'; FenceChar = [char]96; FenceLength = 3 }
+            @{ Label = 'TILDE (~~~)'; FenceChar = [char]0x7E; FenceLength = 3 }
+            @{ Label = '4-backtick (F8)'; FenceChar = [char]96; FenceLength = 4 }
+        ) {
+            param([string]$Label, [char]$FenceChar, [int]$FenceLength)
+
+            $fence = [string]::new($FenceChar, $FenceLength)
             $fencedExample = "Here's an example pipeline-metrics block for reference:`n`n" +
             "$fence`n<!-- pipeline-metrics`nmetrics_version: 4`ncost_summary:`n  capture_point: pr-creation-mid-session`n-->`n$fence`n`n"
             $realBlock = "<!-- pipeline-metrics`nmetrics_version: 4`ncost_summary:`n  capture_point: end-of-session`n-->`n"
@@ -1770,10 +1784,10 @@ Describe 'Rolling baseline (issue #489 CE Gate follow-up)' {
     Context 'script:Get-CostBaselineHarvestRollingBaseline' {
         It 'computes the median and sample size from usable entries, excluding the current PR''s own entry' {
             $entries = @(
-                @{ pr = 100; totals = @{ cost_estimate_usd = 1.00 } }
-                @{ pr = 101; totals = @{ cost_estimate_usd = 2.00 } }
-                @{ pr = 102; totals = @{ cost_estimate_usd = 3.00 } }
-                @{ pr = 999; totals = @{ cost_estimate_usd = 999.00 } }
+                @{ pr = 100; capture_point = 'end-of-session'; totals = @{ cost_estimate_usd = 1.00 } }
+                @{ pr = 101; capture_point = 'end-of-session'; totals = @{ cost_estimate_usd = 2.00 } }
+                @{ pr = 102; capture_point = 'end-of-session'; totals = @{ cost_estimate_usd = 3.00 } }
+                @{ pr = 999; capture_point = 'end-of-session'; totals = @{ cost_estimate_usd = 999.00 } }
             )
 
             $result = script:Get-CostBaselineHarvestRollingBaseline -Entries $entries -ExcludePr 999
@@ -1783,13 +1797,34 @@ Describe 'Rolling baseline (issue #489 CE Gate follow-up)' {
             $result.sample_size | Should -Be 3
         }
 
+        It 'folds ONLY end-of-session captures into the median, excluding n/a / unavailable / mid-session entries that carry real numeric costs (F6)' {
+            $entries = @(
+                # Eligible: end-of-session, numeric cost.
+                @{ pr = 100; capture_point = 'end-of-session'; totals = @{ cost_estimate_usd = 2.00 } }
+                @{ pr = 101; capture_point = 'end-of-session'; totals = @{ cost_estimate_usd = 4.00 } }
+                @{ pr = 102; capture_point = 'end-of-session'; totals = @{ cost_estimate_usd = 6.00 } }
+                # Ineligible: real-but-excluded captures with numeric costs that
+                # would visibly move the median/sample if wrongly folded in.
+                @{ pr = 200; capture_point = 'n/a'; totals = @{ cost_estimate_usd = 100.00 } }
+                @{ pr = 201; capture_point = 'unavailable'; totals = @{ cost_estimate_usd = 200.00 } }
+                @{ pr = 202; capture_point = 'pr-creation-mid-session'; totals = @{ cost_estimate_usd = 0.01 } }
+                # Ineligible: absent capture_point is excluded by the allowlist.
+                @{ pr = 203; totals = @{ cost_estimate_usd = 999.00 } }
+            )
+
+            $result = script:Get-CostBaselineHarvestRollingBaseline -Entries $entries -ExcludePr 0
+
+            $result.sample_size | Should -Be 3 -Because 'only the three end-of-session captures are eligible for the trend baseline'
+            $result.median_usd | Should -Be 4.00 -Because 'the ineligible n/a/unavailable/mid-session costs must not contaminate the median'
+        }
+
         It 'skips entries with an absent or explicitly-null cost_estimate_usd rather than folding them in as $0' {
             $entries = @(
-                @{ pr = 100; totals = @{ cost_estimate_usd = 4.00 } }
-                @{ pr = 101; totals = @{ cost_estimate_usd = 6.00 } }
-                @{ pr = 102; totals = @{ cost_estimate_usd = 8.00 } }
-                @{ pr = 103; totals = @{ cost_estimate_usd = $null } }
-                @{ pr = 104; totals = @{} }
+                @{ pr = 100; capture_point = 'end-of-session'; totals = @{ cost_estimate_usd = 4.00 } }
+                @{ pr = 101; capture_point = 'end-of-session'; totals = @{ cost_estimate_usd = 6.00 } }
+                @{ pr = 102; capture_point = 'end-of-session'; totals = @{ cost_estimate_usd = 8.00 } }
+                @{ pr = 103; capture_point = 'end-of-session'; totals = @{ cost_estimate_usd = $null } }
+                @{ pr = 104; capture_point = 'end-of-session'; totals = @{} }
             )
 
             $result = script:Get-CostBaselineHarvestRollingBaseline -Entries $entries -ExcludePr 0
@@ -1800,10 +1835,10 @@ Describe 'Rolling baseline (issue #489 CE Gate follow-up)' {
 
         It 'skips an entry with a malformed non-numeric cost_estimate_usd rather than throwing, and still computes a correct median from the remaining valid entries' {
             $entries = @(
-                @{ pr = 100; totals = @{ cost_estimate_usd = 4.00 } }
-                @{ pr = 101; totals = @{ cost_estimate_usd = 'N/A' } }
-                @{ pr = 102; totals = @{ cost_estimate_usd = 6.00 } }
-                @{ pr = 103; totals = @{ cost_estimate_usd = 8.00 } }
+                @{ pr = 100; capture_point = 'end-of-session'; totals = @{ cost_estimate_usd = 4.00 } }
+                @{ pr = 101; capture_point = 'end-of-session'; totals = @{ cost_estimate_usd = 'N/A' } }
+                @{ pr = 102; capture_point = 'end-of-session'; totals = @{ cost_estimate_usd = 6.00 } }
+                @{ pr = 103; capture_point = 'end-of-session'; totals = @{ cost_estimate_usd = 8.00 } }
             )
 
             { script:Get-CostBaselineHarvestRollingBaseline -Entries $entries -ExcludePr 0 } | Should -Not -Throw
@@ -1816,8 +1851,8 @@ Describe 'Rolling baseline (issue #489 CE Gate follow-up)' {
 
         It 'returns $null when fewer than the minimum sample size of usable entries remain' {
             $entries = @(
-                @{ pr = 100; totals = @{ cost_estimate_usd = 1.00 } }
-                @{ pr = 101; totals = @{ cost_estimate_usd = 2.00 } }
+                @{ pr = 100; capture_point = 'end-of-session'; totals = @{ cost_estimate_usd = 1.00 } }
+                @{ pr = 101; capture_point = 'end-of-session'; totals = @{ cost_estimate_usd = 2.00 } }
             )
 
             script:Get-CostBaselineHarvestRollingBaseline -Entries $entries -ExcludePr 0 | Should -Be $null
@@ -1836,9 +1871,9 @@ Describe 'Rolling baseline (issue #489 CE Gate follow-up)' {
                 Completeness = @{ completeness = 'complete'; capture_point = 'end-of-session' }
             }
             $entries = @(
-                @{ pr = 200; totals = @{ cost_estimate_usd = 1.00 } }
-                @{ pr = 201; totals = @{ cost_estimate_usd = 2.00 } }
-                @{ pr = 202; totals = @{ cost_estimate_usd = 3.00 } }
+                @{ pr = 200; capture_point = 'end-of-session'; totals = @{ cost_estimate_usd = 1.00 } }
+                @{ pr = 201; capture_point = 'end-of-session'; totals = @{ cost_estimate_usd = 2.00 } }
+                @{ pr = 202; capture_point = 'end-of-session'; totals = @{ cost_estimate_usd = 3.00 } }
             )
 
             $result = script:ConvertTo-CostBaselineHarvestSummaryFromRenderResult -RenderResult $renderResult -Pr 555 -RollingHistoryEntries $entries
@@ -1857,7 +1892,7 @@ Describe 'Rolling baseline (issue #489 CE Gate follow-up)' {
             $withNoEntries = script:ConvertTo-CostBaselineHarvestSummaryFromRenderResult -RenderResult $renderResult -Pr 555 -RollingHistoryEntries $null
             $withNoEntries.ContainsKey('rolling_baseline_usd') | Should -Be $false
 
-            $tooFewEntries = @(@{ pr = 200; totals = @{ cost_estimate_usd = 1.00 } })
+            $tooFewEntries = @(@{ pr = 200; capture_point = 'end-of-session'; totals = @{ cost_estimate_usd = 1.00 } })
             $withTooFew = script:ConvertTo-CostBaselineHarvestSummaryFromRenderResult -RenderResult $renderResult -Pr 555 -RollingHistoryEntries $tooFewEntries
             $withTooFew.ContainsKey('rolling_baseline_usd') | Should -Be $false
         }
@@ -1867,9 +1902,9 @@ Describe 'Rolling baseline (issue #489 CE Gate follow-up)' {
         It 'populates rolling_baseline_usd when sufficient rolling history is supplied' {
             $section = "## Cost Pattern`n<!-- cost-pattern-data`nsession_completeness: complete`ncapture_point: end-of-session`nports:`n  - name: implement-code`ntotals:`n  tokens:`n    input: 100`n    output: 50`n    cache_creation: 0`n    cache_read: 0`n  cost_estimate_usd: 5.00`n-->"
             $entries = @(
-                @{ pr = 300; totals = @{ cost_estimate_usd = 1.00 } }
-                @{ pr = 301; totals = @{ cost_estimate_usd = 2.00 } }
-                @{ pr = 302; totals = @{ cost_estimate_usd = 3.00 } }
+                @{ pr = 300; capture_point = 'end-of-session'; totals = @{ cost_estimate_usd = 1.00 } }
+                @{ pr = 301; capture_point = 'end-of-session'; totals = @{ cost_estimate_usd = 2.00 } }
+                @{ pr = 302; capture_point = 'end-of-session'; totals = @{ cost_estimate_usd = 3.00 } }
             )
 
             $result = script:ConvertTo-CostBaselineHarvestSummaryFromSection -Section $section -Pr 777 -RollingHistoryEntries $entries
@@ -1885,7 +1920,7 @@ Describe 'Rolling baseline (issue #489 CE Gate follow-up)' {
             $withNoEntries = script:ConvertTo-CostBaselineHarvestSummaryFromSection -Section $section -Pr 777 -RollingHistoryEntries $null
             $withNoEntries.ContainsKey('rolling_baseline_usd') | Should -Be $false
 
-            $tooFewEntries = @(@{ pr = 300; totals = @{ cost_estimate_usd = 1.00 } })
+            $tooFewEntries = @(@{ pr = 300; capture_point = 'end-of-session'; totals = @{ cost_estimate_usd = 1.00 } })
             $withTooFew = script:ConvertTo-CostBaselineHarvestSummaryFromSection -Section $section -Pr 777 -RollingHistoryEntries $tooFewEntries
             $withTooFew.ContainsKey('rolling_baseline_usd') | Should -Be $false
         }
@@ -1926,6 +1961,16 @@ $extraLine-->
             $sourceCommentLink = 'https://github.com/example/repo/pull/48940#issuecomment-90011'
             $originalBody = New-S5PrBody -CostSummarySubtree "cost_summary:`n  capture_point: pr-creation-mid-session`n  source_comment: $sourceCommentLink"
             $compositeBody = New-HarvestCompositeCommentBody -Pr $pr
+
+            # F9: the source_comment is validated against THIS repo (resolved
+            # from the git remote) before it is preserved — mock the remote to
+            # match the link's owner/repo (example/repo) so this legitimate,
+            # same-repo, same-PR link is preserved.
+            function global:git {
+                param([Parameter(ValueFromRemainingArguments = $true)]$GitArgs)
+                if (($GitArgs -join ' ') -match 'remote\.origin\.url') { return 'https://github.com/example/repo.git' }
+                return ''
+            }
 
             function global:Get-CostRollingHistory {
                 return @{ timed_out = $false; entries = @(New-HarvestCandidateEntry -Pr $pr) }
@@ -2018,6 +2063,251 @@ $extraLine-->
             $result.Promoted | Should -Be $true
             $result.Signal | Should -Be "upgraded #$pr to end-of-session"
         }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# F2/F10 + F9 (issue #489 lite re-verification, judge-sustained):
+#   F2/F10 — Invoke-CostBaselineHarvestBodySummaryWrite must re-fetch the live
+#            PR body immediately before the write so a concurrent body edit
+#            during the caller's snapshot->write window is not clobbered by
+#            the whole-body `gh pr edit --body-file` replace.
+#   F9     — a PR-body-derived source_comment is untrusted and must be
+#            validated (this repo, this PR) before it is re-emitted into the
+#            regenerated cost_summary.
+# These exercise the shared writer wrapper directly rather than through the
+# full harvest, so the concurrency window and the trust check are isolated.
+# ---------------------------------------------------------------------------
+Describe 'Invoke-CostBaselineHarvestBodySummaryWrite — concurrency guard (F2/F10) + source_comment validation (F9)' {
+
+    BeforeAll {
+        function global:New-F2F10Body {
+            param([string]$CostSummarySubtree = '', [string]$Marker = 'ORIGINAL')
+            $extraLine = if ([string]::IsNullOrEmpty($CostSummarySubtree)) { '' } else { "$CostSummarySubtree`n" }
+            return @"
+## Summary
+Concurrent-edit-marker: $Marker
+
+<!-- pipeline-metrics
+metrics_version: 4
+credits:
+  - port: implement-code
+    adapter: agents/Code-Smith.agent.md
+    status: complete
+$extraLine-->
+"@
+        }
+        $script:F2F10CostSummary = @{
+            cost_usd_total       = 3.33
+            tokens               = @{ input = 10; output = 5; cache_creation = 0; cache_read = 0 }
+            session_completeness = 'complete'
+            capture_point        = 'end-of-session'
+        }
+    }
+
+    AfterAll {
+        Remove-Item function:git -ErrorAction SilentlyContinue
+    }
+
+    Context 'F2/F10: writes against the freshly re-fetched body' {
+        It 'writes cost_summary into the FRESH re-fetched body, not the caller''s stale snapshot' {
+            $snapshotBody = New-F2F10Body -Marker 'ORIGINAL'
+            $freshBody = New-F2F10Body -Marker 'CONCURRENT-EDIT'
+
+            $script:GhBodyFileContent = $null
+            function global:gh {
+                param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+                $joined = $Args -join ' '
+                $global:LASTEXITCODE = 0
+                if ($joined -match 'pr view 700 --json body') {
+                    return (@{ body = $freshBody } | ConvertTo-Json -Depth 6 -Compress)
+                }
+                if ($joined -match 'pr edit') {
+                    $idx = [Array]::IndexOf($Args, '--body-file')
+                    if ($idx -ge 0 -and $idx + 1 -lt $Args.Count) {
+                        $script:GhBodyFileContent = Get-Content -LiteralPath ([string]$Args[$idx + 1]) -Raw
+                    }
+                    return ''
+                }
+                return ''
+            }
+
+            script:Invoke-CostBaselineHarvestBodySummaryWrite -Pr 700 -PrBody $snapshotBody -CostSummary $script:F2F10CostSummary -Outcome 'refreshed'
+
+            $script:GhBodyFileContent | Should -Not -BeNullOrEmpty
+            $script:GhBodyFileContent | Should -Match 'Concurrent-edit-marker: CONCURRENT-EDIT' -Because 'the write must target the freshly re-fetched body so a concurrent edit survives'
+            $script:GhBodyFileContent | Should -Not -Match 'Concurrent-edit-marker: ORIGINAL'
+            $script:GhBodyFileContent | Should -Match 'cost_usd_total: 3\.33'
+        }
+
+        It 'falls back to the caller''s snapshot when the re-fetch fails (fail-open, write still lands)' {
+            $snapshotBody = New-F2F10Body -Marker 'SNAPSHOT-ONLY'
+
+            $script:GhBodyFileContent = $null
+            function global:gh {
+                param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+                $joined = $Args -join ' '
+                if ($joined -match 'pr view 701 --json body') { $global:LASTEXITCODE = 1; return '' }
+                $global:LASTEXITCODE = 0
+                if ($joined -match 'pr edit') {
+                    $idx = [Array]::IndexOf($Args, '--body-file')
+                    if ($idx -ge 0 -and $idx + 1 -lt $Args.Count) {
+                        $script:GhBodyFileContent = Get-Content -LiteralPath ([string]$Args[$idx + 1]) -Raw
+                    }
+                    return ''
+                }
+                return ''
+            }
+
+            script:Invoke-CostBaselineHarvestBodySummaryWrite -Pr 701 -PrBody $snapshotBody -CostSummary $script:F2F10CostSummary -Outcome 'reconciled'
+
+            $script:GhBodyFileContent | Should -Match 'Concurrent-edit-marker: SNAPSHOT-ONLY' -Because 'a failed re-fetch must fail-open to the caller snapshot, not skip the useful write'
+            $script:GhBodyFileContent | Should -Match 'cost_usd_total: 3\.33'
+        }
+    }
+
+    Context 'F9: source_comment validation before re-emit' {
+        BeforeEach {
+            function global:git {
+                param([Parameter(ValueFromRemainingArguments = $true)]$GitArgs)
+                if (($GitArgs -join ' ') -match 'remote\.origin\.url') { return 'https://github.com/example/repo.git' }
+                return ''
+            }
+        }
+
+        It 'preserves a legitimate same-repo, same-PR source_comment link' {
+            $link = 'https://github.com/example/repo/pull/702#issuecomment-555'
+            $freshBody = New-F2F10Body -CostSummarySubtree "cost_summary:`n  capture_point: pr-creation-mid-session`n  source_comment: $link"
+
+            $script:GhBodyFileContent = $null
+            function global:gh {
+                param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+                $joined = $Args -join ' '
+                $global:LASTEXITCODE = 0
+                if ($joined -match 'pr view 702 --json body') { return (@{ body = $freshBody } | ConvertTo-Json -Depth 6 -Compress) }
+                if ($joined -match 'pr edit') {
+                    $idx = [Array]::IndexOf($Args, '--body-file')
+                    if ($idx -ge 0 -and $idx + 1 -lt $Args.Count) { $script:GhBodyFileContent = Get-Content -LiteralPath ([string]$Args[$idx + 1]) -Raw }
+                    return ''
+                }
+                return ''
+            }
+
+            script:Invoke-CostBaselineHarvestBodySummaryWrite -Pr 702 -PrBody $freshBody -CostSummary $script:F2F10CostSummary -Outcome 'refreshed'
+
+            $script:GhBodyFileContent | Should -Match ([regex]::Escape($link)) -Because 'a valid same-repo/same-PR link is trustworthy and must be preserved'
+        }
+
+        It 'does NOT propagate an off-repo source_comment link into the regenerated summary' {
+            $evilLink = 'https://github.com/attacker/phish/pull/702#issuecomment-555'
+            $freshBody = New-F2F10Body -CostSummarySubtree "cost_summary:`n  capture_point: pr-creation-mid-session`n  source_comment: $evilLink"
+
+            $script:GhBodyFileContent = $null
+            function global:gh {
+                param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+                $joined = $Args -join ' '
+                $global:LASTEXITCODE = 0
+                if ($joined -match 'pr view 702 --json body') { return (@{ body = $freshBody } | ConvertTo-Json -Depth 6 -Compress) }
+                if ($joined -match 'pr edit') {
+                    $idx = [Array]::IndexOf($Args, '--body-file')
+                    if ($idx -ge 0 -and $idx + 1 -lt $Args.Count) { $script:GhBodyFileContent = Get-Content -LiteralPath ([string]$Args[$idx + 1]) -Raw }
+                    return ''
+                }
+                return ''
+            }
+
+            script:Invoke-CostBaselineHarvestBodySummaryWrite -Pr 702 -PrBody $freshBody -CostSummary $script:F2F10CostSummary -Outcome 'refreshed'
+
+            $script:GhBodyFileContent | Should -Not -Match ([regex]::Escape('attacker/phish')) -Because 'an untrusted off-repo link must never be re-emitted into the trusted cost_summary'
+        }
+    }
+
+    Context 'F9: Test-CostBaselineHarvestSourceCommentUrl predicate' {
+        BeforeEach {
+            function global:git {
+                param([Parameter(ValueFromRemainingArguments = $true)]$GitArgs)
+                if (($GitArgs -join ' ') -match 'remote\.origin\.url') { return 'https://github.com/example/repo.git' }
+                return ''
+            }
+        }
+
+        It 'accepts this-repo, this-PR pull and issues comment URLs' {
+            script:Test-CostBaselineHarvestSourceCommentUrl -Url 'https://github.com/example/repo/pull/900#issuecomment-1' -Pr 900 | Should -Be $true
+            script:Test-CostBaselineHarvestSourceCommentUrl -Url 'https://github.com/example/repo/issues/900#issuecomment-2' -Pr 900 | Should -Be $true
+        }
+
+        It 'rejects off-repo, wrong-PR, non-github, malformed, and link-breaking URLs' {
+            script:Test-CostBaselineHarvestSourceCommentUrl -Url 'https://github.com/attacker/phish/pull/900#issuecomment-1' -Pr 900 | Should -Be $false
+            script:Test-CostBaselineHarvestSourceCommentUrl -Url 'https://github.com/example/repo/pull/901#issuecomment-1' -Pr 900 | Should -Be $false
+            script:Test-CostBaselineHarvestSourceCommentUrl -Url 'https://evil.example.com/example/repo/pull/900' -Pr 900 | Should -Be $false
+            script:Test-CostBaselineHarvestSourceCommentUrl -Url 'not-a-url' -Pr 900 | Should -Be $false
+            script:Test-CostBaselineHarvestSourceCommentUrl -Url 'https://github.com/example/repo/pull/900)#evil' -Pr 900 | Should -Be $false
+            script:Test-CostBaselineHarvestSourceCommentUrl -Url '' -Pr 900 | Should -Be $false
+        }
+
+        It 'rejects any URL when the repo cannot be resolved from the git remote (fail-safe)' {
+            function global:git {
+                param([Parameter(ValueFromRemainingArguments = $true)]$GitArgs)
+                return ''
+            }
+            script:Test-CostBaselineHarvestSourceCommentUrl -Url 'https://github.com/example/repo/pull/900#issuecomment-1' -Pr 900 | Should -Be $false
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# F11 (issue #489 lite re-verification, judge-sustained): the reconcile pass
+# must be bounded — a per-pass candidate cap so a large merge history cannot
+# process unboundedly at startup, plus a cooperative wall-clock budget. These
+# drive script:Invoke-CostBaselineHarvestReconcilePass directly: each
+# candidate's first `gh` call is a `--json body` fetch, and an already-current
+# body makes the candidate return right after it, so the body-fetch count
+# equals the number of candidates the pass actually processed.
+# ---------------------------------------------------------------------------
+Describe 'Invoke-CostBaselineHarvestReconcilePass — bounded pass (F11)' {
+
+    BeforeAll {
+        $script:F11CurrentBody = "## Summary`n`n<!-- pipeline-metrics`nmetrics_version: 4`ncost_summary:`n  capture_point: end-of-session`n-->"
+    }
+
+    It 'processes at most the per-pass candidate cap, deferring the rest (no error)' {
+        $entries = @(1..8 | ForEach-Object { New-HarvestCandidateEntry -Pr (49000 + $_) -SessionId "session-4900$_" -CapturePoint 'end-of-session' })
+
+        $script:BodyFetchCount = 0
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match '--json body') {
+                $script:BodyFetchCount++
+                return (@{ body = $script:F11CurrentBody } | ConvertTo-Json -Depth 6 -Compress)
+            }
+            return ''
+        }
+
+        { script:Invoke-CostBaselineHarvestReconcilePass -Entries $entries -HorizonDays 14 } | Should -Not -Throw
+
+        $script:BodyFetchCount | Should -Be 5 -Because 'only up to the per-pass cap (5) of the 8 candidates are processed; the remaining 3 are deferred to a later scan'
+    }
+
+    It 'processes every candidate when the set is at or under the cap' {
+        $entries = @(1..3 | ForEach-Object { New-HarvestCandidateEntry -Pr (49100 + $_) -SessionId "session-4910$_" -CapturePoint 'end-of-session' })
+
+        $script:BodyFetchCount = 0
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match '--json body') {
+                $script:BodyFetchCount++
+                return (@{ body = $script:F11CurrentBody } | ConvertTo-Json -Depth 6 -Compress)
+            }
+            return ''
+        }
+
+        script:Invoke-CostBaselineHarvestReconcilePass -Entries $entries -HorizonDays 14
+
+        $script:BodyFetchCount | Should -Be 3 -Because 'a candidate set at or under the cap is fully processed'
     }
 }
 

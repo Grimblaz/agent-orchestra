@@ -630,13 +630,25 @@ function script:Set-FCLPrBodyCostSummary {
     $eol = if ($PrBody.Contains("`r`n")) { "`r`n" } else { "`n" }
     $normalizedBody = $PrBody -replace "`r`n", "`n" -replace "`r", "`n"
 
-    # ---- Fence-aware marker lookup: redact ```-fenced regions to a
-    # same-length filler (so byte offsets stay aligned with $normalizedBody)
-    # before searching for the pipeline-metrics marker, exactly as
+    # ---- Fence-aware marker lookup: redact fenced regions to a same-length
+    # filler (so byte offsets stay aligned with $normalizedBody) before
+    # searching for the pipeline-metrics marker, exactly as
     # Test-PipelineMetricsV4Block does (frame-credit-ledger-core.ps1:3176) —
     # a naive first-match regex would instead splice into a fenced
     # documentation example. ----
-    $fencePattern = '(?s)```.*?```'
+    #
+    # F8 (issue #489 lite re-verification, judge-sustained): the fence
+    # delimiter is a run of 3-or-more backticks OR 3-or-more tildes, closed by
+    # a run of the same character and length (\1 backreference). The prior
+    # exactly-three-backtick pattern left tilde (~~~) fences and 4+-backtick
+    # fences un-redacted, so a `<!-- pipeline-metrics -->` example inside such
+    # a fence could be mis-anchored as the real block. This is the exact
+    # mirror of cost-baseline-harvest.ps1's Get-CostBaselineHarvestBodyCostSummaryField
+    # copy — the two are kept file-local (never a shared top-level $script:
+    # constant) on purpose: this call site runs inside the pipeline hook's
+    # worker-runspace clone, where a new top-level $script: constant marshals
+    # as $null (shipped twice: #825 C3, #487); see this file's header .NOTES.
+    $fencePattern = '(?s)(`{3,}|~{3,}).*?\1'
     $markerPattern = '(?s)(?<open><!--\s*pipeline-metrics\s*)(?<block>.*?)(?<close>\s*-->)'
     $redactFences = {
         param([string]$Text, [string]$Pattern)
