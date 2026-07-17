@@ -432,14 +432,14 @@ Describe 'Format-CostPatternMarkdown' {
             $result | Should -Match '\| experience \|'
         }
 
-        It 'emits dash for ports that did not run' {
+        It 'omits a zero-activity port that did not run (issue #489 s1 suppression)' {
             $attribution = script:New-MinimalAttribution -PortNames @('experience')
             $completeness = script:New-Completeness
             $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
-            # design port not in attribution -> should appear as zero-dispatch row with dashes
-            $result | Should -Match '\| design \|'
-            # The design row should show 0 dispatches and dashes for tokens/cost
-            $result | Should -Match '\| design \| 0 \|'
+            # design port not in attribution and carries no anomaly flag -> suppressed,
+            # not rendered as a zero-dispatch dash row (issue #489 s1 changed this).
+            $result | Should -Not -Match '\| design \|'
+            $result | Should -Match 'ports had zero dispatches, zero attributed cost, and zero token activity, and are omitted from this table\.'
         }
 
         It 'emits orchestrator-overhead row' {
@@ -610,6 +610,29 @@ Describe 'Format-CostPatternMarkdown' {
             $flags = @(script:New-AnomalyFlag -Metric 'dispatches.per_port[experience]' -Port 'experience')
             $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness -AnomalyFlags $flags
             # design port has no anomaly flag — its row should show " — " in anomaly column
+            $lines = $result -split "`n"
+            $designLine = $lines | Where-Object { $_ -match '\| design \|' }
+            $designLine | Should -Match ' — '
+        }
+
+        It 'treats a flag with a null metric as no anomaly rather than a blank name (C14)' {
+            $attribution = script:New-MinimalAttribution -PortNames @('design')
+            $completeness = script:New-Completeness
+            # Built directly (not via New-AnomalyFlag) — that helper's [string]
+            # parameter coerces a $null argument to '', which would not
+            # exercise the true-null case this fix targets.
+            $flags = @(@{ metric = $null; port = 'design'; direction = 'shrink'; confidence = 'medium' })
+            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness -AnomalyFlags $flags
+            $lines = $result -split "`n"
+            $designLine = $lines | Where-Object { $_ -match '\| design \|' }
+            $designLine | Should -Match ' — '
+        }
+
+        It 'treats a flag with a blank metric as no anomaly rather than a blank name (C14)' {
+            $attribution = script:New-MinimalAttribution -PortNames @('design')
+            $completeness = script:New-Completeness
+            $flags = @(script:New-AnomalyFlag -Metric '' -Port 'design')
+            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness -AnomalyFlags $flags
             $lines = $result -split "`n"
             $designLine = $lines | Where-Object { $_ -match '\| design \|' }
             $designLine | Should -Match ' — '
@@ -842,6 +865,194 @@ Describe 'Format-CostPatternMarkdown' {
             $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
             $result | Should -Match '3 cost event\(s\) had unknown models not present in `cost-rate-table\.json`'
             $result | Should -Not -Match 'models missing from the rate table:'
+        }
+    }
+}
+
+Describe 'Build-CostPatternTable suppression (issue #489 s1)' {
+    BeforeAll {
+        $script:LibPath = Join-Path $PSScriptRoot '../lib/cost-pattern-renderer.ps1'
+        if (Test-Path $script:LibPath) {
+            . $script:LibPath
+        }
+
+        # Local copy of the renderer's canonical port order (issue #489 s1 fixture
+        # scope). Each Describe block in this file owns its own fixture helpers
+        # rather than sharing state with sibling Describe blocks (existing
+        # file convention — see New-YamlAttribution vs New-MinimalAttribution).
+        $script:SuppressionPortOrder = @(
+            'experience', 'design', 'plan', 'orchestration',
+            'implement-code', 'implement-test', 'implement-refactor', 'implement-docs',
+            'review', 'process-review'
+        )
+
+        function script:New-SuppressionActivePortBucket {
+            return @{
+                tokens               = @{ input = 100; output = 50; cache_creation = 10; cache_read = 20 }
+                dispatch_count       = 1
+                cost_estimate_usd    = 0.01
+                cache_read_hit_ratio = 0.2
+                mixed_regime         = $false
+            }
+        }
+
+        function script:New-SuppressionZeroPortBucket {
+            return @{
+                tokens               = @{ input = 0; output = 0; cache_creation = 0; cache_read = 0 }
+                dispatch_count       = 0
+                cost_estimate_usd    = 0.0
+                cache_read_hit_ratio = 0.0
+                mixed_regime         = $false
+            }
+        }
+
+        function script:New-SuppressionAttribution {
+            <#
+            .SYNOPSIS
+                Every canonical port is present (in-attribution) and active by
+                default; -PortOverrides replaces specific port buckets so a test
+                can isolate exactly the ports it wants to exercise without the
+                other nine canonical ports also rendering as suppressible zero
+                rows and polluting the omission count.
+            #>
+            param([hashtable]$PortOverrides = @{})
+
+            $ports = @{}
+            foreach ($p in $script:SuppressionPortOrder) {
+                $ports[$p] = if ($PortOverrides.ContainsKey($p)) { $PortOverrides[$p] } else { script:New-SuppressionActivePortBucket }
+            }
+            return @{
+                ports                 = $ports
+                orchestrator_overhead = @{
+                    tokens               = @{ input = 0; output = 0; cache_creation = 0; cache_read = 0 }
+                    cost_estimate_usd    = 0.0
+                    cache_read_hit_ratio = 0.0
+                }
+                dispatches            = @{ general_purpose_count = 0; unattributed_count = 0 }
+                totals                = @{
+                    tokens            = @{ input = 0; output = 0; cache_creation = 0; cache_read = 0 }
+                    cost_estimate_usd = 0.0
+                }
+            }
+        }
+
+        function script:Get-SuppressionRow {
+            param(
+                [Parameter(Mandatory)][string]$Markdown,
+                [Parameter(Mandatory)][string]$PortLabel
+            )
+            return @($Markdown -split "`n" | Where-Object { $_ -like "| $PortLabel |*" })[0]
+        }
+    }
+
+    Context 'suppression-fires' {
+        It 'omits a fully-zero-activity port and emits the singular omission line for exactly one suppressed row' {
+            $attribution = script:New-SuppressionAttribution -PortOverrides @{ design = (script:New-SuppressionZeroPortBucket) }
+
+            $result = script:Build-CostPatternTable -Attribution $attribution -AnomalyFlags @()
+
+            script:Get-SuppressionRow -Markdown $result -PortLabel 'design' | Should -BeNullOrEmpty
+            $result | Should -Match ([regex]::Escape("`n`n1 port had zero dispatches, zero attributed cost, and zero token activity, and is omitted from this table."))
+        }
+
+        It 'emits the plural omission line when more than one row is suppressed' {
+            $attribution = script:New-SuppressionAttribution -PortOverrides @{
+                design = (script:New-SuppressionZeroPortBucket)
+                plan   = (script:New-SuppressionZeroPortBucket)
+            }
+
+            $result = script:Build-CostPatternTable -Attribution $attribution -AnomalyFlags @()
+
+            script:Get-SuppressionRow -Markdown $result -PortLabel 'design' | Should -BeNullOrEmpty
+            script:Get-SuppressionRow -Markdown $result -PortLabel 'plan' | Should -BeNullOrEmpty
+            $result | Should -Match ([regex]::Escape("`n`n2 ports had zero dispatches, zero attributed cost, and zero token activity, and are omitted from this table."))
+        }
+    }
+
+    Context 'suppression-no-op' {
+        It 'keeps a port visible when it carries any non-zero signal' {
+            $partialBucket = script:New-SuppressionZeroPortBucket
+            $partialBucket['tokens']['output'] = 5
+            $attribution = script:New-SuppressionAttribution -PortOverrides @{ design = $partialBucket }
+
+            $result = script:Build-CostPatternTable -Attribution $attribution -AnomalyFlags @()
+
+            script:Get-SuppressionRow -Markdown $result -PortLabel 'design' | Should -Not -BeNullOrEmpty
+            $result | Should -Not -Match 'omitted from this table'
+        }
+    }
+
+    Context 'cache-read-active-retained' {
+        It 'keeps a zero-dispatch, zero-cost port visible when cache_read tokens are nonzero' {
+            $cacheOnlyBucket = script:New-SuppressionZeroPortBucket
+            $cacheOnlyBucket['tokens']['cache_read'] = 40
+            $attribution = script:New-SuppressionAttribution -PortOverrides @{ design = $cacheOnlyBucket }
+
+            $result = script:Build-CostPatternTable -Attribution $attribution -AnomalyFlags @()
+
+            script:Get-SuppressionRow -Markdown $result -PortLabel 'design' | Should -Not -BeNullOrEmpty
+            $result | Should -Not -Match 'omitted from this table'
+        }
+    }
+
+    Context 'anomaly-flagged-zero-row-retained' {
+        It 'keeps a fully-zero-activity port visible when it carries an anomaly flag' {
+            $attribution = script:New-SuppressionAttribution -PortOverrides @{ design = (script:New-SuppressionZeroPortBucket) }
+            $flags = @(@{ metric = 'dispatches.per_port[design]'; port = 'design'; direction = 'shrink'; confidence = 'medium' })
+
+            $result = script:Build-CostPatternTable -Attribution $attribution -AnomalyFlags $flags
+
+            script:Get-SuppressionRow -Markdown $result -PortLabel 'design' | Should -Not -BeNullOrEmpty
+            $result | Should -Not -Match 'omitted from this table'
+        }
+    }
+
+    Context 'blank-metric-anomaly-does-not-block-suppression (C14)' {
+        It 'suppresses a zero-activity port whose only anomaly flag has a null metric' {
+            $attribution = script:New-SuppressionAttribution -PortOverrides @{ design = (script:New-SuppressionZeroPortBucket) }
+            $flags = @(@{ metric = $null; port = 'design'; direction = 'shrink'; confidence = 'medium' })
+
+            $result = script:Build-CostPatternTable -Attribution $attribution -AnomalyFlags $flags
+
+            script:Get-SuppressionRow -Markdown $result -PortLabel 'design' | Should -BeNullOrEmpty
+            $result | Should -Match 'omitted from this table'
+        }
+
+        It 'suppresses a zero-activity port whose only anomaly flag has a blank metric' {
+            $attribution = script:New-SuppressionAttribution -PortOverrides @{ design = (script:New-SuppressionZeroPortBucket) }
+            $flags = @(@{ metric = ''; port = 'design'; direction = 'shrink'; confidence = 'medium' })
+
+            $result = script:Build-CostPatternTable -Attribution $attribution -AnomalyFlags $flags
+
+            script:Get-SuppressionRow -Markdown $result -PortLabel 'design' | Should -BeNullOrEmpty
+            $result | Should -Match 'omitted from this table'
+        }
+    }
+
+    Context 'in-attribution-YAML-retention' {
+        It 'keeps a suppressed in-attribution port present in Format-CostPatternYaml output (machine block is render-layer-independent)' {
+            $attribution = script:New-SuppressionAttribution -PortOverrides @{ design = (script:New-SuppressionZeroPortBucket) }
+            $completeness = @{ completeness = 'complete'; stop_reason = 'end_turn'; excluded_from_rolling_baseline = $false; exclude_reason = '' }
+
+            $table = script:Build-CostPatternTable -Attribution $attribution -AnomalyFlags @()
+            $yaml = Format-CostPatternYaml -Attribution $attribution -Completeness $completeness
+
+            script:Get-SuppressionRow -Markdown $table -PortLabel 'design' | Should -BeNullOrEmpty
+            $yaml | Should -Match '(?m)^  - name: design$'
+        }
+    }
+
+    Context 'render-twice-identical' {
+        It 'produces byte-identical output across two calls against the same fixture (AC4 re-run idempotency)' {
+            $attribution = script:New-SuppressionAttribution -PortOverrides @{
+                design = (script:New-SuppressionZeroPortBucket)
+                plan   = (script:New-SuppressionZeroPortBucket)
+            }
+
+            $first = script:Build-CostPatternTable -Attribution $attribution -AnomalyFlags @()
+            $second = script:Build-CostPatternTable -Attribution $attribution -AnomalyFlags @()
+
+            $second | Should -BeExactly $first
         }
     }
 }

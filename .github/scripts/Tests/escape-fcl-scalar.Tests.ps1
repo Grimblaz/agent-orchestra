@@ -4,9 +4,14 @@
 
 # Tests for the private script:Escape-FCLScalar helper's YAML scalar-escaping
 # correctness (issue #812), exercised indirectly through the public
-# New-PipelineMetricsV4Block builder (Escape-FCLScalar is nested inside that
-# function and is not reachable as a standalone script-scope function after
-# dot-sourcing).
+# New-PipelineMetricsV4Block builder.
+#
+# issue #489 s2: script:Escape-FCLScalar was hoisted from a function nested
+# inside New-PipelineMetricsV4Block to file scope, specifically so it is
+# reachable as a standalone script-scope function immediately after
+# dot-sourcing this file alone — the shape the cost-baseline-harvest dot-source
+# chain actually uses. The 'resolves standalone' test below is the regression
+# guard for that reachability contract.
 #
 # Library under test: .github/scripts/lib/frame-credit-ledger-core.ps1
 #
@@ -46,6 +51,34 @@ BeforeAll {
         $parsed = ConvertFrom-Yaml -Yaml $match.Groups['yaml'].Value
         $reviewCredit = @($parsed['credits']) | Where-Object { $_['port'] -eq 'review' }
         return $reviewCredit['evidence']
+    }
+}
+
+Describe 'Escape-FCLScalar standalone reachability (issue #489 s2)' {
+
+    It 'resolves as script:Escape-FCLScalar immediately after dot-sourcing frame-credit-ledger-core.ps1 alone, with no other call into the file first' {
+        # This is the actual shape the cost-baseline-harvest dot-source chain
+        # uses: dot-source the core lib and call the escaper directly, never
+        # having called New-PipelineMetricsV4Block first. This Describe block
+        # is deliberately placed ahead of the round-trip Describe below (whose
+        # Its call New-PipelineMetricsV4Block) so this assertion cannot pass
+        # merely because an earlier test's side effect already defined the
+        # function — Pester runs Describe blocks in file order, and if
+        # Escape-FCLScalar were ever re-nested inside New-PipelineMetricsV4Block,
+        # this test (running first) would fail rather than incidentally
+        # passing due to test order.
+        #
+        # Get-Command with -CommandType Function proves the function is a
+        # first-class, file-scope definition rather than something that only
+        # exists as a side effect of another function's invocation. Get-Command
+        # does not resolve scope-qualified names (e.g. 'script:Foo' returns
+        # nothing even when the function exists) — query the bare name; the
+        # call below still uses the 'script:' prefix to match the codebase's
+        # own call-site convention.
+        $resolved = Get-Command -Name 'Escape-FCLScalar' -CommandType Function -ErrorAction SilentlyContinue
+        $resolved | Should -Not -BeNullOrEmpty -Because 'Escape-FCLScalar must be a file-scope function, not nested inside New-PipelineMetricsV4Block'
+
+        script:Escape-FCLScalar -Value 'plain: value with a colon' | Should -Be "'plain: value with a colon'"
     }
 }
 

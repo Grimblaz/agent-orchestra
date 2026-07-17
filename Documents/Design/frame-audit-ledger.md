@@ -102,6 +102,8 @@ The additive v4 fields are:
 
 This schema remains additive. The authoritative source for inherited v1-v3 fields and semantics stays in `skills/calibration-pipeline/references/metrics-schema.md`. The frame schema only owns the frame-specific extension and the report-layer interpretation of that extension.
 
+**`cost_summary` (issue #489)**: a further additive v4 field carrying a dollar-per-PR headline (`cost_usd_total`), a projected token/completeness/capture-point subset, and a `source_comment` link back to the full cost-breakdown comment. No `metrics_version` or `frame_version` bump — detected by presence, like the other additive fields above. It projects a subset of the `<!-- cost-pattern-data ... -->` comment block's `version: 1` fields, so a future bump to that source schema has a detectable join point. Full field-level detail lives in `frame/pipeline-metrics-v4-schema.md` § `cost_summary`; the projected fields' own semantics stay normatively owned by `.github/scripts/lib/cost-pattern-data-schema.md`.
+
 ## Historical Back-Derivation
 
 `Invoke-FrameBackDerive` accepts historical `metrics_version` inputs `1`, `2`, `3`, and `4` and lifts them into one current frame audit surface.

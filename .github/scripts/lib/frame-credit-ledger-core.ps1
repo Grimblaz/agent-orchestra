@@ -28,7 +28,7 @@
                                            hashtable arrays. Initial-creation-only; not an updater.
 
     Validation functions (issue #739 s3):
-      - Test-PipelineMetricsV4Block       : validate that a PR body's pipeline-metrics block is canonical
+      - Test-PipelineMetricsV4Block       : validate that a PR body pipeline-metrics block is canonical
                                            v4 shape (version==4, single non-fenced marker, non-empty
                                            credits). Self-correcting: bounded retry rebuilds from the
                                            authoritative draft. Never throws.
@@ -144,7 +144,7 @@ function script:Get-FCLScalar {
         if ($first -eq '"' -and $last -eq '"') {
             $value = $value.Substring(1, $value.Length - 2)
             # YAML double-quoted scalar: unescape \\ to a literal backslash first,
-            # then \" to a literal " (reverse of the writer's escape order in
+            # then \" to a literal " (reverse of the writer escape order in
             # Escape-FCLScalar, which escapes \ before " — see issue #812).
             $value = $value -replace '\\\\', '\'
             $value = $value -replace '\\"', '"'
@@ -186,7 +186,7 @@ function script:Test-FCLYamlSane {
         $afterColon = $stripped.Substring($colonIdx + 1).Trim()
         if ($afterColon.StartsWith('"')) {
             # Must be a well-formed double-quoted scalar: opening quote, a run of
-            # (any char that isn't backslash or quote) or (a backslash-escaped
+            # (any char that is not backslash or quote) or (a backslash-escaped
             # pair), then a closing quote. A naive greedy strip-then-check of
             # `\"` occurrences misclassifies values whose real closing quote is
             # preceded by an even number of backslashes (e.g. a genuine escaped
@@ -268,7 +268,7 @@ function script:ConvertFrom-FCLListSection {
                             $val = $val.Substring(1, $val.Length - 2)
                             # YAML double-quoted scalar: unescape \\ to a literal
                             # backslash first, then \" to a literal " (reverse of
-                            # the writer's escape order — see issue #812).
+                            # the writer escape order — see issue #812).
                             $val = $val -replace '\\\\', '\'
                             $val = $val -replace '\\"', '"'
                         } elseif ($first -eq "'" -and $last -eq "'") {
@@ -295,7 +295,7 @@ function script:ConvertFrom-FCLListSection {
                         $val = $val.Substring(1, $val.Length - 2)
                         # YAML double-quoted scalar: unescape \\ to a literal
                         # backslash first, then \" to a literal " (reverse of
-                        # the writer's escape order — see issue #812).
+                        # the writer escape order — see issue #812).
                         $val = $val -replace '\\\\', '\'
                         $val = $val -replace '\\"', '"'
                     } elseif ($first -eq "'" -and $last -eq "'") {
@@ -431,7 +431,7 @@ function script:Get-FCLChunkKeyMap {
             if ($first -eq '"' -and $last -eq '"') {
                 $val = $val.Substring(1, $val.Length - 2)
                 # YAML double-quoted scalar: unescape \\ to a literal backslash
-                # first, then \" to a literal " (reverse of the writer's escape
+                # first, then \" to a literal " (reverse of the writer escape
                 # order — see issue #812). One of now 4 duplicated double-quoted-
                 # scalar decode sites in this file (Get-FCLScalar,
                 # ConvertFrom-FCLListSection x2 internal sites,
@@ -446,7 +446,7 @@ function script:Get-FCLChunkKeyMap {
         }
 
         # Pop deeper-or-equal entries off the stack so we ascend back to the
-        # current indent's parent before recording the key.
+        # current indent parent before recording the key.
         while ($stack.Count -gt 0 -and $stack[$stack.Count - 1].Indent -ge $indent) {
             $stack.RemoveAt($stack.Count - 1)
         }
@@ -477,7 +477,7 @@ function script:ConvertTo-FCLScalarValue {
         if ($first -eq '"' -and $last -eq '"') {
             $normalizedValue = $normalizedValue.Substring(1, $normalizedValue.Length - 2)
             # YAML double-quoted scalar: unescape \\ to a literal backslash
-            # first, then \" to a literal " (reverse of the writer's escape
+            # first, then \" to a literal " (reverse of the writer escape
             # order — see issue #812). One of now 4 duplicated double-quoted-
             # scalar decode sites in this file (Get-FCLScalar,
             # ConvertFrom-FCLListSection x2 internal sites,
@@ -646,7 +646,7 @@ function script:Set-FCLDispatchCostSamplesSection {
         }
     }
 
-    # Build merged list: existing rows that aren't overridden + all incoming samples
+    # Build merged list: existing rows that are not overridden + all incoming samples
     $mergedRows = [System.Collections.Generic.List[object]]::new()
     foreach ($existing in $existingRows) {
         $override = $null
@@ -721,7 +721,7 @@ function script:Set-FCLDispatchCostSamplesInPrBody {
 
 # region: shared port-report helpers --------------------------------------------
 
-# Normalize an adapter's SuggestedNextStep field. Treat null/whitespace and the
+# Normalize an adapter SuggestedNextStep field. Treat null/whitespace and the
 # literal sentinel 'none' as "no next step"; otherwise return the trimmed
 # string.
 function script:Resolve-FCLNextStep {
@@ -1123,7 +1123,7 @@ function Update-DispatchCostSampleEvaluationInPrBody {
         # This prevents cross-provider contamination once multi-provider rows coexist (post-#545).
         $providerMatch = if ($filterByProvider) { $sampleProvider -eq $Provider } else { [string]::IsNullOrEmpty($sampleProvider) }
         # Without -Model: match any row regardless of model (opt-in — back-fill callers that
-        # don't know the model tier should still be able to update all matching rows).
+        # do not know the model tier should still be able to update all matching rows).
         # With -Model: match only rows whose model equals the specified value.
         # This prevents cross-model contamination when the caller knows which model row to target.
         $modelMatch = if ($filterByModel) { $sampleModel -eq $Model } else { $true }
@@ -1134,7 +1134,7 @@ function Update-DispatchCostSampleEvaluationInPrBody {
             if ($PSBoundParameters.ContainsKey('RcConformance')) { $updatedRcConformance = $RcConformance }
             if ($PSBoundParameters.ContainsKey('JudgeDisposition')) { $updatedJudgeDisposition = $JudgeDisposition }
 
-            # Preserve the existing row's provider and model fields — never drop on back-fill (issue #514 F1 for provider; mirrors for model)
+            # Preserve the existing row provider and model fields — never drop on back-fill (issue #514 F1 for provider; mirrors for model)
             $preservedProvider = if ($sample.PSObject.Properties['provider']) { [string]$sample.provider } else { $null }
             $providerArgs = @{}
             if (-not [string]::IsNullOrEmpty($preservedProvider)) { $providerArgs['Provider'] = $preservedProvider }
@@ -1206,7 +1206,7 @@ function ConvertFrom-JudgeRulingsComment {
 # Build-ReviewCreditRow (issue #441, Step 8b — Decision 2 + M1 emission)
 # ---------------------------------------------------------------------------
 # Construct a v4 review credit row from a judge-rulings PR comment + adapter
-# integrity contract.  Used by Code-Conductor's pipeline-metrics emitter at
+# integrity contract.  Used by Code-Conductor pipeline-metrics emitter at
 # PR creation time.
 #
 # Parameters:
@@ -1411,7 +1411,7 @@ function Build-ReviewCreditRow {
     # integrity-specific details (prosecution passes, integrity status) instead
     # of repeating "N finding(s) sustained, status: X" a second time. Custom
     # $Evidence (caller-supplied) still gets the full judge-ruling + integrity
-    # clause appended, since the caller's text is not guaranteed to already
+    # clause appended, since the caller text is not guaranteed to already
     # carry that information.
     if (-not [string]::IsNullOrWhiteSpace($Evidence)) {
         $resolvedEvidence = $Evidence
@@ -1720,7 +1720,7 @@ function Resolve-FCLRecoveryCommand {
         'NoEvidence'             = "No adapters or credits found for port '$PortName'. Check that the frame spine declares this port and that credits were emitted."
         'MissingNextStepField'   = "Adapter for port '$PortName' has no SuggestedNextStep field. Update the adapter YAML to include a suggested-next-step value."
         'AdapterParseError'      = "Adapter YAML for port '$PortName' failed to parse. Fix the adapter file syntax and re-run the hook."
-        'AdapterDiscoveryFailed' = "All adapters for port '$PortName' returned unknown applicability. Check that the adapter's applies-when predicate is correctly wired."
+        'AdapterDiscoveryFailed' = "All adapters for port '$PortName' returned unknown applicability. Check that the adapter applies-when predicate is correctly wired."
         'UnknownCreditStatus'    = "Credit for port '$PortName' has an unrecognized status. Valid statuses: passed, failed, skipped, not-applicable, inconclusive, not-persisted, overridden."
     }
 
@@ -1839,7 +1839,7 @@ function Resolve-PortStatus {
         $applicableAdapterName = if ($firstApplicableAdapter) { [string]$firstApplicableAdapter.Name } else { '' }
 
         # Map credit status -> (PortStatus, SubReason, includeNextStep). When
-        # includeNextStep is true the adapter's SuggestedNextStep flows through;
+        # includeNextStep is true the adapter SuggestedNextStep flows through;
         # otherwise it is forced to $null.
         $creditMap = @{
             'passed'         = @{ Status = 'Covered'; SubReason = 'PassedCredit'; IncludeNextStep = $false }
@@ -2354,7 +2354,7 @@ function Build-PlanCreditRow {
 # ---------------------------------------------------------------------------
 # NOTE: This function shadow-duplicates Build-ExperienceCreditRow / Build-DesignCreditRow / Build-PlanCreditRow.
 # A future refactor (see issue #577 review P1.F7) should extract a shared Build-FCLPipelineEntryCreditRow
-# helper accepting -Port, -CompletionMarkerTemplate, and -AgentName, mirroring the implement-* family's
+# helper accepting -Port, -CompletionMarkerTemplate, and -AgentName, mirroring the implement-* family
 # Build-FCLImplementCreditRow consolidation pattern. Tracked as routine technical debt.
 function Build-OrchestrationCreditRow {
     [CmdletBinding()]
@@ -2614,11 +2614,11 @@ function Build-DeferredPortCreditRow {
 function Invoke-CreditInputHarvest {
     <#
     .SYNOPSIS
-        Harvests credit-input deferred-emission markers from a GitHub issue's comments
+        Harvests credit-input deferred-emission markers from a GitHub issue comments
         and returns an array of credit rows, one per recognized port (SMC-17).
 
     .DESCRIPTION
-        For each pipeline-entry port (experience, design, plan), scans the issue's
+        For each pipeline-entry port (experience, design, plan), scans the issue
         comment thread for a <!-- credit-input-{port}-{ID} --> marker, parses the
         YAML payload, and calls the matching Build-*CreditRow with the parsed evidence.
 
@@ -2766,8 +2766,8 @@ function Invoke-CreditInputHarvest {
     # comment thread before the loop even starts (which wastes a gh call when every port is
     # satisfied by an in-memory marker and never reaches the gh-fetch branch below), the fetch is
     # lazily computed via $initialFetchResult on first entry into the gh-fetch branch, then reused
-    # as the initial state for every port's first attempt from that point on — instead of each of
-    # the remaining ports independently calling Get-IssueComments for the same thread. Each port's
+    # as the initial state for every port first attempt from that point on — instead of each of
+    # the remaining ports independently calling Get-IssueComments for the same thread. Each port
     # own read-after-write retry loop may still re-fetch on subsequent attempts (attempt > 0) — the
     # shared fetch only replaces the redundant *first* fetch per port.
     $initialFetchResult = $null
@@ -2776,7 +2776,7 @@ function Invoke-CreditInputHarvest {
         # Use in-memory marker when available (bypasses gh for this port).
         # Enforce burst-halt invariant: credit-input is only honored when the corresponding
         # engagement-record completion marker is also present (parallels the gh-fetched
-        # branch's `$null -ne $completionPresent` guard at the bottom of this function).
+        # branch `$null -ne $completionPresent` guard at the bottom of this function).
         #
         # When in-memory completion IS present: emit the credit row directly (no gh needed).
         # When in-memory completion is NOT present but credit-input IS in-memory: fall through
@@ -2880,6 +2880,66 @@ function Invoke-CreditInputHarvest {
 }
 
 # ===========================================================================
+# Escape-FCLScalar (issue #489 s2 — hoisted from New-PipelineMetricsV4Block
+# to file scope so the escaper is reachable by callers other than that
+# composer, e.g. the cost-baseline-harvest dot-source chain).
+#
+# Escape a scalar value so it is safe inside an HTML comment and survives
+# the reader first-':' split + quote-strip in Get-FCLScalar.
+#
+# Escape rules:
+#   1. --> -> --&gt;          (would terminate the HTML comment early)
+#   2. <!-- pipeline-metrics -> <!-- pipeline&#8208;metrics (avoid nested opener)
+#   3. ``` -> &#96;&#96;&#96; (avoids confusing Markdown renderers)
+#
+# YAML quoting rule: quote scalars containing ':', '#', leading/trailing
+# spaces, or quote characters so Get-FCLScalar can read them without
+# truncation at the first ':'.
+# ===========================================================================
+function script:Escape-FCLScalar {
+    param([AllowEmptyString()][string]$Value)
+
+    if ([string]::IsNullOrEmpty($Value)) { return $Value }
+
+    # Fold embedded newlines to space — YAML single-line scalar constraint.
+    # Multi-line values split key: value pairs across physical lines, truncating evidence.
+    $v = $Value -replace '\r\n', ' ' -replace '\r', ' ' -replace '\n', ' '
+
+    # Escaping
+    $v = $v -replace '-->', '--&gt;'
+    $v = $v -replace '<!--\s*pipeline-metrics', '<!-- pipeline&#8208;metrics'
+    $v = $v -replace '```', '&#96;&#96;&#96;'
+
+    # YAML quoting: wrap in single quotes when the value contains ':',
+    # '#', a leading/trailing space, or a single/double quote character.
+    # Use double-quote wrapping when the value already contains a single
+    # quote (escape the double quotes inside as \").
+    $needsQuoting = ($v -match ':') -or
+                    ($v -match '#') -or
+                    ($v -match "^[ \t]") -or
+                    ($v -match "[ \t]$") -or
+                    ($v -match "^['""]") -or
+                    ($v -match "['""]$")
+
+    if ($needsQuoting) {
+        if ($v.Contains("'")) {
+            # Use double-quote wrapping; YAML double-quoted scalars escape a
+            # literal backslash as \\ and a literal " as \" (escape the
+            # backslash first so the \" introduced below is not re-escaped).
+            # Note: in PowerShell -replace, a replacement string of '\\'
+            # (two backslash chars) already emits a literal \\ — '\\\\'
+            # (four chars) would double-escape and emit four backslashes.
+            $v = $v -replace '\\', '\\'
+            $v = $v -replace '"', '\"'
+            return '"' + $v + '"'
+        }
+        return "'" + $v + "'"
+    }
+
+    return $v
+}
+
+# ===========================================================================
 # New-PipelineMetricsV4Block (issue #739 s2 — AC1)
 #
 # Builds a canonical <!-- pipeline-metrics ... --> v4 HTML-comment block
@@ -2892,7 +2952,7 @@ function Invoke-CreditInputHarvest {
 # Round-trip coverage: scalar fields + credits[] + dispatch-cost-samples[]
 # survive Read-PRMetricsBlock.  Nested lists (judge-score.findings[],
 # prosecution-passes, files-checked) are write-only — reader drops them
-# silently via Get-FCLChunkKeyMap's flat hashtable.
+# silently via Get-FCLChunkKeyMap flat hashtable.
 # ===========================================================================
 function New-PipelineMetricsV4Block {
     [CmdletBinding()]
@@ -2964,62 +3024,6 @@ function New-PipelineMetricsV4Block {
         $_.PSObject.Properties | ForEach-Object { $ht[$_.Name] = $_.Value }
         $ht
     })
-
-    # -----------------------------------------------------------------------
-    # Helper: escape a scalar value so it is safe inside an HTML comment and
-    # survives the reader's first-':' split + quote-strip in Get-FCLScalar.
-    #
-    # Escape rules:
-    #   1. --> -> --&gt;          (would terminate the HTML comment early)
-    #   2. <!-- pipeline-metrics -> <!-- pipeline&#8208;metrics (avoid nested opener)
-    #   3. ``` -> &#96;&#96;&#96; (avoids confusing Markdown renderers)
-    #
-    # YAML quoting rule: quote scalars containing ':', '#', leading/trailing
-    # spaces, or quote characters so Get-FCLScalar can read them without
-    # truncation at the first ':'.
-    # -----------------------------------------------------------------------
-    function script:Escape-FCLScalar {
-        param([AllowEmptyString()][string]$Value)
-
-        if ([string]::IsNullOrEmpty($Value)) { return $Value }
-
-        # Fold embedded newlines to space — YAML single-line scalar constraint.
-        # Multi-line values split key: value pairs across physical lines, truncating evidence.
-        $v = $Value -replace '\r\n', ' ' -replace '\r', ' ' -replace '\n', ' '
-
-        # Escaping
-        $v = $v -replace '-->', '--&gt;'
-        $v = $v -replace '<!--\s*pipeline-metrics', '<!-- pipeline&#8208;metrics'
-        $v = $v -replace '```', '&#96;&#96;&#96;'
-
-        # YAML quoting: wrap in single quotes when the value contains ':',
-        # '#', a leading/trailing space, or a single/double quote character.
-        # Use double-quote wrapping when the value already contains a single
-        # quote (escape the double quotes inside as \").
-        $needsQuoting = ($v -match ':') -or
-                        ($v -match '#') -or
-                        ($v -match "^[ \t]") -or
-                        ($v -match "[ \t]$") -or
-                        ($v -match "^['""]") -or
-                        ($v -match "['""]$")
-
-        if ($needsQuoting) {
-            if ($v.Contains("'")) {
-                # Use double-quote wrapping; YAML double-quoted scalars escape a
-                # literal backslash as \\ and a literal " as \" (escape the
-                # backslash first so the \" introduced below isn't re-escaped).
-                # Note: in PowerShell's -replace, a replacement string of '\\'
-                # (two backslash chars) already emits a literal \\ — '\\\\'
-                # (four chars) would double-escape and emit four backslashes.
-                $v = $v -replace '\\', '\\'
-                $v = $v -replace '"', '\"'
-                return '"' + $v + '"'
-            }
-            return "'" + $v + "'"
-        }
-
-        return $v
-    }
 
     # -----------------------------------------------------------------------
     # Helper: render a single credit hashtable as YAML list entry lines.
@@ -3167,7 +3171,7 @@ function Test-PipelineMetricsV4Block {
         # ------------------------------------------------------------------
         # Check 2b: Count non-fenced pipeline-metrics markers.
         # Strip content inside triple-backtick fences first so fenced
-        # documentation examples don't inflate the count.
+        # documentation examples do not inflate the count.
         # ------------------------------------------------------------------
         $strippedBody = [regex]::Replace($Body, '(?s)```.*?```', '')
         $markerMatches = [regex]::Matches($strippedBody, '<!--\s*pipeline-metrics')

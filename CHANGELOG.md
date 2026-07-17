@@ -2,6 +2,12 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.3.19] — 2026-07-17
+
+### Added
+
+Cost summary v5 (issue #489): USD-per-PR headline plus rolling-cost baseline in orchestrated PR bodies as an additive `metrics_version: 4` field, zero-activity port row suppression in the cost-breakdown table, and a harvest reconcile path that keeps the PR-body headline synchronized with the end-of-session cost pattern. Includes the Step 7d harvest dot-source chain extension (adds `frame-credit-ledger-core.ps1`) that requires this version bump to reach cache-served installs (PR #870 external-review F1).
+
 ## [3.3.18] — 2026-07-16
 
 ### Fixed

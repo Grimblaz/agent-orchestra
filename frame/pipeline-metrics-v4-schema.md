@@ -142,6 +142,37 @@ Field notes:
 - `integrity_checks[]` captures audit provenance and confidence checks for the synthetic ledger. The same six-value status enum applies here.
 - Report-layer buckets preserve valid credit statuses, including a distinct `failed` bucket and `not-persisted` for detected-but-not-written review runs, while `missing` remains an absence bucket for ports with no credit entry.
 
+### `cost_summary` (issue #489)
+
+`cost_summary` is additive at `metrics_version: 4` — no version bump, neither `metrics_version` nor `frame_version` (an earlier candidate soft-signal bump to `frame_version: 2` was explicitly dropped by owner decision after adversarial review found it had zero consumers and would cost an emitter edit, a back-derive-tool hardcode edit, and four pinned test-assertion edits for a signal nothing reads). Presence, not a version check, is the detection mechanism: readers that understand `cost_summary` look for the key; readers that don't ignore it per the existing v3/v2 forward-compatibility rule below.
+
+```yaml
+cost_summary:
+  cost_usd_total: 13.4269
+  tokens:
+    input: 812345
+    output: 45210
+    cache_creation: 12000
+    cache_read: 398210
+  session_completeness: complete
+  capture_point: pr-creation-mid-session
+  source_comment: "https://github.com/Grimblaz/agent-orchestra/pull/489#issuecomment-1234567890"
+```
+
+A companion visible markdown line, wrapped in `<!-- cost-summary:begin -->` / `<!-- cost-summary:end -->` sentinels, renders outside this hidden `<!-- pipeline-metrics -->` block so the headline is readable without opening the comment source — the hidden block itself is invisible HTML-comment content.
+
+Field notes for this section:
+
+- `cost_usd_total` (number or null) — the headline dollar figure, or `null` when unknown; omitted from degraded summaries.
+- `tokens.input`, `tokens.output`, `tokens.cache_creation`, `tokens.cache_read` (integer; omitted from degraded summaries) — read from the owning schema's session-wide `totals.tokens.*` aggregate (the sum across all ports **and** orchestrator overhead), not a per-port projection (which would exclude orchestrator overhead); see `.github/scripts/lib/cost-pattern-data-schema.md` (`totals` § Field table) for the normative semantics of each token category.
+- `session_completeness` (string; omitted from degraded summaries) — projected from the owning schema's top-level `session_completeness` field; see `.github/scripts/lib/cost-pattern-data-schema.md` (Top-Level Fields table) for the normative enum and semantics.
+- `capture_point` (string) — projected from the owning schema's top-level `capture_point` field; uses `unavailable` for degraded summaries. See `.github/scripts/lib/cost-pattern-data-schema.md` (Top-Level Fields table) for the normative enum and semantics.
+- `source_comment` (string, URL) — a link-by-reference to the full cost-breakdown PR comment (the `<!-- cost-pattern-data ... -->` block's host comment) carrying the complete per-port breakdown. New to this block; not projected from elsewhere. Omitted when the breakdown-comment link is unavailable at write time.
+
+**Projection provenance.** `cost_summary` projects a subset of fields from the `<!-- cost-pattern-data ... -->` comment block's `version: 1` (defined in `.github/scripts/lib/cost-pattern-data-schema.md`). A reader relying on `cost_summary` should treat it as a v1-schema projection; a future bump to that source schema's `version` has a detectable join point here rather than silently leaving PR bodies carrying stale semantics that still parse without error.
+
+**Scope tension, acknowledged.** This document's own scope section above self-describes the v4 surface as audit-only ("It records synthetic frame credits and integrity metadata for historical analysis"). `cost_summary` is the first field in this block that is genuinely customer/maintainer-facing — a dollar headline meant to be read directly, not just audited. This is deliberate: the pipeline-metrics block is the only machine-readable surface that already lives in every orchestrated PR body, so it is the natural home for the headline despite the audit-only framing predating this use.
+
 ## Additive-Merge Rule (D9)
 
 When the back-deriver runs against a PR body that already contains a partial v4 `credits[]` block (i.e., some ports are present but not all twelve), the merge rule is:
@@ -157,6 +188,8 @@ Dispatch fallback metrics follow the same preservation rule: add missing fallbac
 ## Forward Compatibility
 
 Readers that understand v4 consume the inherited v3 metrics plus the frame additions above. Readers that only understand v3 continue to read the existing pipeline-metrics fields and ignore the extra frame keys. Readers that only understand v2 continue to consume the legacy fields they already know while treating missing later-version fields as absent rather than as parse errors.
+
+Pre-`cost_summary` readers ignore the new key entirely — no version bump means no gate rejects it. This is not a new mechanism; `cost_summary` is simply covered by the existing forward-compatibility guarantee above like every other additive v4 key.
 
 ## Out Of Scope
 

@@ -377,6 +377,33 @@ function script:Test-CostRendererCopilotRateUnavailable {
     return ((script:Test-CostRendererHasKey -Bucket $copilot -Key 'rate_unavailable') -and $copilot['rate_unavailable'] -eq $true)
 }
 
+function script:Test-CostRendererZeroActivityBucket {
+    <#
+    .SYNOPSIS
+        True when a per-port row carries no attributed activity: zero
+        dispatches, a zero-or-null cost estimate, and all four token counts
+        at zero (issue #489 s1, AC3/AC4). Anomaly-flag status is deliberately
+        NOT part of this predicate — callers combine it with their own
+        anomaly check so a stage that should have run and did not (an
+        anomaly-flagged zero row) is never treated as suppressible here.
+    #>
+    [OutputType([bool])]
+    param(
+        [int]$DispatchCount,
+        [AllowNull()][object]$Cost,
+        [int]$InputTokens,
+        [int]$OutputTokens,
+        [int]$CacheCreationTokens,
+        [int]$CacheReadTokens
+    )
+
+    $costIsZeroOrNull = ($null -eq $Cost) -or ([double]$Cost -eq 0.0)
+
+    return ($DispatchCount -eq 0) -and $costIsZeroOrNull -and
+    ($InputTokens -eq 0) -and ($OutputTokens -eq 0) -and
+    ($CacheCreationTokens -eq 0) -and ($CacheReadTokens -eq 0)
+}
+
 function script:Get-CostRendererCoverage {
     param([Parameter(Mandatory)][hashtable]$Attribution)
 
@@ -418,7 +445,7 @@ function script:Format-CostPatternCoverageAnnotation {
     <#
     .SYNOPSIS
         Renders the coverage-annotation suffix appended to a populated header
-        when the walker's Tier-2 corroboration rejected one or more candidate
+        when the walker Tier-2 corroboration rejected one or more candidate
         directories (issue #825 s2, M6). Returns '' when RejectedDirCount is
         not positive, so callers can unconditionally append the result.
     #>
@@ -473,10 +500,10 @@ function script:Format-CostPatternUnknownHeader {
     }
 
     if ($degradedReason -eq 'budget-exceeded') {
-        return "## Cost Pattern `u{26A0} the local walk exceeded its time budget or stopped before finishing searching this PR's branch/session; if it was a timeout, retry the walk on this machine with a larger FRAME_CREDIT_LEDGER_TEST_COST_BUDGET_SECONDS override. cost-fields unavailable; this run is excluded from rolling-history aggregation"
+        return "## Cost Pattern `u{26A0} the local walk exceeded its time budget or stopped before finishing searching this PR branch/session; if it was a timeout, retry the walk on this machine with a larger FRAME_CREDIT_LEDGER_TEST_COST_BUDGET_SECONDS override. cost-fields unavailable; this run is excluded from rolling-history aggregation"
     }
 
-    return "## Cost Pattern `u{26A0} transcripts were searched on this machine and none matched this PR's branch/session; possible causes: the walk ran where transcripts are unavailable, the local walk never ran or exited before the cost step, a since-deleted sibling worktree held the events, the branch was created mid-session outside the phase-marker windows, or the linked issue could not be resolved from the branch name. cost-fields unavailable; this run is excluded from rolling-history aggregation"
+    return "## Cost Pattern `u{26A0} transcripts were searched on this machine and none matched this PR branch/session; possible causes: the walk ran where transcripts are unavailable, the local walk never ran or exited before the cost step, a since-deleted sibling worktree held the events, the branch was created mid-session outside the phase-marker windows, or the linked issue could not be resolved from the branch name. cost-fields unavailable; this run is excluded from rolling-history aggregation"
 }
 
 function script:Build-CostPatternHeader {
@@ -582,8 +609,15 @@ function script:Get-PortAnomalyNames {
 
     $portFlags = @($AnomalyFlags | Where-Object {
             $flagPort = $_['port']
-            ($null -ne $flagPort -and $flagPort -eq $PortName) -or
+            $matchesPort = ($null -ne $flagPort -and $flagPort -eq $PortName) -or
             ($null -eq $flagPort -and [string]::IsNullOrEmpty($PortName))
+            # C14: a null/blank metric cannot produce a real name — filter it out here
+            # so it never contributes an empty entry to the joined name list below.
+            # Without this, a port whose only "anomaly" is a malformed/blank metric
+            # field would still read as "has an anomaly" downstream (via
+            # Test-CostRendererPortHasAnomaly), incorrectly defeating zero-activity
+            # suppression for an otherwise-inactive port.
+            $matchesPort -and -not [string]::IsNullOrWhiteSpace([string]$_['metric'])
         })
 
     if ($portFlags.Count -eq 0) {
@@ -603,6 +637,22 @@ function script:Get-PortAnomalyNames {
     } | Select-Object -Unique
 
     return (' ' + ($names -join ', ') + ' ').TrimEnd()
+}
+
+function script:Test-CostRendererPortHasAnomaly {
+    <#
+    .SYNOPSIS
+        True when a port anomaly-display string carries a real anomaly name
+        rather than the empty-anomaly sentinel returned by Get-PortAnomalyNames.
+        Centralizes the sentinel comparison so both row-emitting branches in
+        Build-CostPatternTable (in-attribution and not-in-attribution) derive
+        "has an anomaly" the same way — used to override the issue #489 s1
+        zero-activity suppression guard.
+    #>
+    [OutputType([bool])]
+    param([Parameter(Mandatory)][string]$AnomalyDisplay)
+
+    return $AnomalyDisplay -ne ' — '
 }
 
 function script:Get-CostRendererIntValue {
@@ -721,6 +771,7 @@ function script:Build-CostPatternTable {
     $lines = [System.Collections.Generic.List[string]]::new()
     $hasCopilotCacheMetricFootnote = $false
     $hasCopilotRateFootnote = $false
+    $suppressedPortCount = 0
 
     # Header row
     $lines.Add('| Port | Dispatches | Input Tokens | Output Tokens | Cache Creation | Cache Read | Cache Hit% | Cost (USD) | Anomalies |')
@@ -736,7 +787,7 @@ function script:Build-CostPatternTable {
     foreach ($p in $script:CostRendererPortOrder) {
         $allPortNames.Add($p)
     }
-    # Add ports present in attribution that aren't in canonical order (except special ones)
+    # Add ports present in attribution that are not in canonical order (except special ones)
     foreach ($p in $ports.Keys) {
         if ($allPortNames -notcontains $p -and
             $p -ne 'orchestrator-overhead' -and
@@ -780,16 +831,41 @@ function script:Build-CostPatternTable {
             $ratioStr = if ($copilotCacheUnavailable) { 'n/a *' } else { script:Format-CostRendererRatioCell -InputTokens $inputTok -CacheCreationTokens $cc -CacheReadTokens $cr -Ratio $ratio }
             $costStr = if ($copilotRateUnavailable) { '' } else { script:Format-CostRendererCostCell -Value $cost }
             $anomStr = script:Get-PortAnomalyNames -AnomalyFlags $AnomalyFlags -PortName $portName
+            $hasAnomaly = script:Test-CostRendererPortHasAnomaly -AnomalyDisplay $anomStr
 
             if ($copilotCacheUnavailable) { $hasCopilotCacheMetricFootnote = $true }
             if ($copilotRateUnavailable) { $hasCopilotRateFootnote = $true }
 
-            $lines.Add("| $displayPortName | $dc | $inputStr | $outputStr | $ccStr | $crStr | $ratioStr | $costStr |$anomStr|")
+            # Issue #489 s1 (AC3/AC4): suppress a fully zero-activity in-attribution
+            # row from the visible table. Guarded only here at the $lines.Add call —
+            # never a `continue` at the loop top — so the Copilot footnote latches
+            # above still fire even when the row itself ends up suppressed.
+            $isZeroActivity = script:Test-CostRendererZeroActivityBucket `
+                -DispatchCount $dc -Cost $cost `
+                -InputTokens $inputTok -OutputTokens $outputTok `
+                -CacheCreationTokens $cc -CacheReadTokens $cr
+
+            if ($isZeroActivity -and -not $hasAnomaly) {
+                $suppressedPortCount++
+            }
+            else {
+                $lines.Add("| $displayPortName | $dc | $inputStr | $outputStr | $ccStr | $crStr | $ratioStr | $costStr |$anomStr|")
+            }
         }
         else {
-            # Port not in attribution — zero dispatches, dashes for everything
+            # Port not in attribution — zero dispatches, dashes for everything.
+            # Issue #489 s1: there is no bucket to read here, so suppress unless
+            # an anomaly flag names this port (a stage that should have run and
+            # did not is exactly the row a maintainer needs to see).
             $anomStr = script:Get-PortAnomalyNames -AnomalyFlags $AnomalyFlags -PortName $portName
-            $lines.Add("| $portName | 0 | — | — | — | — | — | — |$anomStr|")
+            $hasAnomaly = script:Test-CostRendererPortHasAnomaly -AnomalyDisplay $anomStr
+
+            if ($hasAnomaly) {
+                $lines.Add("| $portName | 0 | — | — | — | — | — | — |$anomStr|")
+            }
+            else {
+                $suppressedPortCount++
+            }
         }
     }
 
@@ -891,6 +967,16 @@ function script:Build-CostPatternTable {
     if ($hasCopilotRateFootnote) {
         $lines.Add('')
         $lines.Add('Copilot per-token rates not published; cost figures excluded for Copilot rows.')
+    }
+
+    if ($suppressedPortCount -gt 0) {
+        $lines.Add('')
+        if ($suppressedPortCount -eq 1) {
+            $lines.Add('1 port had zero dispatches, zero attributed cost, and zero token activity, and is omitted from this table.')
+        }
+        else {
+            $lines.Add("$suppressedPortCount ports had zero dispatches, zero attributed cost, and zero token activity, and are omitted from this table.")
+        }
     }
 
     return $lines -join "`n"
@@ -1074,7 +1160,7 @@ function Format-CostPatternYaml {
     # sourced from the eligibility result the caller passes in via $Completeness (added
     # in place by Resolve-BaselineEligibility); session_id/head_ref are capture-time
     # targeting keys the s4 harvest uses to re-walk and verify the originating transcript.
-    # Must render before the ports: block — the parser's ports loop treats the next
+    # Must render before the ports: block — the parser ports loop treats the next
     # zero-indent top-level key as the end of the block.
     $capturePointValue = if ($Completeness.ContainsKey('capture_point')) { [string]$Completeness['capture_point'] } else { 'n/a' }
     $null = $sb.AppendLine("capture_point: $capturePointValue")
@@ -1083,7 +1169,7 @@ function Format-CostPatternYaml {
 
     # Additive post-#487 fields (issue #487 s3, plan finding M16). Must render
     # before the ports: block for the same reason as the baseline-eligibility
-    # fields above — the parser's ports loop treats the next zero-indent
+    # fields above — the parser ports loop treats the next zero-indent
     # top-level key as the end of the block (cost-rolling-history.ps1:266).
     # unknown_models carries at most 10 sanitized, verbatim provider-qualified
     # strings — never the Note-only "+N more" overflow suffix (M12). This field
