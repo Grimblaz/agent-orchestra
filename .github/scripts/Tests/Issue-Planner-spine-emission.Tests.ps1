@@ -10,6 +10,13 @@
     acceptance-criteria coverage, plan persistence semantics, and agent identity
     wording.
 
+    Updated for issue #863 (s5): frame-slice blocks, phase-containment blocks,
+    and the plan-surface judge-rulings block moved out of the `plan-issue-{ID}`
+    comment to two siblings (`frame-slices-{ID}` and
+    `phase-containment-ledger-{ID}`). The plan comment retains prose,
+    frame-spine (now carrying `slice_comment_id`), and the coverage manifest,
+    plus a `phase-containment-ledger-ref` pointer to the ledger sibling.
+
     These tests cover agents/Issue-Planner.agent.md and the matching
     skills/plan-authoring/SKILL.md plan-template guidance.
 #>
@@ -229,27 +236,55 @@ Describe 'Issue-Planner frame spine emission contract' -Tag 'contract' {
         $script:FrontmatterFormatPattern = '(?ms)^```yaml\s*\r?\n---\s*\r?\nstatus:\s+pending\s*\r?\npriority:\s+\{ priority \}.*\r?\nissue_id:\s+\{ issue-id \}\s*\r?\ncreated:\s+\{ date \}\s*\r?\nce_gate:\s+\{ true\|false \}'
     }
 
-    It 'requires the plan-issue comment to include the spine, per-step slices, and AC coverage manifest in order' {
+    It 'requires the plan-issue comment to include the spine (carrying slice_comment_id) and AC coverage manifest in order, excluding frame-slice blocks' {
         & $script:AssertAppearsInOrder `
             -Content $script:PersistPlanSection `
             -Patterns @(
                 '<!--\s*plan-issue-\{ID\}\s*-->',
                 '<!--\s*frame-spine\b',
                 'spine_schema_version:\s*2',
-                '<!--\s*frame-slice\s*-->.{0,160}step_id:\s*s\{N\}',
+                'slice_comment_id',
                 'coverage\s+manifest',
                 'ac-refs-by-slice:'
             ) `
-            -Because 'Persist Plan must describe the durable plan comment shape as plan marker, frame-spine schema v2, per-step frame-slice blocks, then AC coverage manifest mapping'
+            -Because 'Persist Plan must describe the durable plan comment shape as plan marker, frame-spine schema v2 carrying slice_comment_id, then AC coverage manifest mapping (863-D1) -- frame-slice blocks no longer sit inline between them'
 
-        $script:PersistPlanSection | Should -Match '(?is)(one|a)\s+(?:bare\s+)?`?<!--\s*frame-slice\s*-->`?.{0,220}(per|for each|each).{0,80}implementation step|(?:per|for each|each).{0,80}implementation step.{0,220}`?<!--\s*frame-slice\s*-->`?' -Because 'Issue-Planner must require one bare frame-slice block per implementation step'
-        $script:PersistPlanSection | Should -Match '(?is)frame-slice.{0,180}step_id:\s*s\{N\}' -Because 'Issue-Planner must preserve slice addressability through the step_id field, not the marker suffix'
+        # 863-D1: bound the check to the literal "in this order" append list so the assertion
+        # cannot be satisfied by the frame-slice example that documents SIBLING content
+        # elsewhere in the same section (that example is required by a separate test below).
+        $orderingListMatch = [regex]::Match($script:PersistPlanSection, '(?s)in this order \(863-D1\):(?<list>.*?)(?=\r?\n\r?\n)')
+        $orderingListMatch.Success | Should -BeTrue -Because 'Issue-Planner must document the plan-comment append ordering as a bounded numbered list'
+        $orderingListMatch.Groups['list'].Value | Should -Not -Match '<!--\s*frame-slice\b' -Because 'the plan-comment append-ordering list must not include frame-slice blocks (863-D1: they moved to the frame-slices-{ID} sibling); the negative lookahead excludes the plural frame-slices-{ID} sibling marker'
+
+        $script:PersistPlanSection | Should -Match '(?is)frame-slice.{0,40}do NOT go inside the plan comment' -Because 'Issue-Planner must explicitly state frame-slice blocks do not go inside the plan comment'
+        $script:PersistPlanSection | Should -Match '(?is)frame-slice.{0,250}(into a separate|posted into the).{0,60}frame-slices-\{ID\}.{0,40}sibling' -Because 'Issue-Planner must direct frame-slice blocks to the frame-slices-{ID} sibling comment'
     }
 
-    It 'requires frame-slice guidance to carry routing fields and the step Requirement Contract content' {
+    It 'requires frame-slice guidance to carry routing fields and the step Requirement Contract content, documented as frame-slices-{ID} sibling content' {
         $sliceGuidancePattern = '(?is)<!--\s*frame-slice\s*-->.{0,260}step_id:\s*(?:s\{N\}|\{step-id\}|sN).{0,220}commit-index:\s*(?:\{N\}|N|\d+).{0,220}provides:\s*\[[^\]]*port[^\]]*\].{0,220}adapter:\s*[^\r\n]+.{0,220}(?:cycle:\s*N)?.{0,220}(?:terminal:\s*true)?.{0,220}(?:depends-on:\s*\[[^\]]*step-ids?[^\]]*\])?.{0,260}ac-refs:\s*\[[^\]]*AC[^\]]*\].{0,260}Requirement Contract'
 
         $script:PersistPlanSection | Should -Match $sliceGuidancePattern -Because 'each frame-slice block must document id, commit-index, provides, adapter, optional cycle/terminal/depends-on, ac-refs, and the original step Requirement Contract content'
+
+        # 863-D1: the frame-slice example must be labeled as sibling-comment content, not
+        # plan-comment content -- check the text immediately preceding the example.
+        $sliceExampleIndex = $script:PersistPlanSection.IndexOf('<!-- frame-slice -->')
+        $sliceExampleIndex | Should -BeGreaterThan 0 -Because 'Persist Plan must include a checkable frame-slice example'
+        $precedingContextStart = [Math]::Max(0, $sliceExampleIndex - 300)
+        $precedingContext = $script:PersistPlanSection.Substring($precedingContextStart, $sliceExampleIndex - $precedingContextStart)
+        $precedingContext | Should -Match 'frame-slices-\{ID\}' -Because 'the frame-slice example must be introduced as frame-slices-{ID} sibling content'
+        $precedingContext | Should -Match '(?i)sibling' -Because 'the frame-slice example must be explicitly labeled as sibling-comment content, not plan-comment content'
+    }
+
+    It 'requires phase-containment blocks and judge-rulings to target the phase-containment-ledger-{ID} sibling, and the plan comment to carry the pointer back to it' {
+        $phaseContainmentSection = & $script:GetSection -Content $script:Content -HeadingPattern '### Phase-containment emission \(plan-stress-test\)'
+        $phaseContainmentSection | Should -Match '<!--\s*phase-containment-ledger-\{ID\}\s*-->' -Because '863-D4: phase-containment blocks (and the co-moved judge-rulings block) append to the ledger sibling, not the plan comment'
+        $phaseContainmentSection | Should -Not -Match '<!--\s*plan-issue-\{ID\}\s*-->' -Because 'the phase-containment append target must no longer name the plan comment marker'
+        $phaseContainmentSection | Should -Match '<!--\s*phase-containment-ledger-ref' -Because '863-D11: the ledger sibling id is written back onto the plan comment as a pointer'
+    }
+
+    It 'requires the frame-slices-{ID} sibling to be stamped with frame-slices-generated-at equal to the spine generated_at' {
+        $script:PersistPlanSection | Should -Match '<!--\s*frame-slices-generated-at' -Because 's5 owns the frame-slices-generated-at writer that the s2 drift check reads (863-D7); without a writer the AC5 cross-check permanently no-ops'
+        $script:PersistPlanSection | Should -Match '(?is)frame-slices-generated-at.{0,160}(equal|same|match(?:ing)?).{0,120}generated_at' -Because 'the sibling stamp must be written equal to the spine''s generated_at, not an independent timestamp'
     }
 
     It 'flags a synthetic planner output when any emitted frame-slice omits adapter' {

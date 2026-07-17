@@ -333,6 +333,26 @@ Describe 'frame spine parser' -Tag 'unit' {
         $sliceBlocks | Should -Contain $script:S5SliceBlock
     }
 
+    It 'does not false-match frame-slices-{ID} or frame-slices-generated-at markers as frame-slice blocks (863 regression pin)' {
+        $commentBody = @(
+            '<!-- frame-slices-863 -->'
+            'plan sibling body content, not a frame-slice block'
+            '<!-- frame-slices-generated-at: 2026-07-16T18:00:00Z -->'
+            ''
+            '<!-- frame-slice'
+            $script:S2SliceBlock
+            '-->'
+        ) -join "`n"
+
+        $byStepId = @(Get-FSCSliceBlocksByStepId -CommentBody $commentBody -StepId 's2')
+        $byPort = @(Get-FSCSliceBlocksByPort -CommentBody $commentBody -PortName 'implement-code')
+
+        $byStepId | Should -HaveCount 1
+        $byStepId[0] | Should -BeExactly $script:S2SliceBlock
+        $byPort | Should -HaveCount 1
+        $byPort[0] | Should -BeExactly $script:S2SliceBlock
+    }
+
     It 'round-trips canonical spine YAML through parse and serialize without byte changes' {
         $parsed = ConvertFrom-FSCSpineYaml -SpineBlock $script:CanonicalSpineBlock
 
@@ -562,6 +582,66 @@ Describe 'frame spine parser' -Tag 'unit' {
         & $script:AssertStepToken -Token $tokens[0] -StepId 's4' -Cycle 1 -Terminal $false
         & $script:AssertStepToken -Token $tokens[1] -StepId 's5' -Cycle 2 -Terminal $false
         & $script:AssertStepToken -Token $tokens[2] -StepId 's8' -Cycle 3 -Terminal $true
+    }
+
+    It 'surfaces slice_comment_id through the ConvertFrom-FSCSpineYaml projection' {
+        $spineBlockWithPointer = @(
+            'spine_schema_version: 2'
+            'generated_at: 2026-05-04T14:30:00Z'
+            'coverage: complete'
+            'slice_comment_id: 4995965999'
+            'ports:'
+            '  implement-code: [s2]'
+            'slices:'
+            '  s2:'
+            '    execution_mode: serial'
+            '    rc: GREEN code action'
+            '    ac_refs: [AC1]'
+            '    depends_on: []'
+            '    cycle: 1'
+        ) -join "`n"
+
+        $parsed = ConvertFrom-FSCSpineYaml -SpineBlock $spineBlockWithPointer
+
+        $parsed | Should -Not -BeNullOrEmpty
+        $parsed.PSObject.Properties['SliceCommentId'] | Should -Not -BeNullOrEmpty
+        $parsed.SliceCommentId | Should -Be '4995965999'
+    }
+
+    It 'leaves SliceCommentId null when the spine carries no slice_comment_id pointer (legacy plan)' {
+        $parsed = ConvertFrom-FSCSpineYaml -SpineBlock $script:CanonicalSpineBlock
+
+        $parsed | Should -Not -BeNullOrEmpty
+        $parsed.PSObject.Properties['SliceCommentId'] | Should -Not -BeNullOrEmpty
+        $parsed.SliceCommentId | Should -BeNullOrEmpty
+    }
+
+    It 'still returns null (invalid-spine) for an unrecognized top-level key' {
+        $unknownTopLevelKey = @(
+            'spine_schema_version: 2'
+            'generated_at: 2026-05-04T14:30:00Z'
+            'coverage: complete'
+            'some_unknown_key: 12345'
+            'ports:'
+            '  implement-code: [s2]'
+            'slices:'
+            '  s2:'
+            '    execution_mode: serial'
+            '    rc: GREEN code action'
+            '    ac_refs: [AC1]'
+            '    depends_on: []'
+            '    cycle: 1'
+        ) -join "`n"
+        $unknownTopLevelKeyError = $null
+
+        try {
+            ConvertFrom-FSCSpineYaml -SpineBlock $unknownTopLevelKey | Should -BeNullOrEmpty
+        }
+        catch {
+            $unknownTopLevelKeyError = $_.Exception.Message
+        }
+
+        $unknownTopLevelKeyError | Should -BeNullOrEmpty
     }
 
     It 'rejects cycle markers outside flow-style brackets as malformed' {

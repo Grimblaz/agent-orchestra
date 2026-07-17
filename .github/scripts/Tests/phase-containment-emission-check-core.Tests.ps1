@@ -443,6 +443,67 @@ $script:ProseOnlyPlanStressTestBody = @'
 - Challenge M2 (another finding) - Prosecution: SS med - Post-judge: **defense-sustained** - Disposition: **dismiss**.
 '@
 
+# 863-s3: the post-split shape — a plan comment carrying the pointer marker
+# (`phase-containment-ledger-ref`, per the s5 writer contract's expected
+# literal) AND the fallback-triggering plan-issue marker + heading, but with
+# its own judge-rulings head and phase-containment blocks moved OFF this body
+# entirely (co-moved to the sibling per 863-D4). The pointer's mere PRESENCE
+# must never be trusted on its own — Get-EmissionGap must check whether some
+# OTHER body in the same -Bodies set actually supplies a real head, not
+# whether this body merely claims one exists elsewhere.
+$script:PlanWithLedgerRefPointerBody = @'
+<!-- plan-issue-863 -->
+<!-- phase-containment-ledger-ref: 999001 -->
+
+## Plan: Split the plan comment by reader (#863)
+
+**Plan Stress-Test** (summary of Code-Critic review via `skills/adversarial-review/platforms/claude.md` `standard` adapter)
+
+Judge: 2 sustained, 1 defense-sustained. See sibling comment for the full judge-rulings block.
+'@
+
+# 863 M2 fix regression fixtures: a genuine designated ledger sibling MUST
+# carry the plan's own `<!-- phase-containment-ledger-{Id} -->` marker (per
+# plan-authoring/SKILL.md's co-location contract) for $anySiblingHasRealHead
+# to qualify it. These two mirror $script:PlanStressTestBody and
+# $script:UnknownVocabularyBody's real-head content exactly, but WITH that
+# marker present and bound to issue 863 — the "genuine sibling" population
+# the M2 fix's suppression gate must still accept.
+$script:GenuineLedgerSiblingBody = @'
+<!-- phase-containment-ledger-863 -->
+
+**Plan Stress-Test** (summary of Code-Critic review via `skills/adversarial-review/platforms/claude.md` `standard` adapter)
+
+Judge: 18 sustained (1 critical, 2 high, 9 medium, 6 low), 1 defense-sustained (M5 struck).
+
+```yaml
+<!-- judge-rulings
+- id: M1
+  judge_ruling: sustained
+  judge_confidence: high
+  points_awarded: P+5
+- id: M5
+  judge_ruling: defense-sustained
+  judge_confidence: high
+  points_awarded: D+0
+- id: M4
+  judge_ruling: sustained
+  judge_confidence: high
+  points_awarded: P+10
+-->
+```
+'@
+
+$script:GenuineLedgerSiblingHeadCorruptBody = @'
+<!-- phase-containment-ledger-863 -->
+
+<!-- judge-rulings
+- id: Z1
+  judge_ruling: maybe-sustained-ish
+  judge_confidence: high
+-->
+'@
+
 # Chatter that merely discusses the "Plan Stress-Test" heading in prose
 # (e.g. explaining the convention) with NO `<!-- plan-issue-` marker at all.
 # Must NOT trigger the fallback (both conditions are required together).
@@ -2386,6 +2447,56 @@ Describe '811-D1: Get-EmissionGap Reason field (head-missing vs head-corrupt vs 
     }
 }
 
+Describe '863-s3: Get-EmissionGap suppresses head-missing ONLY when a sibling body passes the real judge-rulings vocab gate' {
+    It 'regression: a pointer marker (phase-containment-ledger-ref) on the plan body does NOT by itself suppress head-missing when no OTHER body in -Bodies supplies a real head (this is exactly what the REJECTED Test-EmissionMarkerPresent-based design would have gotten wrong: trusting the pointers mere presence would have reported this body as no-marker/ordinary-chatter and produced a false ok / sustained=0 / blocks=0)' {
+        $result = Get-EmissionGap -Bodies @($script:PlanWithLedgerRefPointerBody) -Id 863 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.Reason | Should -Be 'head-missing'
+    }
+
+    It 'regression: the pointer-bearing plan body plus an UNRELATED sibling that also has no real head still reports head-missing (an extra non-qualifying sibling must not accidentally suppress)' {
+        $result = Get-EmissionGap -Bodies @($script:PlanWithLedgerRefPointerBody, $script:ChatterMentioningHeadingNoMarkerBody) -Id 863 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.Reason | Should -Be 'head-missing'
+    }
+
+    It 'split-shape corpus: the pointer-bearing plan body PLUS a separate sibling body carrying THIS plans phase-containment-ledger-863 marker and a real, vocab-gate-passing judge-rulings head reports Reason ok, with SustainedCount reconciled to the sibling alone' {
+        $result = Get-EmissionGap -Bodies @($script:PlanWithLedgerRefPointerBody, $script:GenuineLedgerSiblingBody) -Id 863 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Reason | Should -Be 'ok'
+        $result.SustainedCount | Should -Be 2
+        $result.BlockCount | Should -Be 0
+        $result.Gap | Should -Be 2
+    }
+
+    It 'split-shape corpus is order-independent: sibling-then-plan produces the identical ok/Reason/SustainedCount result' {
+        $result = Get-EmissionGap -Bodies @($script:GenuineLedgerSiblingBody, $script:PlanWithLedgerRefPointerBody) -Id 863 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Reason | Should -Be 'ok'
+        $result.SustainedCount | Should -Be 2
+    }
+
+    It 'a sibling head that is present but fails to parse (head-corrupt) still counts as passing the vocab gate and suppresses the plan bodys head-missing (the contract keys off Get-RealJudgeRulingsHeadMatches, not off a successful parse) — the aggregate reports the siblings own head-corrupt instead' {
+        $result = Get-EmissionGap -Bodies @($script:PlanWithLedgerRefPointerBody, $script:GenuineLedgerSiblingHeadCorruptBody) -Id 863 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.Reason | Should -Be 'head-corrupt'
+    }
+}
+
+Describe '863 M2 fix (judge-sustained code-review): a foreign real head not bound to THIS plans ledger marker must not suppress head-missing' {
+    It 'regression: pointer-bearing plan body PLUS a body carrying a genuine, vocab-gate-passing judge-rulings head but NO phase-containment-ledger-863 marker (simulating a stale prior-generation head left elsewhere on the issue) still reports head-missing, not ok — a foreign real head is not evidence THIS plans designated sibling exists (this is the exact M2 vector: pre-fix, $anySiblingHasRealHead trusted ANY real head anywhere in -Bodies, so this fixture would have falsely suppressed to ok/sustained=0/blocks=0)' {
+        $result = Get-EmissionGap -Bodies @($script:PlanWithLedgerRefPointerBody, $script:PlanStressTestBody) -Id 863 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.Reason | Should -Be 'head-missing'
+    }
+
+    It 'order-independent: stale-head-then-pointer produces the identical head-missing result' {
+        $result = Get-EmissionGap -Bodies @($script:PlanStressTestBody, $script:PlanWithLedgerRefPointerBody) -Id 863 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.Reason | Should -Be 'head-missing'
+    }
+}
+
 Describe 'Issue #817 (PF-F1) T1/T2: near-decoy window-bleed produces a false head-corrupt today' {
     It 'T1 (plan-stress-test) diagnostic: the decoy and the real head both pass the vocab gate (bleed confirmed, GREEN today)' {
         $realHeads = Get-RealJudgeRulingsHeadMatches -Body $script:NearDecoyPlanStressTestBody
@@ -2920,8 +3031,17 @@ Describe 'Add-CommentBlocks - read-modify-write append primitive' {
                             # normalization (trailing-space and blank-line-run
                             # collapsing) rather than an exact byte-identical
                             # echo — this is the shape that broke the old
-                            # ordinal StartsWith prefix check.
-                            $normalized = ($script:mockOriginalBody + $script:mockNewContent) `
+                            # ordinal StartsWith prefix check. Read the ACTUAL
+                            # body Add-CommentBlocks just PATCHed (captured
+                            # from the --input temp file below) rather than
+                            # recomputing from the pre-stamp $script:mockNewContent,
+                            # so this mock stays correct regardless of any
+                            # writer-side transform Add-CommentBlocks applies
+                            # to NewContent before the PATCH (e.g. the #863 M1
+                            # appended_at stamp) — the real GitHub API always
+                            # echoes what was actually written, stamp
+                            # included.
+                            $normalized = $script:lastPatchedBody `
                                 -replace '[ \t]+\r?\n', "`n" `
                                 -replace '\n{3,}', "`n`n"
                             return (@{ body = $normalized } | ConvertTo-Json)
@@ -2933,6 +3053,11 @@ Describe 'Add-CommentBlocks - read-modify-write append primitive' {
 
             if ($joined -match '^api -X PATCH repos/[^/]+/[^/]+/issues/comments/(\d+) --input') {
                 $script:lastPatchArgs = $Args
+                $inputIdx = [array]::IndexOf($Args, '--input')
+                if ($inputIdx -ge 0 -and $inputIdx + 1 -lt $Args.Count) {
+                    $patchPayload = Get-Content -LiteralPath $Args[$inputIdx + 1] -Raw | ConvertFrom-Json
+                    $script:lastPatchedBody = [string]$patchPayload.body
+                }
                 if ($script:simulateFailure -eq 'patch') {
                     $global:LASTEXITCODE = 1
                     return ''
@@ -3017,6 +3142,34 @@ Describe 'Add-CommentBlocks - read-modify-write append primitive' {
     It 'still succeeds when NewContent carries at least one real phase-containment block' {
         $result = Add-CommentBlocks -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 999 -ExpectedMarker '<!-- judge-rulings' -NewContent $script:mockNewContent
         $result.Success | Should -Be $true
+    }
+
+    It 'F5 fix (PR #868): treats NewContent carrying only the phase-containment-ledger-{ID} sentinel as a no-op, not a real block' {
+        # The ledger sentinel id ("ledger-863") matches [A-Za-z0-9_-]+, so
+        # pre-fix the M10 preflight counted it as a real phase-containment
+        # block and let the write proceed even though there was nothing for
+        # the post-write positive-proof loop to verify.
+        $result = Add-CommentBlocks -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 999 -ExpectedMarker '<!-- judge-rulings' -NewContent "`n<!-- phase-containment-ledger-863 -->"
+        $result.Success | Should -Be $false
+        $result.Reason | Should -Match 'no-op'
+    }
+}
+
+Describe 'Add-AppendedAtStampToPhaseContainmentBlocks — F5 fix: ledger sentinel regex collision (PR #868)' {
+    It 'does not inject a stray appended_at stamp after a phase-containment-ledger-{ID} sentinel with no matching close tag' {
+        $text = "<!-- phase-containment-ledger-863 -->`n`nsome other comment text"
+        $result = script:Add-AppendedAtStampToPhaseContainmentBlocks -Text $text -Timestamp '2026-07-16T00:00:00Z'
+        $result | Should -Be $text
+        $result | Should -Not -Match 'appended_at:'
+    }
+
+    It 'still stamps a real phase-containment-{ID} block that appears alongside a ledger sentinel' {
+        $realBlock = script:New-ValidPhaseContainmentBlockText -Id '863' -Surface 'code-review' -FindingSuffix 'F1'
+        $text = "<!-- phase-containment-ledger-863 -->`n`n$realBlock"
+        $result = script:Add-AppendedAtStampToPhaseContainmentBlocks -Text $text -Timestamp '2026-07-16T00:00:00Z'
+        ($result -match 'appended_at: 2026-07-16T00:00:00Z') | Should -Be $true
+        # No stamp was injected right after the sentinel itself.
+        $result | Should -Not -Match 'ledger-863 -->\r?\nappended_at:'
     }
 }
 
@@ -4183,5 +4336,81 @@ Describe 'Get-EmissionGap - CR-8 seam: code-review/post-review-observer reconcil
         # Miscounted toward the surface its finding_key prefix names instead
         # -- exactly the M26 attribution hazard the assertion below guards.
         $codeReviewResult.BlockCount | Should -Be 1
+    }
+}
+
+Describe '863 M1 fix (judge-sustained code-review): Add-CommentBlocks writer -> Get-PCEffectiveTimestamp/Invoke-PhaseContainmentDedup reader end-to-end' {
+    # The reader (Get-PCEffectiveTimestamp), schema, and dedup tests for
+    # appended_at all pre-existed with no writer anywhere in the tree (M1).
+    # This Describe proves the two ends actually connect: Add-CommentBlocks
+    # stamps a well-formed appended_at into the block it writes, and that
+    # exact stamped value is what the dedup reader consumes and prefers.
+    BeforeAll {
+        . (Join-Path $script:LibRoot 'phase-containment-rolling-history-core.ps1')
+    }
+
+    BeforeEach {
+        $script:mockOriginalBody = "<!-- phase-containment-ledger-863 -->`n`n<!-- phase-containment-863 -->`nfinding_key: plan-stress-test:863:M1:F1`nintroduced_phase: plan`ncatchable_phase: plan`ncaught_stage: plan-stress-test`nescape_distance: 0`nseverity: high`nsystemic_fix_type: instruction`ncategory: architecture`n<!-- /phase-containment-863 -->"
+        $script:mockNewContent = "`n<!-- phase-containment-863 -->`nfinding_key: plan-stress-test:863:M1:F2`nintroduced_phase: plan`ncatchable_phase: plan`ncaught_stage: plan-stress-test`nescape_distance: 0`nseverity: high`nsystemic_fix_type: instruction`ncategory: architecture`n<!-- /phase-containment-863 -->"
+        $script:lastPatchedBody = $null
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+
+            if ($joined -match '^api repos/[^/]+/[^/]+/issues/comments/(\d+)$') {
+                $global:LASTEXITCODE = 0
+                if ($null -ne $script:lastPatchedBody) {
+                    # Post-write verify GET: echo the body that was actually
+                    # PATCHed (captured below), same as the real GitHub API.
+                    return (@{ body = $script:lastPatchedBody } | ConvertTo-Json)
+                }
+                return (@{ body = $script:mockOriginalBody } | ConvertTo-Json)
+            }
+
+            if ($joined -match '^api -X PATCH repos/[^/]+/[^/]+/issues/comments/(\d+) --input') {
+                $inputIdx = [array]::IndexOf($Args, '--input')
+                if ($inputIdx -ge 0 -and $inputIdx + 1 -lt $Args.Count) {
+                    $patchPayload = Get-Content -LiteralPath $Args[$inputIdx + 1] -Raw | ConvertFrom-Json
+                    $script:lastPatchedBody = [string]$patchPayload.body
+                }
+                $global:LASTEXITCODE = 0
+                return (@{ id = 999 } | ConvertTo-Json)
+            }
+
+            $global:LASTEXITCODE = 0
+            return ''
+        }
+    }
+
+    AfterEach {
+        Remove-Item Function:gh -ErrorAction SilentlyContinue
+    }
+
+    It 'stamps a well-formed appended_at into the appended block, and Invoke-PhaseContainmentDedup prefers it over a stale sibling entry sharing the same comment-level createdAt' {
+        $result = Add-CommentBlocks -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 999 -ExpectedMarker '<!-- phase-containment-ledger-863' -NewContent $script:mockNewContent
+        $result.Success | Should -Be $true
+
+        # The actual PATCHed body is what a real GitHub comment now holds.
+        $writtenBlocks = Get-PhaseContainmentBlock -Text $script:lastPatchedBody -Id '863'
+        $writtenBlocks.Count | Should -Be 2
+        $newlyAppended = $writtenBlocks | Where-Object { $_ -match 'plan-stress-test:863:M1:F2' }
+        $newlyAppended | Should -Not -BeNullOrEmpty
+        $parsed = ConvertFrom-PhaseContainmentYaml -Yaml ([string]$newlyAppended)
+        $parsed['appended_at'] | Should -Match '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$'
+
+        # Reader end: this newly-appended entry and an OLDER stale entry
+        # sharing the exact same finding_key AND the exact same
+        # comment-level createdAt (simulating the #863 s4 problem this whole
+        # fix exists for: GitHub never advances createdAt on a PATCH, so two
+        # entries appended to the same sibling at different real times would
+        # otherwise be indistinguishable to the dedup layer) must resolve to
+        # the freshly-appended entry, because ONLY it carries the writer's
+        # appended_at stamp.
+        $staleEntry = @{ finding_key = 'plan-stress-test:863:M1:F2'; createdAt = '2020-01-01T00:00:00Z' }
+        $freshEntry = @{ finding_key = 'plan-stress-test:863:M1:F2'; createdAt = '2020-01-01T00:00:00Z'; appended_at = $parsed['appended_at'] }
+        $dedupResult = Invoke-PhaseContainmentDedup -RawEntries @($staleEntry, $freshEntry)
+        $dedupResult.Count | Should -Be 1
+        $dedupResult[0]['appended_at'] | Should -Be $parsed['appended_at']
     }
 }

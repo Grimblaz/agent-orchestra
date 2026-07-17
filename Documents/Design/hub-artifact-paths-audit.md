@@ -1,6 +1,6 @@
 <!-- audit-meta
-last-verified: cc027b0284f98c6f81b0ca3e1a15231819201341
-generated-at: 2026-07-05T17:28:30Z
+last-verified: 76ee95659252f7c19cbc1c91d7eb63afd933b023
+generated-at: 2026-07-17T00:15:31Z
 -->
 
 ## Purpose
@@ -320,7 +320,10 @@ Copilot always reads from the source tree in the hub repo. This dual-resolved be
 - **examples**:
   - `.tmp/issue-{ISSUE_NUMBER}-body.md`
   - `.tmp/{N}-comments.json`
-- **notes**: Agent scratch / temp-file workspace (introduced in issue #643). Gitignored, consumer-local scratch directory where agents write transient working files (issue-body drafts, comment payloads, engagement-record mirrors) per skills/terminal-hygiene/SKILL.md Scratch & Temp-File Hygiene. Not a distribution artifact and not committed to any repo. Literal example paths such as .tmp/issue-643-body.md and .tmp/643-comments.json appearing in skill body text map to this family. The agent treats this path as consumer-local session scratch; attempting to resolve it from the hub repo or plugin cache is a wasted tool call.
+  - `.tmp/plan-body.md`
+  - `.tmp/sibling-body.md`
+  - `.tmp/lookup-body.md`
+- **notes**: Agent scratch / temp-file workspace (introduced in issue #643). Gitignored, consumer-local scratch directory where agents write transient working files (issue-body drafts, comment payloads, engagement-record mirrors) per skills/terminal-hygiene/SKILL.md Scratch & Temp-File Hygiene. Not a distribution artifact and not committed to any repo. Literal example paths such as .tmp/issue-643-body.md and .tmp/643-comments.json appearing in skill body text map to this family. The agent treats this path as consumer-local session scratch; attempting to resolve it from the hub repo or plugin cache is a wasted tool call. `.tmp/plan-body.md`, `.tmp/sibling-body.md`, and `.tmp/lookup-body.md` (issue #863 M7 fix) are the frame-spine-lookup Claude-shim fetch-sequence intermediates — previously registered under a separate now-retired `/tmp/*.md` family before the Claude shim was corrected to the repo-relative `.tmp/` convention this family already governs; same ephemeral, single-Bash-sequence, never-durable semantics apply.
 
 ### `.vscode/settings.json`
 

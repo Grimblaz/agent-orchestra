@@ -47,7 +47,7 @@ function Test-PhaseContainmentCacheFresh {
     try {
         $parsed = [datetime]::Parse(
             $GeneratedAtUtcString,
-            $null,
+            [System.Globalization.CultureInfo]::InvariantCulture,
             [System.Globalization.DateTimeStyles]::RoundtripKind
         )
         $parsedUtc = $parsed.Kind -eq [System.DateTimeKind]::Utc `
@@ -76,26 +76,122 @@ function Test-PhaseContainmentCacheFresh {
 }
 
 # -------------------------------------------------------------------------
+# Private: Get-PCEffectiveTimestamp
+# Issue #863 s4: resolves the comparison timestamp an entry should dedup
+# on — block-level appended_at when present and well-formed, else the
+# comment-level createdAt. Centralizing this in one place keeps the
+# malformed-vs-absent distinction consistent between the first-seen path
+# and the comparison path in Invoke-PhaseContainmentDedup below.
+# -------------------------------------------------------------------------
+
+function script:Get-PCEffectiveTimestamp {
+    <#
+    .SYNOPSIS
+        Resolves the dedup comparison timestamp for a phase-containment entry.
+    .DESCRIPTION
+        Prefers appended_at when present and non-empty. appended_at must match
+        the strict Z-suffixed ISO-8601 literal (mirrors
+        frame-spine-core.ps1:107's generated_at validation) — this is a
+        RUNTIME check because the JSON Schema pattern alone is never read by
+        any runtime validator. A malformed-but-present appended_at is
+        reported via IsMalformed=$true rather than silently falling back, so
+        the caller can route the drop into InvalidEntryCount instead of an
+        uninspected Write-Warning (issue #863 M14). Falls back to the
+        comment-level createdAt when appended_at is absent or empty, so the
+        historic (pre-appended_at) blocks keep deduping unchanged.
+    .PARAMETER Entry
+        A single hashtable or PSCustomObject entry.
+    .OUTPUTS
+        [PSCustomObject] with TimestampStr [string] and IsMalformed [bool].
+        When IsMalformed is $true, TimestampStr is $null.
+    #>
+    param(
+        [Parameter(Mandatory)]$Entry
+    )
+
+    # F4 fix (PR #868 review): under this file's Set-StrictMode -Version
+    # Latest, both raw dotted access on a PSCustomObject missing the
+    # property AND unconditional `.Value` on a PSObject.Properties[...]
+    # miss (itself $null when absent) throw PropertyNotFoundException — so
+    # the property lookup must be null-checked before reading .Value.
+    $appendedAt = if ($Entry -is [hashtable]) {
+        $Entry['appended_at']
+    }
+    else {
+        $prop = $Entry.PSObject.Properties['appended_at']
+        if ($null -ne $prop) { $prop.Value } else { $null }
+    }
+    if (-not [string]::IsNullOrWhiteSpace([string]$appendedAt)) {
+        if ([string]$appendedAt -notmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$') {
+            return [PSCustomObject]@{ TimestampStr = $null; IsMalformed = $true }
+        }
+        # F6 fix (issue #868 review): the regex above only checks lexical
+        # shape — a calendar-invalid date like '2026-02-30T00:00:00Z'
+        # matches the pattern but throws on Parse. Route that case through
+        # the same IsMalformed=$true path so both the first-seen shortcut
+        # and the comparison path in Invoke-PhaseContainmentDedup below
+        # (the single choke point both flow through) drop it into
+        # InvalidEntryCount instead of an uninspected downstream throw.
+        try {
+            [datetime]::Parse(
+                [string]$appendedAt,
+                [System.Globalization.CultureInfo]::InvariantCulture,
+                [System.Globalization.DateTimeStyles]::RoundtripKind
+            ) | Out-Null
+        }
+        catch {
+            return [PSCustomObject]@{ TimestampStr = $null; IsMalformed = $true }
+        }
+        return [PSCustomObject]@{ TimestampStr = [string]$appendedAt; IsMalformed = $false }
+    }
+
+    $createdAt = if ($Entry -is [hashtable]) {
+        [string]$Entry['createdAt']
+    }
+    else {
+        $createdAtProp = $Entry.PSObject.Properties['createdAt']
+        if ($null -ne $createdAtProp) { [string]$createdAtProp.Value } else { '' }
+    }
+    return [PSCustomObject]@{ TimestampStr = $createdAt; IsMalformed = $false }
+}
+
+# -------------------------------------------------------------------------
 # Public helper: Invoke-PhaseContainmentDedup
-# Dedup by finding_key — keep entry with the latest createdAt.
+# Dedup by finding_key — keep entry with the latest effective timestamp
+# (appended_at when present and well-formed, else comment-level createdAt).
 # -------------------------------------------------------------------------
 
 function Invoke-PhaseContainmentDedup {
     <#
     .SYNOPSIS
-        Deduplicates phase-containment entries by finding_key, keeping the latest createdAt.
+        Deduplicates phase-containment entries by finding_key, keeping the latest.
     .DESCRIPTION
         SMC-20 convention: when the same finding_key appears multiple times (e.g., a
-        re-annotated block), keep the entry with the most recent createdAt timestamp.
+        re-annotated block), keep the entry with the most recent timestamp.
+        Issue #863 s4: comparison now prefers each entry's block-level
+        appended_at over the comment-level createdAt, because GitHub does not
+        advance a comment's createdAt on edit (Add-CommentBlocks is a PATCH),
+        so a re-annotated block could otherwise lose to a stale block sitting
+        in a later-created sibling comment. Both sides of the comparison are
+        normalized with .ToUniversalTime() before -gt, since [datetime]
+        comparison operators compare raw Ticks without normalizing Kind — an
+        offset-form or Unspecified-Kind value can otherwise invert against a
+        'Z'-form (Kind=Utc) value even when both parse successfully.
     .PARAMETER RawEntries
         Array of PSCustomObject or hashtable entries, each with finding_key and createdAt fields.
+    .PARAMETER InvalidEntryCount
+        Optional [ref] counter incremented once per entry dropped because its
+        appended_at is present but does not match the strict Z-suffixed
+        format (issue #863 M14 — malformed must not silently revert to
+        first-seen via an uninspected Write-Warning).
     .OUTPUTS
         [array] Deduplicated entries.
     #>
     [CmdletBinding()]
     [OutputType([array])]
     param(
-        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$RawEntries
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$RawEntries,
+        [ref]$InvalidEntryCount
     )
 
     if ($RawEntries.Count -eq 0) {
@@ -106,7 +202,14 @@ function Invoke-PhaseContainmentDedup {
 
     foreach ($entry in $RawEntries) {
         $key = if ($entry -is [hashtable]) { [string]$entry['finding_key'] } else { [string]$entry.finding_key }
-        $createdAtStr = if ($entry -is [hashtable]) { [string]$entry['createdAt'] } else { [string]$entry.createdAt }
+
+        $effective = script:Get-PCEffectiveTimestamp -Entry $entry
+        if ($effective.IsMalformed) {
+            Write-Warning "phase-containment-rolling-history-core: malformed appended_at for key '$key' — dropping entry rather than silently reverting to first-seen."
+            if ($null -ne $InvalidEntryCount) { $InvalidEntryCount.Value++ }
+            continue
+        }
+        $createdAtStr = $effective.TimestampStr
 
         if (-not $best.ContainsKey($key)) {
             $best[$key] = $entry
@@ -114,11 +217,12 @@ function Invoke-PhaseContainmentDedup {
         }
 
         # Parse both timestamps and keep the newer one
-        $existingCreatedAtStr = if ($best[$key] -is [hashtable]) { [string]$best[$key]['createdAt'] } else { [string]$best[$key].createdAt }
+        $existingEffective = script:Get-PCEffectiveTimestamp -Entry $best[$key]
+        $existingCreatedAtStr = $existingEffective.TimestampStr
 
         try {
-            $existingDt = [datetime]::Parse($existingCreatedAtStr, $null, [System.Globalization.DateTimeStyles]::RoundtripKind)
-            $candidateDt = [datetime]::Parse($createdAtStr, $null, [System.Globalization.DateTimeStyles]::RoundtripKind)
+            $existingDt = [datetime]::Parse($existingCreatedAtStr, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+            $candidateDt = [datetime]::Parse($createdAtStr, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
 
             if ($candidateDt -gt $existingDt) {
                 $best[$key] = $entry
@@ -1735,7 +1839,7 @@ function Get-PhaseContainmentHistory {
         }
         # Compute cache age
         try {
-            $genAt = [datetime]::Parse((script:ConvertTo-PhaseContainmentIsoString -Value $cacheData['generated_at']), $null, [System.Globalization.DateTimeStyles]::RoundtripKind)
+            $genAt = [datetime]::Parse((script:ConvertTo-PhaseContainmentIsoString -Value $cacheData['generated_at']), [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind)
             $genAtUtc = $genAt.Kind -eq [System.DateTimeKind]::Utc ? $genAt : $genAt.ToUniversalTime()
             $cacheAge = (Get-Date).ToUniversalTime() - $genAtUtc
         }
@@ -1792,7 +1896,7 @@ function Get-PhaseContainmentHistory {
             # instead of discarding them, using the fetch path's own Source
             # rather than the empty 'timeout' shape.
             Write-Warning "phase-containment-rolling-history-core: timed out before Surface B fetch — returning Surface A partials (Truncated)"
-            $dedupedPartial = Invoke-PhaseContainmentDedup -RawEntries $rawEntries.ToArray()
+            $dedupedPartial = Invoke-PhaseContainmentDedup -RawEntries $rawEntries.ToArray() -InvalidEntryCount ([ref]$invalidEntryCount)
             return [PSCustomObject]@{
                 Entries           = $dedupedPartial
                 FetchedAt         = (Get-Date)
@@ -1850,7 +1954,7 @@ function Get-PhaseContainmentHistory {
     }
 
     # ---- Dedup ----
-    $dedupedEntries = Invoke-PhaseContainmentDedup -RawEntries $rawEntries.ToArray()
+    $dedupedEntries = Invoke-PhaseContainmentDedup -RawEntries $rawEntries.ToArray() -InvalidEntryCount ([ref]$invalidEntryCount)
 
     # ---- Write cache (only if non-empty AND not truncated) ----
     # P7: a truncated run must not poison the 1-hour cache with an incomplete

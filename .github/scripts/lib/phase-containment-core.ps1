@@ -63,6 +63,109 @@ $script:FindingKeyPattern = '^(code-review|design-challenge|plan-stress-test|pos
 
 #endregion
 
+#region Get-BlockScalarSpans / Test-IndexInBlockScalarSpan (private)
+
+function script:Get-BlockScalarSpans {
+    <#
+    .SYNOPSIS
+        Finds every YAML block-scalar (`key: |` / `key: >`) CONTENT span in a
+        text, so callers can exclude structural-looking substrings that fall
+        inside block-scalar string content from being treated as real YAML
+        structure (CM1/CM4 fix, judge-sustained PR #833 review; relocated
+        here from phase-containment-emission-check-core.ps1 by the #863 M6
+        fix so Get-PhaseContainmentBlock below can reuse it without a
+        circular dot-source — this file has no dependency on the emission
+        check core, and the emission check core already dot-sources this
+        file, so callers there are unaffected by the move).
+    .DESCRIPTION
+        Hand-rolled scan only — no ConvertFrom-Yaml / powershell-yaml
+        (file-level SECURITY invariant at the top of this file).
+
+        A block-scalar key line is any line matching `key: |` or `key: >`
+        (optionally with a chomping indicator +/- and/or an explicit
+        indentation-indicator digit), anchored at end-of-line. Every
+        subsequent line that is either blank or indented strictly MORE than
+        the key line is part of that block scalar's content; the first
+        non-blank line indented at or less than the key line's own
+        indentation ends the span (or end-of-text, if none).
+    .PARAMETER Text
+        The text to scan (a whole body or an already-isolated region).
+    .OUTPUTS
+        Array of [PSCustomObject]@{ Start; End } character-offset spans
+        (End exclusive), covering only the block-scalar's CONTENT lines (not
+        the `key: |`/`key: >` line itself). Empty array when none found.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Text
+    )
+    $spans = [System.Collections.Generic.List[PSCustomObject]]::new()
+    if ([string]::IsNullOrEmpty($Text)) {
+        return , $spans.ToArray()
+    }
+
+    $keyLinePattern = '(?m)^([ \t]*)\S[^\r\n]*:[ \t]*[|>][+-]?\d?[ \t]*\r?$'
+    $keyLineMatches = [regex]::Matches($Text, $keyLinePattern)
+    foreach ($keyMatch in $keyLineMatches) {
+        $keyIndent = $keyMatch.Groups[1].Value.Length
+        $keyLineEnd = $Text.IndexOf("`n", $keyMatch.Index, [System.StringComparison]::Ordinal)
+        if ($keyLineEnd -lt 0) {
+            # The key line is the last line in the text; no content follows.
+            continue
+        }
+        $contentStart = $keyLineEnd + 1
+        $pos = $contentStart
+        $contentEnd = $Text.Length
+        while ($pos -le $Text.Length) {
+            $nextNewline = $Text.IndexOf("`n", $pos, [System.StringComparison]::Ordinal)
+            $lineText = if ($nextNewline -ge 0) { $Text.Substring($pos, $nextNewline - $pos) } else { $Text.Substring($pos) }
+            if ($lineText.Trim().Length -eq 0) {
+                # Blank line: still part of the block scalar.
+                if ($nextNewline -lt 0) { $contentEnd = $Text.Length; break }
+                $pos = $nextNewline + 1
+                continue
+            }
+            $lineIndent = [regex]::Match($lineText, '^[ \t]*').Value.Length
+            if ($lineIndent -le $keyIndent) {
+                $contentEnd = $pos
+                break
+            }
+            if ($nextNewline -lt 0) { $contentEnd = $Text.Length; break }
+            $pos = $nextNewline + 1
+        }
+        if ($contentEnd -gt $contentStart) {
+            $spans.Add([PSCustomObject]@{ Start = $contentStart; End = $contentEnd })
+        }
+    }
+    return , $spans.ToArray()
+}
+
+function script:Test-IndexInBlockScalarSpan {
+    <#
+    .SYNOPSIS
+        Reports whether a character offset falls inside any of the supplied
+        block-scalar spans (CM1/CM4 fix, judge-sustained PR #833 review;
+        relocated here alongside Get-BlockScalarSpans by the #863 M6 fix).
+    .PARAMETER Index
+        The character offset to test.
+    .PARAMETER Spans
+        The Get-BlockScalarSpans result to test against.
+    .OUTPUTS
+        [bool]
+    #>
+    param(
+        [Parameter(Mandatory)][int]$Index,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Spans
+    )
+    foreach ($span in $Spans) {
+        if ($Index -ge $span.Start -and $Index -lt $span.End) {
+            return $true
+        }
+    }
+    return $false
+}
+
+#endregion
+
 #region Get-PhaseContainmentBlock
 
 function Get-PhaseContainmentBlock {
@@ -99,6 +202,19 @@ function Get-PhaseContainmentBlock {
         "no close tag found" case below and — issue #772/#833 GH-2 — is now
         also warned and counted via -SkippedCount, matching the mid-scan
         case, before the scan stops.
+
+        Block-scalar gating (#863 M6, judge-sustained code-review): an
+        open-tag-shaped substring whose start index falls inside another
+        marker's YAML block-scalar (`key: |` / `key: >`) CONTENT span (per
+        Get-BlockScalarSpans/Test-IndexInBlockScalarSpan) is string data,
+        not a real structural marker — e.g. a `requirement-contract: |` or
+        `disposition_rationale: |` scalar that happens to quote or discuss
+        a `<!-- phase-containment-{ID} -->` literal. This mirrors the same
+        gating Get-RealJudgeRulingsHeadMatches already applies to
+        judge-rulings heads (the #768 forgery class this closes for phase-
+        containment blocks too). Such a candidate is skipped silently (not
+        even a malformed-block warning — it was never a real marker
+        attempt) and the scan resumes immediately past it.
     #>
     param(
         [Parameter(Mandatory)][string]$Text,
@@ -109,12 +225,18 @@ function Get-PhaseContainmentBlock {
     $openTag  = "<!-- phase-containment-$Id -->"
     $closeTag = "<!-- /phase-containment-$Id -->"
 
+    $blockScalarSpans = Get-BlockScalarSpans -Text $Text
     $allBlocks  = [System.Collections.Generic.List[string]]::new()
     $searchFrom = 0
 
     while ($true) {
         $startIdx = $Text.IndexOf($openTag, $searchFrom, [System.StringComparison]::Ordinal)
         if ($startIdx -lt 0) { break }
+
+        if (Test-IndexInBlockScalarSpan -Index $startIdx -Spans $blockScalarSpans) {
+            $searchFrom = $startIdx + $openTag.Length
+            continue
+        }
 
         $contentStart = $startIdx + $openTag.Length
         $endIdx = $Text.IndexOf($closeTag, $contentStart, [System.StringComparison]::Ordinal)
@@ -193,6 +315,7 @@ function script:ConvertFrom-PhaseContainmentYamlInternal {
         category          = $null
         apparatus_meta    = $false
         seed              = $false
+        appended_at       = $null
     }
 
     $lines = $Yaml -split '\r?\n'
@@ -232,6 +355,16 @@ function script:ConvertFrom-PhaseContainmentYamlInternal {
         elseif ($line -match '^\s*seed\s*:\s*(.+)$') {
             $val = ($Matches[1].Trim() -replace '\s+#.*$', '' -replace '^[''"]|[''"]$', '').ToLowerInvariant()
             $result['seed'] = ($val -eq 'true')
+        }
+        elseif ($line -match '^\s*appended_at\s*:\s*(.+)$') {
+            # Issue #863 s4: block-level re-annotation timestamp. Captured
+            # raw here (no format validation at parse time — a malformed
+            # value must be distinguishable from "absent" so the dedup
+            # layer can route it into InvalidEntryCount instead of quietly
+            # treating it as absent-and-fallback). Strict Z-format
+            # validation happens at runtime in
+            # phase-containment-rolling-history-core.ps1's dedup path.
+            $result['appended_at'] = ($Matches[1].Trim() -replace '\s+#.*$', '' -replace '^[''"]|[''"]$', '')
         }
     }
 

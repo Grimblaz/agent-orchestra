@@ -33,6 +33,14 @@ Code-Conductor must provide the specialist with:
 
 - Repository owner and name.
 - The GitHub issue comment id for the `<!-- plan-issue-{ID} -->` comment.
+- The GitHub issue comment id for the `<!-- frame-slices-{ID} -->` sibling
+  comment, required when the dispatched spine's `slice_comment_id` field is
+  present. Code-Conductor already has the `<!-- frame-spine ... -->` block in
+  its own dispatch context (see `agents/Code-Conductor.agent.md`) and reads
+  `slice_comment_id` from it directly to populate this input — the specialist
+  never reads `slice_comment_id` itself. Absent when the spine has no
+  `slice_comment_id` (legacy/unsplit plan); see Operational Contract step 1
+  for the resulting single-fetch behavior.
 - The target spine step id, such as `s4`.
 - The spine `generated_at` value captured at dispatch time.
 
@@ -48,6 +56,28 @@ plan-issue comment body.
    Read the response body field as the plan-issue comment body. Do not parse
    issue timelines or search results when the comment id is already known.
 
+   When a sibling comment id was dispatched (the spine's `slice_comment_id` was
+   present at dispatch time), also fetch the `<!-- frame-slices-{ID} -->`
+   sibling comment body, keyed on the dispatched sibling id, with the same
+   GitHub issue comments API. Before concatenating, verify the fetched sibling
+   body carries a `<!-- frame-slices-{ID} -->` marker whose `{ID}` matches the
+   dispatched issue number. If the marker is absent or names a different
+   issue, stop before invoking `-Op Lookup` and report
+   `sibling-identity-mismatch` to Conductor rather than proceeding with a body
+   that may belong to the wrong issue — a copy-pasted or stale sibling id is a
+   zero-adversary path to executing a foreign requirement contract. This check
+   runs at the shim, before `frame-spine-core.ps1` is invoked: the core script
+   has no issue-number parameter to perform it, and adding one would widen the
+   signature the shim concatenation approach was chosen to avoid.
+
+   When the identity check passes, concatenate the plan-issue comment body and
+   the sibling body with a single blank line (`\n\n`) between them — plan body
+   first, sibling body second — and pass the concatenated text to `-Op Lookup`
+   as a single comment body. When no sibling id was dispatched (legacy plan,
+   no `slice_comment_id` on the spine), fetch only the plan comment and pass
+   it unchanged; this is the current single-fetch behavior and its shape does
+   not change.
+
 2. Invoke the production frame-spine parser helpers through the lookup
    operation. The command shape must match this contract:
 
@@ -59,14 +89,24 @@ plan-issue comment body.
    (`-CommentBodyPath` for file-based, `-CommentBodyStdin` for piped stdin), but
    the operation remains `-Op Lookup` against `frame-spine-core.ps1`, with the
    dispatched `generated_at` value and requested `-StepId {id}` present in the
-   lookup invocation. Always pass `-Format Json` so the response is machine-
+   lookup invocation. When a sibling was fetched, the body passed here is the
+   step-1 concatenation of the plan comment and the sibling comment — the
+   command shape and `-Op Lookup`/`-StepId {id}` invocation are unchanged
+   either way; only the content behind `-CommentBodyPath`/`-CommentBodyStdin`
+   differs. Always pass `-Format Json` so the response is machine-
    parseable JSON regardless of platform; parse the returned `status` field to
    determine the lookup outcome (do not rely on exit code alone — see Exit Codes
    below).
 
 3. Use the returned slice content as the only additional plan context for the
    current turn. Do not manually parse `<!-- frame-spine -->` or
-   `<!-- frame-slice -->` blocks in specialist prompt logic.
+   `<!-- frame-slice -->` blocks in specialist prompt logic — this includes the
+   spine's `slice_comment_id` field. The specialist obtains the sibling
+   comment id exclusively from the Dispatch Inputs Conductor supplies, never
+   by reading the spine block itself: the Lookup CLI's JSON payload is closed
+   (`frame-spine-core.ps1`'s `-Op` parameter is `[ValidateSet('Lookup')]`) and
+   exposes no "parsed spine field" operation, so there is no lawful shim-side
+   path to derive `slice_comment_id`.
 
 4. On generated_at mismatch, respect the F2.2 hash-elision filter before
    declaring staleness. If the lookup result is `stale-spine`, stop specialist
@@ -77,19 +117,23 @@ plan-issue comment body.
 Always parse the JSON `status` field to determine the lookup outcome. Do not
 branch on exit code alone — `stale-spine` exits 0, not 1.
 
-| Status          | Exit code | Meaning                                                       |
-| --------------- | --------- | ------------------------------------------------------------- |
-| `ok`            | 0         | Slice retrieved successfully; `slice` field contains content. |
-| `stale-spine`   | 0         | Dispatched spine is no longer current; return to Conductor.   |
-| `missing-spine` | 1         | Comment body contains no `<!-- frame-spine -->` block.        |
-| `invalid-spine` | 1         | Spine block is present but malformed (parse error).           |
-| `missing-slice` | 1         | Spine is valid but the requested step id was not found.       |
-| `error`         | 1         | Unexpected error; `message` field contains the reason.        |
+| Status                | Exit code | Meaning                                                                                                    |
+| --------------------- | --------- | ------------------------------------------------------------------------------------------------------------ |
+| `ok`                  | 0         | Slice retrieved successfully; `slice` field contains content.                                             |
+| `stale-spine`         | 0         | Dispatched spine is no longer current, or the fetched sibling's `frame-slices-generated-at` stamp diverges from the spine's `generated_at`; return to Conductor. |
+| `missing-spine`       | 1         | Comment body contains no `<!-- frame-spine -->` block.                                                    |
+| `invalid-spine`       | 1         | Spine block is present but malformed (parse error).                                                       |
+| `sibling-unstamped`   | 1         | Spine carries `slice_comment_id` but the concatenated body has no `frame-slices-generated-at` marker — a writer defect, not legacy history (863-D3/AC5). |
+| `missing-slice`       | 1         | Spine is valid but the requested step id was not found.                                                   |
+| `duplicate-slice-id`  | 1         | The concatenated corpus carries two or more `<!-- frame-slice -->` blocks for the requested step id.      |
+| `error`               | 1         | Unexpected error; `message` field contains the reason.                                                    |
 
 Wrapper-level error codes (when the outer process fails before the script
 can run) are surfaced by the platform shim — see `platforms/copilot.md` and
-`platforms/claude.md` for `gh-not-installed`, `gh-auth-expired`, and
-`pwsh-not-found` error handling.
+`platforms/claude.md` for `gh-not-installed`, `gh-auth-expired`,
+`pwsh-not-found`, and `sibling-identity-mismatch` error handling. The last is
+a shim-level check (see Operational Contract step 1) — it never reaches
+`frame-spine-core.ps1`, so it is not one of the core `status` values above.
 
 ## Stale-Spine Handling
 

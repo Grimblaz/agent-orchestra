@@ -2,6 +2,17 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.3.18] — 2026-07-16
+
+### Fixed
+
+- Plan comments no longer hit GitHub's 65,536-codepoint comment cap. `frame-slice` blocks move to a `frame-slices-{ID}` sibling comment and `phase-containment`/`judge-rulings` blocks co-move to a `phase-containment-ledger-{ID}` sibling, both pointed to from the plan comment (#863). Fixes the #854 incident where an authoring agent spent 5-10 rounds compressing load-bearing plan content to fit under the cap.
+
+### Added
+
+- `frame-spine-lookup`'s Dispatch Inputs gain a second, optional sibling-comment id; the shim fetches and concatenates both bodies when present, with an identity check guarding against a stale or mismatched pointer.
+- Block-level `appended_at` provenance on phase-containment ledger entries, written by `Add-CommentBlocks` at actual write time (and by hand-authored code-review emission), so dedup resolves correctly once blocks span multiple comments.
+
 ## [3.3.17] — 2026-07-16
 
 ### Added
@@ -20,6 +31,7 @@ All notable changes to agent-orchestra will be documented in this file.
 - Fixed the frame-spine template in `skills/plan-authoring/SKILL.md` (`### Plan-markdown template`): the example `<!-- frame-spine ... -->` block was authored at 3-space/6-space indentation, but `frame-spine-core.ps1`'s parser requires exactly 2-space/4-space and returns `$null` silently on any mismatch. Every plan authored from the prior template carried a dead spine.
 - The Cost Pattern Note no longer reports Claude Code's `<synthetic>` message marker as an addable unknown model (issue #487). `<synthetic>` is what Claude Code puts in `message.model` for assistant messages it injects itself (API-error notices, status lines); it is not a model and can never resolve against the rate table, so the Note was instructing maintainers to add a rate row that would never match. Zero-usage `<synthetic>` events are now excluded from `unknown_models` and from `null_cost_events` entirely — their true cost is exactly `0.00`, and counting them rewrote a genuinely-`0.00` bucket cost to `null`, the same misleading-null class issue #487 exists to eliminate.
 - Fixed silent loss of the Cost Pattern section during re-emission preservation (issue #487). `$script:FCLCostPatternSectionRegex` was missing from `Get-FCLCostScriptState`'s marshal list, so it resolved to `$null` inside the worker runspace clone. `[regex]::Match(body, $null)` does not throw — it returns `Success=True` with an empty match, so the preservation branch accepted an empty section, never reached its YAML-only fallback, and posted the "prior populated render was kept" notice with the cost data destroyed. The regex is now marshaled, and the acceptance guard additionally requires a non-empty captured section so any future empty-match cause degrades into the fallback instead of silent data loss. Third instance of the worker-runspace `$script:`-constant drop first fixed for issue #825 (C3) and issue #496 (C-1).
+
 ## [3.3.15] — 2026-07-16
 
 ### Added

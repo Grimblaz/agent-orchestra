@@ -275,6 +275,18 @@ seed: false
         $result2 = ConvertFrom-PhaseContainmentYaml -Yaml $yaml2
         $result2['seed'] | Should -Be $false
     }
+
+    It 'defaults appended_at to $null when absent (issue #863 s4)' {
+        $yaml = "finding_key: code-review:gh-1"
+        $result = ConvertFrom-PhaseContainmentYaml -Yaml $yaml
+        $result['appended_at'] | Should -BeNullOrEmpty
+    }
+
+    It 'parses appended_at when present (issue #863 s4) — the initializer alone is inert without this parse branch' {
+        $yaml = "appended_at: 2026-07-16T12:00:00Z"
+        $result = ConvertFrom-PhaseContainmentYaml -Yaml $yaml
+        $result['appended_at'] | Should -Be '2026-07-16T12:00:00Z'
+    }
 }
 
 Describe 'Test-PhaseContainmentEntry - valid entry' {

@@ -122,15 +122,18 @@ ce_gate: { true|false }
 
 Add `escalation_recommended: true` and `escalation_reason` when scope exceeds the issue's stated scope.
 
-For any platform path that writes or re-emits the approved SMC-01 `<!-- plan-issue-{ID} -->` comment, keep the legacy plan frontmatter and step body readable by existing consumers, then append the frame routing blocks inside that same comment in this order:
+For any platform path that writes or re-emits the approved SMC-01 `<!-- plan-issue-{ID} -->` comment, keep the legacy plan frontmatter and step body readable by existing consumers, then append the frame-spine block and coverage manifest inside that same comment, in this order (863-D1):
 
-1. `<!-- frame-spine -->` with `spine_schema_version: 2` and a `generated_at` value set at plan creation time.
-2. One bare `<!-- frame-slice -->` block for each implementation step, addressed by its `step_id: s{N}` field.
-3. A coverage manifest section with `ac-refs-by-slice:` mapping each slice ID to the acceptance criteria it covers.
+1. `<!-- frame-spine -->` with `spine_schema_version: 2`, a `generated_at` value set at plan creation time, and `slice_comment_id` (863-D3) pointing at the `<!-- frame-slices-{ID} -->` sibling comment created for this plan.
+2. A coverage manifest section with `ac-refs-by-slice:` mapping each slice ID to the acceptance criteria it covers.
 
-For plans with fewer than 3 implementation steps, emit `spine-omitted: plan-too-small` and do not emit any `<!-- frame-spine -->` frame-spine block.
+The `<!-- frame-slice -->` blocks themselves do NOT go inside the plan comment. Post one bare `<!-- frame-slice -->` block per implementation step — addressed by its `step_id: s{N}` field, same shape as before — into a separate `<!-- frame-slices-{ID} -->` sibling comment (863-D1/863-D2). Create that sibling before finalizing the plan comment's `frame-spine` block, since the sibling's comment id is what `slice_comment_id` points at. Stamp the sibling with `<!-- frame-slices-generated-at: {value} -->` set equal to the spine's `generated_at` (863-D7) — at initial persist and again on every re-persist that touches the spine or any slice, since a stale stamp there is indistinguishable from a genuinely stale slice sibling to the drift check that reads it.
 
-Each frame-slice block carries the routing fields plus the step's Requirement Contract content:
+Also write a standalone `<!-- phase-containment-ledger-ref: {comment_id} -->` marker (863-D11) onto the plan comment, immediately after the `<!-- plan-issue-{ID} -->` marker, pointing at the `<!-- phase-containment-ledger-{ID} -->` sibling created for the `phase-containment` and `judge-rulings` blocks (see `### Phase-containment emission (plan-stress-test)` below) — this pointer is added once that sibling exists, which is after the plan approval burst.
+
+For plans with fewer than 3 implementation steps, emit `spine-omitted: plan-too-small` and do not emit any `<!-- frame-spine -->` frame-spine block or the `<!-- frame-slices-{ID} -->` sibling — this small-plan omission does not extend to the `<!-- phase-containment-ledger-{ID} -->` sibling, which is still created lazily and independently at emission time per § Phase-containment emission below, regardless of plan size.
+
+Each frame-slice block carries the routing fields plus the step's Requirement Contract content. It is posted into the `<!-- frame-slices-{ID} -->` sibling comment, not the plan comment:
 
 ```yaml
 <!-- frame-slice -->
@@ -148,7 +151,7 @@ requirement-contract: |
 
 Set `generated_at` when the spine is first created, preserve `generated_at` across same-content re-emissions, and treat it as transport metadata rather than substantive plan content. D9 normalized comparison hash-elides `generated_at`: it ignores `generated_at` when hashing so identical content does not append duplicate comments.
 
-The spine, slices, and coverage manifest are append-only guidance around the existing plan shape: legacy consumers can continue reading the YAML frontmatter and plan steps without understanding frame blocks.
+The spine and coverage manifest are append-only guidance around the existing plan shape: legacy consumers can continue reading the YAML frontmatter and plan steps without understanding frame blocks. The `frame-slices-{ID}` and `phase-containment-ledger-{ID}` siblings are separate durable comments on the same issue (863-D1); legacy consumers that only fetch the `plan-issue-{ID}` comment are unaffected by their existence.
 
 After posting the `<!-- plan-issue-{ID} -->` GitHub issue comment, post the engagement-record marker (see § Named Decisions write-discipline below); immediately after that successful post, post the credit-input marker.
 
@@ -207,7 +210,7 @@ The canonical session-memory handoff artifacts remain `/memories/session/plan-is
 
 ### Phase-containment emission (plan-stress-test)
 
-After emitting the plan approval burst, for each sustained plan-stress-test finding append one `<!-- phase-containment-{ID} -->` block to the `<!-- plan-issue-{ID} -->` comment (see `skills/plan-authoring/SKILL.md` § Post-Judge Reconciliation → Phase-containment emission for the full field contract). Validate each block against `skills/calibration-pipeline/schemas/phase-containment.schema.json`.
+After emitting the plan approval burst, for each sustained plan-stress-test finding append one `<!-- phase-containment-{ID} -->` block to the `<!-- phase-containment-ledger-{ID} -->` sibling comment — not the plan comment (863-D4; see `skills/plan-authoring/SKILL.md` § Post-Judge Reconciliation → Phase-containment emission for the full field contract, including the co-moved `judge-rulings` block). Create the sibling if it does not yet exist, then write the `<!-- phase-containment-ledger-ref: {comment_id} -->` pointer back onto the plan comment (863-D11; see `## 6. Persist Plan` above). Validate each block against `skills/calibration-pipeline/schemas/phase-containment.schema.json`.
 
 ## Context Management
 

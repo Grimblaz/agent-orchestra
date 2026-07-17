@@ -68,112 +68,12 @@ $script:JudgeRulingsVocabGatePattern = '(?m)(?:^\s*(?:-\s+)?|[{,]\s*)(dispositio
 
 #endregion
 
-#region Get-BlockScalarSpans / Test-IndexInBlockScalarSpan (private)
-
-function script:Get-BlockScalarSpans {
-    <#
-    .SYNOPSIS
-        Finds every YAML block-scalar (`key: |` / `key: >`) CONTENT span in a
-        text, so callers can exclude structural-looking substrings that fall
-        inside block-scalar string content from being treated as real YAML
-        structure (CM1/CM4 fix, judge-sustained PR #833 review).
-    .DESCRIPTION
-        Hand-rolled scan only — no ConvertFrom-Yaml / powershell-yaml
-        (file-level SECURITY invariant at the top of this file).
-
-        A block-scalar key line is any line matching `key: |` or `key: >`
-        (optionally with a chomping indicator +/- and/or an explicit
-        indentation-indicator digit), anchored at end-of-line. Every
-        subsequent line that is either blank or indented strictly MORE than
-        the key line is part of that block scalar's content; the first
-        non-blank line indented at or less than the key line's own
-        indentation ends the span (or end-of-text, if none).
-
-        Before this fix, entry-boundary detection (Get-ReviewDispositionsTallyInternal)
-        and judge-rulings head detection (Get-RealJudgeRulingsHeadMatches)
-        both scanned the raw/region text with no awareness of block-scalar
-        boundaries, so a `disposition_rationale: |` block scalar's indented
-        CONTENT could contain a line that looks exactly like real YAML
-        structure (a `- finding_id:` entry-boundary key, or a
-        `<!-- judge-rulings pr=N -->` head) and be mistaken for the real
-        thing. Callers now compute this text's block-scalar spans once and
-        exclude any structural match whose start index falls inside one.
-    .PARAMETER Text
-        The text to scan (a whole body or an already-isolated region).
-    .OUTPUTS
-        Array of [PSCustomObject]@{ Start; End } character-offset spans
-        (End exclusive), covering only the block-scalar's CONTENT lines (not
-        the `key: |`/`key: >` line itself). Empty array when none found.
-    #>
-    param(
-        [Parameter(Mandatory)][AllowEmptyString()][string]$Text
-    )
-    $spans = [System.Collections.Generic.List[PSCustomObject]]::new()
-    if ([string]::IsNullOrEmpty($Text)) {
-        return , $spans.ToArray()
-    }
-
-    $keyLinePattern = '(?m)^([ \t]*)\S[^\r\n]*:[ \t]*[|>][+-]?\d?[ \t]*\r?$'
-    $keyLineMatches = [regex]::Matches($Text, $keyLinePattern)
-    foreach ($keyMatch in $keyLineMatches) {
-        $keyIndent = $keyMatch.Groups[1].Value.Length
-        $keyLineEnd = $Text.IndexOf("`n", $keyMatch.Index, [System.StringComparison]::Ordinal)
-        if ($keyLineEnd -lt 0) {
-            # The key line is the last line in the text; no content follows.
-            continue
-        }
-        $contentStart = $keyLineEnd + 1
-        $pos = $contentStart
-        $contentEnd = $Text.Length
-        while ($pos -le $Text.Length) {
-            $nextNewline = $Text.IndexOf("`n", $pos, [System.StringComparison]::Ordinal)
-            $lineText = if ($nextNewline -ge 0) { $Text.Substring($pos, $nextNewline - $pos) } else { $Text.Substring($pos) }
-            if ($lineText.Trim().Length -eq 0) {
-                # Blank line: still part of the block scalar.
-                if ($nextNewline -lt 0) { $contentEnd = $Text.Length; break }
-                $pos = $nextNewline + 1
-                continue
-            }
-            $lineIndent = [regex]::Match($lineText, '^[ \t]*').Value.Length
-            if ($lineIndent -le $keyIndent) {
-                $contentEnd = $pos
-                break
-            }
-            if ($nextNewline -lt 0) { $contentEnd = $Text.Length; break }
-            $pos = $nextNewline + 1
-        }
-        if ($contentEnd -gt $contentStart) {
-            $spans.Add([PSCustomObject]@{ Start = $contentStart; End = $contentEnd })
-        }
-    }
-    return , $spans.ToArray()
-}
-
-function script:Test-IndexInBlockScalarSpan {
-    <#
-    .SYNOPSIS
-        Reports whether a character offset falls inside any of the supplied
-        block-scalar spans (CM1/CM4 fix, judge-sustained PR #833 review).
-    .PARAMETER Index
-        The character offset to test.
-    .PARAMETER Spans
-        The Get-BlockScalarSpans result to test against.
-    .OUTPUTS
-        [bool]
-    #>
-    param(
-        [Parameter(Mandatory)][int]$Index,
-        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Spans
-    )
-    foreach ($span in $Spans) {
-        if ($Index -ge $span.Start -and $Index -lt $span.End) {
-            return $true
-        }
-    }
-    return $false
-}
-
-#endregion
+# Get-BlockScalarSpans / Test-IndexInBlockScalarSpan (private): relocated to
+# phase-containment-core.ps1 by the #863 M6 fix, so Get-PhaseContainmentBlock
+# there can reuse the same block-scalar-span gating this file's judge-rulings
+# head detection already relied on. The dot-source above (line 24) makes both
+# functions available here unchanged — no call site in this file needs to
+# change.
 
 #region ConvertFrom-YamlQuotedScalar (private)
 
@@ -2320,6 +2220,60 @@ function Get-EmissionGap {
     $sawRealHeadCorrupt = $false
     $sawDecoyAmbiguous = $false
 
+    # 863-s3: the 811-D1 fallback below fires for a plan body carrying BOTH
+    # the `<!-- plan-issue-` pointer marker and the `**Plan Stress-Test**`
+    # heading with no real judge-rulings head of its OWN. Post-#863-split,
+    # `plan-authoring/SKILL.md` appends the phase-containment blocks and the
+    # judge-rulings head to a SIBLING comment, and only AFTER Post-Judge
+    # Reconciliation — so pointer-written/head-absent on the plan body is the
+    # plan's own MANDATED SEQUENCE, not a defect. Suppress this body's
+    # would-be head-missing contribution ONLY WHEN at least one OTHER body in
+    # this same -Bodies set both (a) already carries a real, vocab-gate-
+    # passing judge-rulings head (Get-RealJudgeRulingsHeadMatches) AND (b)
+    # also carries THIS plan's own `<!-- phase-containment-ledger-{Id} -->`
+    # marker (863 M2 fix, judge-sustained code-review) — never on the
+    # pointer's mere presence, and never on any real head found ANYWHERE on
+    # the issue regardless of which plan it belongs to. Forgery model this
+    # closes: a stale prior-generation judge-rulings head left on the issue
+    # by an earlier plan run (or any other real-head-bearing surface not
+    # bound to the current ledger sibling) must NOT be able to suppress
+    # head-missing for a DIFFERENT plan whose actual designated ledger
+    # sibling is deleted/corrupt/headless — a real head belonging to a
+    # foreign plan run is not evidence that THIS plan's sibling exists.
+    # Binding to the `-Id`-matched ledger marker (rather than trusting the
+    # write-only `phase-containment-ledger-ref` pointer, which no reader may
+    # treat as authoritative on its own — see Documents/Design/
+    # phase-containment-ledger.md § Issue #863) closes that vector while
+    # keeping the check at the aggregation seam.
+    #
+    # This lives at the AGGREGATION SEAM (this function), never inside
+    # Test-EmissionMarkerPresent (judge-sustained M1): that function's
+    # parameter is a single [string]$Body and is structurally unable to ask
+    # "did some OTHER body on this issue supply the real head?" Mirrors the
+    # 817-D1 aggregation-seam precedent below (the CR-8 seam's own comment,
+    # "extend the unpinned sibling, never the pinned function").
+    #
+    # Computed once, up front, rather than per-body: a fallback-firing body
+    # is guaranteed to have zero real heads of its own (that is WHY the
+    # fallback fired — see $hasRealHead below), so "some OTHER ledger-marked
+    # body has a real head" and "ANY ledger-marked body in $Bodies has a
+    # real head" are equivalent for that body. Scoped to plan-stress-test
+    # only — the only surface whose Test-EmissionMarkerPresent has a
+    # fallback path at all (code-review and design-challenge marker
+    # presence is always backed by a real head or its own direct regex
+    # match).
+    $anySiblingHasRealHead = $false
+    if ($Surface -eq 'plan-stress-test') {
+        $ledgerMarker = "<!-- phase-containment-ledger-$Id -->"
+        foreach ($candidateBody in $Bodies) {
+            if ($candidateBody.Contains($ledgerMarker, [System.StringComparison]::Ordinal) -and
+                (Get-RealJudgeRulingsHeadMatches -Body $candidateBody).Count -gt 0) {
+                $anySiblingHasRealHead = $true
+                break
+            }
+        }
+    }
+
     foreach ($body in $Bodies) {
         $bodyHasMarker = Test-EmissionMarkerPresent -Surface $Surface -Body $body
 
@@ -2364,8 +2318,8 @@ function Get-EmissionGap {
 
             $sustainedResult = Get-SustainedFindingCount -Surface $Surface -Body $body
             if ($sustainedResult.ParseStatus -eq 'could-not-verify') {
-                $anyCouldNotVerify = $true
                 if ($hasRealHead) {
+                    $anyCouldNotVerify = $true
                     if (-not $isDesignChallenge -and $realHeadMatches.Count -ge 2) {
                         # The M1 duplicate-head-guard case: 2+ real heads is
                         # exactly the condition Get-JudgeRulingsIsolatedRegion
@@ -2391,7 +2345,31 @@ function Get-EmissionGap {
                         $sawRealHeadCorrupt = $true
                     }
                 }
+                elseif ($anySiblingHasRealHead) {
+                    # 863-s3 suppression (narrowed by the 863 M2 fix): this
+                    # body's 811-D1 fallback fired (pointer marker + prose
+                    # heading present, no real head of its OWN — $hasRealHead
+                    # is false, so this branch is only reachable for
+                    # plan-stress-test, the fallback's only surface), and
+                    # $anySiblingHasRealHead confirms at least one OTHER body
+                    # in this -Bodies set both carries a real, vocab-gate-
+                    # passing judge-rulings head AND carries THIS plan's own
+                    # `<!-- phase-containment-ledger-{Id} -->` marker — not
+                    # merely any real head anywhere on the issue. Post-#863-
+                    # split this is the plan's own mandated sequence (the
+                    # ledger legitimately moved to its designated sibling),
+                    # not a defect — do NOT set $anyCouldNotVerify or
+                    # $sawFallbackFired for this body. $sustainedResult.
+                    # SustainedCount is always 0 on could-not-verify
+                    # (Get-SustainedFindingCount's own invariant), so the
+                    # unconditional accumulation below cannot leak a
+                    # spurious count from this suppressed body.
+                }
                 else {
+                    # No sibling supplies a real head either — the pointer is
+                    # unsubstantiated (sibling headless/deleted/corrupt, or a
+                    # genuinely orphaned plan). head-missing must stand.
+                    $anyCouldNotVerify = $true
                     $sawFallbackFired = $true
                 }
             }
@@ -2555,6 +2533,71 @@ function Get-EmissionGap {
 
 #region Add-CommentBlocks
 
+function script:Add-AppendedAtStampToPhaseContainmentBlocks {
+    <#
+    .SYNOPSIS
+        Stamps `appended_at: {Timestamp}` into every <!-- phase-containment-{ID}
+        --> block in Text that does not already carry one (#863 M1 fix,
+        judge-sustained code-review: the reader, schema, and tests for
+        appended_at all existed with no writer anywhere in the tree).
+    .DESCRIPTION
+        Add-CommentBlocks's own .DESCRIPTION already names it as the s4
+        re-annotation trigger — the actual moment new phase-containment
+        content lands on a comment via PATCH — so it is the natural
+        write-time seam for a real append timestamp, rather than trusting
+        an authoring-time guess baked in long before the API call actually
+        runs. Scans every phase-containment-{ID} open-tag occurrence in
+        Text (same open-tag shape Get-PhaseContainmentBlock parses) and
+        inserts `appended_at: {Timestamp}` as the first content line
+        immediately after the open tag, UNLESS that specific block already
+        contains an `appended_at:` line — an agent that hand-stamped its
+        own value at authoring time (the first-persist/live-authoring path,
+        which does not call this function) is respected, never overwritten.
+    .PARAMETER Text
+        The raw content to scan and stamp (Add-CommentBlocks's NewContent).
+    .PARAMETER Timestamp
+        The strict Z-suffixed UTC timestamp string to stamp (the caller
+        computes this once so every block stamped by one call shares one
+        wall-clock instant).
+    .OUTPUTS
+        [string] Text with appended_at stamped into every un-stamped block.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Text,
+        [Parameter(Mandatory)][string]$Timestamp
+    )
+
+    # F5 fix (PR #868 review): exclude the phase-containment-ledger-{ID}
+    # sentinel marker — it matches [A-Za-z0-9_-]+ (id="ledger-{ID}") but has
+    # no matching close tag, so blockEnd falls through to Text.Length and a
+    # stray `appended_at:` line gets injected after the sentinel with
+    # nothing to close it.
+    $openTagMatches = [regex]::Matches($Text, '<!--\s*phase-containment-(?!ledger-)([A-Za-z0-9_-]+)\s*-->')
+    if ($openTagMatches.Count -eq 0) { return $Text }
+
+    $sb = [System.Text.StringBuilder]::new()
+    $cursor = 0
+    foreach ($openMatch in $openTagMatches) {
+        $id = $openMatch.Groups[1].Value
+        $closeTag = "<!-- /phase-containment-$id -->"
+        $openEnd = $openMatch.Index + $openMatch.Length
+        $closeIdx = $Text.IndexOf($closeTag, $openEnd, [System.StringComparison]::Ordinal)
+        $blockEnd = if ($closeIdx -ge 0) { $closeIdx } else { $Text.Length }
+        $blockContent = $Text.Substring($openEnd, $blockEnd - $openEnd)
+
+        # Copy everything up to and including this open tag unchanged.
+        [void]$sb.Append($Text.Substring($cursor, $openEnd - $cursor))
+
+        if ($blockContent -notmatch '(?m)^\s*appended_at\s*:') {
+            [void]$sb.Append("`nappended_at: $Timestamp")
+        }
+
+        $cursor = $openEnd
+    }
+    [void]$sb.Append($Text.Substring($cursor))
+    return $sb.ToString()
+}
+
 function Add-CommentBlocks {
     <#
     .SYNOPSIS
@@ -2658,11 +2701,27 @@ function Add-CommentBlocks {
     # unverifiable filler (or masked a caller bug, e.g. a backfill scaffold
     # that failed to render any blocks). Detect this before ever issuing the
     # PATCH, so a no-op never masquerades as a successful append.
-    $preflightBlockIds = [regex]::Matches($NewContent, '<!--\s*phase-containment-([A-Za-z0-9_-]+)\s*-->')
+    # F5 fix (PR #868 review, optional same-commit rider): same ledger-
+    # sentinel exclusion as Add-AppendedAtStampToPhaseContainmentBlocks
+    # above — a NewContent carrying only the phase-containment-ledger-{ID}
+    # sentinel (no real block) must still be refused as a no-op, not
+    # mistaken for "carries a block" because the sentinel's id happens to
+    # match [A-Za-z0-9_-]+.
+    $preflightBlockIds = [regex]::Matches($NewContent, '<!--\s*phase-containment-(?!ledger-)([A-Za-z0-9_-]+)\s*-->')
     if ($preflightBlockIds.Count -eq 0) {
         [Console]::Error.WriteLine("Add-CommentBlocks: NewContent carries zero phase-containment blocks for comment $CommentId; refusing as a no-op.")
         return [PSCustomObject]@{ Success = $false; Reason = 'no-op: NewContent carries zero phase-containment blocks' }
     }
+
+    # --- 2c. #863 M1 fix: stamp appended_at into every un-stamped block in
+    #          NewContent at this actual write-time instant, before it is
+    #          concatenated and PATCHed. Reassigning $NewContent here means
+    #          every downstream use (the PATCH body below, and step 5c's
+    #          expected-content comparison) consistently sees the stamped
+    #          version — the positive-proof verify below is comparing
+    #          against exactly what was written, appended_at included.
+    $appendedAtStamp = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+    $NewContent = Add-AppendedAtStampToPhaseContainmentBlocks -Text $NewContent -Timestamp $appendedAtStamp
 
     # --- 3. Concatenate. ---
     $combinedBody = $originalBody + $NewContent
