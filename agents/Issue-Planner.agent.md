@@ -131,7 +131,7 @@ The `<!-- frame-slice -->` blocks themselves do NOT go inside the plan comment. 
 
 Also write a standalone `<!-- phase-containment-ledger-ref: {comment_id} -->` marker (863-D11) onto the plan comment, immediately after the `<!-- plan-issue-{ID} -->` marker, pointing at the `<!-- phase-containment-ledger-{ID} -->` sibling created for the `phase-containment` and `judge-rulings` blocks (see `### Phase-containment emission (plan-stress-test)` below) — this pointer is added once that sibling exists, which is after the plan approval burst.
 
-For plans with fewer than 3 implementation steps, emit `spine-omitted: plan-too-small` and do not emit any `<!-- frame-spine -->` frame-spine block or either sibling comment.
+For plans with fewer than 3 implementation steps, emit `spine-omitted: plan-too-small` and do not emit any `<!-- frame-spine -->` frame-spine block or the `<!-- frame-slices-{ID} -->` sibling — this small-plan omission does not extend to the `<!-- phase-containment-ledger-{ID} -->` sibling, which is still created lazily and independently at emission time per § Phase-containment emission below, regardless of plan size.
 
 Each frame-slice block carries the routing fields plus the step's Requirement Contract content. It is posted into the `<!-- frame-slices-{ID} -->` sibling comment, not the plan comment:
 

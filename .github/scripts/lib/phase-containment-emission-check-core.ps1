@@ -2567,7 +2567,12 @@ function script:Add-AppendedAtStampToPhaseContainmentBlocks {
         [Parameter(Mandatory)][string]$Timestamp
     )
 
-    $openTagMatches = [regex]::Matches($Text, '<!--\s*phase-containment-([A-Za-z0-9_-]+)\s*-->')
+    # F5 fix (PR #868 review): exclude the phase-containment-ledger-{ID}
+    # sentinel marker — it matches [A-Za-z0-9_-]+ (id="ledger-{ID}") but has
+    # no matching close tag, so blockEnd falls through to Text.Length and a
+    # stray `appended_at:` line gets injected after the sentinel with
+    # nothing to close it.
+    $openTagMatches = [regex]::Matches($Text, '<!--\s*phase-containment-(?!ledger-)([A-Za-z0-9_-]+)\s*-->')
     if ($openTagMatches.Count -eq 0) { return $Text }
 
     $sb = [System.Text.StringBuilder]::new()
@@ -2696,7 +2701,13 @@ function Add-CommentBlocks {
     # unverifiable filler (or masked a caller bug, e.g. a backfill scaffold
     # that failed to render any blocks). Detect this before ever issuing the
     # PATCH, so a no-op never masquerades as a successful append.
-    $preflightBlockIds = [regex]::Matches($NewContent, '<!--\s*phase-containment-([A-Za-z0-9_-]+)\s*-->')
+    # F5 fix (PR #868 review, optional same-commit rider): same ledger-
+    # sentinel exclusion as Add-AppendedAtStampToPhaseContainmentBlocks
+    # above — a NewContent carrying only the phase-containment-ledger-{ID}
+    # sentinel (no real block) must still be refused as a no-op, not
+    # mistaken for "carries a block" because the sentinel's id happens to
+    # match [A-Za-z0-9_-]+.
+    $preflightBlockIds = [regex]::Matches($NewContent, '<!--\s*phase-containment-(?!ledger-)([A-Za-z0-9_-]+)\s*-->')
     if ($preflightBlockIds.Count -eq 0) {
         [Console]::Error.WriteLine("Add-CommentBlocks: NewContent carries zero phase-containment blocks for comment $CommentId; refusing as a no-op.")
         return [PSCustomObject]@{ Success = $false; Reason = 'no-op: NewContent carries zero phase-containment blocks' }

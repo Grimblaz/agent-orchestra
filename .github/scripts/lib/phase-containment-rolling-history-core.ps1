@@ -47,7 +47,7 @@ function Test-PhaseContainmentCacheFresh {
     try {
         $parsed = [datetime]::Parse(
             $GeneratedAtUtcString,
-            $null,
+            [System.Globalization.CultureInfo]::InvariantCulture,
             [System.Globalization.DateTimeStyles]::RoundtripKind
         )
         $parsedUtc = $parsed.Kind -eq [System.DateTimeKind]::Utc `
@@ -109,15 +109,49 @@ function script:Get-PCEffectiveTimestamp {
         [Parameter(Mandatory)]$Entry
     )
 
-    $appendedAt = if ($Entry -is [hashtable]) { $Entry['appended_at'] } else { $Entry.appended_at }
+    # F4 fix (PR #868 review): under this file's Set-StrictMode -Version
+    # Latest, both raw dotted access on a PSCustomObject missing the
+    # property AND unconditional `.Value` on a PSObject.Properties[...]
+    # miss (itself $null when absent) throw PropertyNotFoundException — so
+    # the property lookup must be null-checked before reading .Value.
+    $appendedAt = if ($Entry -is [hashtable]) {
+        $Entry['appended_at']
+    }
+    else {
+        $prop = $Entry.PSObject.Properties['appended_at']
+        if ($null -ne $prop) { $prop.Value } else { $null }
+    }
     if (-not [string]::IsNullOrWhiteSpace([string]$appendedAt)) {
         if ([string]$appendedAt -notmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$') {
+            return [PSCustomObject]@{ TimestampStr = $null; IsMalformed = $true }
+        }
+        # F6 fix (issue #868 review): the regex above only checks lexical
+        # shape — a calendar-invalid date like '2026-02-30T00:00:00Z'
+        # matches the pattern but throws on Parse. Route that case through
+        # the same IsMalformed=$true path so both the first-seen shortcut
+        # and the comparison path in Invoke-PhaseContainmentDedup below
+        # (the single choke point both flow through) drop it into
+        # InvalidEntryCount instead of an uninspected downstream throw.
+        try {
+            [datetime]::Parse(
+                [string]$appendedAt,
+                [System.Globalization.CultureInfo]::InvariantCulture,
+                [System.Globalization.DateTimeStyles]::RoundtripKind
+            ) | Out-Null
+        }
+        catch {
             return [PSCustomObject]@{ TimestampStr = $null; IsMalformed = $true }
         }
         return [PSCustomObject]@{ TimestampStr = [string]$appendedAt; IsMalformed = $false }
     }
 
-    $createdAt = if ($Entry -is [hashtable]) { [string]$Entry['createdAt'] } else { [string]$Entry.createdAt }
+    $createdAt = if ($Entry -is [hashtable]) {
+        [string]$Entry['createdAt']
+    }
+    else {
+        $createdAtProp = $Entry.PSObject.Properties['createdAt']
+        if ($null -ne $createdAtProp) { [string]$createdAtProp.Value } else { '' }
+    }
     return [PSCustomObject]@{ TimestampStr = $createdAt; IsMalformed = $false }
 }
 
@@ -187,8 +221,8 @@ function Invoke-PhaseContainmentDedup {
         $existingCreatedAtStr = $existingEffective.TimestampStr
 
         try {
-            $existingDt = [datetime]::Parse($existingCreatedAtStr, $null, [System.Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
-            $candidateDt = [datetime]::Parse($createdAtStr, $null, [System.Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+            $existingDt = [datetime]::Parse($existingCreatedAtStr, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+            $candidateDt = [datetime]::Parse($createdAtStr, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
 
             if ($candidateDt -gt $existingDt) {
                 $best[$key] = $entry
@@ -1805,7 +1839,7 @@ function Get-PhaseContainmentHistory {
         }
         # Compute cache age
         try {
-            $genAt = [datetime]::Parse((script:ConvertTo-PhaseContainmentIsoString -Value $cacheData['generated_at']), $null, [System.Globalization.DateTimeStyles]::RoundtripKind)
+            $genAt = [datetime]::Parse((script:ConvertTo-PhaseContainmentIsoString -Value $cacheData['generated_at']), [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind)
             $genAtUtc = $genAt.Kind -eq [System.DateTimeKind]::Utc ? $genAt : $genAt.ToUniversalTime()
             $cacheAge = (Get-Date).ToUniversalTime() - $genAtUtc
         }

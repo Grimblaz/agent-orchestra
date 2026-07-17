@@ -264,6 +264,69 @@ Describe 'Invoke-PhaseContainmentDedup — appended_at' {
         $result[0].createdAt | Should -Be '2026-07-16T14:00:00Z'
         $counter | Should -Be 1
     }
+
+    It 'calendar-invalid case: an appended_at that matches the regex but is not a real calendar date is routed into InvalidEntryCount' {
+        # PR #868 F6 fix: '2026-02-30T00:00:00Z' passes the strict Z-suffixed
+        # regex (lexically well-formed) but February never has a 30th day,
+        # so [datetime]::Parse throws. Must be dropped exactly like the
+        # regex-malformed case above, not silently kept or crash the dedup.
+        $calendarInvalid = script:New-ValidPCEntry5b -FindingKey 'code-review:762:F10' -CreatedAt '2026-02-01T00:00:00Z' -AppendedAt '2026-02-30T00:00:00Z'
+        $counter = 0
+
+        $result = Invoke-PhaseContainmentDedup -RawEntries @($calendarInvalid) -InvalidEntryCount ([ref]$counter)
+
+        $result | Should -HaveCount 0
+        $counter | Should -Be 1
+    }
+}
+
+# ---------------------------------------------------------------------------
+# 5c. Get-PCEffectiveTimestamp — StrictMode-safe PSCustomObject access (PR #868 F4)
+# ---------------------------------------------------------------------------
+
+Describe 'Invoke-PhaseContainmentDedup — PSCustomObject entries under StrictMode' {
+    It 'falls back to createdAt without throwing when a PSCustomObject entry lacks appended_at' {
+        # A PSCustomObject (not hashtable) entry that never had appended_at
+        # set at all — raw '.appended_at' property access throws
+        # PropertyNotFoundException under this file's Set-StrictMode -Version
+        # Latest. Must fall back to createdAt-based dedup instead of erroring.
+        $entryNoAppendedAt = [PSCustomObject]@{
+            finding_key       = 'code-review:762:F11'
+            introduced_phase  = 'design'
+            catchable_phase   = 'design'
+            caught_stage      = 'code-review'
+            escape_distance   = 2
+            severity          = 'high'
+            systemic_fix_type = 'skill'
+            category          = 'architecture'
+            apparatus_meta    = $false
+            seed              = $false
+            createdAt         = '2026-07-01T00:00:00Z'
+            surface           = 'issue'
+            issueOrPrNumber   = 762
+        }
+        $olderSibling = [PSCustomObject]@{
+            finding_key       = 'code-review:762:F11'
+            introduced_phase  = 'design'
+            catchable_phase   = 'design'
+            caught_stage      = 'code-review'
+            escape_distance   = 2
+            severity          = 'high'
+            systemic_fix_type = 'skill'
+            category          = 'architecture'
+            apparatus_meta    = $false
+            seed              = $false
+            createdAt         = '2026-06-01T00:00:00Z'
+            surface           = 'issue'
+            issueOrPrNumber   = 762
+        }
+
+        { Invoke-PhaseContainmentDedup -RawEntries @($entryNoAppendedAt, $olderSibling) } | Should -Not -Throw
+
+        $result = Invoke-PhaseContainmentDedup -RawEntries @($entryNoAppendedAt, $olderSibling)
+        $result | Should -HaveCount 1
+        $result[0].createdAt | Should -Be '2026-07-01T00:00:00Z'
+    }
 }
 
 # ---------------------------------------------------------------------------

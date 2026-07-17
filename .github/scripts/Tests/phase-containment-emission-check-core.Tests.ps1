@@ -3143,6 +3143,34 @@ Describe 'Add-CommentBlocks - read-modify-write append primitive' {
         $result = Add-CommentBlocks -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 999 -ExpectedMarker '<!-- judge-rulings' -NewContent $script:mockNewContent
         $result.Success | Should -Be $true
     }
+
+    It 'F5 fix (PR #868): treats NewContent carrying only the phase-containment-ledger-{ID} sentinel as a no-op, not a real block' {
+        # The ledger sentinel id ("ledger-863") matches [A-Za-z0-9_-]+, so
+        # pre-fix the M10 preflight counted it as a real phase-containment
+        # block and let the write proceed even though there was nothing for
+        # the post-write positive-proof loop to verify.
+        $result = Add-CommentBlocks -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 999 -ExpectedMarker '<!-- judge-rulings' -NewContent "`n<!-- phase-containment-ledger-863 -->"
+        $result.Success | Should -Be $false
+        $result.Reason | Should -Match 'no-op'
+    }
+}
+
+Describe 'Add-AppendedAtStampToPhaseContainmentBlocks — F5 fix: ledger sentinel regex collision (PR #868)' {
+    It 'does not inject a stray appended_at stamp after a phase-containment-ledger-{ID} sentinel with no matching close tag' {
+        $text = "<!-- phase-containment-ledger-863 -->`n`nsome other comment text"
+        $result = script:Add-AppendedAtStampToPhaseContainmentBlocks -Text $text -Timestamp '2026-07-16T00:00:00Z'
+        $result | Should -Be $text
+        $result | Should -Not -Match 'appended_at:'
+    }
+
+    It 'still stamps a real phase-containment-{ID} block that appears alongside a ledger sentinel' {
+        $realBlock = script:New-ValidPhaseContainmentBlockText -Id '863' -Surface 'code-review' -FindingSuffix 'F1'
+        $text = "<!-- phase-containment-ledger-863 -->`n`n$realBlock"
+        $result = script:Add-AppendedAtStampToPhaseContainmentBlocks -Text $text -Timestamp '2026-07-16T00:00:00Z'
+        ($result -match 'appended_at: 2026-07-16T00:00:00Z') | Should -Be $true
+        # No stamp was injected right after the sentinel itself.
+        $result | Should -Not -Match 'ledger-863 -->\r?\nappended_at:'
+    }
 }
 
 Describe 'Add-JudgeRulingsBlock - sibling append primitive with entry-level positive-proof (811-D1 s3, M17)' {
