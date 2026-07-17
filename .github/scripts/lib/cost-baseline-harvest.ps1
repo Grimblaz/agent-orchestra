@@ -579,11 +579,14 @@ function script:Get-CostBaselineHarvestRollingBaseline {
         Excludes the entry (if any) belonging to $ExcludePr — the rolling
         history returned by Get-CostRollingHistory can legitimately already
         contain the very PR being harvested (e.g. a re-run after an earlier
-        promotion). Entries with no parsed totals.cost_estimate_usd — either
-        the key is absent, or it carries the renderer's own "genuinely
-        unknown" null (cost-pattern-renderer.ps1's
-        Format-CostRendererNullableCostYaml) — are skipped rather than
-        folded in as $0.00, which would silently understate the median.
+        promotion). Entries with no parsed totals.cost_estimate_usd are
+        skipped rather than folded in as $0.00, which would silently
+        understate the median. That covers three cases: the key is absent,
+        it carries the renderer's own "genuinely unknown" null
+        (cost-pattern-renderer.ps1's Format-CostRendererNullableCostYaml),
+        or the value is present but doesn't culture-invariantly parse as a
+        number (guards against untrusted rolling-history data that has been
+        corrupted or hand-edited).
 
         Returns $null (never a zero-sample hashtable) when fewer than
         $MinimumSampleSize usable entries remain after exclusion/filtering,
@@ -612,7 +615,9 @@ function script:Get-CostBaselineHarvestRollingBaseline {
         if ($null -eq $totals -or $totals -isnot [hashtable]) { continue }
         if (-not $totals.ContainsKey('cost_estimate_usd') -or $null -eq $totals['cost_estimate_usd']) { continue }
 
-        $costs.Add([double]$totals['cost_estimate_usd'])
+        [double]$parsedCost = 0.0
+        if (-not [double]::TryParse([string]$totals['cost_estimate_usd'], [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$parsedCost)) { continue }
+        $costs.Add($parsedCost)
     }
 
     if ($costs.Count -lt $MinimumSampleSize) { return $null }

@@ -1798,6 +1798,22 @@ Describe 'Rolling baseline (issue #489 CE Gate follow-up)' {
             $result.median_usd | Should -Be 6.00
         }
 
+        It 'skips an entry with a malformed non-numeric cost_estimate_usd rather than throwing, and still computes a correct median from the remaining valid entries' {
+            $entries = @(
+                @{ pr = 100; totals = @{ cost_estimate_usd = 4.00 } }
+                @{ pr = 101; totals = @{ cost_estimate_usd = 'N/A' } }
+                @{ pr = 102; totals = @{ cost_estimate_usd = 6.00 } }
+                @{ pr = 103; totals = @{ cost_estimate_usd = 8.00 } }
+            )
+
+            { script:Get-CostBaselineHarvestRollingBaseline -Entries $entries -ExcludePr 0 } | Should -Not -Throw
+
+            $result = script:Get-CostBaselineHarvestRollingBaseline -Entries $entries -ExcludePr 0
+
+            $result.sample_size | Should -Be 3 -Because 'the malformed non-numeric entry must be skipped, not counted toward the sample'
+            $result.median_usd | Should -Be 6.00
+        }
+
         It 'returns $null when fewer than the minimum sample size of usable entries remain' {
             $entries = @(
                 @{ pr = 100; totals = @{ cost_estimate_usd = 1.00 } }
