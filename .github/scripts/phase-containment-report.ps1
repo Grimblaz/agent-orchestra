@@ -59,6 +59,100 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# ---------------------------------------------------------------------------
+# Issue #842 M4: resolve the judge identity from ambient `gh` auth when the
+# caller (whether the script itself or a direct Invoke-PhaseContainmentReportCli
+# caller) did not supply -JudgeLogin explicitly. Defined here, before both
+# resolution sites below, so it exists at script scope in time for the
+# (gated -- post-review M4 fix, see below) script-scope resolution
+# immediately below AND for Invoke-PhaseContainmentReportCli's own
+# function-level gate.
+# ---------------------------------------------------------------------------
+function Resolve-JudgeLogin {
+    <#
+    .SYNOPSIS
+        Resolves the judge identity's login via `gh api user`.
+    .DESCRIPTION
+        Used whenever -JudgeLogin is not explicitly supplied, so the
+        author-forgery gate (Test-PhaseContainmentCommentAuthoredByJudge)
+        always has a real identity to compare against instead of falling
+        back to the static 'github-actions[bot]' default literal, which is
+        wrong for a run authenticated as a different account. An empty or
+        whitespace-only return (auth failure, no ambient `gh` session) is
+        the CALLER's responsibility to reject (issue #842 M21) — this
+        function reports what `gh` returned, including a legitimate '' on
+        failure, rather than throwing itself, so callers can choose their
+        own fail-loud wording.
+    .OUTPUTS
+        [string] — the resolved login, or '' when resolution failed.
+    .NOTES
+        Identity-degradation envelope (issue #842 s6): the auto-resolved
+        default assumes the report-runner IS the judge-poster. If that
+        identity changes within a measurement window (maintainer handoff,
+        bot migration, a different account running the report), older
+        posters' entries silently filter out of `matched` under the NEW
+        identity. This no longer degrades silently, though: it surfaces
+        loudly via the FILTERED-EMPTY / INVALID-EMPTY render states
+        (phase-containment-rolling-history-core.ps1, `Get-DispositionTally`'s
+        DenominatorZero-branch discrimination) and the always-on header
+        disclosure line naming the identity actually used, both added
+        alongside this identity-resolution gate. Pass -JudgeLogin explicitly
+        to pin the identity across a handoff instead of relying on the
+        auto-resolved default.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param()
+
+    try {
+        $login = & gh api user --jq '.login' 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "phase-containment-report: gh api user failed (exit $LASTEXITCODE) while resolving the judge identity"
+            return ''
+        }
+        return [string]$login
+    }
+    catch {
+        # Defensive: a missing `gh` binary or other native-command failure
+        # must degrade to '' (a resolution failure the caller rejects per
+        # M21), never crash whatever dot-sourced this file.
+        Write-Warning "phase-containment-report: failed to resolve the judge identity: $_"
+        return ''
+    }
+}
+
+# ---- Script-scope identity resolution (issue #842 M4, post-review fix) ----
+# M4 fix (judge-sustained): the earlier version of this block ran
+# unconditionally at dot-source/load time -- every dot-source of this file
+# (including Pester's own BeforeAll, before any mock is in place) shelled
+# out to a live `gh api user` call. This is now gated on the SAME
+# `$MyInvocation.InvocationName -ne '.'` check the auto-invoke guard at the
+# bottom of this file uses, so dot-sourcing the file to reuse its functions
+# (the whole point of the auto-invoke guard's own design) never triggers a
+# live network call -- resolution only happens on the real `pwsh -File`
+# execution path.
+#
+# M1 fix (judge-sustained): $JudgeLoginSource is captured HERE, at the one
+# point where "the script's own caller passed -JudgeLogin explicitly" vs.
+# "the script auto-resolved it from ambient gh auth" is still knowable. It
+# is threaded through to Invoke-PhaseContainmentReportCli via
+# -JudgeLoginSource below so the header's provenance label reflects what
+# ACTUALLY happened here, rather than being re-derived from
+# $PSBoundParameters.ContainsKey('JudgeLogin') inside the function -- that
+# re-derivation can no longer tell the two cases apart once this script
+# always forwards a concrete -JudgeLogin value (it would always say "from
+# -JudgeLogin", even for an auto-resolved identity).
+$JudgeLoginSource = $null
+if ($MyInvocation.InvocationName -ne '.') {
+    if ($PSBoundParameters.ContainsKey('JudgeLogin')) {
+        $JudgeLoginSource = 'from -JudgeLogin'
+    }
+    else {
+        $JudgeLogin = Resolve-JudgeLogin
+        $JudgeLoginSource = 'resolved from gh auth'
+    }
+}
+
 # ---- Dot-source order (issue #768 s6, judge-sustained M11 — see header) ----
 $libRoot = Join-Path $PSScriptRoot 'lib'
 . (Join-Path $libRoot 'phase-containment-rolling-history-core.ps1')
@@ -396,6 +490,14 @@ function Invoke-PhaseContainmentReportCli {
         The judge identity's login, threaded to
         Get-PhaseContainmentTerminalObservation (issue #854 s4/s6) so only
         judge-authored bodies contribute coverage/escape-side data.
+    .PARAMETER JudgeLoginSource
+        Issue #842 M1 fix (post-review): optional true-provenance override
+        ('from -JudgeLogin' or 'resolved from gh auth'), supplied by the
+        script-scope auto-invoke path so the header's provenance label is
+        never re-derived from $PSBoundParameters.ContainsKey('JudgeLogin')
+        alone -- that check can no longer distinguish an explicit caller
+        value from an auto-resolved one once the script always forwards a
+        concrete -JudgeLogin. Direct function callers normally omit this.
     .OUTPUTS
         [string[]] — the full report (value report + cost section, or value
         report + degradation/caveat lines), written via Write-Output.
@@ -408,8 +510,54 @@ function Invoke-PhaseContainmentReportCli {
         [string]$Token,
         [switch]$NoCache,
         [switch]$ValueCacheOk,
-        [string]$JudgeLogin = 'github-actions[bot]'
+        [string]$JudgeLogin = 'github-actions[bot]',
+        # Issue #842 M1 fix (post-review): optional provenance override.
+        # The script-scope auto-invoke path (above) always supplies this --
+        # it already knows, unambiguously, whether $JudgeLogin was
+        # explicitly passed by the script's own caller or auto-resolved
+        # from gh auth, at the one point that distinction is still
+        # knowable. Direct function callers (tests, or another script
+        # dot-sourcing this file and calling this function itself) omit
+        # this and fall back to the original ContainsKey-based derivation
+        # below, unchanged from before this fix.
+        [string]$JudgeLoginSource
     )
+
+    # ---- Function-level identity resolution gate (issue #842 M4) ----
+    # Direct function callers (tests, or another script that dot-sources this
+    # file and calls Invoke-PhaseContainmentReportCli itself) bypass the
+    # script-scope resolution above entirely -- this gate is what keeps THAT
+    # call path honest too. An explicit -JudgeLogin always wins outright and
+    # is never re-resolved.
+    #
+    # M1 fix (judge-sustained): when the caller supplies -JudgeLoginSource
+    # explicitly (the script-scope auto-invoke path always does), that value
+    # is authoritative and used as-is. $PSBoundParameters.ContainsKey(
+    # 'JudgeLogin') alone can no longer distinguish "explicitly passed by
+    # the original caller" from "auto-resolved then forwarded" once a
+    # caller always forwards a concrete -JudgeLogin value -- it would
+    # always say "from -JudgeLogin", even for an auto-resolved identity.
+    # Direct function callers that omit -JudgeLoginSource keep the original
+    # ContainsKey-based derivation exactly as before this fix.
+    if ($PSBoundParameters.ContainsKey('JudgeLoginSource')) {
+        $judgeLoginSource = $JudgeLoginSource
+    }
+    elseif ($PSBoundParameters.ContainsKey('JudgeLogin')) {
+        $judgeLoginSource = 'from -JudgeLogin'
+    }
+    else {
+        $JudgeLogin = Resolve-JudgeLogin
+        $judgeLoginSource = 'resolved from gh auth'
+    }
+
+    # M21 fix: an empty/whitespace resolved identity silently disables
+    # Test-PhaseContainmentCommentAuthoredByJudge's gate for every body
+    # scanned (fail-closed only works if there IS an identity to compare
+    # against) -- fail loud here, naming -JudgeLogin as the remedy, rather
+    # than letting it flow through and degrade quietly.
+    if ([string]::IsNullOrWhiteSpace($JudgeLogin)) {
+        throw "phase-containment-report: could not resolve a judge identity (gh auth failed or returned empty) -- pass -JudgeLogin explicitly to avoid silently disabling the judge-authorship gate."
+    }
 
     # ---- Fetch coherence (issue #768 s6, judge-sustained M8) ----
     # Edited BEFORE the value fetch call below (not appended after the
@@ -437,8 +585,21 @@ function Invoke-PhaseContainmentReportCli {
         $fetchParams['Token'] = $Token
     }
     if ($bypassValueCache) {
-        # Force cache miss by pointing at a non-existent path.
-        $fetchParams['CachePath'] = [System.IO.Path]::GetTempFileName() + '.nocache.json'
+        # Force cache miss by pointing at a non-existent path. issue #842 s6
+        # (CM16 fix a): a prior version called [System.IO.Path]::GetTempFileName()
+        # and appended '.nocache.json' to ITS return value -- GetTempFileName()
+        # creates a real 0-byte file on disk and returns that path, so the
+        # appended-suffix path named here was always a DIFFERENT, never-created
+        # path, orphaning the original 0-byte file on every default/-NoCache
+        # run. A GUID-based name under $env:TEMP names a throwaway path
+        # without ever creating a file, matching the cache-path construction
+        # convention already documented by the `# host-path-ok` marker in
+        # phase-containment-rolling-history-core.ps1.
+        $fetchParams['CachePath'] = Join-Path $env:TEMP "phase-containment-bypass-$([guid]::NewGuid().ToString('N')).json"  # host-path-ok
+        # M5 fix (issue #842 post-review): signal the throwaway-cache bypass
+        # through to Get-PhaseContainmentHistory so it skips writing a full-
+        # content orphan JSON for this never-reused GUID path.
+        $fetchParams['SkipCacheWrite'] = $true
     }
 
     $history = Get-PhaseContainmentHistory @fetchParams
@@ -448,6 +609,19 @@ function Invoke-PhaseContainmentReportCli {
     $source            = $history.Source
     $truncated         = $history.Truncated
     $invalidEntryCount = $history.InvalidEntryCount
+
+    # Issue #842 M8: read Matched/AuthorFilteredCount defensively (PSObject.
+    # Properties lookup, not dot-access) rather than $history.Matched --
+    # under this file's Set-StrictMode -Version Latest, a bare dot-access
+    # throws PropertyNotFoundException against any fixture object (existing
+    # or future test-double) that has not been updated to carry these new
+    # fields, which would fail every pre-existing test using such a fixture
+    # rather than degrading gracefully to "not tracked" (0).
+    $matchedProp = $history.PSObject.Properties['Matched']
+    $historyMatched = if ($null -ne $matchedProp) { [int]$matchedProp.Value } else { 0 }
+    $authorFilteredProp = $history.PSObject.Properties['AuthorFilteredCount']
+    $historyAuthorFilteredCount = if ($null -ne $authorFilteredProp) { [int]$authorFilteredProp.Value } else { 0 }
+    $commentBodyCount = $historyMatched + $historyAuthorFilteredCount
 
     # ---- Corpus fetch, hoisted (issue #854 s6, M2 — see the header for the
     # full ordering rationale). Fetched exactly ONCE: this same $corpus is
@@ -512,12 +686,17 @@ function Invoke-PhaseContainmentReportCli {
     # it (issue #768 s6, judge-sustained M5/M8 isolation requirement).
 
     $reportContext = @{
-        Rollup            = $rollup
-        Source            = $source
-        Truncated         = $truncated
-        WindowDays        = $WindowDays
-        FetchedAt         = $fetchedAt
-        InvalidEntryCount = $invalidEntryCount
+        Rollup              = $rollup
+        Source              = $source
+        Truncated           = $truncated
+        WindowDays          = $WindowDays
+        FetchedAt           = $fetchedAt
+        InvalidEntryCount   = $invalidEntryCount
+        Matched             = $historyMatched
+        CommentBodyCount    = $commentBodyCount
+        AuthorFilteredCount = $historyAuthorFilteredCount
+        JudgeLogin          = $JudgeLogin
+        JudgeLoginSource    = $judgeLoginSource
     }
 
     Format-PhaseContainmentReport -Context $reportContext | Write-Output
@@ -578,6 +757,13 @@ function Invoke-PhaseContainmentReportCli {
 # `& script.ps1`), never when dot-sourced -- Pester dot-sources this file to
 # load Invoke-PhaseContainmentReportCli (and, transitively, every function
 # above) without triggering a live `gh` fetch.
+#
+# M1 fix (issue #842, judge-sustained post-review): -JudgeLoginSource
+# forwards the TRUE provenance computed by the script-scope resolution
+# block above, rather than letting the function re-derive it from
+# $PSBoundParameters.ContainsKey('JudgeLogin') -- which is always $true
+# here since this line always forwards a concrete -JudgeLogin value,
+# regardless of whether it was explicitly supplied or auto-resolved.
 if ($MyInvocation.InvocationName -ne '.') {
-    Invoke-PhaseContainmentReportCli -RepoOwner $RepoOwner -RepoName $RepoName -WindowDays $WindowDays -Token $Token -NoCache:$NoCache -ValueCacheOk:$ValueCacheOk -JudgeLogin $JudgeLogin
+    Invoke-PhaseContainmentReportCli -RepoOwner $RepoOwner -RepoName $RepoName -WindowDays $WindowDays -Token $Token -NoCache:$NoCache -ValueCacheOk:$ValueCacheOk -JudgeLogin $JudgeLogin -JudgeLoginSource $JudgeLoginSource
 }

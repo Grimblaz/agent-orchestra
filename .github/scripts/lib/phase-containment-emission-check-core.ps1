@@ -113,6 +113,52 @@ function script:ConvertFrom-YamlQuotedScalar {
     return $trimmed
 }
 
+function script:ConvertTo-SanitizedReviewerSource {
+    <#
+    .SYNOPSIS
+        Length-caps and strips control characters from a reviewer_source
+        value before it is used as a cost-table grouping key (issue #842
+        CM21; extended for Unicode bidi/zero-width characters, issue #842
+        post-review M12).
+    .DESCRIPTION
+        reviewer_source is attacker-influenced comment text that
+        Get-ReviewCostRollup groups on directly (Group-Object -Property
+        ReviewerSource) and Format-ReviewCostSection later interpolates
+        verbatim into a rendered report line. The extraction regex
+        (`reviewer_source\s*:\s*(\S+)`) has no upper bound on length, and
+        `\S` matches any non-whitespace byte, including ASCII control
+        characters — an oversized value could bloat the per-source cost
+        table, and an embedded control character could corrupt rendered
+        report output. Strips ASCII control characters (0x00-0x1F, 0x7F)
+        first, then caps the result at a fixed length.
+
+        M12 fix (issue #842 post-review): also strips Unicode bidirectional
+        override/isolate characters (U+202A-U+202E, U+2066-U+2069) and
+        zero-width characters (U+200B-U+200D, U+2060, U+FEFF) before the
+        length cap is applied. Left unstripped, a bidi-override character in
+        an interpolated reviewer_source value could reorder how the
+        surrounding rendered report text visually displays in a terminal or
+        editor (a Trojan-Source-class attack), and zero-width characters
+        could silently fragment or disguise an otherwise-identical grouping
+        key.
+    .PARAMETER Value
+        The already-dequoted reviewer_source value, or $null when no
+        reviewer_source field was present on the entry.
+    .OUTPUTS
+        [string] or $null (passes a $null/empty input through unchanged).
+    #>
+    param(
+        [Parameter(Mandatory)][AllowNull()][AllowEmptyString()][string]$Value
+    )
+    if ([string]::IsNullOrEmpty($Value)) { return $Value }
+    $maxLength = 64
+    $stripped = [regex]::Replace($Value, '[\x00-\x1F\x7F\u200B-\u200D\u2060\uFEFF\u202A-\u202E\u2066-\u2069]', '')
+    if ($stripped.Length -gt $maxLength) {
+        return $stripped.Substring(0, $maxLength)
+    }
+    return $stripped
+}
+
 #endregion
 
 #region Judge-rulings head detection and duplicate-diagnosis helpers (private)
@@ -1049,23 +1095,58 @@ function script:Get-ReviewDispositionsRealHeadMatch {
         [Parameter(Mandatory)][AllowEmptyString()][string]$Body
     )
     if ([string]::IsNullOrWhiteSpace($Body)) { return $null }
+    $realHeadMatches = Get-RealReviewDispositionsHeadMatches -Body $Body
+    if ($realHeadMatches.Count -eq 0) { return $null }
+    return $realHeadMatches[0]
+}
+
+function script:Get-RealReviewDispositionsHeadMatches {
+    <#
+    .SYNOPSIS
+        Scans a body for ALL review-dispositions head candidates and returns
+        only those that pass the vocab gate (real heads), preserving
+        encounter order (issue #842 CM19).
+    .DESCRIPTION
+        Same scan-all-candidates technique as Get-RealJudgeRulingsHeadMatches
+        above: a vocab-gate-FAILING decoy head positioned before a real,
+        vocab-gate-PASSING block must never suppress detection of the real
+        block, and the full candidate set is what Get-ReviewDispositionsTallyInternal
+        needs to apply the SAME >=2-real-heads fail-loud guard
+        (811-D1 owner decision M1) its judge-rulings sibling already applies
+        — a genuine duplicate review-dispositions head on one body signals
+        an anomaly (e.g. a double-run backfill) that must be surfaced as
+        could-not-verify, never silently resolved by picking the first head
+        (CM19: this is the closure this function exists to enable).
+    .PARAMETER Body
+        The raw comment body text to scan.
+    .OUTPUTS
+        [System.Text.RegularExpressions.Match[]] — the subset of the
+        `<!-- review-dispositions-{N} -->` head pattern matches that pass
+        the vocab gate, in original encounter order. Empty array when none
+        pass.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Body
+    )
+    if ([string]::IsNullOrWhiteSpace($Body)) { return , @() }
 
     # Capture group 1 (the marker's own {N}) lets Test-ReviewDispositionsHeadPresent's
     # optional -ExpectedNumber check (M13 fix) read the matched marker's own
     # number directly off the returned Match, with no second regex pass.
     $headPattern = '<!--\s*review-dispositions-(\d+)\s*-->'
     $headCandidates = [regex]::Matches($Body, $headPattern)
-    if ($headCandidates.Count -eq 0) { return $null }
+    if ($headCandidates.Count -eq 0) { return , @() }
 
     $lookaheadWindow = 400
+    $realHeadMatches = [System.Collections.Generic.List[System.Text.RegularExpressions.Match]]::new()
     foreach ($candidate in $headCandidates) {
         $windowEnd = [Math]::Min($Body.Length, $candidate.Index + $candidate.Length + $lookaheadWindow)
         $window = $Body.Substring($candidate.Index, $windowEnd - $candidate.Index)
         if ([regex]::IsMatch($window, '(?m)^\s*(entries|schema_version|stable_finding_key)\s*:')) {
-            return $candidate
+            $realHeadMatches.Add($candidate)
         }
     }
-    return $null
+    return , $realHeadMatches.ToArray()
 }
 
 function script:Test-ReviewDispositionsHeadPresent {
@@ -1446,7 +1527,18 @@ function script:Get-ReviewDispositionsTallyInternal {
     # 'Key-anchor pattern' drift-guard meta-test in this file's Tests.
     $keyAnchor = '(?:^\s*(?:-\s+)?|[{,]\s*)'
 
-    $realHead = Get-ReviewDispositionsRealHeadMatch -Body $Body
+    # CM19 fix (issue #842): fail loud when 2+ real review-dispositions heads
+    # exist in one body, matching the judge-rulings sibling's 811-D1 owner
+    # decision (M1) rather than silently picking the first head. The writer's
+    # replace-own-block already guarantees a single head on the normal
+    # persist path, so a genuine duplicate signals an anomaly (e.g. a
+    # double-run backfill) that should be surfaced, not quietly resolved.
+    $realHeadMatches = Get-RealReviewDispositionsHeadMatches -Body $Body
+    if ($realHeadMatches.Count -ge 2) {
+        return [PSCustomObject]@{ Entries = @(); ParseStatus = 'could-not-verify' }
+    }
+
+    $realHead = if ($realHeadMatches.Count -eq 1) { $realHeadMatches[0] } else { $null }
     if ($null -eq $realHead) {
         return [PSCustomObject]@{ Entries = @(); ParseStatus = 'could-not-verify' }
     }
@@ -1555,8 +1647,12 @@ function script:Get-ReviewDispositionsTallyInternal {
         # of forming a phantom distinct per-source row.
         # GH-N1 fix (judge-sustained PR #852 review): also strip trailing
         # flow-mapping closers `}`/`]` (see stage fix above for rationale).
+        # CM21 fix (issue #842): sanitize AFTER dequoting -- length-caps and
+        # strips control characters before this value is ever used as a
+        # cost-table grouping key (Get-ReviewCostRollup) or interpolated
+        # into rendered report output (Format-ReviewCostSection).
         $reviewerSourceMatch = [regex]::Match($entrySpan, "(?m)${keyAnchor}reviewer_source\s*:\s*(\S+)")
-        $reviewerSource = if ($reviewerSourceMatch.Success) { ConvertFrom-YamlQuotedScalar -Value ($reviewerSourceMatch.Groups[1].Value.TrimEnd(',', '}', ']')) } else { $null }
+        $reviewerSource = if ($reviewerSourceMatch.Success) { ConvertTo-SanitizedReviewerSource -Value (ConvertFrom-YamlQuotedScalar -Value ($reviewerSourceMatch.Groups[1].Value.TrimEnd(',', '}', ']'))) } else { $null }
 
         # internal_match.match_status / matched_finding_key (issue #854 s3,
         # M41): a keyword capture group anchors the block-scalar exclusion
@@ -2713,7 +2809,60 @@ function Add-CommentBlocks {
         return [PSCustomObject]@{ Success = $false; Reason = 'no-op: NewContent carries zero phase-containment blocks' }
     }
 
-    # --- 2c. #863 M1 fix: stamp appended_at into every un-stamped block in
+    # --- 2c. #842 fix (s4): validate-before-post. The raw regex above only
+    # proves a marker-shaped substring exists somewhere in NewContent; it has
+    # no awareness of the unclosed-block class (#772 D6) or the block-scalar
+    # gating class (#863 M6) that Get-PhaseContainmentBlock's real parser
+    # applies. Parse each candidate id with the SAME gated parser used
+    # elsewhere in this file (:2399, Fix A), passing -SkippedCount, and
+    # refuse BEFORE ever issuing the PATCH when:
+    #   - SkippedCount > 0 (an unclosed or malformed block was found), OR
+    #   - zero real blocks parsed for an id the raw regex above believed was
+    #     present (a block-scalar-embedded decoy substring, e.g. a
+    #     `key: |` scalar that merely quotes the marker in prose).
+    # These are additive, not either alone: an unclosed final block can
+    # still leave SkippedCount incremented while parsing zero blocks, and a
+    # decoy substring never increments SkippedCount at all (it is silently
+    # skipped as "never a real marker attempt") — keying on only one of the
+    # two misses the other class. This is the real production shape that
+    # produced the 8 live malformed blocks (#824, #811, #785 x2, #777 x2,
+    # #776 x2).
+    # Every block that DOES parse cleanly must also pass
+    # Test-PhaseContainmentEntry (Rules 1-12, including the ordering
+    # constraints at Rules 9-11) — a syntactically well-formed, fully closed
+    # block whose field values violate the schema (e.g. introduced_phase
+    # ordinal > catchable_phase ordinal) must not be posted either.
+    $preflightIds = [System.Collections.Generic.List[string]]::new()
+    foreach ($m in $preflightBlockIds) {
+        $id = $m.Groups[1].Value
+        if (-not $preflightIds.Contains($id)) { $preflightIds.Add($id) }
+    }
+
+    foreach ($id in $preflightIds) {
+        $preflightSkippedCount = 0
+        $preflightGatedBlocks = Get-PhaseContainmentBlock -Text $NewContent -Id $id -SkippedCount ([ref]$preflightSkippedCount)
+
+        if ($preflightSkippedCount -gt 0) {
+            [Console]::Error.WriteLine("Add-CommentBlocks: NewContent's phase-containment-$id block is unclosed or malformed ($preflightSkippedCount skipped); refusing to append for comment $CommentId.")
+            return [PSCustomObject]@{ Success = $false; Reason = "NewContent's phase-containment-$id block is unclosed or malformed ($preflightSkippedCount skipped)" }
+        }
+
+        if ($null -eq $preflightGatedBlocks -or $preflightGatedBlocks.Count -eq 0) {
+            [Console]::Error.WriteLine("Add-CommentBlocks: NewContent's phase-containment-$id marker did not yield any real, gated-parseable block; refusing to append for comment $CommentId.")
+            return [PSCustomObject]@{ Success = $false; Reason = "NewContent's phase-containment-$id marker did not yield any real parseable block" }
+        }
+
+        foreach ($rawBlock in $preflightGatedBlocks) {
+            $preflightEntry = ConvertFrom-PhaseContainmentYaml -Yaml $rawBlock
+            $preflightValidation = Test-PhaseContainmentEntry -Entry $preflightEntry
+            if (-not $preflightValidation.IsValid) {
+                [Console]::Error.WriteLine("Add-CommentBlocks: NewContent's phase-containment-$id block fails schema validation ($($preflightValidation.Errors -join '; ')); refusing to append for comment $CommentId.")
+                return [PSCustomObject]@{ Success = $false; Reason = "NewContent's phase-containment-$id block fails schema validation: $($preflightValidation.Errors -join '; ')" }
+            }
+        }
+    }
+
+    # --- 2d. #863 M1 fix: stamp appended_at into every un-stamped block in
     #          NewContent at this actual write-time instant, before it is
     #          concatenated and PATCHed. Reassigning $NewContent here means
     #          every downstream use (the PATCH body below, and step 5c's
@@ -2792,15 +2941,28 @@ function Add-CommentBlocks {
     }
 
     foreach ($id in $newBlockIds) {
-        $expectedBlocks = Get-PhaseContainmentBlock -Text $NewContent -Id $id
+        $expectedSkippedCount = 0
+        $expectedBlocks = Get-PhaseContainmentBlock -Text $NewContent -Id $id -SkippedCount ([ref]$expectedSkippedCount)
         $verifyBlocks = Get-PhaseContainmentBlock -Text $verifyBody -Id $id
+
+        # #842 fix (M16): a $null/zero-block $expectedBlocks (an unclosed
+        # source block, or SkippedCount > 0) used to fall through to
+        # $expectedCount = 0 below, making the subsequent count-comparison
+        # and content-match loop vacuously pass with zero iterations — a
+        # positive-proof loop that proves nothing when there is nothing to
+        # prove. Refuse loud instead of silently treating "nothing expected"
+        # as "nothing to verify".
+        if ($expectedSkippedCount -gt 0 -or $null -eq $expectedBlocks) {
+            [Console]::Error.WriteLine("Add-CommentBlocks: post-write verify FAILED — phase-containment-$id block(s) from NewContent never parsed as real, well-formed blocks (unclosed/malformed or decoy substring) for comment $CommentId.")
+            return [PSCustomObject]@{ Success = $false; Reason = "Post-write verify failed: phase-containment-$id block(s) from NewContent never parsed as real, well-formed blocks" }
+        }
 
         if ($null -eq $verifyBlocks) {
             [Console]::Error.WriteLine("Add-CommentBlocks: post-write verify FAILED — phase-containment-$id block(s) from NewContent did not parse out of the verify body for comment $CommentId.")
             return [PSCustomObject]@{ Success = $false; Reason = "Post-write verify failed: phase-containment-$id block(s) missing or unparseable in verify body" }
         }
 
-        $expectedCount = if ($null -eq $expectedBlocks) { 0 } else { $expectedBlocks.Count }
+        $expectedCount = $expectedBlocks.Count
         if ($verifyBlocks.Count -lt $expectedCount) {
             [Console]::Error.WriteLine("Add-CommentBlocks: post-write verify FAILED — phase-containment-$id expected $expectedCount block(s), found $($verifyBlocks.Count) in verify body for comment $CommentId.")
             return [PSCustomObject]@{ Success = $false; Reason = "Post-write verify failed: phase-containment-$id expected $expectedCount block(s), found $($verifyBlocks.Count)" }
@@ -2926,6 +3088,37 @@ function Add-JudgeRulingsBlock {
     if ($preflightEntryMatches.Count -eq 0) {
         [Console]::Error.WriteLine("Add-JudgeRulingsBlock: NewContent carries zero judge_ruling: entries for comment $CommentId; refusing as a no-op.")
         return [PSCustomObject]@{ Success = $false; Reason = 'no-op: NewContent carries zero judge_ruling: entries' }
+    }
+
+    # --- 2c. #842 fix (s4, owner decision d-842-judge-rulings-validator):
+    # validate-before-post using Get-DispositionTally's -Surface
+    # 'plan-stress-test' branch (NOT -Surface code-review, which parses a
+    # DIFFERENT marker — the review-dispositions head — and would return
+    # could-not-verify for every judge-rulings payload). The raw
+    # $judgeRulingEntryPattern regex above proves only that judge_ruling:
+    # substrings exist; it has no vocabulary awareness (sustained |
+    # defense-sustained is a closed 2-value enum) and no awareness of the
+    # required_fixes: decoy list that Get-JudgeRulingsSustainedCountInternal
+    # strips before tallying. Refuse before ever posting when:
+    #   - the tally itself could not parse (an unrecognized judge_ruling
+    #     value anywhere makes the whole surface could-not-verify), OR
+    #   - the tallied SustainedCount + DefenseSustainedCount disagrees with
+    #     the raw assembled entry count in NewContent (the plan-stress-test
+    #     surface returns no per-entry Entries list, so this is a count
+    #     compare, not a per-entry list compare) — e.g. an entry hidden
+    #     inside a required_fixes: decoy list inflates the raw count but
+    #     never contributes to the tally.
+    # This is additive to, not a replacement for, the zero-entry preflight
+    # above and the entry-level post-write positive-proof below.
+    $preflightTally = Get-DispositionTally -Surface 'plan-stress-test' -Body $NewContent
+    if ($preflightTally.ParseStatus -ne 'ok') {
+        [Console]::Error.WriteLine("Add-JudgeRulingsBlock: NewContent's judge-rulings vocabulary did not parse (ParseStatus '$($preflightTally.ParseStatus)') for comment $CommentId; refusing to append.")
+        return [PSCustomObject]@{ Success = $false; Reason = "NewContent's judge-rulings vocabulary did not parse (ParseStatus '$($preflightTally.ParseStatus)')" }
+    }
+    $preflightTallyCount = $preflightTally.SustainedCount + $preflightTally.DefenseSustainedCount
+    if ($preflightTallyCount -ne $preflightEntryMatches.Count) {
+        [Console]::Error.WriteLine("Add-JudgeRulingsBlock: NewContent's assembled judge_ruling: entry count ($($preflightEntryMatches.Count)) disagrees with Get-DispositionTally's SustainedCount + DefenseSustainedCount ($preflightTallyCount) for comment $CommentId; refusing to append.")
+        return [PSCustomObject]@{ Success = $false; Reason = "NewContent's assembled judge_ruling: entry count ($($preflightEntryMatches.Count)) disagrees with tallied count ($preflightTallyCount)" }
     }
 
     $getPath = "repos/$Owner/$Repo/issues/comments/$CommentId"

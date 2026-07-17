@@ -60,16 +60,41 @@ function script:Test-JudgeRulingsRealHeadPresent {
         this file only needs a yes/no presence signal, and reusing the
         hardened scan keeps a single source of truth for "what counts as a
         real judge-rulings head" across both files.
+
+        CM2 fix (issue #842): mirrors Test-EmissionMarkerPresent's 811-D1
+        prose-body fallback (plan-stress-test surface only). A plan comment
+        can legitimately carry a prose-only "Plan Stress-Test" section
+        (heading + narrative bullets, `<!-- plan-issue-` marker present) with
+        no machine-readable judge-rulings block at all — every plan
+        persisted before the 811 writer change is exactly this shape.
+        Without this fallback, such a body's index never enters
+        Get-ReviewCostRollup's judge-rulings candidate list at all, so the
+        whole tuple contributes nothing (silence) instead of an honest
+        could-not-verify. -Surface 'plan-stress-test' opts into the SAME
+        two-condition check Test-EmissionMarkerPresent uses (both a durable
+        `<!-- plan-issue-` marker AND a line-start `**Plan Stress-Test**`
+        heading required together, so ordinary chatter that merely mentions
+        the heading in prose does not qualify).
     .PARAMETER Body
         The raw comment body text to scan.
+    .PARAMETER Surface
+        Optional, defaults to 'code-review'. Set to 'plan-stress-test' to
+        additionally apply the 811-D1 prose-body fallback described above.
     .OUTPUTS
         [bool]
     #>
     param(
-        [Parameter(Mandatory)][AllowEmptyString()][string]$Body
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Body,
+        [ValidateSet('code-review', 'plan-stress-test')][string]$Surface = 'code-review'
     )
     if ([string]::IsNullOrWhiteSpace($Body)) { return $false }
-    return (Get-RealJudgeRulingsHeadMatches -Body $Body).Count -gt 0
+    if ((Get-RealJudgeRulingsHeadMatches -Body $Body).Count -gt 0) { return $true }
+    if ($Surface -eq 'plan-stress-test') {
+        $hasPlanIssueMarker = [regex]::IsMatch($Body, '<!--\s*plan-issue-')
+        $hasPlanStressTestHeading = [regex]::IsMatch($Body, '(?m)^\*\*Plan Stress-Test\*\*')
+        if ($hasPlanIssueMarker -and $hasPlanStressTestHeading) { return $true }
+    }
+    return $false
 }
 
 #endregion
@@ -175,21 +200,23 @@ function script:Select-LatestByCreatedAt {
             }
         }
 
-        if (-not $haveBestDt) {
-            # First candidate examined so far (array-order default).
-            $bestIndex = $idx
-            if ($null -ne $dt) { $bestDt = $dt; $haveBestDt = $true }
-            continue
-        }
-
         if ($null -eq $dt) {
-            # Unparseable timestamp on a later-in-array candidate: array
-            # order still wins over an unparseable comparison.
+            # Unparseable timestamp: array order (later index processed
+            # later) wins, but only among unparseable candidates. CM9 fix
+            # (issue #842): clear $bestDt/$haveBestDt here so this
+            # unparseable candidate does not silently inherit a
+            # previously-established real timestamp as its own -- a later
+            # parseable candidate must be judged as the new best outright,
+            # not compared against a stale $bestDt that no longer describes
+            # the candidate at $bestIndex.
             $bestIndex = $idx
+            $bestDt = $null
+            $haveBestDt = $false
         }
-        elseif ($dt -ge $bestDt) {
+        elseif (-not $haveBestDt -or $dt -ge $bestDt) {
             $bestIndex = $idx
             $bestDt = $dt
+            $haveBestDt = $true
         }
     }
 
@@ -455,8 +482,13 @@ function Get-ReviewCostRollup {
 
             # --- judge-rulings marker: defense-kill rate (M1 (Surface, head) routing) ---
             $judgeRulingsCandidateIdx = [System.Collections.Generic.List[int]]::new()
+            # CM2 (issue #842): pass the plan-stress-test surface hint only
+            # for Surface='issue' tuples, so the 811-D1 prose-body fallback
+            # applies to plan-stress-test bodies only, matching
+            # Test-EmissionMarkerPresent's own surface-scoped divergence.
+            $headCheckSurface = if ($surface -eq 'issue') { 'plan-stress-test' } else { 'code-review' }
             for ($i = 0; $i -lt $bodies.Count; $i++) {
-                if (Test-JudgeRulingsRealHeadPresent -Body ([string]$bodies[$i])) {
+                if (Test-JudgeRulingsRealHeadPresent -Body ([string]$bodies[$i]) -Surface $headCheckSurface) {
                     $judgeRulingsCandidateIdx.Add($i)
                 }
             }
@@ -491,6 +523,14 @@ function Get-ReviewCostRollup {
                 }
             }
             if ($designCandidateIdx.Count -gt 0) {
+                # CM18 fix (issue #842): the review-dispositions and
+                # judge-rulings branches above both add the PR number to
+                # $costPresentPrNumbers when Surface='pr'; this branch never
+                # did, even though design-challenge is "any surface" per this
+                # function's own routing contract -- a PR carrying ONLY a
+                # finding_dispositions marker was wrongly counted as a
+                # forward gap (no cost data) despite having real cost data.
+                if ($surface -eq 'pr') { $costPresentPrNumbers.Add($number) | Out-Null }
                 $latestIdx = Select-LatestByCreatedAt -CreatedAtValues $createdAtValues -CandidateIndices $designCandidateIdx.ToArray()
                 $latestBody = [string]$bodies[$latestIdx]
                 $tally = Get-DispositionTally -Surface 'design-challenge' -Body $latestBody
@@ -592,13 +632,51 @@ function script:Format-CostRateDisplayValue {
         return "COST DATA UNAVAILABLE (fetch $FetchSource)"
     }
     if ($RateSection.InsufficientData) {
-        return "INSUFFICIENT DATA (n=$($RateSection.N) < 5)"
+        $insufficientDisplay = "INSUFFICIENT DATA (n=$($RateSection.N) < 5)"
+        # CM13 fix (issue #842): the could-not-verify suffix used to render
+        # only on the confident-rate path below, so a thin-data section
+        # (n<5) that ALSO had could-not-verify contributions silently
+        # dropped that signal -- a reader saw only "n<5" with no hint that
+        # some contributions were excluded as unparseable rather than
+        # genuinely absent.
+        if ($RateSection.CouldNotVerifyCount -gt 0) {
+            $insufficientDisplay += " $(Format-CouldNotVerifySuffix -Count $RateSection.CouldNotVerifyCount)"
+        }
+        return $insufficientDisplay
     }
     $display = '{0:F2} ({1} of {2})' -f $RateSection.Rate, $RateSection.Numerator, $RateSection.N
     if ($RateSection.CouldNotVerifyCount -gt 0) {
-        $display += " [could-not-verify: $($RateSection.CouldNotVerifyCount)]"
+        $display += " $(Format-CouldNotVerifySuffix -Count $RateSection.CouldNotVerifyCount)"
     }
     return $display
+}
+
+function script:Format-CouldNotVerifySuffix {
+    <#
+    .SYNOPSIS
+        Renders the "[could-not-verify: N body|bodies]" suffix shared by
+        both Format-CostRateDisplayValue branches (issue #842 CM15).
+    .DESCRIPTION
+        N and Numerator (rendered elsewhere on the same line) count
+        individual findings/entries; CouldNotVerifyCount always counts
+        whole excluded BODIES (one per unparseable comment, regardless of
+        how many findings that body might have contained) -- see
+        Get-ReviewCostRollup's per-body could-not-verify accounting and
+        New-DefenseKillRateSubSection's per-contribution (one contribution
+        per PR/issue tuple, itself body-shaped after Select-LatestByCreatedAt
+        dedup) CouldNotVerifyCount. Naming the unit explicitly stops a
+        reader from mistaking this count as additional findings.
+    .PARAMETER Count
+        The CouldNotVerifyCount value (must be > 0; callers already gate on
+        this before calling).
+    .OUTPUTS
+        [string]
+    #>
+    param(
+        [Parameter(Mandatory)][int]$Count
+    )
+    $unit = if ($Count -eq 1) { 'body' } else { 'bodies' }
+    return "[could-not-verify: $Count $unit]"
 }
 
 #endregion

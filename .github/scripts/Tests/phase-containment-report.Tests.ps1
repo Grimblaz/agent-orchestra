@@ -22,6 +22,26 @@ BeforeAll {
     $script:CliPath = Join-Path $PSScriptRoot '..' 'phase-containment-report.ps1'
     . $script:CliPath
 
+    # Issue #842 s1: Resolve-JudgeLogin does not exist in production yet.
+    # Stub it as a placeholder BEFORE authoring the Mock below (M6) --
+    # Pester throws CommandNotFoundException when Mock-ing a command
+    # absent from scope entirely, which is an error-RED that proves
+    # nothing, not the assertion-RED this suite needs. Once #842 GREEN
+    # lands a real Resolve-JudgeLogin in phase-containment-report.ps1, this
+    # placeholder is simply redefined by the dot-source above on every
+    # subsequent test run and is safe to delete then.
+    function script:Resolve-JudgeLogin {
+        param([string]$JudgeLogin = '')
+        return $JudgeLogin
+    }
+
+    # Default mock for the 12 pre-existing call sites below that omit
+    # -JudgeLogin (:118,135,160,170,185,191,197,203,214,222,278,284) --
+    # keeps them passing without shelling out to `gh` for identity
+    # resolution. Do NOT add explicit -JudgeLogin to those sites; that
+    # would delete the suite's only default-path coverage.
+    Mock Resolve-JudgeLogin { 'github-actions[bot]' }
+
     $script:FixedFetchedAt = [datetime]::Parse('2026-01-01T00:00:00Z', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind)
 
     # Minimal value-side entries: one design-challenge (issue-surfaced) entry
@@ -203,6 +223,29 @@ Describe 'Invoke-PhaseContainmentReportCli' {
             $output = Invoke-PhaseContainmentReportCli -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 90 -Token '' -NoCache
             ($output -join "`n") | Should -Not -Match 'CAVEAT: -ValueCacheOk was used'
             Should -Invoke Get-PhaseContainmentHistory -Times 1 -Exactly -ParameterFilter { $CachePath }
+        }
+    }
+
+    Context 'CM16 fix (a): no orphaned temp file on cache-bypass (issue #842 s6)' {
+        BeforeEach {
+            Mock Get-PhaseContainmentHistory { New-FixedHistoryResult }
+            Mock Get-PhaseContainmentCommentCorpus { New-FixedCorpusResult }
+        }
+
+        It 'does not orphan a real 0-byte GetTempFileName() file when a default run bypasses the value cache' {
+            # A prior version pointed $fetchParams['CachePath'] at
+            # [System.IO.Path]::GetTempFileName() + '.nocache.json' -- since
+            # GetTempFileName() creates a REAL file and returns its path, and
+            # the appended suffix names a DIFFERENT path, the created file
+            # (named 'tmp*.tmp' on this host) was orphaned on every single
+            # default/-NoCache run. Snapshot the temp directory's matching
+            # files before and after a default (bypass-cache) invocation and
+            # assert no new one was left behind.
+            $before = @(Get-ChildItem -Path $env:TEMP -Filter 'tmp*.tmp' -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name)
+            Invoke-PhaseContainmentReportCli -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 90 -Token '' | Out-Null
+            $after = @(Get-ChildItem -Path $env:TEMP -Filter 'tmp*.tmp' -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name)
+            $newFiles = @($after | Where-Object { $before -notcontains $_ })
+            $newFiles | Should -BeNullOrEmpty -Because "a default (bypass-cache) run must not orphan a real temp file; new tmp*.tmp file(s) found: $($newFiles -join ', ')"
         }
     }
 
@@ -944,5 +987,252 @@ Describe 'Post-fix batch 4: review-judgment SKILL.md scopes external_sources_rec
         # writer behavior (an internal-only pass that never emits it).
         $script:SkillText | Should -Match 'An absent field means this pass never attempted external reconciliation'
         $script:SkillText | Should -Match 'the normal, expected state for a plain internal-only `/orchestra:review` pass'
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Issue #842 s1 (RED): the report's honesty surface. Three sites resolve
+# -JudgeLogin (script-scope :56/:60-581, the :582 unconditional forward, and
+# the function-level :411 gate for direct callers), Resolve-JudgeLogin must
+# never let an empty/whitespace identity flow through silently (M21), and
+# matched/AuthorFilteredCount accounting must reach every aggregation layer.
+# No production code exists for any of this yet -- every assertion below is
+# expected to be assertion-RED (not error-RED, thanks to the stub above).
+# ---------------------------------------------------------------------------
+
+Describe 'Invoke-PhaseContainmentReportCli: function-level identity resolution gate (:411, issue #842 M4 -- direct function callers)' {
+    BeforeEach {
+        Mock Get-PhaseContainmentHistory { New-FixedHistoryResult }
+        Mock Get-PhaseContainmentCommentCorpus { New-FixedCorpusResult }
+        Mock Resolve-JudgeLogin { 'resolved-login' }
+    }
+
+    It 'invokes Resolve-JudgeLogin exactly once when called directly without -JudgeLogin' {
+        Invoke-PhaseContainmentReportCli -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 90 -Token '' | Out-Null
+        Should -Invoke Resolve-JudgeLogin -Times 1 -Exactly -Because (
+            'a direct caller (e.g. a test or another script) that omits -JudgeLogin entirely must still get a resolved identity, not the bare hardcoded default literal.'
+        )
+    }
+
+    It 'does NOT invoke Resolve-JudgeLogin when called directly WITH an explicit -JudgeLogin' {
+        Invoke-PhaseContainmentReportCli -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 90 -Token '' -JudgeLogin 'explicit-login' | Out-Null
+        Should -Invoke Resolve-JudgeLogin -Times 0 -Exactly -Because (
+            'an explicit caller-supplied -JudgeLogin must win outright -- resolution must never override it.'
+        )
+    }
+
+    It 'threads the resolved login into Get-PhaseContainmentHistory''s -JudgeLogin parameter, not the hardcoded default' {
+        Invoke-PhaseContainmentReportCli -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 90 -Token '' | Out-Null
+        Should -Invoke Get-PhaseContainmentHistory -Times 1 -Exactly -ParameterFilter { $JudgeLogin -eq 'resolved-login' } -Because (
+            'the value-side fetch must see the resolved identity so a non-judge-authored phase-containment block is still gated correctly.'
+        )
+    }
+}
+
+Describe 'phase-containment-report.ps1: script-scope identity resolution gate (issue #842 M4, post-review fix)' {
+    # Post-review fix (judge-sustained M4): the script-scope resolution
+    # block previously ran UNCONDITIONALLY at dot-source/load time -- every
+    # dot-source of this file (including this very suite's own BeforeAll,
+    # before any Resolve-JudgeLogin mock existed) shelled out to a live
+    # `gh api user` call. The block is now gated on the same
+    # `$MyInvocation.InvocationName -ne '.'` check the auto-invoke guard at
+    # the bottom of the file uses, so a mere dot-source never resolves at
+    # all. These tests replace the pre-fix expectations (which asserted the
+    # buggy unconditional-resolution behavior was correct) with the
+    # corrected, gated behavior.
+    BeforeEach {
+        Mock Resolve-JudgeLogin { 'resolved-for-script-scope' }
+    }
+
+    It 'does NOT invoke Resolve-JudgeLogin when the script is merely dot-sourced without -JudgeLogin' {
+        . $script:CliPath
+        Should -Invoke Resolve-JudgeLogin -Times 0 -Exactly -Because (
+            'dot-sourcing this file to reuse its functions (the entire purpose of the auto-invoke guard''s design, and exactly what this suite''s own BeforeAll does) must never resolve the judge identity or shell out to gh -- resolution only happens on the real pwsh -File execution path.'
+        )
+    }
+
+    It 'does NOT invoke Resolve-JudgeLogin when the script is dot-sourced WITH an explicit -JudgeLogin either' {
+        . $script:CliPath -JudgeLogin 'explicit-login'
+        Should -Invoke Resolve-JudgeLogin -Times 0 -Exactly -Because (
+            'a mere dot-source never resolves at all post-fix, regardless of whether -JudgeLogin was supplied to the dot-source call -- resolution is gated on the real-execution InvocationName check, not on ContainsKey alone.'
+        )
+    }
+
+    It 'leaves script-scope $JudgeLogin at the static param() default when merely dot-sourced (no live resolution attempted)' {
+        . $script:CliPath
+        $JudgeLogin | Should -Be 'github-actions[bot]' -Because (
+            'the script-scope resolution block never executes on a dot-source post-fix, so $JudgeLogin keeps its static default rather than acquiring a value that was never actually resolved.'
+        )
+    }
+}
+
+Describe 'phase-containment-report.ps1: dot-source never attempts a live gh call (issue #842 M4 fix -- proof)' {
+    It 'does not invoke the gh CLI at all when the file is merely dot-sourced with no -JudgeLogin bound and no Resolve-JudgeLogin mock in place' {
+        # Deliberately does NOT mock Resolve-JudgeLogin -- the whole point
+        # of this proof is that the REAL Resolve-JudgeLogin function (which
+        # shells out to `gh api user`) is never even CALLED during a mere
+        # dot-source, so mocking the gh CLI itself (rather than the
+        # wrapper function) is the tightest available assertion that no
+        # live network call was attempted.
+        Mock gh { throw 'gh must never be invoked by a mere dot-source of phase-containment-report.ps1' }
+
+        { . $script:CliPath } | Should -Not -Throw
+
+        Should -Invoke gh -Times 0 -Exactly -Because (
+            'the M4 fix gates script-scope identity resolution on the real pwsh -File execution path -- dot-sourcing this file (Pester''s own BeforeAll, or any other consumer reusing its functions) must never shell out to gh api user.'
+        )
+    }
+}
+
+Describe 'Invoke-PhaseContainmentReportCli: JudgeLoginSource provenance override (issue #842 M1 fix -- proof)' {
+    BeforeEach {
+        Mock Get-PhaseContainmentHistory { New-FixedHistoryResult }
+        Mock Get-PhaseContainmentCommentCorpus { New-FixedCorpusResult }
+    }
+
+    It 'labels the header "resolved from gh auth" -- never "from -JudgeLogin" -- when the caller forwards a concrete -JudgeLogin alongside -JudgeLoginSource ''resolved from gh auth'' (mirrors the script-scope auto-invoke forward)' {
+        # Before the M1 fix, provenance was derived solely from
+        # $PSBoundParameters.ContainsKey('JudgeLogin') -- always $true here
+        # since a concrete value IS bound -- so the header always said
+        # "from -JudgeLogin" even when the TRUE origin (as only the
+        # script-scope auto-invoke path can know) was an auto-resolved
+        # identity forwarded explicitly.
+        $output = Invoke-PhaseContainmentReportCli -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 90 -Token '' -JudgeLogin 'auto-resolved-login' -JudgeLoginSource 'resolved from gh auth'
+        $joined = $output -join "`n"
+
+        $joined | Should -Match ([regex]::Escape('identity: auto-resolved-login, resolved from gh auth'))
+        $joined | Should -Not -Match 'from -JudgeLogin'
+    }
+
+    It 'still labels the header "from -JudgeLogin" when a direct caller supplies only -JudgeLogin with no -JudgeLoginSource override (unchanged direct-caller behavior)' {
+        $output = Invoke-PhaseContainmentReportCli -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 90 -Token '' -JudgeLogin 'explicit-login'
+        $joined = $output -join "`n"
+
+        $joined | Should -Match ([regex]::Escape('identity: explicit-login, from -JudgeLogin'))
+    }
+}
+
+Describe 'Resolve-JudgeLogin non-empty invariant: the CLI must fail loud, not silently disable the forgery gate (issue #842 M21)' {
+    BeforeEach {
+        Mock Get-PhaseContainmentHistory { New-FixedHistoryResult }
+        Mock Get-PhaseContainmentCommentCorpus { New-FixedCorpusResult }
+    }
+
+    Context 'Resolve-JudgeLogin resolves to an empty string' {
+        It 'throws naming -JudgeLogin instead of silently proceeding with a gate-disabling empty identity' {
+            Mock Resolve-JudgeLogin { '' }
+            {
+                Invoke-PhaseContainmentReportCli -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 90 -Token ''
+            } | Should -Throw -ExpectedMessage '*-JudgeLogin*' -Because (
+                'an empty resolved login silently disables Test-PhaseContainmentCommentAuthoredByJudge''s gate for every body scanned -- this must fail loud, not degrade quietly, and the swallowing try/catch around Get-PhaseContainmentTerminalObservation (report.ps1:495-503) must never be the ONLY place this surfaces (a caught exception there is downgraded to a mere Write-Warning).'
+            )
+        }
+    }
+
+    Context 'Resolve-JudgeLogin resolves to a whitespace-only string' {
+        It 'throws naming -JudgeLogin instead of silently proceeding with a gate-disabling whitespace identity' {
+            Mock Resolve-JudgeLogin { '   ' }
+            {
+                Invoke-PhaseContainmentReportCli -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 90 -Token ''
+            } | Should -Throw -ExpectedMessage '*-JudgeLogin*' -Because (
+                'whitespace-only is the same silent-disable vector as empty -- both must be treated as a resolution failure.'
+            )
+        }
+    }
+}
+
+Describe 'Invoke-PhaseContainmentCommentScan: matched/AuthorFilteredCount accounting (issue #842 M8, aggregation layer)' {
+    BeforeAll {
+        # A not-yet-existing property must read as $null under this file's
+        # inherited Set-StrictMode -Version Latest (from dot-sourcing the
+        # CLI script above), not throw PropertyNotFoundException -- this
+        # helper is null-safe both for the missing-property case (today,
+        # RED) and the present-property case (once #842 GREEN lands),
+        # keeping every assertion below assertion-RED, never error-RED.
+        function script:Get-PC842TestProperty {
+            param([Parameter(Mandatory)][object]$InputObject, [Parameter(Mandatory)][string]$Name)
+            $prop = $InputObject.PSObject.Properties[$Name]
+            if ($null -eq $prop) { return $null }
+            return $prop.Value
+        }
+    }
+
+    It 'reports Matched and AuthorFilteredCount reflecting the author-gate split across three bodies' {
+        $bodies  = @('<!-- phase-containment-1 -->', '<!-- phase-containment-1 -->', '<!-- phase-containment-1 -->')
+        $authors = @('judge', 'mallory', 'mallory')
+
+        $result = Invoke-PhaseContainmentCommentScan -CommentBodies $bodies -IssueOrPrNumber 1 -AuthorLogins $authors -JudgeLogin 'judge'
+
+        Get-PC842TestProperty -InputObject $result -Name 'Matched'             | Should -Be 1 -Because "only the first body is authored by 'judge'; the other two must be tallied, not silently dropped by the 'continue' at :450."
+        Get-PC842TestProperty -InputObject $result -Name 'AuthorFilteredCount' | Should -Be 2 -Because "the two 'mallory'-authored bodies were filtered by the author gate and must be counted, so a report consumer can distinguish 'filtered' from 'genuinely empty'."
+    }
+
+    It 'reports Matched equal to the full body count and AuthorFilteredCount=0 when no -JudgeLogin gate is supplied (unfiltered legacy behavior preserved)' {
+        $bodies = @('some comment', 'another comment')
+
+        $result = Invoke-PhaseContainmentCommentScan -CommentBodies $bodies -IssueOrPrNumber 1
+
+        Get-PC842TestProperty -InputObject $result -Name 'Matched'             | Should -Be 2
+        Get-PC842TestProperty -InputObject $result -Name 'AuthorFilteredCount' | Should -Be 0
+    }
+}
+
+Describe 'structural guard: every Get-PhaseContainmentHistory return shape carries AuthorFilteredCount (issue #842 M11 -- StrictMode-safe degradation paths)' {
+    It 'every return [PSCustomObject]@{...} block inside Get-PhaseContainmentHistory declares an AuthorFilteredCount key' {
+        $libPath = Join-Path $PSScriptRoot '..' 'lib' 'phase-containment-rolling-history-core.ps1'
+        $lines   = Get-Content $libPath
+
+        $startIdx = 0
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -match '^function Get-PhaseContainmentHistory\s*\{') { $startIdx = $i; break }
+        }
+        $startIdx | Should -BeGreaterThan 0 -Because "Get-PhaseContainmentHistory must exist in the lib file."
+
+        $depth  = 0
+        $endIdx = $null
+        for ($i = $startIdx; $i -lt $lines.Count; $i++) {
+            $depth += ([regex]::Matches($lines[$i], '\{')).Count
+            $depth -= ([regex]::Matches($lines[$i], '\}')).Count
+            if ($depth -eq 0 -and $i -gt $startIdx) { $endIdx = $i; break }
+        }
+        $endIdx | Should -Not -BeNullOrEmpty -Because "the function body must have a matching closing brace."
+
+        $body         = ($lines[$startIdx..$endIdx] -join "`n")
+        $returnBlocks = [regex]::Matches($body, 'return \[PSCustomObject\]@\{[^}]*\}')
+
+        $returnBlocks.Count | Should -BeGreaterOrEqual 8 -Because (
+            "Get-PhaseContainmentHistory currently has (at least) 8 distinct early-return/degradation shapes; a future refactor must not silently drop below this floor. Found: $($returnBlocks.Count)"
+        )
+
+        $missingAuthorFilteredCount = @($returnBlocks | Where-Object { $_.Value -notmatch 'AuthorFilteredCount' })
+        $missingAuthorFilteredCount.Count | Should -Be 0 -Because (
+            "every return shape must carry AuthorFilteredCount so a StrictMode consumer never throws reading it off a degradation path (timeout, repo-resolution-failed, cache, partial). " +
+            "$($missingAuthorFilteredCount.Count) of $($returnBlocks.Count) return blocks are missing it."
+        )
+    }
+}
+
+Describe 'structural guard: Get-PhaseContainmentHistory''s default CachePath includes the identity component of the cache key (issue #842, cache poisoning across judge identities)' {
+    # Get-PhaseContainmentHistory calls its own cache helpers via explicit
+    # script:-qualified names (script:Read-PhaseContainmentCache,
+    # script:Get-SurfaceAEntriesGraphQL, etc.) -- a scope-qualified call site
+    # resolves directly against the PowerShell scope table and is not
+    # observable through Pester's ordinary command-shadowing Mock mechanism,
+    # so a behavioral round-trip test through the live fetch path is neither
+    # reliable nor fast (it falls through to a real, slow `gh` network call
+    # instead of the intended mock). This structural check pins the same
+    # requirement -- the identity component of the cache key -- without
+    # depending on that unreliable interception.
+    It 'the default CachePath construction interpolates $JudgeLogin, not just $RepoOwner/$RepoName' {
+        $libPath       = Join-Path $PSScriptRoot '..' 'lib' 'phase-containment-rolling-history-core.ps1'
+        $lines         = Get-Content $libPath
+        $cachePathLine = $lines | Where-Object { $_ -match '\$CachePath\s*=\s*Join-Path\s+\$env:TEMP' }
+
+        $cachePathLine | Should -Not -BeNullOrEmpty -Because "the default CachePath construction line must exist in Get-PhaseContainmentHistory."
+        $cachePathLine | Should -Match '\$JudgeLogin' -Because (
+            "today's default CachePath is keyed only on `$RepoOwner/`$RepoName ('.phase-containment-cache-{owner}-{repo}.json') -- identical for every judge identity, " +
+            "so a later run under a DIFFERENT -JudgeLogin silently reads back cache entries computed and author-filtered under a PRIOR identity (cache poisoning across judge identities). " +
+            "The cache key must also vary with `$JudgeLogin.`nActual line:`n$cachePathLine"
+        )
     }
 }

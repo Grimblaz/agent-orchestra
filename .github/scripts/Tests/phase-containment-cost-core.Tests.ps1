@@ -557,6 +557,20 @@ Describe 'Get-ReviewCostRollup - forward gap (value-present PRs with no cost mar
 
         $result.ForwardGapCount | Should -Be 0
     }
+
+    It 'CM18 (issue #842): a PR carrying ONLY a finding_dispositions (design-challenge) marker still counts as cost-present, not a forward gap' {
+        # The review-dispositions and judge-rulings branches above both add
+        # the PR number to $costPresentPrNumbers when their marker is found
+        # (Surface='pr'); the finding_dispositions/design-challenge branch
+        # never did, even though design-challenge is explicitly "any
+        # surface" per Get-ReviewCostRollup's own routing contract -- a PR
+        # with only a design-challenge marker was wrongly counted as having
+        # no cost data at all.
+        $tuplePr450 = @{ Number = 450; Surface = 'pr'; Bodies = @($script:CostFindingDispositionsIssue400Body); CreatedAtValues = @('2026-01-01T00:00:00Z') }
+        $result = Get-ReviewCostRollup -Tuples @($tuplePr450) -Source 'graphql' -Truncated $false -ValuePresentPrNumbers @(450)
+
+        $result.ForwardGapCount | Should -Be 0
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -625,6 +639,37 @@ entries:
         $script:LabelReportText.Contains('Post-judge dismiss-rate: 0.00 (0 of 5)') | Should -BeFalse -Because (
             "the defense-kill rate's value must never leak onto the post-judge dismiss-rate's label.`nActual report:`n$script:LabelReportText"
         )
+    }
+}
+
+Describe 'Format-CostRateDisplayValue - CM13 (issue #842): could-not-verify suffix must render on the INSUFFICIENT DATA path too' {
+    It 'appends the could-not-verify suffix even when the section is also INSUFFICIENT DATA (n<5)' {
+        $rateSection = New-CostRateSubSection -Numerator 1 -N 2 -CouldNotVerifyCount 3
+        $display = Format-CostRateDisplayValue -RateSection $rateSection -FetchUnavailable $false -FetchSource 'graphql'
+
+        $display | Should -Match '^INSUFFICIENT DATA \(n=2 < 5\)'
+        $display | Should -Match '\[could-not-verify: 3 bodies\]$'
+    }
+}
+
+Describe 'Format-CostRateDisplayValue - CM15 (issue #842): disambiguates the could-not-verify unit (bodies, not findings)' {
+    It 'names the unit "bodies" (plural) so the count is never mistaken for the findings the N/Numerator denominator counts' {
+        # N and Numerator count individual findings/entries; CouldNotVerifyCount
+        # counts whole excluded bodies (one per unparseable comment,
+        # regardless of how many findings that body might have contained).
+        # Rendering both numbers on the same line with no unit label made
+        # this distinction invisible to a reader.
+        $rateSection = New-CostRateSubSection -Numerator 2 -N 5 -CouldNotVerifyCount 3
+        $display = Format-CostRateDisplayValue -RateSection $rateSection -FetchUnavailable $false -FetchSource 'graphql'
+
+        $display | Should -Match '\[could-not-verify: 3 bodies\]$'
+    }
+
+    It 'uses the singular "body" for a count of exactly one' {
+        $rateSection = New-CostRateSubSection -Numerator 2 -N 5 -CouldNotVerifyCount 1
+        $display = Format-CostRateDisplayValue -RateSection $rateSection -FetchUnavailable $false -FetchSource 'graphql'
+
+        $display | Should -Match '\[could-not-verify: 1 body\]$'
     }
 }
 
@@ -922,5 +967,158 @@ entries:
         # Round A ("dismiss") is invariant-latest and must win -> numerator 1.
         $result.CodeReview.PostJudgeDismissRate.N | Should -Be 1
         $result.CodeReview.PostJudgeDismissRate.Numerator | Should -Be 1
+    }
+}
+
+Describe 'Get-ReviewCostRollup - CM12 (issue #842, VERIFY-ONLY): a keyless review-dispositions entry never reaches the '''' dedup slot' {
+    It 'routes a legacy entry with no stable_finding_key to CouldNotVerifyCount, never to a phantom key="" contribution' {
+        # Get-DispositionTally's code-review-surface guard
+        # (phase-containment-emission-check-core.ps1) already converts the
+        # WHOLE tally result to ParseStatus 'could-not-verify' when any
+        # code-review-stage entry lacks a stable_finding_key -- so
+        # Get-ReviewCostRollup's per-key dedup loop (which only iterates
+        # $tally.Entries when ParseStatus is 'ok') can never see an entry
+        # with an empty/missing key at all. This is a verify-only rider:
+        # confirming the existing upstream guard already makes the ''
+        # dedup slot unreachable, not adding a new guard.
+        $keylessBody = @'
+<!-- review-dispositions-912 -->
+
+```yaml
+schema_version: 3
+passes_run: [1]
+entries:
+  - finding_id: "legacy-id-without-stable-key"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: medium
+    stage: code-review
+    reviewer_source: local
+    disposition_rationale: "Legacy shape lacking stable_finding_key."
+```
+'@
+        $tuple = @{
+            Number          = 912
+            Surface         = 'pr'
+            Bodies          = @($keylessBody)
+            CreatedAtValues = @('2026-01-01T00:00:00Z')
+        }
+        $result = Get-ReviewCostRollup -Tuples @($tuple) -Source 'graphql' -Truncated $false -ValuePresentPrNumbers @(912)
+
+        # No confident N/Numerator contribution from a phantom key="" entry.
+        $result.CodeReview.PostJudgeDismissRate.N | Should -Be 0
+        $result.CodeReview.PostJudgeDismissRate.Numerator | Should -Be 0
+        $result.CodeReview.PostJudgeDismissRate.CouldNotVerifyCount | Should -Be 1
+        $result.CodeReview.PerSource.Count | Should -Be 0
+    }
+}
+
+Describe 'Select-LatestByCreatedAt - CM9 (issue #842): an unparseable candidate that becomes the running best must not carry a stale bestDt forward' {
+    It 'picks C (T+5), not B (unparseable), when candidates are [A(T+10), B(unparseable), C(T+5)]' {
+        # "Array order wins" is scoped to unparseable-vs-unparseable
+        # comparisons only. Once B (unparseable) displaces A as the running
+        # best by array order, B's own timestamp is unknown -- a later
+        # parseable candidate (C) must be judged as the new best outright,
+        # not compared against A's stale T+10 timestamp that no longer
+        # describes the current best (B).
+        $createdAtValues = @('2026-01-01T00:10:00Z', 'not-a-real-timestamp', '2026-01-01T00:05:00Z')
+        $winner = Select-LatestByCreatedAt -CreatedAtValues $createdAtValues -CandidateIndices @(0, 1, 2)
+
+        $winner | Should -Be 2
+    }
+}
+
+Describe 'Get-ReviewCostRollup - CM2 (issue #842): mirrors the 811-D1 prose-body fallback for plan-stress-test' {
+    It 'a prose-only plan-stress-test body (plan-issue marker + Plan Stress-Test heading, no judge-rulings block) contributes could-not-verify, not silence' {
+        # Every plan persisted before the 811 writer change carries this
+        # exact shape: a durable <!-- plan-issue-N --> marker plus a
+        # **Plan Stress-Test** heading with narrative bullets, but no
+        # machine-readable judge-rulings YAML block at all.
+        # Test-EmissionMarkerPresent already treats this as "marker present"
+        # (811-D1 fallback) so Get-EmissionGap renders an honest
+        # could-not-verify instead of a false clean. Get-ReviewCostRollup's
+        # own head-presence check (Test-JudgeRulingsRealHeadPresent) did not
+        # mirror that fallback, so this body's index never even entered
+        # $judgeRulingsCandidateIdx -- the tuple contributed nothing at all
+        # (silence), not a could-not-verify entry.
+        $proseOnlyBody = @'
+<!-- plan-issue-913 -->
+
+**Plan Stress-Test**
+
+- Round 1: reviewers raised concerns about the caching layer; resolved via
+  design discussion, no formal judge-rulings block was ever posted for this
+  legacy plan.
+'@
+        $tuple = @{
+            Number          = 913
+            Surface         = 'issue'
+            Bodies          = @($proseOnlyBody)
+            CreatedAtValues = @('2026-01-01T00:00:00Z')
+        }
+        $result = Get-ReviewCostRollup -Tuples @($tuple) -Source 'graphql' -Truncated $false -ValuePresentPrNumbers @()
+
+        # Could-not-verify, not a silently-skipped zero-contribution tuple.
+        $result.PlanStressTest.DefenseKillRate.CouldNotVerifyCount | Should -Be 1
+        $result.PlanStressTest.DefenseKillRate.N | Should -Be 0
+        $result.PlanStressTest.DefenseKillRate.Numerator | Should -Be 0
+    }
+}
+
+# ---------------------------------------------------------------------------
+# CM11 / CM17 (issue #842): cross-file contract guards, modelled on the
+# 811-D1 s4 literal-parity technique (reading literals live from both source
+# files rather than re-typing an assertion that could silently drift from
+# the real call site or the real definition). Neither test adds a new
+# de-scripted public surface or relocates any function -- both riders'
+# decided direction is a guard test only. Each fails loud if a helper this
+# file depends on cross-file is renamed or rescoped without the call site
+# being updated to match.
+# ---------------------------------------------------------------------------
+
+Describe 'Cross-file contract guard - CM11 (issue #842): head-detection trio call sites resolve to real definitions' {
+    BeforeAll {
+        $script:CostCoreSrc = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..' 'lib' 'phase-containment-cost-core.ps1') -Raw
+        $script:EmissionCheckSrc = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..' 'lib' 'phase-containment-emission-check-core.ps1') -Raw
+    }
+
+    It 'Get-ReviewCostRollup''s three head-presence checks (judge-rulings, review-dispositions, finding_dispositions) each call a helper that is genuinely defined in phase-containment-emission-check-core.ps1' {
+        # The trio: Get-RealJudgeRulingsHeadMatches (via cost-core's own
+        # Test-JudgeRulingsRealHeadPresent wrapper), Test-ReviewDispositionsHeadPresent,
+        # and Test-EmissionMarkerPresent (design-challenge surface) -- all
+        # three are dot-sourced from phase-containment-emission-check-core.ps1
+        # rather than re-implemented as a third local copy in cost-core.ps1
+        # (issue #842 CM11's duplication class).
+        #
+        # M11 fix (issue #842 post-review): the cost-core-side check used to
+        # match the bare helper name anywhere in the file
+        # ([regex]::Escape($helper) with no surrounding anchor) -- a comment
+        # merely mentioning the helper's name, with the real call site
+        # deleted, would still satisfy that match, silently defeating the
+        # guard. Anchored to a real invocation shape instead: the helper name
+        # immediately followed by a parameter flag (`-Word`) or an opening
+        # paren, matching how every real call site in this file actually
+        # invokes it.
+        $trio = @('Get-RealJudgeRulingsHeadMatches', 'Test-ReviewDispositionsHeadPresent', 'Test-EmissionMarkerPresent')
+        foreach ($helper in $trio) {
+            $script:CostCoreSrc | Should -Match "$([regex]::Escape($helper))\s*(-\w+|\()" -Because "cost-core.ps1 must still call $helper as a real invocation, not merely mention its name"
+            $script:EmissionCheckSrc | Should -Match "(?m)^function\s+(?:script:)?$([regex]::Escape($helper))\s*\{" -Because "$helper must still be defined in phase-containment-emission-check-core.ps1"
+        }
+    }
+}
+
+Describe 'Cross-file contract guard - CM17 (issue #842, DECIDED DIRECTION: guard test only, no de-script or relocation)' {
+    It 'Test-JudgeRulingsHasDefenseSustainedConcept''s call to Get-JudgeRulingsIsolatedRegion resolves to a real, script-scoped definition in phase-containment-emission-check-core.ps1' {
+        $costCoreSrc = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..' 'lib' 'phase-containment-cost-core.ps1') -Raw
+        $emissionCheckSrc = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..' 'lib' 'phase-containment-emission-check-core.ps1') -Raw
+
+        # M11 fix (issue #842 post-review): anchored to the real invocation
+        # shape (helper name immediately followed by its `-Body` parameter
+        # flag), same rationale as the CM11 trio hardening above -- a bare
+        # mention of the helper's name in a comment, with the real call
+        # deleted, must not satisfy this guard.
+        $costCoreSrc | Should -Match 'Get-JudgeRulingsIsolatedRegion\s*(-\w+|\()' -Because 'cost-core.ps1 must still call the cross-file helper as a real invocation, not merely mention its name'
+        $emissionCheckSrc | Should -Match '(?m)^function\s+script:Get-JudgeRulingsIsolatedRegion\s*\{' -Because 'the helper must stay script:-scoped and defined in phase-containment-emission-check-core.ps1, not de-scripted or relocated (issue #842 CM17 decided direction)'
     }
 }

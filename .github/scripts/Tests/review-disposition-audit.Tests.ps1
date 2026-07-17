@@ -382,7 +382,13 @@ entries:
         $result.marker_count | Should -Be 1
     }
 
-    It 'v3 entry without reviewer_source validates (status clean, field is optional)' {
+    It 'v3 entry without reviewer_source yields a finding (CM14, issue #842, owner decision d-842-cm14-redisposition: reviewer_source is writer-mandatory on v3 too, matching the schema''s if/then at review-dispositions.schema.json:132-144)' {
+        # Retargeted (issue #842 CM14): the schema's if/then requires
+        # reviewer_source on entries for schema_version IN [3, 4], but the
+        # validator only ever enforced it for -eq 4 -- a v3 entry missing
+        # reviewer_source silently validated as clean. This inverts the
+        # test's prior "field is optional" assertion now that the validator
+        # enforces the schema's real if/then condition.
         $body = @'
 <!-- review-dispositions-42 -->
 
@@ -399,8 +405,9 @@ entries:
 '@
         $result = script:Run-Validator -PR 42 -Bodies @($body)
 
-        $result.status       | Should -Be 'clean'
+        $result.status       | Should -Be 'findings'
         $result.marker_count | Should -Be 1
+        ($result.findings | Where-Object { $_.message -match 'reviewer_source' }).Count | Should -BeGreaterThan 0
     }
 
     It 'schema_version 5 emits warning mentioning schema_version (out of range)' {
