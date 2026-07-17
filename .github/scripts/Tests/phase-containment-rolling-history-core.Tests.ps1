@@ -3406,6 +3406,45 @@ Describe 'Get-PhaseContainmentCommentCorpus — T1 partial-preservation on inter
     }
 }
 
+Describe 'Get-PhaseContainmentHistory — issue #876 F1: default CachePath construction survives $env:TEMP being unset (PowerShell Core / Linux / macOS)' {
+    BeforeEach {
+        $script:SavedEnvTemp876 = $env:TEMP
+        Remove-Item Env:\TEMP -ErrorAction SilentlyContinue
+    }
+
+    AfterEach {
+        if ($null -ne $script:SavedEnvTemp876) {
+            $env:TEMP = $script:SavedEnvTemp876
+        }
+        else {
+            Remove-Item Env:\TEMP -ErrorAction SilentlyContinue
+        }
+        if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {
+            Remove-Item -Path Function:gh -ErrorAction SilentlyContinue
+        }
+        $defaultCache = Join-Path ([System.IO.Path]::GetTempPath()) '.phase-containment-cache-Grimblaz-agent-orchestra-.json'
+        if (Test-Path -LiteralPath $defaultCache) { Remove-Item -LiteralPath $defaultCache -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'does not throw a null-binding error building the default CachePath when $env:TEMP is unset and no -CachePath is supplied' {
+        # Only Windows conventionally sets $env:TEMP; PowerShell Core on
+        # Linux/macOS leaves it unset by default. A prior version called
+        # `Join-Path $env:TEMP "..."` for the default CachePath, which
+        # throws a terminating parameter-binding error the instant
+        # $env:TEMP is $null -- reproducible even on this Windows host once
+        # the variable is cleared (confirmed manually).
+        # [System.IO.Path]::GetTempPath() resolves TMPDIR/TEMP/TMP
+        # cross-platform without ever needing $env:TEMP directly.
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $global:LASTEXITCODE = 0
+            return '{}'
+        }
+
+        { Get-PhaseContainmentHistory -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 30 -TimeoutSeconds 30 3>$null } | Should -Not -Throw
+    }
+}
+
 Describe 'Get-PhaseContainmentHistory — T1 partial-preservation on inter-surface timeout' {
     AfterEach {
         if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {

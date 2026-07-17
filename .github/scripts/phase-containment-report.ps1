@@ -591,11 +591,13 @@ function Invoke-PhaseContainmentReportCli {
         # creates a real 0-byte file on disk and returns that path, so the
         # appended-suffix path named here was always a DIFFERENT, never-created
         # path, orphaning the original 0-byte file on every default/-NoCache
-        # run. A GUID-based name under $env:TEMP names a throwaway path
-        # without ever creating a file, matching the cache-path construction
-        # convention already documented by the `# host-path-ok` marker in
-        # phase-containment-rolling-history-core.ps1.
-        $fetchParams['CachePath'] = Join-Path $env:TEMP "phase-containment-bypass-$([guid]::NewGuid().ToString('N')).json"  # host-path-ok
+        # run. A GUID-based name under the platform temp directory (resolved
+        # via [System.IO.Path]::GetTempPath(), not $env:TEMP -- see issue
+        # #876 F1, which is unset on PowerShell Core/Linux/macOS) names a
+        # throwaway path without ever creating a file, matching the
+        # cache-path construction convention already documented by the
+        # `# host-path-ok` marker in phase-containment-rolling-history-core.ps1.
+        $fetchParams['CachePath'] = Join-Path ([System.IO.Path]::GetTempPath()) "phase-containment-bypass-$([guid]::NewGuid().ToString('N')).json"  # host-path-ok
         # M5 fix (issue #842 post-review): signal the throwaway-cache bypass
         # through to Get-PhaseContainmentHistory so it skips writing a full-
         # content orphan JSON for this never-reused GUID path.

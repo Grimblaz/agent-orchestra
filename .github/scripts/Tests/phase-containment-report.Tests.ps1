@@ -249,6 +249,36 @@ Describe 'Invoke-PhaseContainmentReportCli' {
         }
     }
 
+    Context 'issue #876 F1: bypass CachePath construction survives $env:TEMP being unset (PowerShell Core / Linux / macOS)' {
+        BeforeEach {
+            Mock Get-PhaseContainmentHistory { New-FixedHistoryResult }
+            Mock Get-PhaseContainmentCommentCorpus { New-FixedCorpusResult }
+            $script:SavedEnvTemp876 = $env:TEMP
+            Remove-Item Env:\TEMP -ErrorAction SilentlyContinue
+        }
+
+        AfterEach {
+            if ($null -ne $script:SavedEnvTemp876) {
+                $env:TEMP = $script:SavedEnvTemp876
+            }
+            else {
+                Remove-Item Env:\TEMP -ErrorAction SilentlyContinue
+            }
+        }
+
+        It 'does not throw a null-binding error building the bypass CachePath when $env:TEMP is unset' {
+            # Only Windows conventionally sets $env:TEMP; PowerShell Core on
+            # Linux/macOS leaves it unset by default. A prior version called
+            # `Join-Path $env:TEMP "..."`, which throws a terminating
+            # parameter-binding error the instant $env:TEMP is $null --
+            # reproducible even on this Windows host once the variable is
+            # cleared (confirmed manually). [System.IO.Path]::GetTempPath()
+            # resolves TMPDIR/TEMP/TMP cross-platform without ever needing
+            # $env:TEMP directly.
+            { Invoke-PhaseContainmentReportCli -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 90 -Token '' } | Should -Not -Throw
+        }
+    }
+
     Context 'Truncated-flag divergence (issue #768 s6, judge-sustained M8)' {
         It 'renders a population-divergence warning when the value and cost Truncated flags disagree' {
             Mock Get-PhaseContainmentHistory { New-FixedHistoryResult -Truncated $false }
@@ -1226,7 +1256,7 @@ Describe 'structural guard: Get-PhaseContainmentHistory''s default CachePath inc
     It 'the default CachePath construction interpolates $JudgeLogin, not just $RepoOwner/$RepoName' {
         $libPath       = Join-Path $PSScriptRoot '..' 'lib' 'phase-containment-rolling-history-core.ps1'
         $lines         = Get-Content $libPath
-        $cachePathLine = $lines | Where-Object { $_ -match '\$CachePath\s*=\s*Join-Path\s+\$env:TEMP' }
+        $cachePathLine = $lines | Where-Object { $_ -match '\$CachePath\s*=\s*Join-Path' }
 
         $cachePathLine | Should -Not -BeNullOrEmpty -Because "the default CachePath construction line must exist in Get-PhaseContainmentHistory."
         $cachePathLine | Should -Match '\$JudgeLogin' -Because (

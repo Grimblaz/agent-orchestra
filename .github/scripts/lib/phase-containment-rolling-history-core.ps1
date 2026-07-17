@@ -1785,7 +1785,7 @@ function Get-PhaseContainmentHistory {
         GitHub token. Currently unused (gh CLI uses ambient auth). Reserved for future use.
     .PARAMETER CachePath
         Absolute path to the cache file. Defaults to
-        $env:TEMP\.phase-containment-cache-{RepoOwner}-{RepoName}.json
+        [System.IO.Path]::GetTempPath()\.phase-containment-cache-{RepoOwner}-{RepoName}-{JudgeLogin}.json
     .PARAMETER TimeoutSeconds
         Per-run budget in seconds. Default: 30.
     .PARAMETER JudgeLogin
@@ -1893,7 +1893,7 @@ function Get-PhaseContainmentHistory {
     # cache entries computed and author-filtered under a PRIOR identity
     # (cache poisoning across judge identities).
     if (-not $CachePath) {
-        $CachePath = Join-Path $env:TEMP ".phase-containment-cache-$RepoOwner-$RepoName-$JudgeLogin.json"  # host-path-ok
+        $CachePath = Join-Path ([System.IO.Path]::GetTempPath()) ".phase-containment-cache-$RepoOwner-$RepoName-$JudgeLogin.json"  # host-path-ok
     }
 
     # ---- Cache hit ----
