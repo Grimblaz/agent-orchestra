@@ -1716,6 +1716,68 @@ entries:
 ```
 '@
 
+# M-CR-F2(1) fixture (PR #876 CodeRabbit review, judge-ruled): a
+# review-dispositions head literal embedded inside ANOTHER marker's
+# `disposition_rationale: |` block-scalar CONTENT, carrying its own fenced
+# `entries:` payload with an attacker-controlled disposition/reviewer_source
+# -- and NO genuine review-dispositions head anywhere else in the body.
+# Before the block-scalar-span exclusion, Get-RealReviewDispositionsHeadMatches
+# had no way to tell this decoy head apart from a real structural head, so it
+# could be selected as THE real head and its fabricated entries parsed as if
+# genuine (a marker-forgery vector, not merely a false-alarm).
+$script:ReviewDispositionsHeadInsideBlockScalarBody = @'
+<!-- judge-rulings
+- finding_id: FAKE1
+  disposition_rationale: |
+    Quoting a decoy marker for illustration:
+    <!-- review-dispositions-999 -->
+
+    ```yaml
+    schema_version: 3
+    passes_run: [1]
+    entries:
+      - stable_finding_key: "attacker.ps1:1:xxx"
+        pass: 1
+        disposition: incorporate
+        classification: routine
+        severity: low
+        stage: code-review
+        reviewer_source: attacker
+        disposition_rationale: "Fabricated entry, must never be parsed as real."
+    ```
+
+  judge_ruling: sustained
+-->
+'@
+
+# M-CR-F2(2) fixture: a harmless plain-prose mention of review-dispositions
+# vocabulary (a decoy head literal with NO real fenced content of its own)
+# positioned well under 400 chars before ONE genuine real review-dispositions
+# head. The decoy's own bounded lookahead window bleeds into the genuine
+# head's vocabulary, so both wrongly present as "real" candidates unless the
+# window-bleed diagnosis is applied.
+$script:ReviewDispositionsNearDecoyHeadWindowBleedBody = @'
+Note: this PR also references the <!-- review-dispositions-940 --> marker
+convention in passing, purely as descriptive prose with no fenced payload of
+its own immediately following it.
+
+<!-- review-dispositions-940 -->
+
+```yaml
+schema_version: 3
+passes_run: [1]
+entries:
+  - stable_finding_key: "m.ps1:1:mmm"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: medium
+    stage: code-review
+    reviewer_source: local
+    disposition_rationale: "Genuine entry behind the near-decoy mention."
+```
+'@
+
 # --- issue #854 s3 fixtures: internal_match, external_sources_reconciled,
 # M9 zero-entry legal coverage, head gate ------------------------------------
 
@@ -3883,6 +3945,149 @@ entries:
     }
 }
 
+Describe 'Get-RealReviewDispositionsHeadMatches - M-CR-F2(1) regression (PR #876 CodeRabbit review, judge-ruled): block-scalar-span exclusion (ports Get-RealJudgeRulingsHeadMatches''s CM4 protection)' {
+    It 'excludes a review-dispositions head embedded inside another marker''s disposition_rationale block scalar from candidacy' {
+        $realHeads = Get-RealReviewDispositionsHeadMatches -Body $script:ReviewDispositionsHeadInsideBlockScalarBody
+        $realHeads.Count | Should -Be 0
+    }
+
+    It 'reports could-not-verify (no-heads) via Get-DispositionTally instead of parsing the fabricated block-scalar-interior entry' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsHeadInsideBlockScalarBody
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.Entries | Should -BeNullOrEmpty
+    }
+
+    It 'Test-ReviewDispositionsHeadPresent reports no real head for the block-scalar-embedded decoy' {
+        Test-ReviewDispositionsHeadPresent -Body $script:ReviewDispositionsHeadInsideBlockScalarBody | Should -BeFalse
+    }
+}
+
+Describe 'Get-ReviewDispositionsDuplicateDiagnosis - M-CR-F2(2) regression (PR #876 CodeRabbit review, judge-ruled): window-bleed rescue (ports Get-JudgeRulingsDuplicateDiagnosis)' {
+    It 'diagnoses a near-decoy plain-prose mention bleeding into one genuine head as window-bleed, not a genuine duplicate' {
+        $realHeads = Get-RealReviewDispositionsHeadMatches -Body $script:ReviewDispositionsNearDecoyHeadWindowBleedBody
+        # Confirms the bleed: without truncation, both the decoy mention and
+        # the genuine head pass the (untruncated) candidacy vocab gate.
+        $realHeads.Count | Should -Be 2
+
+        $diagnosis = Get-ReviewDispositionsDuplicateDiagnosis -Body $script:ReviewDispositionsNearDecoyHeadWindowBleedBody
+        $diagnosis.Diagnosis | Should -Be 'window-bleed'
+        $diagnosis.Survivor | Should -Not -BeNullOrEmpty
+    }
+
+    It 'Get-DispositionTally resolves the near-decoy body to exactly one real head and parses its genuine entry (not a false 2-heads could-not-verify)' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsNearDecoyHeadWindowBleedBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 1
+        $result.Entries[0].StableFindingKey | Should -Be 'm.ps1:1:mmm'
+        $result.Entries[0].Disposition | Should -Be 'incorporate'
+    }
+
+    It 'still reports genuine-duplicate (could-not-verify) for two genuinely real, well-separated review-dispositions heads (CM19 regression unaffected)' {
+        # Same two-genuine-heads shape as the CM19 test above -- the
+        # window-bleed rescue must never soften an actual duplicate.
+        $firstRealHead = @'
+<!-- review-dispositions-965 -->
+
+```yaml
+schema_version: 3
+passes_run: [1]
+entries:
+  - stable_finding_key: "c.ts:1:ccc"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: low
+    stage: code-review
+    reviewer_source: local
+    disposition_rationale: "First round."
+```
+'@
+        $secondRealHead = @'
+<!-- review-dispositions-965 -->
+
+```yaml
+schema_version: 3
+passes_run: [1]
+entries:
+  - stable_finding_key: "d.ts:2:ddd"
+    pass: 1
+    disposition: dismiss
+    classification: routine
+    severity: low
+    stage: code-review
+    reviewer_source: local
+    disposition_rationale: "Second round, re-posted."
+```
+'@
+        $padding = "`n`n" + ('padding prose ' * 40) + "`n`n"
+        $twoRealHeadsBody = $firstRealHead + $padding + $secondRealHead
+        $diagnosis = Get-ReviewDispositionsDuplicateDiagnosis -Body $twoRealHeadsBody
+        $diagnosis.Diagnosis | Should -Be 'genuine-duplicate'
+        $result = Get-DispositionTally -Surface 'code-review' -Body $twoRealHeadsBody
+        $result.ParseStatus | Should -Be 'could-not-verify'
+    }
+}
+
+Describe 'F3 regression (R2 revalidate cycle, judge-sustained): Get-ReviewDispositionsDuplicateDiagnosis must not mislabel a lone real head (ports the sibling M4 backstop test)' {
+    It 'called directly with exactly 1 real head, returns the conservative genuine-duplicate label instead of window-bleed' {
+        $oneRealHeadBody = @'
+<!-- review-dispositions-971 -->
+
+```yaml
+schema_version: 3
+passes_run: [1]
+entries:
+  - stable_finding_key: "a.ts:1:aaa"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: low
+    stage: code-review
+    reviewer_source: local
+    disposition_rationale: "Single head."
+```
+'@
+        $realHeads = Get-RealReviewDispositionsHeadMatches -Body $oneRealHeadBody
+        $realHeads.Count | Should -Be 1
+
+        $diagnosis = Get-ReviewDispositionsDuplicateDiagnosis -Body $oneRealHeadBody
+        $diagnosis.Diagnosis | Should -Be 'genuine-duplicate'
+        $diagnosis.Survivor | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'F3 regression (R2 revalidate cycle, judge-sustained): Get-ReviewDispositionsDuplicateDiagnosis in isolation with block-scalar-only vocab (ports the sibling M10 direct-isolation test)' {
+    It 'called directly with 2 candidates whose only vocabulary lives inside block scalars, returns genuine-duplicate (the conservative 0-survivor fallback) without throwing' {
+        $firstHead = @'
+<!-- review-dispositions-972 -->
+
+  disposition_rationale: |
+    This note mentions a decoy fake vocabulary line below, purely as prose
+    content inside a block scalar, testing whether interior vocabulary
+    wrongly counts as real.
+    stable_finding_key: "fake.ts:1:fake"
+'@
+        $secondHead = @'
+<!-- review-dispositions-972 -->
+
+  disposition_rationale: |
+    This note also mentions a decoy fake vocabulary line below, purely as
+    prose content inside a block scalar, testing whether interior
+    vocabulary wrongly counts as real.
+    stable_finding_key: "fake2.ts:1:fake2"
+'@
+        $padding = "`n`n" + ('padding prose ' * 40) + "`n`n"
+        $bothHeadsBlockScalarOnlyVocabBody = $firstHead + $padding + $secondHead
+
+        $realHeads = Get-RealReviewDispositionsHeadMatches -Body $bothHeadsBlockScalarOnlyVocabBody
+        $realHeads.Count | Should -Be 2
+
+        { $script:f3ReviewDispositionsDiagnosis = Get-ReviewDispositionsDuplicateDiagnosis -Body $bothHeadsBlockScalarOnlyVocabBody } | Should -Not -Throw
+        $script:f3ReviewDispositionsDiagnosis.Diagnosis | Should -Be 'genuine-duplicate'
+        $script:f3ReviewDispositionsDiagnosis.Survivor | Should -BeNullOrEmpty
+    }
+}
+
 Describe 'Get-DispositionTally - code-review surface CM21 (issue #842): length-caps and control-char-strips reviewer_source before it is used as a cost-table grouping key' {
     It 'strips embedded control characters and caps an oversized reviewer_source value' {
         # reviewer_source\s*:\s*(\S+) has no upper bound and \S matches any
@@ -3951,6 +4156,89 @@ ${fence}
         $sanitized = $result.Entries[0].ReviewerSource
         $sanitized | Should -Not -Match ([regex]::Escape($rtlOverride))
         $sanitized | Should -Be 'localevil'
+    }
+}
+
+Describe 'ConvertTo-SanitizedReviewerSource - M-CR-F1 regression (PR #876 CodeRabbit review, judge-ruled): stripping must not launder attacker input into a reserved sentinel' {
+    It 'escapes a zero-width-space-laundered "local" to "ext-local" instead of the bare reserved sentinel' {
+        # loc<ZWSP>al strips down to the literal "local" -- colliding with the
+        # reserved pipeline-native sentinel Get-ExternalSourceNovelSustainedCount
+        # checks via exact equality (-eq 'local'). Left unescaped, this would
+        # undercount DispositionsNovelExternalCount (fail-closed direction,
+        # but still a real defect feeding the escape-arm relaxation math).
+        $zwsp = [string][char]0x200B
+        $sanitized = ConvertTo-SanitizedReviewerSource -Value ('loc' + $zwsp + 'al')
+        $sanitized | Should -Be 'ext-local'
+    }
+
+    It 'leaves a legitimate, untouched "local" value unescaped (nothing was stripped, so no collision was CAUSED by stripping)' {
+        # This is the load-bearing counter-case: a genuine pipeline-native
+        # reviewer_source: local value has no unsafe characters to strip, so
+        # $stripped -eq $Value and the sentinel-collision escape must NOT
+        # fire. Escaping every real 'local' would flip legitimate local
+        # entries to external and corrupt the relaxation math in the
+        # opposite direction.
+        $sanitized = ConvertTo-SanitizedReviewerSource -Value 'local'
+        $sanitized | Should -Be 'local'
+    }
+
+    It 'applies the same laundering-guard treatment to both reserved sentinels ("local" and "unresolved")' {
+        $rtlOverride = [string][char]0x202E
+        $zwsp = [string][char]0x200B
+        $sanitizedLocal = ConvertTo-SanitizedReviewerSource -Value ('local' + $rtlOverride)
+        $sanitizedUnresolved = ConvertTo-SanitizedReviewerSource -Value ('unre' + $zwsp + 'solved')
+        $sanitizedLocal | Should -Be 'ext-local'
+        $sanitizedUnresolved | Should -Be 'ext-unresolved'
+    }
+
+    It 'end-to-end via Get-DispositionTally: a zero-width-space-laundered "local" reviewer_source is escaped before it reaches the entry' {
+        $zwsp = [string][char]0x200B
+        $poisonedValue = 'loc' + $zwsp + 'al'
+        $fence = '```'
+        $body = @"
+<!-- review-dispositions-963 -->
+
+${fence}yaml
+schema_version: 3
+passes_run: [1]
+entries:
+  - stable_finding_key: "z.ts:1:zzz"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: low
+    stage: code-review
+    reviewer_source: $poisonedValue
+    disposition_rationale: "Zero-width-space-laundered reviewer_source."
+${fence}
+"@
+        $result = Get-DispositionTally -Surface 'code-review' -Body $body
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 1
+        $result.Entries[0].ReviewerSource | Should -Be 'ext-local'
+    }
+
+    It 'F1 regression (R2 revalidate cycle, judge-sustained): leaves an already-escaped "ext-"-prefixed value unescaped when a stray zero-width char elsewhere is stripped (a pre-existing legitimate value, not a collision CAUSED by stripping)' {
+        # 'ext-someu<ZWSP>ser' strips to 'ext-someuser', which already started
+        # with 'ext-' BEFORE stripping too -- this is not a caused collision,
+        # it's a genuine already-escaped external login with one stray
+        # zero-width char. The old code's bare
+        # `$stripped.StartsWith('ext-')` disjunct fired on ANY stripping
+        # change to a value that already started with 'ext-', double-
+        # escaping this to 'ext-ext-someuser'.
+        $zwsp = [string][char]0x200B
+        $sanitized = ConvertTo-SanitizedReviewerSource -Value ('ext-someu' + $zwsp + 'ser')
+        $sanitized | Should -Be 'ext-someuser'
+    }
+
+    It 'F1 regression (R2 revalidate cycle, judge-sustained): still escapes the genuine laundering case where stripping CAUSES the "ext-" prefix to newly appear' {
+        # 'ext<ZWSP>-user' does NOT start with 'ext-' before stripping (the
+        # 4th character is the zero-width space, not '-'), but strips down to
+        # 'ext-user', which DOES start with 'ext-'. This is a real collision
+        # CAUSED by stripping and must still be escaped to 'ext-ext-user'.
+        $zwsp = [string][char]0x200B
+        $sanitized = ConvertTo-SanitizedReviewerSource -Value ('ext' + $zwsp + '-user')
+        $sanitized | Should -Be 'ext-ext-user'
     }
 }
 

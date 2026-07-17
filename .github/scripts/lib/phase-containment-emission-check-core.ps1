@@ -141,6 +141,33 @@ function script:ConvertTo-SanitizedReviewerSource {
         editor (a Trojan-Source-class attack), and zero-width characters
         could silently fragment or disguise an otherwise-identical grouping
         key.
+
+        M-CR-F1 fix (PR #876 CodeRabbit review, judge-ruled): stripping the
+        unsafe characters above can LAUNDER attacker input into a reserved
+        pipeline-native sentinel. `loc<U+200B>al` strips down to the literal
+        `local` -- colliding with the exact-equality reserved-sentinel checks
+        downstream (Get-ExternalSourceNovelSustainedCount's `-eq 'local'` /
+        `-eq 'unresolved'` checks), which feeds DispositionsNovelExternalCount
+        and the escape-arm relaxation math. After stripping and length-
+        capping, if stripping actually REMOVED something (`$stripped -ne
+        $Value`) AND the stripped result collides with a reserved sentinel
+        (`local`/`unresolved`) or already starts with `ext-`, prepend `ext-`
+        to the stripped result -- the same escape convention already codified
+        by skills/code-review-intake/SKILL.md's reviewer_source normalization
+        rule and skills/review-judgment/SKILL.md's M40 exact-equality note.
+        The "did stripping actually change the value" gate is load-bearing: a
+        value that already equals a reserved sentinel BEFORE stripping
+        (nothing was removed) is a legitimate pipeline-native value and must
+        NOT be escaped -- escaping every genuine `local` would flip real
+        local-sentinel entries to external and corrupt the relaxation math in
+        the opposite direction. Only a sentinel collision CAUSED by the
+        stripping operation itself is escaped. That comparison MUST use
+        ordinal equality ([string]::Equals(..., Ordinal)), never PowerShell's
+        default `-ne`/`-eq`: .NET's current-culture linguistic string
+        comparison treats zero-width/format characters (the exact class this
+        function strips) as collation-ignorable, so `-ne` wrongly reports
+        'local' and 'loc<ZWSP>al' as equal strings -- silently defeating the
+        very check this fix exists to add for zero-width-laundered input.
     .PARAMETER Value
         The already-dequoted reviewer_source value, or $null when no
         reviewer_source field was present on the entry.
@@ -153,6 +180,21 @@ function script:ConvertTo-SanitizedReviewerSource {
     if ([string]::IsNullOrEmpty($Value)) { return $Value }
     $maxLength = 64
     $stripped = [regex]::Replace($Value, '[\x00-\x1F\x7F\u200B-\u200D\u2060\uFEFF\u202A-\u202E\u2066-\u2069]', '')
+    # Ordinal comparison only (see .DESCRIPTION): PowerShell's default -ne
+    # would wrongly treat 'local' and 'loc<ZWSP>al' as equal.
+    $strippingChangedValue = -not [string]::Equals($stripped, $Value, [System.StringComparison]::Ordinal)
+    # The `ext-` collision disjunct must fire only when stripping itself
+    # CAUSED the `ext-` prefix to newly appear (genuine laundering, e.g.
+    # 'ext<ZWSP>-user' -> 'ext-user'). A value that already started with
+    # `ext-` before stripping (e.g. 'ext-someu<ZWSP>ser' -> 'ext-someuser')
+    # is a pre-existing legitimate already-escaped value, not a caused
+    # collision, and must NOT be re-escaped to 'ext-ext-...'.
+    $originalStartsWithExt = $Value.StartsWith('ext-', [System.StringComparison]::Ordinal)
+    $collidesWithReservedSentinel = $stripped -in @('local', 'unresolved')
+    $collidesWithExtPrefix = $stripped.StartsWith('ext-', [System.StringComparison]::Ordinal) -and -not $originalStartsWithExt
+    if ($strippingChangedValue -and ($collidesWithReservedSentinel -or $collidesWithExtPrefix)) {
+        $stripped = "ext-$stripped"
+    }
     if ($stripped.Length -gt $maxLength) {
         return $stripped.Substring(0, $maxLength)
     }
@@ -1117,6 +1159,19 @@ function script:Get-RealReviewDispositionsHeadMatches {
         an anomaly (e.g. a double-run backfill) that must be surfaced as
         could-not-verify, never silently resolved by picking the first head
         (CM19: this is the closure this function exists to enable).
+
+        M-CR-F2(1) fix (PR #876 CodeRabbit review, judge-ruled): ported the
+        block-scalar-span exclusion Get-RealJudgeRulingsHeadMatches already
+        applies (above, ~L316-321). Without it, a review-dispositions head
+        literal embedded inside another marker's `disposition_rationale: |`
+        block-scalar CONTENT (attacker-influenced text quoted into a
+        judge-authored comment) is string data, not a real structural head —
+        but this function previously had no way to tell the two apart, so a
+        crafted decoy carrying its own fenced `entries:` content could be
+        selected as THE real head and fabricate entries downstream (a
+        marker-forgery vector, not merely a false-alarm). Any head candidate
+        whose match start falls inside a block-scalar span is excluded before
+        the vocab gate ever runs.
     .PARAMETER Body
         The raw comment body text to scan.
     .OUTPUTS
@@ -1137,9 +1192,17 @@ function script:Get-RealReviewDispositionsHeadMatches {
     $headCandidates = [regex]::Matches($Body, $headPattern)
     if ($headCandidates.Count -eq 0) { return , @() }
 
+    # M-CR-F2(1) fix: exclude any candidate head embedded inside another
+    # marker's block-scalar content before applying the vocab gate — same
+    # exclusion Get-RealJudgeRulingsHeadMatches applies (~L316-321).
+    $blockScalarSpans = Get-BlockScalarSpans -Text $Body
+
     $lookaheadWindow = 400
     $realHeadMatches = [System.Collections.Generic.List[System.Text.RegularExpressions.Match]]::new()
     foreach ($candidate in $headCandidates) {
+        if (Test-IndexInBlockScalarSpan -Index $candidate.Index -Spans $blockScalarSpans) {
+            continue
+        }
         $windowEnd = [Math]::Min($Body.Length, $candidate.Index + $candidate.Length + $lookaheadWindow)
         $window = $Body.Substring($candidate.Index, $windowEnd - $candidate.Index)
         if ([regex]::IsMatch($window, '(?m)^\s*(entries|schema_version|stable_finding_key)\s*:')) {
@@ -1147,6 +1210,116 @@ function script:Get-RealReviewDispositionsHeadMatches {
         }
     }
     return , $realHeadMatches.ToArray()
+}
+
+function script:Get-ReviewDispositionsDuplicateDiagnosis {
+    <#
+    .SYNOPSIS
+        Distinguishes a genuine duplicate review-dispositions head from a
+        single real head whose vocab-gate pass was actually "borrowed" via
+        window-bleed from a neighboring decoy (M-CR-F2(2) fix, PR #876
+        CodeRabbit review, judge-ruled; ports Get-JudgeRulingsDuplicateDiagnosis's
+        window-bleed rescue for the review-dispositions surface).
+    .DESCRIPTION
+        PRECONDITION: the caller must already know
+        `Get-RealReviewDispositionsHeadMatches -Body $Body` returns 2 or more
+        candidates — the same threshold Get-ReviewDispositionsTallyInternal's
+        own `.Count -ge 2` guard applies. This helper does not re-verify that
+        count itself.
+
+        Get-RealReviewDispositionsHeadMatches's own vocab gate scans each
+        candidate's bounded 400-char lookahead window in isolation, so it
+        cannot tell whether the vocabulary found inside a candidate's window
+        is that candidate's OWN content, or content that actually belongs to
+        the NEXT candidate but still bleeds into the current candidate's
+        untruncated window (a "near-decoy": a harmless plain-prose mention of
+        review-dispositions vocabulary positioned close enough before a real
+        block that the mention's window bleeds into the real block's own
+        vocabulary and both appear to pass the gate).
+
+        This helper re-runs the same vocab-gate check per candidate, but
+        truncates each non-last candidate's window at the position of the
+        NEXT candidate in encounter order (mirroring
+        Get-JudgeRulingsDuplicateDiagnosis exactly), so a candidate can only
+        "survive" on vocabulary that genuinely precedes the next head. A
+        vocab match falling inside a block-scalar span
+        (Get-BlockScalarSpans / Test-IndexInBlockScalarSpan) also does not
+        count as a survivor-qualifying match, so a planted decoy vocabulary
+        token living inside a `disposition_rationale: |` block scalar's
+        string content cannot inflate the survivor count.
+
+        Survivor count 1 -> exactly one candidate has genuinely own
+        vocabulary; the caller can rescue the parse by treating that single
+        survivor as the sole real head instead of failing the whole body as
+        could-not-verify.
+
+        Survivor count >= 2, or 0 -> at least two candidates each have their
+        own genuine vocabulary (a real duplicate), or none do (defensive,
+        conservative fallback) — both report 'genuine-duplicate' so the
+        caller keeps its existing could-not-verify behavior.
+    .PARAMETER Body
+        The raw comment body text to scan (the same text the caller already
+        passed to Get-RealReviewDispositionsHeadMatches).
+    .OUTPUTS
+        [PSCustomObject] with:
+          Diagnosis [string] — 'window-bleed' or 'genuine-duplicate'
+          Survivor  [System.Text.RegularExpressions.Match] — the single
+                    surviving real head when Diagnosis is 'window-bleed';
+                    $null otherwise.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Body
+    )
+
+    $candidates = Get-RealReviewDispositionsHeadMatches -Body $Body
+
+    # M4 fix (PR #833 judge-sustained follow-up): defensive backstop only —
+    # this function's own documented precondition (and the caller's existing
+    # `.Count -ge 2` guard) already requires at least 2 real heads before
+    # this helper is ever invoked on the real call path. A direct call with
+    # fewer than 2 candidates has no genuine duplicate to diagnose at all,
+    # so return the conservative 'genuine-duplicate' label immediately
+    # rather than letting a lone candidate's own survival be misread as a
+    # 1-survivor window-bleed case.
+    if ($candidates.Count -lt 2) {
+        return [PSCustomObject]@{ Diagnosis = 'genuine-duplicate'; Survivor = $null }
+    }
+
+    $blockScalarSpans = Get-BlockScalarSpans -Text $Body
+    $vocabPattern = '(?m)^\s*(entries|schema_version|stable_finding_key)\s*:'
+    $survivorCount = 0
+    $survivorCandidate = $null
+
+    for ($i = 0; $i -lt $candidates.Count; $i++) {
+        $candidate = $candidates[$i]
+        $hasNext = ($i + 1) -lt $candidates.Count
+        $rawWindowEnd = $candidate.Index + $candidate.Length + 400
+        $windowEnd = if ($hasNext) {
+            [Math]::Min([Math]::Min($rawWindowEnd, $candidates[$i + 1].Index), $Body.Length)
+        }
+        else {
+            [Math]::Min($rawWindowEnd, $Body.Length)
+        }
+        $window = $Body.Substring($candidate.Index, $windowEnd - $candidate.Index)
+
+        $survives = $false
+        foreach ($vocabMatch in [regex]::Matches($window, $vocabPattern)) {
+            $absoluteIndex = $candidate.Index + $vocabMatch.Groups[1].Index
+            if (-not (Test-IndexInBlockScalarSpan -Index $absoluteIndex -Spans $blockScalarSpans)) {
+                $survives = $true
+                break
+            }
+        }
+        if ($survives) {
+            $survivorCount++
+            $survivorCandidate = $candidate
+        }
+    }
+
+    if ($survivorCount -eq 1) {
+        return [PSCustomObject]@{ Diagnosis = 'window-bleed'; Survivor = $survivorCandidate }
+    }
+    return [PSCustomObject]@{ Diagnosis = 'genuine-duplicate'; Survivor = $null }
 }
 
 function script:Test-ReviewDispositionsHeadPresent {
@@ -1533,12 +1706,31 @@ function script:Get-ReviewDispositionsTallyInternal {
     # replace-own-block already guarantees a single head on the normal
     # persist path, so a genuine duplicate signals an anomaly (e.g. a
     # double-run backfill) that should be surfaced, not quietly resolved.
+    #
+    # M-CR-F2(2) fix (PR #876 CodeRabbit review, judge-ruled): a real
+    # duplicate is not the only way to reach 2+ real heads here — a harmless
+    # plain-prose mention of review-dispositions vocabulary positioned close
+    # enough before a genuine head can "borrow" that head's own vocabulary via
+    # window-bleed and wrongly present as a second real head. Before failing
+    # the whole body, diagnose whether this is a genuine duplicate or a
+    # window-bleed artifact (Get-ReviewDispositionsDuplicateDiagnosis, porting
+    # Get-JudgeRulingsDuplicateDiagnosis's rescue); when it is window-bleed,
+    # proceed to parse using the single surviving real head instead of
+    # discarding an otherwise-parseable body.
     $realHeadMatches = Get-RealReviewDispositionsHeadMatches -Body $Body
+    $realHead = $null
     if ($realHeadMatches.Count -ge 2) {
-        return [PSCustomObject]@{ Entries = @(); ParseStatus = 'could-not-verify' }
+        $diagnosis = Get-ReviewDispositionsDuplicateDiagnosis -Body $Body
+        if ($diagnosis.Diagnosis -eq 'window-bleed') {
+            $realHead = $diagnosis.Survivor
+        }
+        else {
+            return [PSCustomObject]@{ Entries = @(); ParseStatus = 'could-not-verify' }
+        }
     }
-
-    $realHead = if ($realHeadMatches.Count -eq 1) { $realHeadMatches[0] } else { $null }
+    elseif ($realHeadMatches.Count -eq 1) {
+        $realHead = $realHeadMatches[0]
+    }
     if ($null -eq $realHead) {
         return [PSCustomObject]@{ Entries = @(); ParseStatus = 'could-not-verify' }
     }
