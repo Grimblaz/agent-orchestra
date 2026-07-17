@@ -876,6 +876,55 @@ function Update-FCLPrBodyDispatchCostSamples {
     return Update-DispatchCostSampleEvaluationInPrBody @updateParameters
 }
 
+# Translates Invoke-CostSessionRender's nested return shape into the flat
+# hashtable Set-FCLPrBodyCostSummary/Update-FCLPrBodyCostSummary expect
+# (issue #489 s4 refactor pass). Field names read here are the render
+# pipeline's own (Attribution['totals']['cost_estimate_usd'], not
+# 'cost_usd_total'; Completeness['capture_point'] nested inside Completeness,
+# not a peer of it) — this function is the one place that maps them to the
+# cost_summary schema's own field names, so Invoke-FrameCreditLedger's Step 7
+# body-edit flow doesn't have to interleave that translation with gh-call
+# plumbing. Returns $null (never an empty hashtable) when nothing mapped, so
+# callers can treat "$null" as "omit cost_summary" uniformly.
+function script:Build-FCLCostSummaryFromRenderResult {
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param(
+        [Parameter(Mandatory)][hashtable]$CostResult,
+        [AllowNull()][string]$BreakdownCommentUrl = $null
+    )
+
+    $costSummary = @{}
+    $totals = $null
+    if ($null -ne $CostResult['Attribution'] -and $CostResult['Attribution'].ContainsKey('totals')) {
+        $totals = $CostResult['Attribution']['totals']
+    }
+    if ($null -ne $totals) {
+        if ($totals.ContainsKey('cost_estimate_usd') -and $null -ne $totals['cost_estimate_usd']) {
+            $costSummary['cost_usd_total'] = $totals['cost_estimate_usd']
+        }
+        if ($totals.ContainsKey('tokens') -and $totals['tokens'] -is [hashtable]) {
+            $costSummary['tokens'] = $totals['tokens']
+        }
+    }
+    $completeness = $CostResult['Completeness']
+    if ($null -ne $completeness) {
+        if ($completeness.ContainsKey('completeness') -and $null -ne $completeness['completeness']) {
+            $costSummary['session_completeness'] = $completeness['completeness']
+        }
+        if ($completeness.ContainsKey('capture_point') -and $null -ne $completeness['capture_point']) {
+            $costSummary['capture_point'] = $completeness['capture_point']
+        }
+    }
+    # Omit source_comment entirely (rather than writing an empty link) when
+    # the breakdown-comment upsert failed or returned no usable URL.
+    if (-not [string]::IsNullOrWhiteSpace($BreakdownCommentUrl)) {
+        $costSummary['source_comment'] = $BreakdownCommentUrl
+    }
+    if ($costSummary.Count -eq 0) { return $null }
+    return $costSummary
+}
+
 # ---------------------------------------------------------------------------
 # Invoke-FrameCreditLedger
 # ---------------------------------------------------------------------------
@@ -1038,7 +1087,10 @@ function Invoke-FrameCreditLedger {
         }
     }
 
-    script:Update-FCLPrBodyMetricsBestEffort -Pr $Pr -PrBody $prBody
+    # NOTE (issue #489 s4): the best-effort PR-body metrics write that used to
+    # happen here unconditionally now happens ONCE, consolidated with the new
+    # cost-summary write, after the breakdown-comment upsert below — see the
+    # "Step 7: Consolidated PR-body edit" block near the end of this function.
 
     # 5. v4 path: discover adapters and classify ports.
     $repoRoot = script:Resolve-FCLRepoRoot -ScriptPath $PSCommandPath
@@ -1374,11 +1426,92 @@ function Invoke-FrameCreditLedger {
     }
 
     $comment = Compose-CommentWithCostPattern -MarkerToken $marker -PortReports $reportsArray -CostSection $costSection -Mode $Mode -HasBlock $hasBlock
+    $breakdownCommentUrl = $null
     try {
-        $null = Find-OrUpsertComment -Type 'pr' -Number $Pr -Marker $marker -Body $comment
+        $breakdownCommentUrl = Find-OrUpsertComment -Type 'pr' -Number $Pr -Marker $marker -Body $comment
     }
     catch {
         [Console]::Error.WriteLine("frame-credit-ledger: upsert failed: $($_.Exception.Message)")
+    }
+
+    # ---------------------------------------------------------------------------
+    # Step 7: Consolidated PR-body edit (issue #489 s4).
+    #
+    # Exactly ONE body write happens per run, performed here — after the
+    # breakdown-comment upsert above, so a successful upsert's html_url is
+    # available to thread into the cost-summary section as source_comment.
+    #
+    # Read-side UTF-8 pin (issue #824 M2 fix, mirrored from
+    # cost-baseline-harvest.ps1): native `gh` stdout otherwise decodes with
+    # the console's default encoding on Windows, and a whole-body
+    # `gh pr edit` write can permanently mangle maintainer-authored
+    # non-ASCII prose elsewhere in the body. This is a process-wide static;
+    # nothing earlier in this file reads console output expecting the
+    # OS-default encoding, so setting it once here is safe.
+    #
+    # The body is RE-FETCHED here rather than reusing $prBody (fetched once
+    # at Step 2, above) — $prBody goes stale the instant any earlier code
+    # path (e.g. a short-circuit comment upsert, or another concurrent run)
+    # edits the body.
+    # ---------------------------------------------------------------------------
+    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+
+    $freshBodyJsonRaw = $null
+    try {
+        $freshBodyJsonRaw = & gh pr view $Pr --json body 2>$null
+    }
+    catch {
+        $freshBodyJsonRaw = $null
+    }
+
+    $freshPrBody = $prBody
+    if ($null -ne $freshBodyJsonRaw -and $freshBodyJsonRaw -ne '') {
+        try {
+            $freshParsed = $freshBodyJsonRaw | ConvertFrom-Json -ErrorAction Stop
+            if ($null -ne $freshParsed -and $null -ne $freshParsed.body) {
+                $freshPrBody = [string]$freshParsed.body
+            }
+        }
+        catch {
+            # Fail open: fall back to the run-opening body rather than losing
+            # this run's edit entirely.
+            $freshPrBody = $prBody
+        }
+    }
+
+    # Stale-spine transform first (pure, unchanged from :808-819) — it
+    # appends at zero indent after trying its own dispatch-fallback-events/
+    # credits anchors, so the cost-summary transform's after-the-list-
+    # sections anchor must be computed against the POST-stale-spine text.
+    $staleSpinePrBody = script:Update-FCLPrBodyStaleSpineFallbackMetric -PrBody $freshPrBody
+
+    if ([string]::IsNullOrEmpty($costSection)) {
+        # No cost data to report (library-load-failure or the composition-
+        # catch path, both of which run unconditionally today) — the
+        # stale-spine update must still land. Route through
+        # Update-FCLPrBodyMetricsBestEffort directly rather than
+        # Update-FCLPrBodyCostSummary: that writer's own no-op guard
+        # compares its output only against the text it is given, so if the
+        # cost-summary transform were called here and turned out to be a
+        # fixed point, the stale-spine change already folded into
+        # $staleSpinePrBody would be silently dropped along with it.
+        # $costResult is deliberately never read on this branch — it is
+        # unassigned (not just empty) on the library-load-failure path.
+        script:Update-FCLPrBodyMetricsBestEffort -Pr $Pr -PrBody $freshPrBody
+    }
+    else {
+        # Thread the degraded signal explicitly so a degraded run emits the
+        # honest "unavailable" line rather than fabricated totals.
+        $degraded = [bool]$costResult['ShouldPostDegraded']
+
+        # Translation from Invoke-CostSessionRender's nested return shape to
+        # the flat cost_summary schema lives in
+        # script:Build-FCLCostSummaryFromRenderResult (see its definition for
+        # the field-name mapping rationale) — Set-FCLPrBodyCostSummary maps
+        # the result onto the cost_summary schema's own field names.
+        $costSummary = script:Build-FCLCostSummaryFromRenderResult -CostResult $costResult -BreakdownCommentUrl $breakdownCommentUrl
+
+        script:Update-FCLPrBodyCostSummary -Pr $Pr -PrBody $staleSpinePrBody -Degraded $degraded -CostSummary $costSummary
     }
 
     return @{

@@ -409,6 +409,37 @@ integrity_checks:
 "@
     }
 
+    # Issue #489 s4: bypasses the real walk -> attribution -> completeness ->
+    # render pipeline (Invoke-CostSessionRender) so wiring-level tests can
+    # control CostSection / ShouldPostDegraded / Attribution / Completeness
+    # directly. Field names match Invoke-CostSessionRender's own documented
+    # .OUTPUTS shape (Attribution['totals']['cost_estimate_usd'], not
+    # 'cost_usd_total'; Completeness['capture_point'] nested inside
+    # Completeness, not a peer key). Defined here (BeforeAll), not inside a
+    # Context body, so it survives Pester's Discovery/Run scope split.
+    $script:NewFCLCostSessionResult = {
+        param(
+            [string]$CostSection = 'cost data present',
+            [bool]$ShouldPostDegraded = $false,
+            [hashtable]$Attribution = @{ totals = @{ cost_estimate_usd = 2.5; tokens = @{ input = 100; output = 50; cache_creation = 0; cache_read = 10 } } },
+            [hashtable]$Completeness = @{ completeness = 'complete'; capture_point = 'end-of-session' }
+        )
+        return @{
+            CostSection           = $CostSection
+            Completeness          = $Completeness
+            TokenSum              = 160
+            Attribution           = $Attribution
+            SessionId             = 'test-session'
+            CostEventsCount       = 3
+            UsePriorCostSection   = $false
+            DegradedMarker        = '<!-- frame-credit-ledger-degraded-429 -->'
+            ShouldRetractDegraded = $false
+            RetractDegradedBody   = ''
+            ShouldPostDegraded    = $ShouldPostDegraded
+            PostDegradedBody      = if ($ShouldPostDegraded) { 'degraded body' } else { '' }
+        }
+    }
+
     $script:GetUpdatedPrBody = {
         param([AllowEmptyString()][string]$Output)
 
@@ -648,7 +679,30 @@ integrity_checks:
             [hashtable]$EnvVars = @{},
             # When non-empty, the GH mock calls this scriptblock for pr view --json body.
             # Allows tests to supply custom per-call body responses.
-            [scriptblock]$CustomBodyBranch = $null
+            [scriptblock]$CustomBodyBranch = $null,
+            # Issue #489 s4 knobs -----------------------------------------------
+            # When supplied, replaces the real Invoke-CostSessionRender with a
+            # stub that returns exactly this hashtable, so tests can control
+            # CostSection / ShouldPostDegraded / Attribution / Completeness
+            # directly rather than driving them indirectly through the walker
+            # stubs. When $null (default), the real cost pipeline runs against
+            # the existing empty-events walker stubs below.
+            [scriptblock]$CostSessionRenderOverride = $null,
+            # Simulates a cost-lib dot-source failure (the $costSection empty
+            # path via $script:CostLibLoadFailed) without actually breaking the
+            # dot-source — set AFTER the real (successful) dot-source so the
+            # cost-summary writer functions stay resolvable.
+            [bool]$ForceCostLibLoadFailed = $false,
+            # Simulates the composition-catch path: makes the caller-side
+            # identity resolution (Get-CostTranscriptSlug) throw, so the outer
+            # try/catch around Invoke-CostSessionRender resets $costSection to
+            # '' exactly as it does on a real composition failure.
+            [bool]$ForceCostCompositionThrow = $false,
+            # Forces Find-OrUpsertComment's own comment-listing call to fail,
+            # so the breakdown-comment upsert returns $null (its documented
+            # fail-open contract) — used to prove source_comment is omitted
+            # rather than empty-stringed.
+            [bool]$ForceCommentUpsertFailure = $false
         )
 
         # Snapshot env vars that we will mutate so we can restore them in finally.
@@ -684,6 +738,12 @@ integrity_checks:
             # top-level execution block (because $isDotSourced will be $true).
             . $script:OrchestratorPath -Pr 0 -Mode warn -ErrorAction SilentlyContinue 2>$null
             $script:FrameCreditLedgerRepoRoot = $script:RepoRoot
+
+            # Issue #489 s4: simulate a cost-lib load failure AFTER the real
+            # (successful) dot-source above, so the cost-summary writer
+            # functions (cost-fcl-helpers.ps1) stay resolvable while the
+            # orchestrator's own $costSection-empty gate still fires.
+            if ($ForceCostLibLoadFailed) { $script:CostLibLoadFailed = $true }
 
             # ---- git mock -------------------------------------------------------
             function git {
@@ -753,11 +813,18 @@ integrity_checks:
                         if ($capturedThrowOnBodyFetch) {
                             throw 'simulated body-fetch failure'
                         }
-                        $global:LASTEXITCODE = 0; return $resolvedPrBodyJson
+                        $global:LASTEXITCODE = 0
+                        if ($null -ne $CustomBodyBranch) {
+                            return (& $CustomBodyBranch)
+                        }
+                        return $resolvedPrBodyJson
                     }
                 }
 
                 if ($joined -match 'issue view \d+ --json comments') {
+                    if ($ForceCommentUpsertFailure) {
+                        $global:LASTEXITCODE = 1; return ''
+                    }
                     $global:LASTEXITCODE = 0; return $resolvedIssueComments
                 }
 
@@ -806,7 +873,32 @@ integrity_checks:
 
             # Cost-walker stubs (same as InvokeCostWalkerOrchestratorInProcess — cost path
             # is always fail-open in these content tests, so empty events is fine).
-            function Get-CostTranscriptSlug { param([string]$CwdPath) $null = $CwdPath; return 'test-slug' }
+            if ($ForceCostCompositionThrow) {
+                # Issue #489 s4: throws inside the caller-side identity resolution
+                # that precedes the Invoke-CostSessionRender call, so the outer
+                # try/catch in Step 6 resets $costSection to '' exactly as a
+                # real composition failure would.
+                function Get-CostTranscriptSlug { param([string]$CwdPath) $null = $CwdPath; throw 'simulated composition failure' }
+            }
+            else {
+                function Get-CostTranscriptSlug { param([string]$CwdPath) $null = $CwdPath; return 'test-slug' }
+            }
+            if ($null -ne $CostSessionRenderOverride) {
+                # Issue #489 s4: bypass the real walk -> attribution -> render
+                # pipeline entirely so tests can assert on the wiring
+                # (ordering, gating, degraded-signal threading) against a
+                # controlled CostSection/ShouldPostDegraded/Attribution/
+                # Completeness shape without needing real transcript events.
+                $script:FCL_CostSessionRenderOverride = $CostSessionRenderOverride
+                function Invoke-CostSessionRender {
+                    param(
+                        [int]$Pr, [string]$Branch, [string]$Slug, [string]$ParentCwd, [string]$RepoRoot,
+                        [string]$PrBody, $PriorComments, [bool]$IsOrchestrated,
+                        [switch]$AdmitCorroboratedFallback, $CorroborationWindowStart, $CorroborationWindowEnd
+                    )
+                    return & $script:FCL_CostSessionRenderOverride
+                }
+            }
             function Invoke-CostTranscriptWalk {
                 param([string]$Slug, [string]$Branch, [string]$ParentCwd, [Nullable[int]]$IssueNumber = $null)
                 $null = $Slug; $null = $Branch; $null = $ParentCwd; $null = $IssueNumber
@@ -841,6 +933,7 @@ integrity_checks:
             Remove-Variable -Name InProcessGhCallLog -Scope Script -ErrorAction SilentlyContinue
             Remove-Variable -Name InProcessUpdatedPrBody -Scope Script -ErrorAction SilentlyContinue
             Remove-Variable -Name InProcessBaseRefAttempts -Scope Script -ErrorAction SilentlyContinue
+            Remove-Variable -Name FCL_CostSessionRenderOverride -Scope Script -ErrorAction SilentlyContinue
         }
     }
 }
@@ -1504,6 +1597,183 @@ dispatch-fallback-events:
             $ip.UpdatedPrBody | Should -Not -BeNullOrEmpty -Because 'additive PR-body metrics updates must preserve previously observed stale-spine fallback counts'
             $ip.UpdatedPrBody | Should -Match '(?m)^spine-stale-fallback-count:\s*5\s*$'
             $ip.UpdatedPrBody | Should -Not -Match '(?m)^spine-stale-fallback-count:\s*[0-4]\s*$'
+        }
+    }
+
+    Context 'Issue #489 s4 consolidated cost-summary body edit' {
+
+        It 'performs exactly one consolidated body edit, after the comment upsert, against a freshly re-fetched body' {
+            $staleBody = & $script:NewV4PrBodyWithFallbackMetrics -MetricsPrelude @'
+dispatch-fallback-events:
+  stale-spine:
+    - step: 1
+      reason: generated_at-mismatch
+'@ -CreditRows @'
+  - port: implement-test
+    status: passed
+    evidence: "tests passed"
+'@
+            $freshBody = & $script:NewV4PrBodyWithFallbackMetrics -MetricsPrelude @'
+dispatch-fallback-events:
+  stale-spine:
+    - step: 1
+      reason: generated_at-mismatch
+    - step: 2
+      reason: generated_at-mismatch
+    - step: 3
+      reason: generated_at-mismatch
+'@ -CreditRows @'
+  - port: implement-test
+    status: passed
+    evidence: "tests passed"
+'@
+            $bodyJson = (@{ body = $staleBody } | ConvertTo-Json -Compress)
+            $script:FCLTestFreshBodyJson = (@{ body = $freshBody } | ConvertTo-Json -Compress)
+
+            $ip = & $script:InvokeOrchestratorInProcess -Pr 429 -Mode 'warn' `
+                -PrBodyJson $bodyJson `
+                -CustomBodyBranch { $script:FCLTestFreshBodyJson } `
+                -CostSessionRenderOverride $script:NewFCLCostSessionResult
+
+            $ip.Result.ExitCode | Should -Be 0
+
+            $editIndices = @()
+            for ($i = 0; $i -lt $ip.GhCallLog.Count; $i++) {
+                if ($ip.GhCallLog[$i] -match '^pr edit \d+ .*--body-file') { $editIndices += $i }
+            }
+            $editIndices.Count | Should -Be 1 -Because 'the hook must perform exactly one consolidated body edit per run'
+
+            $commentUpsertIndex = -1
+            for ($i = 0; $i -lt $ip.GhCallLog.Count; $i++) {
+                if ($ip.GhCallLog[$i] -match '^(issue|pr) comment \d+ --body') { $commentUpsertIndex = $i; break }
+            }
+            $commentUpsertIndex | Should -BeGreaterOrEqual 0 -Because 'the breakdown comment must be upserted'
+
+            $refetchIndex = -1
+            for ($i = 0; $i -lt $ip.GhCallLog.Count; $i++) {
+                if ($ip.GhCallLog[$i] -match '^pr view \d+ --json body$') { $refetchIndex = $i; break }
+            }
+            $refetchIndex | Should -BeGreaterOrEqual 0 -Because 'the body edit must re-fetch the body rather than reuse the run-opening fetch'
+
+            $refetchIndex | Should -BeGreaterThan $commentUpsertIndex -Because 'the re-fetch happens after the breakdown comment upsert'
+            $editIndices[0] | Should -BeGreaterThan $refetchIndex -Because 'the write happens after the re-fetch'
+
+            $ip.UpdatedPrBody | Should -Match '(?m)^spine-stale-fallback-count:\s*3\s*$' `
+                -Because 'the write must be built from the re-fetched (fresh) body, not the run-opening fetch'
+
+            Remove-Variable -Name FCLTestFreshBodyJson -Scope Script -ErrorAction SilentlyContinue
+        }
+
+        It 'preserves the stale-spine update on an empty $costSection run caused by cost-lib load failure' {
+            $prBody = & $script:NewV4PrBodyWithFallbackMetrics -MetricsPrelude @'
+dispatch-fallback-events:
+  stale-spine:
+    - step: 10
+      reason: generated_at-mismatch
+    - step: 12
+      reason: missing-step-id
+'@ -CreditRows @'
+  - port: implement-test
+    status: passed
+    evidence: "tests passed"
+'@
+            $bodyJson = (@{ body = $prBody } | ConvertTo-Json -Compress)
+
+            $ip = & $script:InvokeOrchestratorInProcess -Pr 429 -Mode 'warn' `
+                -PrBodyJson $bodyJson `
+                -ForceCostLibLoadFailed $true
+
+            $ip.Result.ExitCode | Should -Be 0
+            $ip.UpdatedPrBody | Should -Not -BeNullOrEmpty -Because 'the stale-spine update must still be written even when the cost lib failed to load'
+            $ip.UpdatedPrBody | Should -Match '(?m)^spine-stale-fallback-count:\s*2\s*$'
+            $ip.UpdatedPrBody | Should -Not -Match 'cost_summary\s*:' -Because 'no cost data is available on the lib-load-failure path'
+
+            $editIndices = @($ip.GhCallLog | Where-Object { $_ -match '^pr edit \d+ .*--body-file' })
+            $editIndices.Count | Should -Be 1 -Because 'exactly one write must occur even on the empty-cost path'
+        }
+
+        It 'preserves the stale-spine update on an empty $costSection run caused by the composition-catch path' {
+            $prBody = & $script:NewV4PrBodyWithFallbackMetrics -MetricsPrelude @'
+dispatch-fallback-events:
+  stale-spine:
+    - step: 10
+      reason: generated_at-mismatch
+    - step: 12
+      reason: missing-step-id
+'@ -CreditRows @'
+  - port: implement-test
+    status: passed
+    evidence: "tests passed"
+'@
+            $bodyJson = (@{ body = $prBody } | ConvertTo-Json -Compress)
+
+            $ip = & $script:InvokeOrchestratorInProcess -Pr 429 -Mode 'warn' `
+                -PrBodyJson $bodyJson `
+                -ForceCostCompositionThrow $true
+
+            $ip.Result.ExitCode | Should -Be 0
+            $ip.UpdatedPrBody | Should -Not -BeNullOrEmpty -Because 'the stale-spine update must still be written even when cost composition throws'
+            $ip.UpdatedPrBody | Should -Match '(?m)^spine-stale-fallback-count:\s*2\s*$'
+            $ip.UpdatedPrBody | Should -Not -Match 'cost_summary\s*:' -Because 'no cost data is available on the composition-catch path'
+
+            $editIndices = @($ip.GhCallLog | Where-Object { $_ -match '^pr edit \d+ .*--body-file' })
+            $editIndices.Count | Should -Be 1 -Because 'exactly one write must occur even on the empty-cost path'
+        }
+
+        It 'threads ShouldPostDegraded through to the writer as -Degraded $true with the honest degraded line' {
+            $prBody = & $script:NewV4PrBodyWithFallbackMetrics -MetricsPrelude '' -CreditRows @'
+  - port: implement-test
+    status: passed
+    evidence: "tests passed"
+'@
+            $bodyJson = (@{ body = $prBody } | ConvertTo-Json -Compress)
+
+            $ip = & $script:InvokeOrchestratorInProcess -Pr 429 -Mode 'warn' `
+                -PrBodyJson $bodyJson `
+                -CostSessionRenderOverride { & $script:NewFCLCostSessionResult -CostSection 'degraded cost data' -ShouldPostDegraded $true }
+
+            $ip.Result.ExitCode | Should -Be 0
+            $ip.UpdatedPrBody | Should -Match '\*\*Session cost\*\*: unavailable \(attribution degraded\)' `
+                -Because 'ShouldPostDegraded must thread through to -Degraded $true, which writes the honest degraded line'
+            $ip.UpdatedPrBody | Should -Match '(?m)^\s*capture_point:\s*unavailable\s*$'
+        }
+
+        It 'populates source_comment from the breakdown-comment upsert html_url on success' {
+            $prBody = & $script:NewV4PrBodyWithFallbackMetrics -MetricsPrelude '' -CreditRows @'
+  - port: implement-test
+    status: passed
+    evidence: "tests passed"
+'@
+            $bodyJson = (@{ body = $prBody } | ConvertTo-Json -Compress)
+
+            $ip = & $script:InvokeOrchestratorInProcess -Pr 429 -Mode 'warn' `
+                -PrBodyJson $bodyJson `
+                -CostSessionRenderOverride $script:NewFCLCostSessionResult
+
+            $ip.Result.ExitCode | Should -Be 0
+            $ip.UpdatedPrBody | Should -Match '(?m)^\s*source_comment:' `
+                -Because 'a successful comment upsert must be threaded into cost_summary as source_comment'
+            $ip.UpdatedPrBody | Should -Match 'issuecomment-1'
+        }
+
+        It 'omits source_comment (not an empty string) when the breakdown-comment upsert fails' {
+            $prBody = & $script:NewV4PrBodyWithFallbackMetrics -MetricsPrelude '' -CreditRows @'
+  - port: implement-test
+    status: passed
+    evidence: "tests passed"
+'@
+            $bodyJson = (@{ body = $prBody } | ConvertTo-Json -Compress)
+
+            $ip = & $script:InvokeOrchestratorInProcess -Pr 429 -Mode 'warn' `
+                -PrBodyJson $bodyJson `
+                -CostSessionRenderOverride $script:NewFCLCostSessionResult `
+                -ForceCommentUpsertFailure $true
+
+            $ip.Result.ExitCode | Should -Be 0
+            $ip.UpdatedPrBody | Should -Not -Match '(?m)^\s*source_comment\s*:' `
+                -Because 'a failed upsert (no usable html_url) must omit source_comment entirely rather than writing an empty link'
+            $ip.UpdatedPrBody | Should -Match '(?m)^\s*capture_point:\s*end-of-session\s*$' `
+                -Because 'the rest of the cost summary must still be written even though the comment link is unavailable'
         }
     }
 
