@@ -56,8 +56,8 @@ Describe 'cost-rate-table.json' {
     It 'has rate_source_url set' { $script:Table.rate_source_url | Should -Not -BeNullOrEmpty }
     It 'has fallback_behavior warn-and-null' { $script:Table.fallback_behavior | Should -Be 'warn-and-null' }
     It 'contains claude-opus-4-7' { $script:Table.rates.'claude-opus-4-7' | Should -Not -BeNullOrEmpty }
-    It 'contains claude-sonnet-4-x' { $script:Table.rates.'claude-sonnet-4-x' | Should -Not -BeNullOrEmpty }
-    It 'contains claude-haiku-4-x' { $script:Table.rates.'claude-haiku-4-x' | Should -Not -BeNullOrEmpty }
+    It 'contains claude-sonnet-4-6' { $script:Table.rates.'claude-sonnet-4-6' | Should -Not -BeNullOrEmpty }
+    It 'contains claude-haiku-4-5' { $script:Table.rates.'claude-haiku-4-5' | Should -Not -BeNullOrEmpty }
     It 'all rate values are positive' {
         foreach ($model in $script:Table.rates.PSObject.Properties) {
             $provider = script:Get-RateEntryProvider -Entry $model.Value
@@ -82,7 +82,7 @@ Describe 'cost-rate-table.json' {
 
         Context 'provider-aware lookup' {
                 It 'defaults legacy entries without provider to claude' {
-                        foreach ($model in @('claude-opus-4-7', 'claude-sonnet-4-x', 'claude-haiku-4-x')) {
+                        foreach ($model in @('claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5')) {
                                 script:Get-RateEntryProvider -Entry $script:Table.rates.$model | Should -Be 'claude'
                         }
                 }

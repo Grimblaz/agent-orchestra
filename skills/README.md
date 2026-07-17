@@ -68,7 +68,7 @@ This keeps prompts concise while preserving depth when needed.
 | `step-commit` | Discrete validated-step commit workflow for Code-Conductor | ✅ Included |
 | `subagent-env-handshake` | Claude subagent environment-handshake contract for tree-grounded claims | ✅ Included |
 | `systematic-debugging` | 4-phase debugging process (Observe, Hypothesize, Test, Fix) | ✅ Included |
-| `terminal-hygiene` | Terminal and test execution guardrails for Agent Orchestra workflows | ✅ Included |
+| `terminal-hygiene` | Terminal and test execution guardrails plus session-cost discipline for Agent Orchestra workflows | ✅ Included |
 | `test-driven-development` | TDD workflow guidance, quality standards, and practical patterns | ✅ Included |
 | `tracking-format` | Tracking-file frontmatter and local coordination format guidance | ✅ Included |
 | `ui-iteration` | Screenshot-driven UI polish workflow | ✅ Included |

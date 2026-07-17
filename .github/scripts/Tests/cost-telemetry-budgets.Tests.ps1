@@ -320,3 +320,110 @@ constants (issue #496 C-1).
         }
     }
 }
+
+# Regression test for issue #487 (post-render fix) — the THIRD instance of the
+# bug class above (#825 C3 and #496 C-1 were the first two).
+#
+# This Describe lives in the budgets test file, despite covering a cost-pattern
+# constant rather than a budget, because this file already dot-sources
+# cost-fcl-helpers.ps1 at script scope. That gives the same production-shaped
+# scope the real defect depends on: the constant, Get-FCLCostScriptState, and
+# New-FCLInitialSessionStateClone all sharing one script scope that is NOT the
+# global scope. Reproducing the bug requires exactly that shape — a `pwsh -File`
+# style probe, where the entry-script scope aliases global, FALSELY EXONERATES
+# the bug because the clone picks the constant up as a global. It also reuses
+# the live-worker-block extraction harness directly above.
+#
+# $script:FCLCostPatternSectionRegex is defined at the top of cost-fcl-helpers.ps1
+# and consumed by Invoke-CostSessionRender, which runs INSIDE the worker clone.
+# New-FCLInitialSessionStateClone copies only function definitions and
+# `Get-Variable -Scope Global`, so a script-scoped constant reaches the worker
+# only if Get-FCLCostScriptState marshals it by name. This test is RED before
+# that marshal entry is added (the constant is $null inside the clone) and GREEN
+# after.
+Describe 'FCL cost-pattern section regex worker-runspace isolation (issue #487)' {
+
+    It 'resolves $script:FCLCostPatternSectionRegex inside the cloned worker runspace, not $null-degraded-to-an-empty-match' {
+        $fclPath = Join-Path $script:RepoRoot '.github/scripts/frame-credit-ledger.ps1'
+        $fclContent = Get-Content -LiteralPath $fclPath -Raw
+
+        # Same balanced-brace extraction as the Describe above, so this test runs
+        # the LIVE worker setup code (including its marshal loop) rather than a
+        # copy that could drift from production.
+        $anchor = '$null = $worker.AddScript({'
+        $anchorIndex = $fclContent.IndexOf($anchor)
+        $anchorIndex | Should -BeGreaterThan -1 `
+            -Because 'the worker AddScript() call site must exist in frame-credit-ledger.ps1 — update this anchor if the worker construction is refactored'
+
+        $braceStart = $anchorIndex + $anchor.Length - 1
+        $depth = 0
+        $braceEnd = -1
+        for ($i = $braceStart; $i -lt $fclContent.Length; $i++) {
+            if ($fclContent[$i] -eq '{') { $depth++ }
+            elseif ($fclContent[$i] -eq '}') {
+                $depth--
+                if ($depth -eq 0) { $braceEnd = $i; break }
+            }
+        }
+        $braceEnd | Should -BeGreaterThan $braceStart -Because 'the worker AddScript() script block must have balanced braces'
+
+        $workerBlockText = $fclContent.Substring($braceStart, $braceEnd - $braceStart + 1)
+        $innerText = $workerBlockText.Substring(1, $workerBlockText.Length - 2)
+
+        $probeMarker = 'Invoke-FrameCreditLedger -Pr $PrArg -Mode $ModeArg'
+        $innerText.Contains($probeMarker) | Should -BeTrue `
+            -Because 'the worker script block must still end by calling Invoke-FrameCreditLedger — update this probe marker if that call site changes'
+        $probeText = $innerText.Replace($probeMarker, 'return $script:FCLCostPatternSectionRegex')
+
+        $costScriptState = script:Get-FCLCostScriptState
+        $iss = script:New-FCLInitialSessionStateClone
+        $rs = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace($iss)
+        $rs.Open()
+        $worker = [System.Management.Automation.PowerShell]::Create()
+        $worker.Runspace = $rs
+        try {
+            $null = $worker.AddScript($probeText).AddArgument(0).AddArgument('warn').AddArgument($script:RepoRoot).AddArgument($costScriptState)
+            $result = $worker.Invoke()
+
+            $worker.HadErrors | Should -BeFalse `
+                -Because ('worker probe threw: ' + (@($worker.Streams.Error) -join '; '))
+
+            $resolvedInsideWorker = @($result) | Select-Object -Last 1
+            $resolvedInsideWorker | Should -Be $script:FCLCostPatternSectionRegex -Because @"
+Inside the cloned worker runspace, `$script:FCLCostPatternSectionRegex must
+resolve to the same real pattern it has at the top level, not `$null. A `$null
+pattern does NOT throw: [regex]::Match(body, `$null) returns Success=True with
+an EMPTY match, so Invoke-CostSessionRender accepts an empty captured section,
+never reaches its YAML-only fallback, and ships the re-emission preservation
+notice with the cost section destroyed. If this fails,
+Get-FCLCostScriptState no longer marshals FCLCostPatternSectionRegex into the
+worker clone (issue #487).
+"@
+        }
+        finally {
+            try { $worker.Dispose() } catch { $null = $_ }
+            try { $rs.Close(); $rs.Dispose() } catch { $null = $_ }
+        }
+    }
+
+    # Companion to the marshal assertion above: locks in the defensive tightening
+    # of the acceptance guard in cost-session-render.ps1. The marshal fix cures
+    # the known cause of the empty match, but the guard is the thing that decides
+    # whether an empty section is ACCEPTED (silent data loss) or REJECTED (falls
+    # back to the YAML block). This documents the .NET behavior the guard has to
+    # withstand, so a future refactor back to a bare Success check fails here.
+    It 'treats a null pattern as a successful EMPTY match, which a bare Success check would accept' {
+        $priorBody = "## Cost Pattern`n`n| port | cost |`n<!-- cost-pattern-data`nversion: 1`n-->"
+        $nullPatternMatch = [regex]::Match($priorBody, $null)
+
+        $nullPatternMatch.Success | Should -BeTrue `
+            -Because 'this is the trap: a null pattern does not throw, so Success alone is not evidence that a section was captured'
+        $nullPatternMatch.Groups['section'].Value | Should -BeNullOrEmpty `
+            -Because 'the "successful" match is zero-length, so the captured section is empty and the prior cost data would be dropped'
+
+        $renderPath = Join-Path $script:RepoRoot '.github/scripts/lib/cost-session-render.ps1'
+        $renderContent = Get-Content -LiteralPath $renderPath -Raw
+        $renderContent | Should -Match '\$sectionMatch\.Success -and -not \[string\]::IsNullOrWhiteSpace\(\$priorSectionText\)' `
+            -Because 'the preservation branch must require a non-empty captured section before accepting it, so any future empty-match cause degrades into the YAML-only fallback instead of silently shipping a destroyed cost section'
+    }
+}

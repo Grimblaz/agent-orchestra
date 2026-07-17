@@ -330,14 +330,14 @@ generated_at: {ISO-8601 UTC}
 coverage: complete
 slice_comment_id: { frame-slices-{ID} sibling comment id, set at persist time }
 ports:
-   {port}: [sN, sM#cycle:2#terminal]
+  {port}: [sN, sM#cycle:2#terminal]
 slices:
-   sN:
-      execution_mode: {serial | parallel}
-      rc: {GREEN code/test action summary}
-      ac_refs: [AC#]
-      depends_on: []
-      cycle: 1
+  sN:
+    execution_mode: {serial | parallel}
+    rc: {GREEN code/test action summary}
+    ac_refs: [AC#]
+    depends_on: []
+    cycle: 1
 -->
 
 **Steps**
@@ -449,8 +449,20 @@ When authoring a migration-type plan with three or more implementation steps (sp
    ```
 
 2. **Placement constraint**: `migration-scan: true` belongs in the `<!-- frame-slice -->` HTML comment block only. Do NOT place it in the machine-readable spine `slices:` block — the spine key parser rejects hyphenated keys and would null the entire spine.
-
 3. **Port constraint**: slice #1 must use a real, deterministic `provides:` port (e.g., `implement-docs`). Using `coverage: exploratory` on a migration scan slice is disallowed — the scan is a deterministic deliverable, not exploratory work.
+
+Slice #1 frame-slice example (keys sit at column 0 inside the comment block; the parser rejects indented keys):
+
+```text
+<!-- frame-slice
+id: s1
+provides: [implement-docs]
+adapter: {path}
+migration-scan: true
+depends-on: []
+ac-refs: [AC#]
+-->
+```
 
 For **legacy/spine-omitted plans** (fewer than three implementation steps and `spine-omitted: plan-too-small`), the `migration-scan: true` slice marker does not apply. Instead, the plan's Step 1 prose MUST be the exhaustive repo scan. The authoring-time validator checks the first-step text for a scan action when no spine is present.
 

@@ -203,7 +203,7 @@ A PR body with no pipeline-metrics marker block and no body orchestration signal
                             cwd       = $ParentCwd
                             gitBranch = $Branch
                             message   = @{
-                                model       = 'claude-sonnet-4-x'
+                                model       = 'claude-sonnet-4-6'
                                 stop_reason = 'max_tokens'
                                 usage       = @{ input_tokens = 100; output_tokens = 20; cache_creation_input_tokens = 0; cache_read_input_tokens = 0 }
                                 content     = @()
@@ -217,7 +217,7 @@ A PR body with no pipeline-metrics marker block and no body orchestration signal
                             cwd       = $ParentCwd
                             gitBranch = $Branch
                             message   = @{
-                                model       = 'claude-sonnet-4-x'
+                                model       = 'claude-sonnet-4-6'
                                 stop_reason = 'end_turn'
                                 usage       = @{ input_tokens = 100; output_tokens = 20; cache_creation_input_tokens = 0; cache_read_input_tokens = 0 }
                                 content     = @()

@@ -135,6 +135,144 @@ function script:Format-CostRendererYamlArray {
     return '[' + ($items -join ', ') + ']'
 }
 
+function script:Format-CostRendererSanitizedModelString {
+    <#
+    .SYNOPSIS
+        Sanitizes an externally-sourced provider-qualified model string before it
+        enters the null-event Note or the embedded cost-pattern-data YAML array
+        (issue #487 s3, plan findings M2/M10/M11/M13).
+    .DESCRIPTION
+        Model strings originate from transcript telemetry and the Copilot OTEL
+        walker (cost-walker-copilot.ps1) — neither source is validated, so this
+        string is adversary-controlled by the time it reaches the renderer.
+
+        Pipeline, in this exact order (load-bearing):
+          1. Truncate to 128 characters FIRST. Neutralizing before truncating can
+             bisect a multi-character replacement at the cut boundary, leaving a
+             dangling partial-replacement artifact. Truncating first means
+             whatever survives to the neutralization pass is neutralized in full.
+          2. Neutralize by SUBSTITUTION, never escaping. The YAML consumer
+             (ConvertFrom-CostPatternYamlScalar / ConvertFrom-CostPatternYamlArray
+             in cost-rolling-history.ps1) strips outer quotes on read but has
+             no unescape step anywhere, so an escaped sequence would read back as
+             those literal characters, not the original — breaking the
+             verbatim-string contract of the array. Do not reuse Format-CostRendererYamlArray:
+             it performs zero escaping and is only safe for internally-controlled
+             values.
+
+        Neutralized (each replaced with a fixed-width safe placeholder that
+        itself contains none of the other neutralized patterns):
+          - CR, LF, and other C0/DEL control characters — a survivor forges a new
+            top-level YAML field, since the parser splits on `\r?\n`
+            (cost-rolling-history.ps1:156) with `^\s*`-anchored field matchers.
+          - `,` (comma) — the array parser splits unconditionally and
+            quote-blind (cost-rolling-history.ps1:64), so a survivor splits one
+            array entry into two.
+          - `<!--` / `-->` — can terminate or forge the enclosing
+            cost-pattern-data block, which is extracted by a first-match,
+            non-greedy regex (cost-rolling-history.ps1:22-29).
+          - `` ` `` (backtick) — the Note wraps each sanitized string in a
+            single backtick pair; GFM closes a Markdown code span at the next
+            backtick, so a survivor lets adversary-controlled text (e.g. a
+            Markdown link) escape the span and render live in the PR body
+            (plan finding M1). Neutralized last, after the comment-marker
+            substitutions, so the `(backtick)` placeholder text itself is
+            never re-matched by an earlier rule.
+
+        A literal double-quote is intentionally NOT in the neutralization set:
+        ConvertFrom-CostPatternYamlArray only strips the outermost quote
+        character of each split item (cost-rolling-history.ps1:66-68); an
+        embedded quote round-trips correctly because the split already happened
+        on (already-neutralized) commas, not on quotes.
+    .PARAMETER Model
+        Raw provider-qualified model string (e.g. "claude/claude-unknown-future-model").
+    .OUTPUTS
+        [string] Sanitized model string, safe to wrap in a Markdown code span or
+        a quoted YAML array entry.
+    #>
+    [OutputType([string])]
+    param([AllowNull()][string]$Model)
+
+    if ([string]::IsNullOrEmpty($Model)) { return '' }
+
+    # 1. Truncate first. Substring operates on UTF-16 code units, so a cut at
+    # exactly 128 can bisect the surrogate pair of an astral-plane character
+    # (high surrogate kept at index 127, low surrogate dropped at index 128),
+    # leaving an unpaired surrogate that no later -replace targets (plan
+    # finding M7). If the character at the cut boundary is a high surrogate,
+    # back the cut up by one so the pair stays intact (or fully excluded).
+    $truncateLength = 128
+    if ($Model.Length -gt 128 -and [char]::IsHighSurrogate($Model[127])) {
+        $truncateLength = 127
+    }
+    $truncated = if ($Model.Length -gt $truncateLength) { $Model.Substring(0, $truncateLength) } else { $Model }
+
+    # 2. Neutralize by substitution (never escaping).
+    $sanitized = $truncated `
+        -replace '[\x00-\x1F\x7F]', ' ' `
+        -replace ',', ' ' `
+        -replace '<!--', '(comment-open)' `
+        -replace '-->', '(comment-close)' `
+        -replace '`', '(backtick)'
+
+    return $sanitized
+}
+
+function script:Get-CostRendererDedupedSanitizedModels {
+    <#
+    .SYNOPSIS
+        Sanitizes, dedups, and re-sorts the unknown_models list, WITHOUT
+        capping it at 10. Callers that need the shared 10-entry cap should
+        use Get-CostRendererSanitizedUnknownModels; callers that need to know
+        whether genuine overflow exists (as opposed to a phantom count
+        inflated by pre-sanitization duplicates/collisions — issue #487 F4)
+        should use this uncapped form to compute the true unique count first.
+    .DESCRIPTION
+        Dedup and sort happen AFTER sanitization, not before (code-review
+        findings M4/M9): the raw list is deduped and sorted on the
+        pre-sanitization string, but the character substitutions from sanitization
+        (e.g. comma/control-char -> space) can map two distinct raw strings
+        to the same sanitized output, and can change collation order.
+        Deduping and re-sorting post-sanitization guarantees the rendered
+        Note and YAML array never show visible duplicates and are actually
+        sorted.
+    #>
+    [OutputType([string[]])]
+    param([AllowEmptyCollection()][object[]]$UnknownModels)
+
+    $sanitized = @($UnknownModels | ForEach-Object { script:Format-CostRendererSanitizedModelString -Model ([string]$_) })
+    return , @($sanitized | Select-Object -Unique | Sort-Object)
+}
+
+function script:Get-CostRendererSanitizedUnknownModels {
+    <#
+    .SYNOPSIS
+        Sanitizes, dedups, re-sorts, and caps the unknown_models list at 10
+        entries — the shared cap between the Note and the YAML array (plan
+        finding M12: the Note-only "+N more" overflow suffix must never enter
+        the machine-read array).
+    #>
+    [OutputType([string[]])]
+    param([AllowEmptyCollection()][object[]]$UnknownModels)
+
+    $dedupedSorted = script:Get-CostRendererDedupedSanitizedModels -UnknownModels $UnknownModels
+    return , @($dedupedSorted | Select-Object -First 10)
+}
+
+function script:Format-CostRendererUnknownModelsYamlArray {
+    <#
+    .SYNOPSIS
+        Renders the sanitized, capped unknown_models list as a YAML inline array.
+        Never includes the Note-only "+N more" overflow suffix.
+    #>
+    [OutputType([string])]
+    param([AllowEmptyCollection()][object[]]$UnknownModels)
+
+    $sanitizedModels = script:Get-CostRendererSanitizedUnknownModels -UnknownModels $UnknownModels
+    $items = @($sanitizedModels | ForEach-Object { '"' + $_ + '"' })
+    return '[' + ($items -join ', ') + ']'
+}
+
 function script:Test-CostRendererShouldEmitProviderSupport {
     [OutputType([bool])]
     param([AllowEmptyCollection()][object[]]$ProviderSupport)
@@ -495,6 +633,82 @@ function script:Get-CostRendererNullEventTotal {
     return $nullEventTotal
 }
 
+function script:Build-CostRendererNullEventNote {
+    <#
+    .SYNOPSIS
+        Renders the per-reason null-cost-event Note naming addable unknown
+        models (issue #487 s3, AC2). Callers only invoke this when the
+        attribution result carries the unknown_models / null_cost_events_by_reason
+        additive fields (issue #487 s2); older cached results fall back to the
+        original count-only Note for backwards compatibility.
+    .OUTPUTS
+        [string] The blockquote Note text (no leading/trailing blank lines).
+    #>
+    [OutputType([string])]
+    param([Parameter(Mandatory)][hashtable]$Attribution)
+
+    $unknownModels = @($Attribution['unknown_models'])
+    $reasonCounts = $Attribution['null_cost_events_by_reason']
+
+    $unknownKeyCount = script:Get-CostRendererIntValue -Bucket $reasonCounts -Key 'unknown_key'
+    $rateUnavailableCount = script:Get-CostRendererIntValue -Bucket $reasonCounts -Key 'rate_unavailable'
+    # Issue #487 CE-F2: rate_unavailable_malformed is an additive subset of rate_unavailable
+    # (see Add-NullCostEventReason). Absent on pre-CE-F2 cached results, defaulting to 0 via
+    # Get-CostRendererIntValue — in that case byDesignRateUnavailableCount equals the full
+    # rate_unavailable total, preserving the original count-only "intentionally unpublished"
+    # rendering exactly (backwards compatibility).
+    $malformedRateCount = script:Get-CostRendererIntValue -Bucket $reasonCounts -Key 'rate_unavailable_malformed'
+    $byDesignRateUnavailableCount = $rateUnavailableCount - $malformedRateCount
+    $emptyModelCount = script:Get-CostRendererIntValue -Bucket $reasonCounts -Key 'empty_model'
+
+    $clauses = [System.Collections.Generic.List[string]]::new()
+
+    if ($unknownKeyCount -gt 0) {
+        # Issue #487 F4: overflow is computed from the deduped-and-sanitized
+        # identifier count, not the raw pre-sanitization array length —
+        # sanitization can collapse distinct raw strings (or repeated raw
+        # strings for the same unknown model) onto the same output, which
+        # would otherwise inflate the raw count and produce a phantom
+        # "+N more" suffix for models that are already fully shown.
+        $dedupedModels = script:Get-CostRendererDedupedSanitizedModels -UnknownModels $unknownModels
+        $sanitizedModels = @($dedupedModels | Select-Object -First 10)
+        $modelList = ($sanitizedModels | ForEach-Object { '`' + $_ + '`' }) -join ', '
+        $overflow = [Math]::Max(0, $dedupedModels.Count - 10)
+        if ($overflow -gt 0) {
+            $modelList += ", +$overflow more"
+        }
+        $clauses.Add("$unknownKeyCount event(s) from models missing from the rate table: $modelList — add rows to ``cost-rate-table.json`` (see ``cost-rate-table.md`` for the exact row format).")
+    }
+
+    if ($byDesignRateUnavailableCount -gt 0) {
+        $clauses.Add("$byDesignRateUnavailableCount event(s) from models with intentionally unpublished rates.")
+    }
+
+    if ($malformedRateCount -gt 0) {
+        # Issue #487 CE-F2: unlike the by-design clause above, this is NOT an intentional
+        # gap — it is a partially-null rate-table row (an editing mistake), so the model is
+        # named (reusing the same sanitize/dedup/sort/cap pipeline as unknown_key) and the
+        # wording avoids the word "intentional".
+        $malformedModels = @($Attribution['malformed_rate_models'])
+        # Issue #487 F4: same fix as the unknown_key clause above — compute
+        # overflow from the deduped-and-sanitized count, not raw length.
+        $dedupedMalformedModels = script:Get-CostRendererDedupedSanitizedModels -UnknownModels $malformedModels
+        $sanitizedMalformedModels = @($dedupedMalformedModels | Select-Object -First 10)
+        $malformedModelList = ($sanitizedMalformedModels | ForEach-Object { '`' + $_ + '`' }) -join ', '
+        $malformedOverflow = [Math]::Max(0, $dedupedMalformedModels.Count - 10)
+        if ($malformedOverflow -gt 0) {
+            $malformedModelList += ", +$malformedOverflow more"
+        }
+        $clauses.Add("$malformedRateCount event(s) from models with an incomplete rate-table row (some rate fields are null): $malformedModelList — check ``cost-rate-table.json``.")
+    }
+
+    if ($emptyModelCount -gt 0) {
+        $clauses.Add("$emptyModelCount event(s) had no model identifier.")
+    }
+
+    return '> **Note**: ' + ($clauses -join ' ')
+}
+
 function script:Build-CostPatternTable {
     <#
     .SYNOPSIS Builds the markdown table for the cost pattern section. #>
@@ -757,7 +971,18 @@ function Format-CostPatternMarkdown {
     }
     $body += "`n`n$table"
     if ($nullEventTotal -gt 0) {
-        $body += "`n`n> **Note**: $nullEventTotal cost event(s) had unknown models not present in ``cost-rate-table.json`` and contributed null to the cost estimate. Update the rate table to include the missing model(s) for accurate attribution."
+        # Issue #487 s3: prefer the per-reason breakdown that names addable
+        # unknown models when the attribution result carries the additive
+        # unknown_models / null_cost_events_by_reason fields (issue #487 s2).
+        # Absent fields (e.g. an older cached attribution result from before
+        # this change) fall back to the original count-only Note — plan
+        # Invariant, backwards compatibility.
+        if ($Attribution.ContainsKey('unknown_models') -and $Attribution.ContainsKey('null_cost_events_by_reason')) {
+            $body += "`n`n" + (script:Build-CostRendererNullEventNote -Attribution $Attribution)
+        }
+        else {
+            $body += "`n`n> **Note**: $nullEventTotal cost event(s) had unknown models not present in ``cost-rate-table.json`` and contributed null to the cost estimate. Update the rate table to include the missing model(s) for accurate attribution."
+        }
     }
     if ($Completeness['exclude_reason'] -eq 'phase-marker-only attribution; rolling-history excluded') {
         $body += "`n`n> **Note**: This Cost Pattern shows Claude-side phase-marker attribution. Copilot-side collection was not captured for this run."
@@ -855,6 +1080,37 @@ function Format-CostPatternYaml {
     $null = $sb.AppendLine("capture_point: $capturePointValue")
     $null = $sb.AppendLine("session_id: $SessionId")
     $null = $sb.AppendLine("head_ref: $HeadRef")
+
+    # Additive post-#487 fields (issue #487 s3, plan finding M16). Must render
+    # before the ports: block for the same reason as the baseline-eligibility
+    # fields above — the parser's ports loop treats the next zero-indent
+    # top-level key as the end of the block (cost-rolling-history.ps1:266).
+    # unknown_models carries at most 10 sanitized, verbatim provider-qualified
+    # strings — never the Note-only "+N more" overflow suffix (M12). This field
+    # has zero readers today, by design: an additive write-only disclosure
+    # field, consistent with the existing matcher-less phase_scope/branch
+    # fields (plan Decisions block).
+    if ($Attribution.ContainsKey('unknown_models')) {
+        $unknownModelsYaml = script:Format-CostRendererUnknownModelsYamlArray -UnknownModels @($Attribution['unknown_models'])
+        $null = $sb.AppendLine("unknown_models: $unknownModelsYaml")
+    }
+    # Issue #487 CE-F2: additive sibling to unknown_models, reusing the same sanitize/
+    # dedup/sort/cap array renderer. Names models whose rate-table row was partially
+    # null (malformed), as opposed to fully-null-by-design rows (e.g. Copilot).
+    if ($Attribution.ContainsKey('malformed_rate_models')) {
+        $malformedRateModelsYaml = script:Format-CostRendererUnknownModelsYamlArray -UnknownModels @($Attribution['malformed_rate_models'])
+        $null = $sb.AppendLine("malformed_rate_models: $malformedRateModelsYaml")
+    }
+    if ($Attribution.ContainsKey('null_cost_events_by_reason')) {
+        $reasonCounts = $Attribution['null_cost_events_by_reason']
+        $null = $sb.AppendLine('null_cost_events_by_reason:')
+        $null = $sb.AppendLine("  unknown_key: $(script:Get-CostRendererIntValue -Bucket $reasonCounts -Key 'unknown_key')")
+        $null = $sb.AppendLine("  rate_unavailable: $(script:Get-CostRendererIntValue -Bucket $reasonCounts -Key 'rate_unavailable')")
+        # Issue #487 CE-F2: additive subset counter of rate_unavailable above (never a
+        # replacement) — see Add-NullCostEventReason for the union-total invariant.
+        $null = $sb.AppendLine("  rate_unavailable_malformed: $(script:Get-CostRendererIntValue -Bucket $reasonCounts -Key 'rate_unavailable_malformed')")
+        $null = $sb.AppendLine("  empty_model: $(script:Get-CostRendererIntValue -Bucket $reasonCounts -Key 'empty_model')")
+    }
 
     # ports array
     $null = $sb.AppendLine('ports:')

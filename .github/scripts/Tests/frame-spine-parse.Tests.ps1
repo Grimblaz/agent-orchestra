@@ -260,6 +260,39 @@ Describe 'frame spine parser' -Tag 'unit' {
         $sliceBlocks[0] | Should -BeExactly $script:S2SliceBlock
     }
 
+    It 'parses the plan-authoring plan-markdown template''s frame-slice examples verbatim (issue #487 AC6 regression guard)' {
+        $planAuthoringContent = Get-Content -Path (Join-Path $script:RepoRoot 'skills/plan-authoring/SKILL.md') -Raw
+        $templateSectionMatch = [regex]::Match($planAuthoringContent, '(?s)### Plan-markdown template\r?\n(?<body>.*?)\r?\n### Base rules')
+        $templateSectionMatch.Success | Should -BeTrue -Because 'the plan-markdown template must stay bounded between its own heading and the next section heading'
+
+        $templateSection = $templateSectionMatch.Groups['body'].Value
+
+        $s1Blocks = @(Get-FSCSliceBlocksByStepId -CommentBody $templateSection -StepId 's1')
+        $s2Blocks = @(Get-FSCSliceBlocksByStepId -CommentBody $templateSection -StepId 's2')
+
+        $s1Blocks | Should -HaveCount 1 -Because 'the shipped template must ship a frame-slice example the production parser can actually extract, not just a human-readable approximation'
+        $s2Blocks | Should -HaveCount 1 -Because 'every per-step frame-slice example in the template must parse, not just the first one'
+
+        $s1Blocks[0] | Should -Match '(?m)^id: s1$' -Because 'Get-FSCScalarValue anchors ^key with zero leading-whitespace allowance'
+        $s1Blocks[0] | Should -Not -Match '(?m)^\s+id:' -Because 'a leading-whitespace key line silently fails Get-FSCScalarValue''s column-0-anchored pattern'
+    }
+
+    It 'returns zero blocks for a frame-slice example with indented keys (locks the shipped-template regression AC6 fixed)' {
+        $indentedSliceBlock = @(
+            '<!-- frame-slice'
+            '   id: s1'
+            '   provides: [implement-code]'
+            '   adapter: skills/implementation-discipline/adapters/implement-code-adapter.md'
+            '   depends-on: []'
+            '   ac-refs: [AC1]'
+            '   -->'
+        ) -join "`n"
+
+        $blocks = @(Get-FSCSliceBlocksByStepId -CommentBody $indentedSliceBlock -StepId 's1')
+
+        $blocks | Should -HaveCount 0 -Because 'this fixture reproduces the pre-#487-AC6 shipped-template defect (3-space indented keys), which Get-FSCScalarValue''s column-0-anchored regex silently rejects — this is the exact defect that made every frame-slice block in the plan-issue-487 comment unparseable before the retrofit'
+    }
+
     It 'extracts a bare frame-slice block addressed by id and provides fields' {
         $commentBody = @(
             '<!-- frame-slice'

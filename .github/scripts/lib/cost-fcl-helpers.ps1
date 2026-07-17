@@ -113,7 +113,20 @@ function script:Get-FCLCostScriptState {
             # ''.StartsWith(anything) returns $true, misclassifying every real cwd as the
             # Copilot-OTEL sentinel and silently killing both Tier-1 identity discovery
             # and Tier-2 admission.
-            'CostWalkerCopilotOtelCwdPrefix'
+            'CostWalkerCopilotOtelCwdPrefix',
+            # Issue #487 (post-render fix): same bug class as C3 above, third instance.
+            # Defined at the top of this file, consumed by Invoke-CostSessionRender in
+            # cost-session-render.ps1, which runs inside the worker clone — so without
+            # marshaling it resolves to $null there. [regex]::Match(body, $null) does NOT
+            # throw: it returns Success=True with an EMPTY match, so the
+            # if ($sectionMatch.Success) guard passes, the captured section is '', and the
+            # YAML-only fallback that would have preserved the data never fires. Net
+            # effect: the re-emission preservation branch announced that it kept a prior
+            # populated render while shipping a comment with the cost section destroyed.
+            # Marshaled rather than re-dot-sourced in the worker (the issue #496 C-1
+            # mechanism) because this file is function-heavy and defines
+            # New-FCLInitialSessionStateClone itself, matching the C3 precedent above.
+            'FCLCostPatternSectionRegex'
         )) {
         try {
             $state[$costStateName] = Get-Variable -Scope Script -Name $costStateName -ValueOnly -ErrorAction Stop
