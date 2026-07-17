@@ -1,0 +1,537 @@
+#Requires -Version 7.0
+#Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
+
+# Tests for issue #489 s3 — the shared cost-summary PR-body text transform and
+# its effectful writer, added to .github/scripts/lib/cost-fcl-helpers.ps1:
+#   (a) script:Set-FCLPrBodyCostSummary    — PURE. Body-text in, body-text out.
+#   (b) script:Update-FCLPrBodyCostSummary — PR number + body-text in; performs
+#                                             the single `gh pr edit --body-file`
+#                                             write. Fail-open.
+#
+# At RED, cost-fcl-helpers.ps1 does not yet define either function — every
+# It-block below fails with CommandNotFoundException until the GREEN
+# implementation lands.
+
+BeforeAll {
+    $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+    $script:CoreLibPath = Join-Path $script:RepoRoot '.github/scripts/lib/frame-credit-ledger-core.ps1'
+    $script:RendererLibPath = Join-Path $script:RepoRoot '.github/scripts/lib/cost-pattern-renderer.ps1'
+    $script:HelpersLibPath = Join-Path $script:RepoRoot '.github/scripts/lib/cost-fcl-helpers.ps1'
+
+    . $script:CoreLibPath
+    . $script:RendererLibPath
+    . $script:HelpersLibPath
+
+    # Helper: build a realistic v4 PR body — the pipeline-metrics block as a
+    # TRAILING HTML comment, matching production layout (CE Gate S1 method).
+    $script:NewV4Body = {
+        param(
+            [string]$Yaml,
+            [string]$Prefix = "## Summary`n`nA PR body.`n",
+            [string]$Suffix = ''
+        )
+        return "$Prefix`n<!-- pipeline-metrics`n$Yaml`n-->$Suffix"
+    }
+
+    $script:BaseYaml = @'
+metrics_version: 4
+frame_version: 1
+credits:
+  - port: implement-code
+    status: passed
+    evidence: "tests GREEN"
+'@
+
+    $script:YamlWithDispatchSamples = @'
+metrics_version: 4
+frame_version: 1
+credits:
+  - port: implement-code
+    status: passed
+dispatch-cost-samples:
+  - step-id: s1
+    mode: spine
+    bytes: 100
+    rc-conformance: pass
+    judge-disposition: accepted
+'@
+
+    # A prior cost_summary subtree containing a BLANK LINE and a '#'-comment
+    # line inside it (must be treated as continuation, not a terminator),
+    # followed by a dispatch-cost-samples section that must survive intact.
+    $script:YamlWithStaleSubtreeAndBlank = @'
+metrics_version: 4
+frame_version: 1
+credits:
+  - port: implement-code
+    status: passed
+cost_summary:
+  cost_usd_total: 1.0000
+
+  # stale comment continuation
+  tokens:
+    input: 1
+    output: 1
+    cache_creation: 0
+    cache_read: 0
+  session_completeness: partial
+  capture_point: pr-creation-mid-session
+dispatch-cost-samples:
+  - step-id: s1
+    mode: spine
+    bytes: 50
+    rc-conformance: pass
+    judge-disposition: accepted
+'@
+
+    $script:FencedDecoyBody = @'
+## Summary
+
+Example fenced documentation:
+
+```text
+<!-- pipeline-metrics
+metrics_version: 4
+frame_version: 1
+credits: []
+-->
+```
+
+<!-- pipeline-metrics
+metrics_version: 4
+frame_version: 1
+credits:
+  - port: implement-code
+    status: passed
+-->
+'@
+
+    $script:BodyWithOrphanBegin = @'
+## Summary
+
+<!-- cost-summary:begin -->
+**Session cost**: $1.0000 (partial, pr-creation-mid-session) - [full breakdown](https://example.com/old)
+
+<!-- pipeline-metrics
+metrics_version: 4
+frame_version: 1
+credits:
+  - port: implement-code
+    status: passed
+-->
+'@
+
+    $script:BodyWithOrphanEnd = @'
+## Summary
+
+Some stray text
+<!-- cost-summary:end -->
+More text
+
+<!-- pipeline-metrics
+metrics_version: 4
+frame_version: 1
+credits:
+  - port: implement-code
+    status: passed
+-->
+'@
+
+    $script:BodyWithDuplicatedPairs = @'
+## Summary
+
+<!-- cost-summary:begin -->
+**Session cost**: $1.0000 (partial, pr-creation-mid-session) - [full breakdown](https://example.com/old1)
+<!-- cost-summary:end -->
+
+<!-- cost-summary:begin -->
+**Session cost**: $2.0000 (complete, end-of-session) - [full breakdown](https://example.com/old2)
+<!-- cost-summary:end -->
+
+<!-- pipeline-metrics
+metrics_version: 4
+frame_version: 1
+credits:
+  - port: implement-code
+    status: passed
+-->
+'@
+
+    $script:NewCostSummary = @{
+        cost_usd_total        = 13.4269
+        tokens                = @{ input = 1000; output = 500; cache_creation = 20; cache_read = 300 }
+        session_completeness  = 'complete'
+        capture_point         = 'end-of-session'
+        source_comment        = 'https://github.com/example/example/pull/1#issuecomment-99'
+    }
+}
+
+Describe 'Set-FCLPrBodyCostSummary — pure transform (issue #489 s3)' {
+
+    It 'inserts the cost_summary YAML section and the visible sentinel-wrapped line when absent (items 1, 2, 3)' {
+        $body = & $script:NewV4Body $script:BaseYaml
+        $result = script:Set-FCLPrBodyCostSummary -PrBody $body -Degraded $false -CostSummary $script:NewCostSummary
+
+        $result | Should -Match 'cost_usd_total: 13\.4269'
+        $result | Should -Match 'tokens:'
+        $result | Should -Match 'input: 1000'
+        $result | Should -Match 'output: 500'
+        $result | Should -Match 'cache_creation: 20'
+        $result | Should -Match 'cache_read: 300'
+        $result | Should -Match 'session_completeness: complete'
+        $result | Should -Match 'capture_point: end-of-session'
+        $result | Should -Match '<!-- cost-summary:begin -->'
+        $result | Should -Match '<!-- cost-summary:end -->'
+        $result | Should -Match '\*\*Session cost\*\*: \$13\.4269 \(complete, end-of-session\) - \[full breakdown\]\(https://github\.com/example/example/pull/1#issuecomment-99\)'
+        $result | Should -Not -Match '—' -Because 'the visible line must use a plain ASCII hyphen, never an em-dash — this text round-trips through gh pr view/edit'
+    }
+
+    It 'locates the block by stripping fences first, ignoring a fenced decoy pipeline-metrics example above the real block (item 2)' {
+        $result = script:Set-FCLPrBodyCostSummary -PrBody $script:FencedDecoyBody -Degraded $false -CostSummary $script:NewCostSummary
+
+        $costSummaryIndex = $result.IndexOf('cost_summary:')
+        $costSummaryIndex | Should -BeGreaterThan -1
+
+        $before = $result.Substring(0, $costSummaryIndex)
+        $fenceCount = ([regex]::Matches($before, '```')).Count
+        ($fenceCount % 2) | Should -Be 0 -Because 'cost_summary must land in the real (non-fenced) block, not the fenced documentation example'
+
+        $result | Should -Match '(?s)```text.*?credits: \[\].*?```' -Because 'the fenced decoy content must remain untouched'
+    }
+
+    It 'positions cost_summary after credits: when no dispatch-cost-samples section exists (item 3)' {
+        $body = & $script:NewV4Body $script:BaseYaml
+        $result = script:Set-FCLPrBodyCostSummary -PrBody $body -Degraded $false -CostSummary $script:NewCostSummary
+
+        $costSummaryIdx = $result.IndexOf('cost_summary:')
+        $lastCreditLineIdx = $result.LastIndexOf('evidence: "tests GREEN"')
+
+        $costSummaryIdx | Should -BeGreaterThan $lastCreditLineIdx
+    }
+
+    It 'positions cost_summary after dispatch-cost-samples: when both list sections are present (item 3)' {
+        $body = & $script:NewV4Body $script:YamlWithDispatchSamples
+        $result = script:Set-FCLPrBodyCostSummary -PrBody $body -Degraded $false -CostSummary $script:NewCostSummary
+
+        $costSummaryIdx = $result.IndexOf('cost_summary:')
+        $lastDcsLineIdx = $result.LastIndexOf('judge-disposition: accepted')
+
+        $costSummaryIdx | Should -BeGreaterThan $lastDcsLineIdx
+    }
+
+    It 'anchors the visible sentinel span outside the trailing pipeline-metrics HTML comment (item 4)' {
+        $body = & $script:NewV4Body $script:BaseYaml
+        $result = script:Set-FCLPrBodyCostSummary -PrBody $body -Degraded $false -CostSummary $script:NewCostSummary
+
+        $beginIdx = $result.IndexOf('<!-- cost-summary:begin -->')
+        $markerIdx = $result.IndexOf('<!-- pipeline-metrics')
+
+        $beginIdx | Should -BeGreaterThan -1
+        $beginIdx | Should -BeLessThan $markerIdx -Because 'the visible line must render before/outside the hidden comment, not be swallowed inside it'
+
+        $blockMatch = [regex]::Match($result, '(?s)<!--\s*pipeline-metrics\s*(?<block>.*?)\s*-->')
+        $blockMatch.Groups['block'].Value | Should -Not -Match 'cost-summary:begin' -Because 'the visible span must not land inside the HTML comment — the design explicitly rejected a YAML-only summary'
+    }
+
+    It 'replaces the FULL cost_summary subtree on re-run, including a blank-line-containing subtree, without orphaning the following section (item 5)' {
+        $body = & $script:NewV4Body $script:YamlWithStaleSubtreeAndBlank
+        $result = script:Set-FCLPrBodyCostSummary -PrBody $body -Degraded $false -CostSummary $script:NewCostSummary
+
+        $result | Should -Not -Match 'cost_usd_total: 1\.0000' -Because 'the stale subtree must be fully removed'
+        $result | Should -Not -Match 'stale comment continuation'
+        $result | Should -Not -Match 'session_completeness: partial'
+        $result | Should -Not -Match 'capture_point: pr-creation-mid-session'
+        $result | Should -Match 'cost_usd_total: 13\.4269'
+
+        $result | Should -Match 'dispatch-cost-samples:'
+        $result | Should -Match 'step-id: s1'
+        $result | Should -Match 'judge-disposition: accepted' -Because 'the following section must survive intact — a naive stop-at-first-blank-line removal would orphan it'
+
+        $result.IndexOf('cost_summary:') | Should -BeGreaterThan $result.LastIndexOf('judge-disposition: accepted') -Because 'cost_summary must be re-anchored after dispatch-cost-samples post-removal'
+    }
+
+    It 'escapes a source_comment URL containing multiple colons so it round-trips without truncation (item 6)' {
+        $body = & $script:NewV4Body $script:BaseYaml
+        $summary = $script:NewCostSummary.Clone()
+        $summary['source_comment'] = 'https://github.com/example/example/pull/1#issuecomment-99:extra'
+        $result = script:Set-FCLPrBodyCostSummary -PrBody $body -Degraded $false -CostSummary $summary
+
+        $blockMatch = [regex]::Match($result, '(?s)<!--\s*pipeline-metrics\s*(?<block>.*?)\s*-->')
+        $subtreeMatch = [regex]::Match($blockMatch.Groups['block'].Value, '(?s)cost_summary:.*')
+        $roundTripped = script:Get-FCLNestedScalar -Block $subtreeMatch.Value -ParentKey 'cost_summary' -ChildKey 'source_comment'
+
+        $roundTripped | Should -Be 'https://github.com/example/example/pull/1#issuecomment-99:extra' -Because 'Get-FCLScalar''s flat regex truncates at the first colon unless the writer quotes the value'
+    }
+
+    It 'escapes an embedded --> so the HTML comment is not terminated early, preserving credits[] for downstream readers (item 6)' {
+        $body = & $script:NewV4Body $script:BaseYaml
+        $summary = $script:NewCostSummary.Clone()
+        $summary['session_completeness'] = 'complete--> <script>alert(1)</script>'
+        $result = script:Set-FCLPrBodyCostSummary -PrBody $body -Degraded $false -CostSummary $summary
+
+        $parsed = Read-PRMetricsBlock -PrBody $result
+        $parsed.MetricsVersion | Should -Be 4
+        @($parsed.Credits).Count | Should -Be 1 -Because 'an unescaped --> would prematurely close the HTML comment and truncate credits for every downstream reader'
+    }
+
+    It 'formats cost_usd_total with InvariantCulture even under a comma-decimal thread culture (item 7)' {
+        $originalCulture = [System.Threading.Thread]::CurrentThread.CurrentCulture
+        try {
+            [System.Threading.Thread]::CurrentThread.CurrentCulture = [System.Globalization.CultureInfo]::GetCultureInfo('de-DE')
+            $body = & $script:NewV4Body $script:BaseYaml
+            $result = script:Set-FCLPrBodyCostSummary -PrBody $body -Degraded $false -CostSummary $script:NewCostSummary
+
+            $result | Should -Match 'cost_usd_total: 13\.4269' -Because 'InvariantCulture must be pinned regardless of the thread culture'
+            $result | Should -Not -Match 'cost_usd_total: 13,4269'
+            $result | Should -Match 'input: 1000'
+            $result | Should -Match 'output: 500'
+        }
+        finally {
+            [System.Threading.Thread]::CurrentThread.CurrentCulture = $originalCulture
+        }
+    }
+
+    It 'preserves the body''s original CRLF line endings end-to-end (item 8)' {
+        $lfBody = & $script:NewV4Body $script:BaseYaml
+        $crlfBody = $lfBody -replace "`n", "`r`n"
+
+        $result = script:Set-FCLPrBodyCostSummary -PrBody $crlfBody -Degraded $false -CostSummary $script:NewCostSummary
+
+        $result | Should -Match "`r`n" -Because 'CRLF must be preserved, not collapsed to LF'
+        $bareLfCount = ([regex]::Matches($result, "(?<!`r)`n")).Count
+        $bareLfCount | Should -Be 0 -Because 'every newline in the output must be part of a CRLF pair — a bare LF means the transform partially collapsed CRLF to LF'
+    }
+
+    It 'is a fixed point when called twice with identical inputs (item 9 precondition for the writer''s no-op guard)' {
+        $body = & $script:NewV4Body $script:BaseYaml
+        $once = script:Set-FCLPrBodyCostSummary -PrBody $body -Degraded $false -CostSummary $script:NewCostSummary
+        $twice = script:Set-FCLPrBodyCostSummary -PrBody $once -Degraded $false -CostSummary $script:NewCostSummary
+
+        $twice | Should -Be $once
+    }
+
+    It 'omits the source_comment YAML field and the visible link when no source comment is supplied' {
+        $body = & $script:NewV4Body $script:BaseYaml
+        $summary = $script:NewCostSummary.Clone()
+        $summary.Remove('source_comment')
+        $result = script:Set-FCLPrBodyCostSummary -PrBody $body -Degraded $false -CostSummary $summary
+
+        $result | Should -Not -Match 'source_comment:'
+        $visibleLineMatch = [regex]::Match($result, '\*\*Session cost\*\*:[^\r\n]*')
+        $visibleLineMatch.Value | Should -Not -Match 'full breakdown'
+        $visibleLineMatch.Value | Should -Match '\$13\.4269 \(complete, end-of-session\)'
+    }
+
+    It 'repairs a begin-without-end sentinel pathology to a single canonical span (item 11)' {
+        $result = script:Set-FCLPrBodyCostSummary -PrBody $script:BodyWithOrphanBegin -Degraded $false -CostSummary $script:NewCostSummary
+
+        ([regex]::Matches($result, '<!-- cost-summary:begin -->')).Count | Should -Be 1
+        ([regex]::Matches($result, '<!-- cost-summary:end -->')).Count | Should -Be 1
+        $result | Should -Match '\$13\.4269'
+        $result | Should -Not -Match '\$1\.0000 \(partial'
+    }
+
+    It 'repairs an end-before-begin sentinel pathology to a single canonical span (item 11)' {
+        $result = script:Set-FCLPrBodyCostSummary -PrBody $script:BodyWithOrphanEnd -Degraded $false -CostSummary $script:NewCostSummary
+
+        ([regex]::Matches($result, '<!-- cost-summary:begin -->')).Count | Should -Be 1
+        ([regex]::Matches($result, '<!-- cost-summary:end -->')).Count | Should -Be 1
+        $result | Should -Match 'Some stray text' -Because 'only the orphan marker LINE is removed, not surrounding prose'
+        $result | Should -Match 'More text'
+    }
+
+    It 'collapses duplicated well-formed sentinel pairs to a single canonical span carrying the fresh hidden-YAML-authoritative content (item 11)' {
+        $result = script:Set-FCLPrBodyCostSummary -PrBody $script:BodyWithDuplicatedPairs -Degraded $false -CostSummary $script:NewCostSummary
+
+        ([regex]::Matches($result, '<!-- cost-summary:begin -->')).Count | Should -Be 1
+        ([regex]::Matches($result, '<!-- cost-summary:end -->')).Count | Should -Be 1
+        $result | Should -Not -Match '\$1\.0000'
+        $result | Should -Not -Match '\$2\.0000'
+        $result | Should -Match '\$13\.4269'
+    }
+
+    It 'AC1 forward-compat: adding cost_summary does not change credit parsing for Read-PRMetricsBlock or Test-PipelineMetricsV4Block' {
+        $withoutBody = & $script:NewV4Body $script:BaseYaml
+        $withBody = script:Set-FCLPrBodyCostSummary -PrBody $withoutBody -Degraded $false -CostSummary $script:NewCostSummary
+
+        $parsedWithout = Read-PRMetricsBlock -PrBody $withoutBody
+        $parsedWith = Read-PRMetricsBlock -PrBody $withBody
+
+        ($parsedWithout.Credits | ConvertTo-Json -Depth 10 -Compress) | Should -Be ($parsedWith.Credits | ConvertTo-Json -Depth 10 -Compress) -Because 'adding the additive cost_summary field must not change credit parsing for existing v4 readers'
+
+        (Test-PipelineMetricsV4Block -PRBody $withoutBody).Valid | Should -Be $true
+        (Test-PipelineMetricsV4Block -PRBody $withBody).Valid | Should -Be $true
+    }
+
+    It 'returns the body unchanged when no non-fenced pipeline-metrics block exists (documented judgment call: fail-open no-op)' {
+        $body = "## Summary`n`nJust a regular PR body with no marker.`n"
+        $result = script:Set-FCLPrBodyCostSummary -PrBody $body -Degraded $false -CostSummary $script:NewCostSummary
+        $result | Should -Be $body
+    }
+}
+
+Describe 'Set-FCLPrBodyCostSummary — degraded decision table (issue #489 s3, item 10)' {
+
+    It 'degraded + no prior cost_summary -> writes the honest unavailable line and a capture_point: unavailable YAML section' {
+        $body = & $script:NewV4Body $script:BaseYaml
+        $result = script:Set-FCLPrBodyCostSummary -PrBody $body -Degraded $true -CostSummary $null
+
+        $result | Should -Match '\*\*Session cost\*\*: unavailable \(attribution degraded\)'
+        $result | Should -Match 'cost_summary:'
+        $result | Should -Match 'capture_point: unavailable'
+        $result | Should -Not -Match 'cost_usd_total:'
+    }
+
+    It 'degraded + a prior REAL summary exists -> leaves both surfaces untouched' {
+        $body = & $script:NewV4Body $script:BaseYaml
+        $seeded = script:Set-FCLPrBodyCostSummary -PrBody $body -Degraded $false -CostSummary $script:NewCostSummary
+
+        $result = script:Set-FCLPrBodyCostSummary -PrBody $seeded -Degraded $true -CostSummary $null
+
+        $result | Should -Be $seeded -Because 'a degraded run must never overwrite good data with a degraded blank'
+    }
+
+    It 'degraded + a prior DEGRADED line exists already -> no-op (the previously-unspecified cell the panel caught)' {
+        $body = & $script:NewV4Body $script:BaseYaml
+        $seededDegraded = script:Set-FCLPrBodyCostSummary -PrBody $body -Degraded $true -CostSummary $null
+
+        $result = script:Set-FCLPrBodyCostSummary -PrBody $seededDegraded -Degraded $true -CostSummary $null
+
+        $result | Should -Be $seededDegraded
+    }
+
+    It 'not degraded always writes normally, even over a previously-degraded body' {
+        $body = & $script:NewV4Body $script:BaseYaml
+        $seededDegraded = script:Set-FCLPrBodyCostSummary -PrBody $body -Degraded $true -CostSummary $null
+
+        $result = script:Set-FCLPrBodyCostSummary -PrBody $seededDegraded -Degraded $false -CostSummary $script:NewCostSummary
+
+        $result | Should -Match 'cost_usd_total: 13\.4269'
+        $result | Should -Not -Match 'capture_point: unavailable'
+        $result | Should -Match '\*\*Session cost\*\*: \$13\.4269'
+        $result | Should -Not -Match 'unavailable \(attribution degraded\)'
+    }
+}
+
+Describe 'Update-FCLPrBodyCostSummary — writer (issue #489 s3)' {
+
+    BeforeEach {
+        $global:GhCalls = @()
+        $global:GhBodyFileContent = $null
+    }
+
+    AfterEach {
+        Remove-Item function:global:gh -ErrorAction SilentlyContinue
+    }
+
+    BeforeAll {
+        function script:Install-CostSummaryGhMock {
+            param([int]$ExitCode = 0)
+            $exitCodeCopy = $ExitCode
+            Set-Item -Path function:global:gh -Value ([scriptblock]::Create(@"
+param([Parameter(ValueFromRemainingArguments = `$true)]`$Args)
+`$global:GhCalls += (`$Args -join ' ')
+`$idx = [Array]::IndexOf(`$Args, '--body-file')
+if (`$idx -ge 0 -and `$idx + 1 -lt `$Args.Count) {
+    `$global:GhBodyFileContent = Get-Content -LiteralPath ([string]`$Args[`$idx + 1]) -Raw
+}
+`$global:LASTEXITCODE = $exitCodeCopy
+return ''
+"@))
+        }
+    }
+
+    It 'writes via gh pr edit --body-file with the transformed body when the transform changes something' {
+        Install-CostSummaryGhMock
+        $body = & $script:NewV4Body $script:BaseYaml
+
+        script:Update-FCLPrBodyCostSummary -Pr 4890001 -PrBody $body -Degraded $false -CostSummary $script:NewCostSummary
+
+        $global:GhCalls.Count | Should -Be 1
+        $global:GhCalls[0] | Should -Match 'pr edit 4890001'
+        $global:GhBodyFileContent | Should -Match 'cost_usd_total: 13\.4269'
+    }
+
+    It 'skips the gh pr edit call entirely when the transform is a fixed point (item 9 no-op guard)' {
+        Install-CostSummaryGhMock
+        $body = & $script:NewV4Body $script:BaseYaml
+        $seeded = script:Set-FCLPrBodyCostSummary -PrBody $body -Degraded $false -CostSummary $script:NewCostSummary
+
+        script:Update-FCLPrBodyCostSummary -Pr 4890002 -PrBody $seeded -Degraded $false -CostSummary $script:NewCostSummary
+
+        $global:GhCalls.Count | Should -Be 0
+    }
+
+    It 'fails open — warns to stderr and never throws — when gh pr edit fails' {
+        Install-CostSummaryGhMock -ExitCode 1
+        $body = & $script:NewV4Body $script:BaseYaml
+
+        $stderrWriter = [System.IO.StringWriter]::new()
+        $originalError = [Console]::Error
+        [Console]::SetError($stderrWriter)
+        $threw = $false
+        try {
+            script:Update-FCLPrBodyCostSummary -Pr 4890003 -PrBody $body -Degraded $false -CostSummary $script:NewCostSummary
+        }
+        catch { $threw = $true }
+        finally { [Console]::SetError($originalError) }
+
+        $threw | Should -Be $false
+        $stderrWriter.ToString() | Should -Match '(?i)cost-summary'
+    }
+
+    It 'fails open when the pure transform itself throws' {
+        Install-CostSummaryGhMock
+        $body = & $script:NewV4Body $script:BaseYaml
+
+        function script:Escape-FCLScalar { throw 'forced transform failure' }
+        $stderrWriter = [System.IO.StringWriter]::new()
+        $originalError = [Console]::Error
+        [Console]::SetError($stderrWriter)
+        $threw = $false
+        try {
+            script:Update-FCLPrBodyCostSummary -Pr 4890004 -PrBody $body -Degraded $false -CostSummary $script:NewCostSummary
+        }
+        catch { $threw = $true }
+        finally {
+            [Console]::SetError($originalError)
+            . $script:CoreLibPath
+        }
+
+        $threw | Should -Be $false
+        $global:GhCalls.Count | Should -Be 0
+        $stderrWriter.ToString() | Should -Match '(?i)cost-summary transform failed'
+    }
+}
+
+Describe 'Update-FCLPrBodyCostSummary — worker-runspace reachability (issue #489 s3, item 12)' {
+
+    It 'produces identical output when invoked inside the pipeline hook''s worker-runspace clone (no new top-level $script: constants leak as $null)' {
+        $body = & $script:NewV4Body $script:BaseYaml
+        $summary = $script:NewCostSummary
+
+        $iss = script:New-FCLInitialSessionStateClone
+        $rs = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace($iss)
+        $rs.Open()
+        $ps = [System.Management.Automation.PowerShell]::Create()
+        $ps.Runspace = $rs
+        try {
+            $null = $ps.AddScript({
+                    param($BodyArg, $SummaryArg)
+                    return script:Set-FCLPrBodyCostSummary -PrBody $BodyArg -Degraded $false -CostSummary $SummaryArg
+                }).AddArgument($body).AddArgument($summary)
+
+            $result = $ps.Invoke()
+            $errors = @($ps.Streams.Error)
+
+            $errors.Count | Should -Be 0 -Because "worker-runspace call must not throw (errors: $($errors -join '; '))"
+            $inProcess = script:Set-FCLPrBodyCostSummary -PrBody $body -Degraded $false -CostSummary $summary
+            [string]$result[0] | Should -Be $inProcess
+        }
+        finally {
+            $ps.Dispose()
+            $rs.Close()
+            $rs.Dispose()
+        }
+    }
+}

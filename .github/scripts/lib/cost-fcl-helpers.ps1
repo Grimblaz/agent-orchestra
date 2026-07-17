@@ -580,3 +580,357 @@ function script:Test-FCLRecurrenceGuardShouldWarn {
 
     return $true
 }
+
+# ===========================================================================
+# Set-FCLPrBodyCostSummary / Update-FCLPrBodyCostSummary (issue #489 s3 —
+# AC1's forward-compat half, AC2's transform half, AC5's body half).
+#
+# Stamps a `cost_summary` additive v4 field into a PR body's hidden
+# pipeline-metrics YAML block, plus a visible one-line dollar headline
+# wrapped in <!-- cost-summary:begin/end --> sentinels immediately before
+# that block. Two functions, matching this repo's file-local precedent that
+# splits a pure text transform from its effectful writer
+# (script:Update-FCLPrBodyStaleSpineFallbackMetric vs
+# script:Update-FCLPrBodyMetricsBestEffort, frame-credit-ledger.ps1:808/822):
+#
+#   (a) Set-FCLPrBodyCostSummary    — PURE. Body-text in, body-text out.
+#   (b) Update-FCLPrBodyCostSummary — writes via `gh pr edit --body-file`,
+#                                     fail-open (warn to stderr, never throw).
+#
+# All constants (regexes, sentinel strings) are LOCAL to these two function
+# bodies by design — never new top-level $script: constants. This call site
+# runs inside the pipeline hook's outer worker-runspace clone
+# (frame-credit-ledger.ps1:1487-1525), which copies function definitions and
+# global variables but never re-runs a file's top-level dot-sources. A new
+# top-level $script: constant would silently marshal as $null there (shipped
+# twice: #825 C3, #487).
+# ===========================================================================
+function script:Set-FCLPrBodyCostSummary {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$PrBody,
+        [Parameter(Mandatory)][bool]$Degraded,
+        [AllowNull()][hashtable]$CostSummary = $null
+    )
+
+    if ([string]::IsNullOrEmpty($PrBody)) { return $PrBody }
+
+    # ---- EOL detection/normalization (whole body). ----
+    $eol = if ($PrBody.Contains("`r`n")) { "`r`n" } else { "`n" }
+    $normalizedBody = $PrBody -replace "`r`n", "`n" -replace "`r", "`n"
+
+    # ---- Fence-aware marker lookup: redact ```-fenced regions to a
+    # same-length filler (so byte offsets stay aligned with $normalizedBody)
+    # before searching for the pipeline-metrics marker, exactly as
+    # Test-PipelineMetricsV4Block does (frame-credit-ledger-core.ps1:3176) —
+    # a naive first-match regex would instead splice into a fenced
+    # documentation example. ----
+    $fencePattern = '(?s)```.*?```'
+    $markerPattern = '(?s)(?<open><!--\s*pipeline-metrics\s*)(?<block>.*?)(?<close>\s*-->)'
+    $redactFences = {
+        param([string]$Text, [string]$Pattern)
+        return [regex]::Replace($Text, $Pattern, { param($m) [string]::new('x', $m.Value.Length) })
+    }
+
+    $redacted = & $redactFences $normalizedBody $fencePattern
+    $markerMatch = [regex]::Match($redacted, $markerPattern)
+    if (-not $markerMatch.Success) {
+        # No real (non-fenced) pipeline-metrics block to anchor against.
+        # Fail open as a no-op — the writer's no-op guard skips the write.
+        return $PrBody
+    }
+
+    $blockGroup = $markerMatch.Groups['block']
+    $blockText = $normalizedBody.Substring($blockGroup.Index, $blockGroup.Length)
+    $blockLines = @($blockText -split "`n")
+
+    # ---- Local helper: bounds of a top-level (column-0) key's subtree.
+    # Blank and '#'-comment lines are continuation, not a terminator — the
+    # subtree ends at the next column-0, non-blank, non-comment line.
+    # Matches this codebase's one consistent precedent (Get-FCLEntryChunks
+    # :351-354 guards blanks before its break check; Get-FCLNestedScalar
+    # :73-75 and Test-FCLYamlSane agree). ----
+    $findTopLevelKeySubtreeBounds = {
+        param([string[]]$Lines, [string]$KeyName)
+        $keyPattern = '^' + [regex]::Escape($KeyName) + '\s*:\s*$'
+        for ($i = 0; $i -lt $Lines.Count; $i++) {
+            if ($Lines[$i] -notmatch $keyPattern) { continue }
+            $end = $Lines.Count
+            for ($j = $i + 1; $j -lt $Lines.Count; $j++) {
+                $line = $Lines[$j]
+                if ([string]::IsNullOrWhiteSpace($line)) { continue }
+                $trimmed = $line.TrimStart()
+                if ($trimmed.StartsWith('#')) { continue }
+                if (($line.Length - $trimmed.Length) -eq 0) { $end = $j; break }
+            }
+            return @{ Start = $i; End = $end }
+        }
+        return $null
+    }
+
+    $existingBounds = & $findTopLevelKeySubtreeBounds $blockLines 'cost_summary'
+
+    # ---- Degraded decision table (complete over prior-summary-state x degraded):
+    #   degraded + no prior cost_summary -> honest degraded write (fall through)
+    #   degraded + prior summary (real OR already-degraded) -> no-op, untouched
+    #   not degraded -> always write normally (fall through) ----
+    if ($Degraded -and $null -ne $existingBounds) {
+        return $PrBody
+    }
+
+    # ---- Compose the new cost_summary YAML subtree lines. ----
+    $newSubtreeLines = [System.Collections.Generic.List[string]]::new()
+    $newSubtreeLines.Add('cost_summary:')
+
+    $costUsdTotal = 0.0
+    $sessionCompleteness = ''
+    $capturePoint = ''
+    $sourceComment = ''
+
+    if ($Degraded) {
+        $capturePoint = 'unavailable'
+        $newSubtreeLines.Add('  capture_point: ' + (script:Escape-FCLScalar -Value $capturePoint))
+    }
+    else {
+        $summary = if ($null -ne $CostSummary) { $CostSummary } else { @{} }
+
+        if ($summary.ContainsKey('cost_usd_total') -and $null -ne $summary['cost_usd_total']) {
+            $costUsdTotal = [double]$summary['cost_usd_total']
+        }
+
+        $tokens = if ($summary.ContainsKey('tokens') -and $summary['tokens'] -is [hashtable]) { $summary['tokens'] } else { @{} }
+        $inv = [System.Globalization.CultureInfo]::InvariantCulture
+        $tokenNames = @('input', 'output', 'cache_creation', 'cache_read')
+        $tokenValues = @{}
+        foreach ($tk in $tokenNames) {
+            $v = 0L
+            if ($tokens.ContainsKey($tk) -and $null -ne $tokens[$tk]) { $v = [long]$tokens[$tk] }
+            $tokenValues[$tk] = $v
+        }
+
+        if ($summary.ContainsKey('session_completeness') -and $null -ne $summary['session_completeness']) {
+            $sessionCompleteness = [string]$summary['session_completeness']
+        }
+        if ($summary.ContainsKey('capture_point') -and $null -ne $summary['capture_point']) {
+            $capturePoint = [string]$summary['capture_point']
+        }
+        if ($summary.ContainsKey('source_comment') -and $null -ne $summary['source_comment']) {
+            $sourceComment = [string]$summary['source_comment']
+        }
+
+        $newSubtreeLines.Add('  cost_usd_total: ' + (script:Escape-FCLScalar -Value (script:Format-CostYaml -Value $costUsdTotal)))
+        $newSubtreeLines.Add('  tokens:')
+        foreach ($tk in $tokenNames) {
+            $newSubtreeLines.Add('    ' + $tk + ': ' + (script:Escape-FCLScalar -Value ($tokenValues[$tk]).ToString($inv)))
+        }
+        $newSubtreeLines.Add('  session_completeness: ' + (script:Escape-FCLScalar -Value $sessionCompleteness))
+        $newSubtreeLines.Add('  capture_point: ' + (script:Escape-FCLScalar -Value $capturePoint))
+        if (-not [string]::IsNullOrWhiteSpace($sourceComment)) {
+            $newSubtreeLines.Add('  source_comment: ' + (script:Escape-FCLScalar -Value $sourceComment))
+        }
+    }
+
+    # ---- Remove the existing cost_summary subtree (full subtree replace). ----
+    if ($null -ne $existingBounds) {
+        $keep = [System.Collections.Generic.List[string]]::new()
+        for ($i = 0; $i -lt $blockLines.Count; $i++) {
+            if ($i -ge $existingBounds.Start -and $i -lt $existingBounds.End) { continue }
+            $keep.Add($blockLines[$i])
+        }
+        $blockLines = $keep.ToArray()
+    }
+
+    # ---- Insertion anchor: after any list section (dispatch-cost-samples:
+    # then credits:, in that preference order since dispatch-cost-samples
+    # always renders after credits when both are present); append at the end
+    # of the block when neither list section exists. An indent-0 key placed
+    # here correctly terminates Get-FCLEntryChunks's list scan; nested
+    # children placed before that terminator would be silently consumed as
+    # fields of the last credit entry. ----
+    $insertIdx = $blockLines.Count
+    $dcsBounds = & $findTopLevelKeySubtreeBounds $blockLines 'dispatch-cost-samples'
+    if ($null -ne $dcsBounds) {
+        $insertIdx = $dcsBounds.End
+    }
+    else {
+        $creditsBounds = & $findTopLevelKeySubtreeBounds $blockLines 'credits'
+        if ($null -ne $creditsBounds) { $insertIdx = $creditsBounds.End }
+    }
+
+    $newBlockLines = [System.Collections.Generic.List[string]]::new()
+    for ($i = 0; $i -lt $insertIdx; $i++) { $newBlockLines.Add($blockLines[$i]) }
+    foreach ($l in $newSubtreeLines) { $newBlockLines.Add($l) }
+    for ($i = $insertIdx; $i -lt $blockLines.Count; $i++) { $newBlockLines.Add($blockLines[$i]) }
+
+    $newBlockText = ($newBlockLines.ToArray() -join "`n")
+
+    $prefix = $normalizedBody.Substring(0, $blockGroup.Index)
+    $suffixStart = $blockGroup.Index + $blockGroup.Length
+    $suffix = $normalizedBody.Substring($suffixStart)
+    $bodyWithUpdatedBlock = $prefix + $newBlockText + $suffix
+
+    # ---- Compose the visible sentinel-wrapped line. ASCII hyphen only —
+    # this text round-trips through gh pr view/edit repeatedly and non-ASCII
+    # separators mangle on Windows. ----
+    if ($Degraded) {
+        $visibleLine = '**Session cost**: unavailable (attribution degraded)'
+    }
+    else {
+        $costMarkdown = script:Format-Cost -Value $costUsdTotal
+        $visibleLine = "**Session cost**: $costMarkdown ($sessionCompleteness, $capturePoint)"
+        if (-not [string]::IsNullOrWhiteSpace($sourceComment)) {
+            $visibleLine += " - [full breakdown]($sourceComment)"
+        }
+    }
+
+    # ---- Sentinel pathology repair + re-anchor: delegate to a dedicated
+    # helper — matching/removing stale begin/end spans (including the
+    # non-obvious asymmetric orphan handling) and re-anchoring the fresh span
+    # against the fence-aware marker is one cohesive responsibility, and is
+    # sizable enough on its own to deserve a name rather than living inline
+    # in this already-long transform. See
+    # script:Repair-FCLCostSummarySentinelSpan for the full rationale. ----
+    $finalNormalized = script:Repair-FCLCostSummarySentinelSpan `
+        -Body $bodyWithUpdatedBlock `
+        -VisibleLine $visibleLine `
+        -RedactFences $redactFences `
+        -FencePattern $fencePattern `
+        -MarkerPattern $markerPattern
+
+    # ---- Restore the body's original EOL convention. ----
+    return ($finalNormalized -replace "`n", $eol)
+}
+
+# Strips every well-formed <!-- cost-summary:begin/end --> pair (handles
+# duplicated pairs) plus any orphan begin-without-end or end-before-begin
+# marker line, anywhere in $Body, then splices in exactly one fresh canonical
+# span (begin / $VisibleLine / end) immediately before the (fence-aware)
+# pipeline-metrics marker — outside the trailing HTML comment, so it always
+# renders. The hidden YAML section is authoritative — the visible span is
+# always regenerated from it, never merged with stale visible text.
+#
+# Orphan handling is intentionally asymmetric and bounded: this writer's own
+# span is always exactly 3 lines (begin, one content line, end), so an orphan
+# BEGIN with no end anywhere in the document most plausibly means the
+# terminating end was lost mid-write — the single line right after the begin
+# is presumed to be that lost span's stale content and is removed too. An
+# orphan END has no such reliable direction to look (any content that
+# belonged to it may already be gone, and the line immediately before it may
+# be unrelated prose), so only the marker line itself is removed for that
+# case.
+#
+# $RedactFences/$FencePattern/$MarkerPattern are threaded in from the caller
+# rather than redefined here so the fence/marker regex text has exactly one
+# source of truth across both the block-location step and this repair step.
+function script:Repair-FCLCostSummarySentinelSpan {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Body,
+        [Parameter(Mandatory)][string]$VisibleLine,
+        [Parameter(Mandatory)][scriptblock]$RedactFences,
+        [Parameter(Mandatory)][string]$FencePattern,
+        [Parameter(Mandatory)][string]$MarkerPattern
+    )
+
+    $lines = @($Body -split "`n")
+    $beginPattern = '^\s*<!--\s*cost-summary:begin\s*-->\s*$'
+    $endPattern = '^\s*<!--\s*cost-summary:end\s*-->\s*$'
+    $toRemove = [System.Collections.Generic.HashSet[int]]::new()
+    $openStack = [System.Collections.Generic.List[int]]::new()
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match $beginPattern) {
+            $openStack.Add($i)
+        }
+        elseif ($lines[$i] -match $endPattern) {
+            if ($openStack.Count -gt 0) {
+                $beginIdx = $openStack[$openStack.Count - 1]
+                $openStack.RemoveAt($openStack.Count - 1)
+                for ($k = $beginIdx; $k -le $i; $k++) { [void]$toRemove.Add($k) }
+            }
+            else {
+                [void]$toRemove.Add($i)
+            }
+        }
+    }
+    foreach ($idx in $openStack) {
+        [void]$toRemove.Add($idx)
+        $nextIdx = $idx + 1
+        if ($nextIdx -lt $lines.Count -and -not [string]::IsNullOrWhiteSpace($lines[$nextIdx])) {
+            [void]$toRemove.Add($nextIdx)
+        }
+    }
+
+    $cleanedLines = [System.Collections.Generic.List[string]]::new()
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($toRemove.Contains($i)) { continue }
+        $cleanedLines.Add($lines[$i])
+    }
+    $cleanedBody = ($cleanedLines.ToArray() -join "`n")
+
+    $redactedCleaned = & $RedactFences $cleanedBody $FencePattern
+    $anchorMatch = [regex]::Match($redactedCleaned, $MarkerPattern)
+    if (-not $anchorMatch.Success) {
+        # Should not happen — the block was just written by the caller. Fail
+        # open: keep the block update, skip the visible-span insert.
+        return $cleanedBody
+    }
+
+    $before = $cleanedBody.Substring(0, $anchorMatch.Index).TrimEnd("`n")
+    $after = $cleanedBody.Substring($anchorMatch.Index)
+    $spanText = @('<!-- cost-summary:begin -->', $VisibleLine, '<!-- cost-summary:end -->') -join "`n"
+    if ([string]::IsNullOrEmpty($before)) {
+        return $spanText + "`n`n" + $after
+    }
+    return $before + "`n`n" + $spanText + "`n`n" + $after
+}
+
+function script:Update-FCLPrBodyCostSummary {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][int]$Pr,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$PrBody,
+        [Parameter(Mandatory)][bool]$Degraded,
+        [AllowNull()][hashtable]$CostSummary = $null
+    )
+
+    $updatedBody = $PrBody
+    try {
+        $updatedBody = script:Set-FCLPrBodyCostSummary -PrBody $PrBody -Degraded $Degraded -CostSummary $CostSummary
+    }
+    catch {
+        [Console]::Error.WriteLine("frame-credit-ledger: cost-summary transform failed: $($_.Exception.Message)")
+        return
+    }
+
+    if ($updatedBody -eq $PrBody) {
+        # No-op guard (issue #489 AC2/AC5): a true fixed point closes the
+        # encoding/EOL churn window and shrinks the concurrent-overwrite
+        # exposure on every unchanged re-run.
+        return
+    }
+
+    $tempPath = Join-Path ([System.IO.Path]::GetTempPath()) ("frame-credit-ledger-cost-summary-$Pr-$([System.Guid]::NewGuid().ToString('N')).md")
+    try {
+        $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+        [System.IO.File]::WriteAllText($tempPath, $updatedBody, $utf8NoBom)
+        $null = & gh pr edit $Pr --body-file $tempPath 2>$null
+        if ($global:LASTEXITCODE -ne 0) {
+            [Console]::Error.WriteLine("frame-credit-ledger: PR body cost-summary update failed via gh pr edit --body-file")
+        }
+    }
+    catch {
+        [Console]::Error.WriteLine("frame-credit-ledger: PR body cost-summary update failed: $($_.Exception.Message)")
+    }
+    finally {
+        try {
+            if (Test-Path -LiteralPath $tempPath -PathType Leaf) {
+                Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
+            }
+        }
+        catch {
+            [Console]::Error.WriteLine("frame-credit-ledger: temporary PR body cost-summary file cleanup failed: $($_.Exception.Message)")
+        }
+    }
+}
