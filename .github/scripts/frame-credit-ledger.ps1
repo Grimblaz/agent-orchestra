@@ -43,6 +43,24 @@ if ($Mode -notin @('warn', 'enforce')) {
 # error. Set BEFORE the dot-sources.
 $script:WarnModeOnly = ($Mode -eq 'warn')
 
+# Read-side UTF-8 pin (issue #824 M2 fix, mirrored from
+# cost-baseline-harvest.ps1; hoisted here per issue #489 post-review C2 fix,
+# secondary instance — the primary instance lives in
+# cost-baseline-harvest.ps1). Native `gh` stdout otherwise decodes with the
+# console's default (OS-default) code page on Windows, and a whole-body
+# `gh pr edit` write built from that stdout can permanently mangle
+# maintainer-authored non-ASCII prose elsewhere in the PR body. This is a
+# process-wide static, so it must be set before this file's EARLIEST gh
+# stdout read — Get-FrameCreditLedgerBaseRefOid's `gh pr view --json
+# baseRefOid` call and Step 2's `gh pr view --json body,comments` fetch both
+# execute well before the old Step-7-adjacent location this pin used to live
+# at, and Step 2's fetch is exactly the "fresh-fetch-failure fallback path"
+# body text that can end up written back later in this file. Setting the pin
+# here, before any dot-source or gh call in this file, guarantees every gh
+# read made anywhere in this process — including inside the worker-runspace
+# clone, which shares this process's Console static — observes UTF-8.
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+
 # ---------------------------------------------------------------------------
 # Library dot-sources (wrapped: a parse-time error in any lib file would
 # crash the script before the inner try/catch wrapper engages, so warn-mode
@@ -900,7 +918,16 @@ function script:Build-FCLCostSummaryFromRenderResult {
         $totals = $CostResult['Attribution']['totals']
     }
     if ($null -ne $totals) {
-        if ($totals.ContainsKey('cost_estimate_usd') -and $null -ne $totals['cost_estimate_usd']) {
+        # C7 (issue #489 post-review fix, constructor half — the writer half
+        # already honours an explicit null): a genuinely unknown cost is
+        # represented by the KEY being present with an explicit $null value,
+        # distinct from the key being absent entirely. The old `-and $null
+        # -ne ...` guard treated both shapes identically (key omitted), so
+        # the writer's honest "unknown" rendering could never be reached —
+        # it silently fell back to a false $0.0000 headline instead. Presence
+        # of the source key is now the only gate; the value (including an
+        # explicit $null) passes through unchanged.
+        if ($totals.ContainsKey('cost_estimate_usd')) {
             $costSummary['cost_usd_total'] = $totals['cost_estimate_usd']
         }
         if ($totals.ContainsKey('tokens') -and $totals['tokens'] -is [hashtable]) {
@@ -918,7 +945,19 @@ function script:Build-FCLCostSummaryFromRenderResult {
     }
     # Omit source_comment entirely (rather than writing an empty link) when
     # the breakdown-comment upsert failed or returned no usable URL.
-    if (-not [string]::IsNullOrWhiteSpace($BreakdownCommentUrl)) {
+    #
+    # C11 (issue #489 post-review fix): basic URL-shape validation, defense
+    # in depth alongside the writer-side sanitization already applied in
+    # Set-FCLPrBodyCostSummary. The upsert's return value must look like an
+    # absolute http(s) URL with no embedded whitespace and no ')' character
+    # (which would break a markdown `[text](url)` link if ever rendered
+    # without escaping) before it is trusted here. Anything else — including
+    # a JSON-looking blob returned by a malformed upsert path — is treated
+    # the same as "no usable URL" and the key is omitted.
+    $isValidSourceCommentUrl = (-not [string]::IsNullOrWhiteSpace($BreakdownCommentUrl)) -and
+        ($BreakdownCommentUrl -match '(?i)^https?://\S+$') -and
+        ($BreakdownCommentUrl -notmatch '\)')
+    if ($isValidSourceCommentUrl) {
         $costSummary['source_comment'] = $BreakdownCommentUrl
     }
     if ($costSummary.Count -eq 0) { return $null }
@@ -1094,273 +1133,309 @@ function Invoke-FrameCreditLedger {
 
     # 5. v4 path: discover adapters and classify ports.
     $repoRoot = script:Resolve-FCLRepoRoot -ScriptPath $PSCommandPath
-    $adapters = Get-FrameCreditLedgerAdapters -RepoRoot $repoRoot
-    # Atomic completion marker template: <!-- adversarial-pipeline-atomic-{ISSUE_ID} -->
-    $atomicMarkerSearchText = $prBody
-    if ($null -ne $script:PrComments) {
-        $atomicMarkerSearchText += "`n" + ((@($script:PrComments) | ForEach-Object { script:Get-FCLCommentBody -Comment $_ }) -join "`n")
-    }
-    $currentBranch = ''
-    try { $currentBranch = [string](& git -C $repoRoot rev-parse --abbrev-ref HEAD 2>$null) } catch { $currentBranch = '' }
-    $atomicMarkerIssueId = script:Resolve-FCLLinkedIssueNumber -PrBody $prBody -Branch $currentBranch
-    if ($null -ne $atomicMarkerIssueId) {
-        $issueCommentsForAtomicMarker = @(script:Get-FCLIssueCommentsForSpine -IssueNumber ([int]$atomicMarkerIssueId))
-        if ($issueCommentsForAtomicMarker.Count -gt 0) {
-            $atomicMarkerSearchText += "`n" + (($issueCommentsForAtomicMarker | ForEach-Object { script:Get-FCLCommentBody -Comment $_ }) -join "`n")
+
+    # C8 (issue #489 post-review fix): the adapter-discovery / port-
+    # classification span below (through the Step 5b tripwire) used to run
+    # completely unguarded. An exception anywhere in it propagated straight
+    # to the outer worker-runspace catch, skipping Step 7 entirely —
+    # including the stale-spine metric write, which used to run earlier and
+    # more resiliently before this PR's Step 7 consolidation. The catch
+    # below always resets $reportsArray/$hasBlock/$atomicMarkerStatusValue to
+    # their safe empty defaults on any exception (regardless of how far the
+    # try got before throwing), and the try body always assigns them
+    # unconditionally on its normal (non-throwing) path — so no pre-seed is
+    # needed for those three. $portClassificationFailed is the one exception:
+    # it additionally gates Step 6 off below, so it needs a real default for
+    # the success path, where nothing inside the try ever sets it.
+    $portClassificationFailed = $false
+
+    try {
+        $adapters = Get-FrameCreditLedgerAdapters -RepoRoot $repoRoot
+        # Atomic completion marker template: <!-- adversarial-pipeline-atomic-{ISSUE_ID} -->
+        $atomicMarkerSearchText = $prBody
+        if ($null -ne $script:PrComments) {
+            $atomicMarkerSearchText += "`n" + ((@($script:PrComments) | ForEach-Object { script:Get-FCLCommentBody -Comment $_ }) -join "`n")
         }
-    }
-
-    $portsDir = Join-Path $repoRoot 'frame/ports'
-    $ports = Get-PortFiles -PortsDir $portsDir
-
-    $credits = @()
-    if ($null -ne $metrics.Credits) { $credits = @($metrics.Credits) }
-
-    # Step 5a (SMC-16): Synthesize a not-persisted review credit when the
-    # review-judge-produced-{PR} sentinel is present but no review credit
-    # has been written yet. This path fires on PRs like #446 where the judge
-    # ran but the credit was never persisted to the PR body.
-    $synthesizedReviewCredit = Resolve-NotPersistedSynthesis -PrNumber $Pr -MetricsBlock $metrics -Comments $script:PrComments
-    if ($null -ne $synthesizedReviewCredit) {
-        $credits = @($credits) + @($synthesizedReviewCredit)
-    }
-
-    # Build a changeset descriptor from the diff between baseRefOid and HEAD.
-    # Used by Test-FVPredicateAgainstChangeset to evaluate each adapter's
-    # `applies-when` predicate. Failure to build the changeset is non-fatal —
-    # we fall back to an empty changeset, which makes every predicate evaluate
-    # to 'false' or 'unknown' (preserving warn-mode invariants).
-    $changeset = Build-FrameCreditLedgerChangeset -BaseRefOid $baseRefOid
-
-    # H1 fix (issue #441 judge): Populate JudgeScore on the changeset from the
-    # PR's judge-rulings comment so the review.sustainedCriticalOrHigh predicate
-    # identifier resolves at runtime (not just in tests). Without this, the
-    # post-fix-review predicate always falls through to the deferred-unknown path.
-    if ($null -ne $script:PrComments) {
-        $judgeRulingsComment = @($script:PrComments | Where-Object { $_.body -match '<!--\s*judge-rulings' }) | Select-Object -Last 1
-        if ($null -ne $judgeRulingsComment) {
-            $findings = @(ConvertFrom-JudgeRulingsComment -CommentBody ([string]$judgeRulingsComment.body))
-            $changeset['JudgeScore'] = @{ Findings = $findings }
-        }
-    }
-
-    # Track which (port, adapter) pairs have already emitted the deferred-
-    # identifier stderr note so we don't spam the log.
-    $script:DeferredNotedPairs = @{}
-
-    # Build per-port reports.
-    $portReports = [System.Collections.Generic.List[object]]::new()
-    $hasApplicableAtomicAdapter = $false
-
-    if (@($ports).Count -gt 0) {
-        foreach ($port in $ports) {
-            $portName = [string]$port.Name
-            $matchingAdapters = @($adapters | Where-Object { [string]$_.Provides -eq $portName })
-            $applicableMap = Resolve-FrameCreditLedgerApplicableMap -PortName $portName -Adapters $matchingAdapters -Changeset $changeset
-            foreach ($adapter in $matchingAdapters) {
-                if ([string]$adapter.IntegrityAtomic -ne 'true') { continue }
-                $adapterName = [string]$adapter.Name
-                if ($applicableMap.ContainsKey($adapterName) -and [string]$applicableMap[$adapterName] -eq 'true') {
-                    $hasApplicableAtomicAdapter = $true
-                    break
-                }
+        $currentBranch = ''
+        try { $currentBranch = [string](& git -C $repoRoot rev-parse --abbrev-ref HEAD 2>$null) } catch { $currentBranch = '' }
+        $atomicMarkerIssueId = script:Resolve-FCLLinkedIssueNumber -PrBody $prBody -Branch $currentBranch
+        if ($null -ne $atomicMarkerIssueId) {
+            $issueCommentsForAtomicMarker = @(script:Get-FCLIssueCommentsForSpine -IssueNumber ([int]$atomicMarkerIssueId))
+            if ($issueCommentsForAtomicMarker.Count -gt 0) {
+                $atomicMarkerSearchText += "`n" + (($issueCommentsForAtomicMarker | ForEach-Object { script:Get-FCLCommentBody -Comment $_ }) -join "`n")
             }
-            $credit = Select-AuthoritativeCreditForPort -Credits $credits -Port $portName
-
-            $report = Resolve-PortStatus -Port $port -WorkAdapters $matchingAdapters -ApplicableMap $applicableMap -Credit $credit
-            $portReports.Add($report) | Out-Null
         }
-    }
-    else {
-        # No port catalog available — synthesize port reports directly from credits so we can still emit a meaningful ledger.
-        $creditPortNames = @($credits | ForEach-Object { [string]$_.Port } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
-        foreach ($portName in $creditPortNames) {
-            $credit = Select-AuthoritativeCreditForPort -Credits $credits -Port $portName
-            $synthPort = [pscustomobject]@{ Name = $portName }
-            $report = Resolve-PortStatus -Port $synthPort -WorkAdapters @() -ApplicableMap @{} -Credit $credit
-            $portReports.Add($report) | Out-Null
+
+        $portsDir = Join-Path $repoRoot 'frame/ports'
+        $ports = Get-PortFiles -PortsDir $portsDir
+
+        $credits = @()
+        if ($null -ne $metrics.Credits) { $credits = @($metrics.Credits) }
+
+        # Step 5a (SMC-16): Synthesize a not-persisted review credit when the
+        # review-judge-produced-{PR} sentinel is present but no review credit
+        # has been written yet. This path fires on PRs like #446 where the judge
+        # ran but the credit was never persisted to the PR body.
+        $synthesizedReviewCredit = Resolve-NotPersistedSynthesis -PrNumber $Pr -MetricsBlock $metrics -Comments $script:PrComments
+        if ($null -ne $synthesizedReviewCredit) {
+            $credits = @($credits) + @($synthesizedReviewCredit)
         }
-    }
 
-    $atomicMarkerStatus = Resolve-AdversarialPipelineAtomicMarkerPresence `
-        -AdapterAtomicState $hasApplicableAtomicAdapter `
-        -Text $atomicMarkerSearchText `
-        -IssueId $(if ($null -eq $atomicMarkerIssueId) { '' } else { [string]$atomicMarkerIssueId })
-    $atomicMarkerStatusValue = [string]$atomicMarkerStatus.adversarial_pipeline_atomic_marker_present
-    if (-not [string]::IsNullOrWhiteSpace([string]$atomicMarkerStatus.warning)) {
-        [Console]::Error.WriteLine("frame-credit-ledger: $($atomicMarkerStatus.warning)")
-    }
+        # Build a changeset descriptor from the diff between baseRefOid and HEAD.
+        # Used by Test-FVPredicateAgainstChangeset to evaluate each adapter's
+        # `applies-when` predicate. Failure to build the changeset is non-fatal —
+        # we fall back to an empty changeset, which makes every predicate evaluate
+        # to 'false' or 'unknown' (preserving warn-mode invariants).
+        $changeset = Build-FrameCreditLedgerChangeset -BaseRefOid $baseRefOid
 
-    foreach ($incompleteCycleReport in @(script:Resolve-FCLIncompleteCycleReports -Pr $Pr -PrBody $prBody -PrComments $script:PrComments -LedgerRows $credits)) {
-        $portReports.Add($incompleteCycleReport) | Out-Null
-    }
+        # H1 fix (issue #441 judge): Populate JudgeScore on the changeset from the
+        # PR's judge-rulings comment so the review.sustainedCriticalOrHigh predicate
+        # identifier resolves at runtime (not just in tests). Without this, the
+        # post-fix-review predicate always falls through to the deferred-unknown path.
+        if ($null -ne $script:PrComments) {
+            $judgeRulingsComment = @($script:PrComments | Where-Object { $_.body -match '<!--\s*judge-rulings' }) | Select-Object -Last 1
+            if ($null -ne $judgeRulingsComment) {
+                $findings = @(ConvertFrom-JudgeRulingsComment -CommentBody ([string]$judgeRulingsComment.body))
+                $changeset['JudgeScore'] = @{ Findings = $findings }
+            }
+        }
 
-    $reportsArray = $portReports.ToArray()
+        # Track which (port, adapter) pairs have already emitted the deferred-
+        # identifier stderr note so we don't spam the log.
+        $script:DeferredNotedPairs = @{}
 
-    # Apply authorized self-override: find and validate the frame-override-{PR} marker.
-    # Override misconfiguration classes (AdapterParseError, AdapterDiscoveryFailed) are NOT
-    # eligible — these indicate system configuration problems, not missing credits.
-    $overriddenPorts = @(Resolve-FCLOverrideMarker -Pr $Pr -Comments $script:PrComments)
-    if ($overriddenPorts.Count -gt 0) {
-        $nonOverridableSubs = @('AdapterParseError', 'AdapterDiscoveryFailed')
-        $reportsArray = @($reportsArray | ForEach-Object {
+        # Build per-port reports.
+        $portReports = [System.Collections.Generic.List[object]]::new()
+        $hasApplicableAtomicAdapter = $false
+
+        if (@($ports).Count -gt 0) {
+            foreach ($port in $ports) {
+                $portName = [string]$port.Name
+                $matchingAdapters = @($adapters | Where-Object { [string]$_.Provides -eq $portName })
+                $applicableMap = Resolve-FrameCreditLedgerApplicableMap -PortName $portName -Adapters $matchingAdapters -Changeset $changeset
+                foreach ($adapter in $matchingAdapters) {
+                    if ([string]$adapter.IntegrityAtomic -ne 'true') { continue }
+                    $adapterName = [string]$adapter.Name
+                    if ($applicableMap.ContainsKey($adapterName) -and [string]$applicableMap[$adapterName] -eq 'true') {
+                        $hasApplicableAtomicAdapter = $true
+                        break
+                    }
+                }
+                $credit = Select-AuthoritativeCreditForPort -Credits $credits -Port $portName
+
+                $report = Resolve-PortStatus -Port $port -WorkAdapters $matchingAdapters -ApplicableMap $applicableMap -Credit $credit
+                $portReports.Add($report) | Out-Null
+            }
+        }
+        else {
+            # No port catalog available — synthesize port reports directly from credits so we can still emit a meaningful ledger.
+            $creditPortNames = @($credits | ForEach-Object { [string]$_.Port } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+            foreach ($portName in $creditPortNames) {
+                $credit = Select-AuthoritativeCreditForPort -Credits $credits -Port $portName
+                $synthPort = [pscustomobject]@{ Name = $portName }
+                $report = Resolve-PortStatus -Port $synthPort -WorkAdapters @() -ApplicableMap @{} -Credit $credit
+                $portReports.Add($report) | Out-Null
+            }
+        }
+
+        $atomicMarkerStatus = Resolve-AdversarialPipelineAtomicMarkerPresence `
+            -AdapterAtomicState $hasApplicableAtomicAdapter `
+            -Text $atomicMarkerSearchText `
+            -IssueId $(if ($null -eq $atomicMarkerIssueId) { '' } else { [string]$atomicMarkerIssueId })
+        $atomicMarkerStatusValue = [string]$atomicMarkerStatus.adversarial_pipeline_atomic_marker_present
+        if (-not [string]::IsNullOrWhiteSpace([string]$atomicMarkerStatus.warning)) {
+            [Console]::Error.WriteLine("frame-credit-ledger: $($atomicMarkerStatus.warning)")
+        }
+
+        foreach ($incompleteCycleReport in @(script:Resolve-FCLIncompleteCycleReports -Pr $Pr -PrBody $prBody -PrComments $script:PrComments -LedgerRows $credits)) {
+            $portReports.Add($incompleteCycleReport) | Out-Null
+        }
+
+        $reportsArray = $portReports.ToArray()
+
+        # Apply authorized self-override: find and validate the frame-override-{PR} marker.
+        # Override misconfiguration classes (AdapterParseError, AdapterDiscoveryFailed) are NOT
+        # eligible — these indicate system configuration problems, not missing credits.
+        $overriddenPorts = @(Resolve-FCLOverrideMarker -Pr $Pr -Comments $script:PrComments)
+        if ($overriddenPorts.Count -gt 0) {
+            $nonOverridableSubs = @('AdapterParseError', 'AdapterDiscoveryFailed')
+            $reportsArray = @($reportsArray | ForEach-Object {
+                $r = $_
+                $portName = [string]$r.PortName
+                if ($portName -in $overriddenPorts -and [string]$r.SubReason -notin $nonOverridableSubs) {
+                    [pscustomobject]@{
+                        PortName          = $portName
+                        Status            = 'Covered'
+                        SubReason         = 'OverriddenCredit'
+                        AdapterName       = $r.AdapterName
+                        SuggestedNextStep = $null
+                        Evidence          = "override: authorized self-override posted in PR $Pr comment"
+                    }
+                } else {
+                    $r
+                }
+            })
+        }
+
+        # Build a port-descriptor lookup for fast access to BlockOnInconclusive and TriggerStatus.
+        $portDescriptorMap = @{}
+        foreach ($pd in $ports) {
+            $portDescriptorMap[[string]$pd.Name] = $pd
+        }
+
+        # Determine which ports should block in enforce mode.
+        # A port blocks when:
+        #   1. Status = 'NotCovered' (port has a gap — always blocks)
+        #   2. Status = 'Inconclusive' AND it is a misconfiguration sub-reason (AdapterParseError,
+        #      AdapterDiscoveryFailed) — always blocks regardless of BlockOnInconclusive
+        #   3. Status = 'Inconclusive' AND the port's BlockOnInconclusive = true (per-port flag)
+        # Exception: ports with TriggerStatus = 'deferred' are NEVER included in the block set.
+        $blockingReports = @($reportsArray | Where-Object {
             $r = $_
             $portName = [string]$r.PortName
-            if ($portName -in $overriddenPorts -and [string]$r.SubReason -notin $nonOverridableSubs) {
-                [pscustomobject]@{
-                    PortName          = $portName
-                    Status            = 'Covered'
-                    SubReason         = 'OverriddenCredit'
-                    AdapterName       = $r.AdapterName
-                    SuggestedNextStep = $null
-                    Evidence          = "override: authorized self-override posted in PR $Pr comment"
-                }
-            } else {
-                $r
-            }
-        })
-    }
-
-    # Build a port-descriptor lookup for fast access to BlockOnInconclusive and TriggerStatus.
-    $portDescriptorMap = @{}
-    foreach ($pd in $ports) {
-        $portDescriptorMap[[string]$pd.Name] = $pd
-    }
-
-    # Determine which ports should block in enforce mode.
-    # A port blocks when:
-    #   1. Status = 'NotCovered' (port has a gap — always blocks)
-    #   2. Status = 'Inconclusive' AND it is a misconfiguration sub-reason (AdapterParseError,
-    #      AdapterDiscoveryFailed) — always blocks regardless of BlockOnInconclusive
-    #   3. Status = 'Inconclusive' AND the port's BlockOnInconclusive = true (per-port flag)
-    # Exception: ports with TriggerStatus = 'deferred' are NEVER included in the block set.
-    $blockingReports = @($reportsArray | Where-Object {
-        $r = $_
-        $portName = [string]$r.PortName
-        $status = [string]$r.Status
-        $subReason = [string]$r.SubReason
-
-        # Deferred ports: never block, render DEFERRED row separately.
-        $pd = $portDescriptorMap[$portName]
-        if ($null -ne $pd -and [string]$pd.TriggerStatus -eq 'deferred') {
-            return $false
-        }
-
-        if ($status -eq 'NotCovered') {
-            return $true
-        }
-
-        if ($status -eq 'Inconclusive') {
-            # Misconfiguration classes always block.
-            if ($subReason -in @('AdapterParseError', 'AdapterDiscoveryFailed')) {
-                return $true
-            }
-            # Per-port flag.
-            if ($null -ne $pd) {
-                $boi = $pd.PSObject.Properties['BlockOnInconclusive']
-                if ($null -ne $boi) { return [bool]$boi.Value }
-            }
-            return $true  # fail-safe default
-        }
-
-        return $false
-    })
-    $hasBlock = $blockingReports.Count -gt 0
-
-    # Fill recovery commands for blocking reports that have no SuggestedNextStep.
-    $reportsArray = @($reportsArray | ForEach-Object {
-        $r = $_
-        if ($null -eq $r.SuggestedNextStep -or [string]::IsNullOrWhiteSpace([string]$r.SuggestedNextStep)) {
             $status = [string]$r.Status
             $subReason = [string]$r.SubReason
-            # Only fill for statuses that are presented as actionable in the report
-            if ($status -in @('NotCovered', 'Inconclusive')) {
-                $recovery = Resolve-FCLRecoveryCommand -PortName ([string]$r.PortName) -SubReason $subReason
-                $r = [pscustomobject]@{
-                    PortName          = $r.PortName
-                    Status            = $r.Status
-                    SubReason         = $r.SubReason
-                    AdapterName       = $r.AdapterName
-                    SuggestedNextStep = $recovery
-                    Evidence          = $r.Evidence
+
+            # Deferred ports: never block, render DEFERRED row separately.
+            $pd = $portDescriptorMap[$portName]
+            if ($null -ne $pd -and [string]$pd.TriggerStatus -eq 'deferred') {
+                return $false
+            }
+
+            if ($status -eq 'NotCovered') {
+                return $true
+            }
+
+            if ($status -eq 'Inconclusive') {
+                # Misconfiguration classes always block.
+                if ($subReason -in @('AdapterParseError', 'AdapterDiscoveryFailed')) {
+                    return $true
+                }
+                # Per-port flag.
+                if ($null -ne $pd) {
+                    $boi = $pd.PSObject.Properties['BlockOnInconclusive']
+                    if ($null -ne $boi) { return [bool]$boi.Value }
+                }
+                return $true  # fail-safe default
+            }
+
+            return $false
+        })
+        $hasBlock = $blockingReports.Count -gt 0
+
+        # Fill recovery commands for blocking reports that have no SuggestedNextStep.
+        $reportsArray = @($reportsArray | ForEach-Object {
+            $r = $_
+            if ($null -eq $r.SuggestedNextStep -or [string]::IsNullOrWhiteSpace([string]$r.SuggestedNextStep)) {
+                $status = [string]$r.Status
+                $subReason = [string]$r.SubReason
+                # Only fill for statuses that are presented as actionable in the report
+                if ($status -in @('NotCovered', 'Inconclusive')) {
+                    $recovery = Resolve-FCLRecoveryCommand -PortName ([string]$r.PortName) -SubReason $subReason
+                    $r = [pscustomobject]@{
+                        PortName          = $r.PortName
+                        Status            = $r.Status
+                        SubReason         = $r.SubReason
+                        AdapterName       = $r.AdapterName
+                        SuggestedNextStep = $recovery
+                        Evidence          = $r.Evidence
+                    }
+                }
+            }
+            $r
+        })
+
+        # Ensure deferred ports render a visible DEFERRED(#NNN): row.
+        # These ports are excluded from the block check (above) but must appear in the render table.
+        foreach ($pd in $ports) {
+            if ([string]$pd.TriggerStatus -ne 'deferred') { continue }
+            $portName = [string]$pd.Name
+            $deferredTo = if ($null -ne $pd.TriggerDeferredTo) { [string]$pd.TriggerDeferredTo } else { 'unknown' }
+
+            # Check if this port already has a report (it might have a credit with DEFERRED evidence)
+            $existing = @($reportsArray | Where-Object { [string]$_.PortName -eq $portName })
+            if ($existing.Count -eq 0) {
+                # Add a synthetic DEFERRED row — status Covered/DeferredPort, never auto-filtered
+                $deferredRow = [pscustomobject]@{
+                    PortName          = $portName
+                    Status            = 'Covered'
+                    SubReason         = 'DeferredPort'
+                    AdapterName       = ''
+                    SuggestedNextStep = "Deferred to issue $deferredTo"
+                    Evidence          = "DEFERRED($deferredTo): port excluded until producing issue lands"
+                }
+                $reportsArray = @($reportsArray) + $deferredRow
+            }
+        }
+
+        # ---------------------------------------------------------------------------
+        # Step 5b: 90-day deferred-port tripwire (issue #443, Step 11)
+        #
+        # Scan credits for DEFERRED(#NNN): evidence rows.  For each, read the
+        # matching port YAML to extract trigger-deferred-since.  If the date is
+        # older than 90 days, emit a non-blocking stderr warning.  This is
+        # tripwire-only — it never gates a PR merge.
+        # ---------------------------------------------------------------------------
+        try {
+            $tripwireDays = 90
+            $today = [datetime]::UtcNow.Date
+            foreach ($credit in $credits) {
+                $evidenceProp = $credit.PSObject.Properties['evidence']
+                if ($null -eq $evidenceProp) { continue }
+                $evidence = [string]$evidenceProp.Value
+                if ([string]::IsNullOrWhiteSpace($evidence)) { continue }
+                if ($evidence -notmatch '^DEFERRED\(#(\d+)\):') { continue }
+
+                $portProp = $credit.PSObject.Properties['port']
+                if ($null -eq $portProp) { continue }
+                $portName = [string]$portProp.Value
+                if ([string]::IsNullOrWhiteSpace($portName)) { continue }
+
+                # Read trigger-deferred-since from the port YAML file.
+                $portYaml = Join-Path $portsDir "$portName.yaml"
+                if (-not (Test-Path -LiteralPath $portYaml -PathType Leaf)) { continue }
+
+                $portRaw = ''
+                try { $portRaw = Get-Content -LiteralPath $portYaml -Raw -ErrorAction Stop } catch { continue }
+
+                $sincePattern = '(?m)^\s*trigger-deferred-since\s*:\s*[''"]?(?<val>[0-9]{4}-[0-9]{2}-[0-9]{2})[''"]?\s*$'
+                $sinceMatch = [regex]::Match($portRaw, $sincePattern)
+                if (-not $sinceMatch.Success) { continue }
+
+                $sinceDate = $null
+                try {
+                    $sinceDate = [datetime]::ParseExact($sinceMatch.Groups['val'].Value, 'yyyy-MM-dd',
+                        [System.Globalization.CultureInfo]::InvariantCulture)
+                } catch { continue }
+
+                $age = ($today - $sinceDate.Date).Days
+                if ($age -gt $tripwireDays) {
+                    [Console]::Error.WriteLine("frame-credit-ledger: ⚠️ deferred-port tripwire: port '$portName' has been deferred for $age days (threshold: $tripwireDays). trigger-deferred-since: $($sinceMatch.Groups['val'].Value). Consider prioritizing the producing issue.")
                 }
             }
         }
-        $r
-    })
-
-    # Ensure deferred ports render a visible DEFERRED(#NNN): row.
-    # These ports are excluded from the block check (above) but must appear in the render table.
-    foreach ($pd in $ports) {
-        if ([string]$pd.TriggerStatus -ne 'deferred') { continue }
-        $portName = [string]$pd.Name
-        $deferredTo = if ($null -ne $pd.TriggerDeferredTo) { [string]$pd.TriggerDeferredTo } else { 'unknown' }
-
-        # Check if this port already has a report (it might have a credit with DEFERRED evidence)
-        $existing = @($reportsArray | Where-Object { [string]$_.PortName -eq $portName })
-        if ($existing.Count -eq 0) {
-            # Add a synthetic DEFERRED row — status Covered/DeferredPort, never auto-filtered
-            $deferredRow = [pscustomobject]@{
-                PortName          = $portName
-                Status            = 'Covered'
-                SubReason         = 'DeferredPort'
-                AdapterName       = ''
-                SuggestedNextStep = "Deferred to issue $deferredTo"
-                Evidence          = "DEFERRED($deferredTo): port excluded until producing issue lands"
-            }
-            $reportsArray = @($reportsArray) + $deferredRow
-        }
-    }
-
-    # ---------------------------------------------------------------------------
-    # Step 5b: 90-day deferred-port tripwire (issue #443, Step 11)
-    #
-    # Scan credits for DEFERRED(#NNN): evidence rows.  For each, read the
-    # matching port YAML to extract trigger-deferred-since.  If the date is
-    # older than 90 days, emit a non-blocking stderr warning.  This is
-    # tripwire-only — it never gates a PR merge.
-    # ---------------------------------------------------------------------------
-    try {
-        $tripwireDays = 90
-        $today = [datetime]::UtcNow.Date
-        foreach ($credit in $credits) {
-            $evidenceProp = $credit.PSObject.Properties['evidence']
-            if ($null -eq $evidenceProp) { continue }
-            $evidence = [string]$evidenceProp.Value
-            if ([string]::IsNullOrWhiteSpace($evidence)) { continue }
-            if ($evidence -notmatch '^DEFERRED\(#(\d+)\):') { continue }
-
-            $portProp = $credit.PSObject.Properties['port']
-            if ($null -eq $portProp) { continue }
-            $portName = [string]$portProp.Value
-            if ([string]::IsNullOrWhiteSpace($portName)) { continue }
-
-            # Read trigger-deferred-since from the port YAML file.
-            $portYaml = Join-Path $portsDir "$portName.yaml"
-            if (-not (Test-Path -LiteralPath $portYaml -PathType Leaf)) { continue }
-
-            $portRaw = ''
-            try { $portRaw = Get-Content -LiteralPath $portYaml -Raw -ErrorAction Stop } catch { continue }
-
-            $sincePattern = '(?m)^\s*trigger-deferred-since\s*:\s*[''"]?(?<val>[0-9]{4}-[0-9]{2}-[0-9]{2})[''"]?\s*$'
-            $sinceMatch = [regex]::Match($portRaw, $sincePattern)
-            if (-not $sinceMatch.Success) { continue }
-
-            $sinceDate = $null
-            try {
-                $sinceDate = [datetime]::ParseExact($sinceMatch.Groups['val'].Value, 'yyyy-MM-dd',
-                    [System.Globalization.CultureInfo]::InvariantCulture)
-            } catch { continue }
-
-            $age = ($today - $sinceDate.Date).Days
-            if ($age -gt $tripwireDays) {
-                [Console]::Error.WriteLine("frame-credit-ledger: ⚠️ deferred-port tripwire: port '$portName' has been deferred for $age days (threshold: $tripwireDays). trigger-deferred-since: $($sinceMatch.Groups['val'].Value). Consider prioritizing the producing issue.")
-            }
+        catch {
+            # Tripwire is warn-only; never block on failure.
+            $null = $_
         }
     }
     catch {
-        # Tripwire is warn-only; never block on failure.
-        $null = $_
+        # C8 (issue #489 post-review fix): adapter discovery / port
+        # classification threw. Log to stderr (matching this file's
+        # existing fail-open logging style) and degrade gracefully instead
+        # of letting the exception propagate to the outer worker-runspace
+        # catch — that would skip Step 7 entirely, including the
+        # stale-spine metric write. $reportsArray/$hasBlock/
+        # $atomicMarkerStatusValue are reset to safe empty defaults here,
+        # discarding whatever partial state the try body built up before
+        # throwing. $portClassificationFailed additionally gates Step 6 off
+        # below, since cost composition has no reason to run once this run
+        # has already degraded to stale-spine-only.
+        [Console]::Error.WriteLine("frame-credit-ledger: adapter discovery / port classification failed (degrading to stale-spine-only for this run): $($_.Exception.Message)")
+        $reportsArray = @()
+        $hasBlock = $false
+        $atomicMarkerStatusValue = ''
+        $portClassificationFailed = $true
     }
 
     # ---------------------------------------------------------------------------
@@ -1379,7 +1454,7 @@ function Invoke-FrameCreditLedger {
     # before the extraction.
     # ---------------------------------------------------------------------------
     $costSection = ''
-    if (-not $script:CostLibLoadFailed) {
+    if (-not $script:CostLibLoadFailed -and -not $portClassificationFailed) {
         try {
             $slug = Get-CostTranscriptSlug -CwdPath $repoRoot
             $costBranch = & git -C $repoRoot rev-parse --abbrev-ref HEAD 2>$null
@@ -1441,21 +1516,16 @@ function Invoke-FrameCreditLedger {
     # breakdown-comment upsert above, so a successful upsert's html_url is
     # available to thread into the cost-summary section as source_comment.
     #
-    # Read-side UTF-8 pin (issue #824 M2 fix, mirrored from
-    # cost-baseline-harvest.ps1): native `gh` stdout otherwise decodes with
-    # the console's default encoding on Windows, and a whole-body
-    # `gh pr edit` write can permanently mangle maintainer-authored
-    # non-ASCII prose elsewhere in the body. This is a process-wide static;
-    # nothing earlier in this file reads console output expecting the
-    # OS-default encoding, so setting it once here is safe.
+    # Read-side UTF-8 pin: hoisted to the top of this file (issue #489
+    # post-review C2 fix, secondary instance) so it covers Step 1's and Step
+    # 2's earlier gh reads too, not only the re-fetch below. See the pin's
+    # own comment near the top of this file for the full rationale.
     #
     # The body is RE-FETCHED here rather than reusing $prBody (fetched once
     # at Step 2, above) — $prBody goes stale the instant any earlier code
     # path (e.g. a short-circuit comment upsert, or another concurrent run)
     # edits the body.
     # ---------------------------------------------------------------------------
-    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
-
     $freshBodyJsonRaw = $null
     try {
         $freshBodyJsonRaw = & gh pr view $Pr --json body 2>$null
@@ -1511,7 +1581,18 @@ function Invoke-FrameCreditLedger {
         # the result onto the cost_summary schema's own field names.
         $costSummary = script:Build-FCLCostSummaryFromRenderResult -CostResult $costResult -BreakdownCommentUrl $breakdownCommentUrl
 
-        script:Update-FCLPrBodyCostSummary -Pr $Pr -PrBody $staleSpinePrBody -Degraded $degraded -CostSummary $costSummary
+        # C1 (issue #489 post-review fix): -PrBody is $staleSpinePrBody — text
+        # already mutated by the stale-spine transform above — so the
+        # writer's no-op guard must compare its final output against
+        # -OriginalBody ($freshPrBody, the true GitHub-fetched body from
+        # BEFORE any local transform) rather than against $staleSpinePrBody
+        # itself. Without this, a cost-summary transform that happens to be a
+        # fixed point on the already-mutated text silently drops the
+        # stale-spine metric change along with it. The writer's own return
+        # value ($outcome, a { Outcome = 'edited' | 'noop' | 'failed' }
+        # hashtable) is intentionally discarded here — no caller at this
+        # site currently branches on write outcome.
+        $null = script:Update-FCLPrBodyCostSummary -Pr $Pr -PrBody $staleSpinePrBody -Degraded $degraded -CostSummary $costSummary -OriginalBody $freshPrBody
     }
 
     return @{

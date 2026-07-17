@@ -440,6 +440,21 @@ integrity_checks:
         }
     }
 
+    # Minimal Attribution/Completeness-only cost-result fixture for tests that
+    # call script:Build-FCLCostSummaryFromRenderResult directly (issue #489
+    # post-review C7/C11 tests) rather than going through the full
+    # Invoke-CostSessionRender-shaped $script:NewFCLCostSessionResult fixture
+    # above — that constructor only reads Attribution.totals and Completeness,
+    # so the other NewFCLCostSessionResult fields (CostSection, TokenSum, etc.)
+    # would be unused noise here.
+    $script:NewFCLCostResultForSummaryTest = {
+        param([AllowNull()][object]$CostEstimateUsd = 1.23)
+        return @{
+            Attribution  = @{ totals = @{ cost_estimate_usd = $CostEstimateUsd; tokens = @{ input = 10; output = 5; cache_creation = 0; cache_read = 0 } } }
+            Completeness = @{ completeness = 'complete'; capture_point = 'end-of-session' }
+        }
+    }
+
     $script:GetUpdatedPrBody = {
         param([AllowEmptyString()][string]$Output)
 
@@ -702,7 +717,13 @@ integrity_checks:
             # so the breakdown-comment upsert returns $null (its documented
             # fail-open contract) — used to prove source_comment is omitted
             # rather than empty-stringed.
-            [bool]$ForceCommentUpsertFailure = $false
+            [bool]$ForceCommentUpsertFailure = $false,
+            # Issue #489 C8 knob: forces an exception inside the adapter-
+            # discovery/port-classification span (Get-PortFiles, called
+            # early in that span) so tests can verify the span's own
+            # try/catch degrades gracefully instead of aborting the run
+            # before Step 7.
+            [bool]$ForcePortClassificationThrow = $false
         )
 
         # Snapshot env vars that we will mutate so we can restore them in finally.
@@ -916,6 +937,17 @@ integrity_checks:
                 param($ThisRun, [object[]]$RollingHistory, $RegimeCheckpoint)
                 $null = $ThisRun; $null = $RollingHistory; $null = $RegimeCheckpoint
                 return @()
+            }
+
+            # Issue #489 C8: force an exception inside the adapter-discovery/
+            # port-classification span by making Get-PortFiles (called early
+            # in that span) throw.
+            if ($ForcePortClassificationThrow) {
+                function Get-PortFiles {
+                    param([string]$PortsDir)
+                    $null = $PortsDir
+                    throw 'simulated port-classification failure'
+                }
             }
 
             $result = Invoke-FrameCreditLedger -Pr $private:prNumber -Mode $private:modeValue
@@ -1774,6 +1806,168 @@ dispatch-fallback-events:
                 -Because 'a failed upsert (no usable html_url) must omit source_comment entirely rather than writing an empty link'
             $ip.UpdatedPrBody | Should -Match '(?m)^\s*capture_point:\s*end-of-session\s*$' `
                 -Because 'the rest of the cost summary must still be written even though the comment link is unavailable'
+        }
+    }
+
+    Context 'Issue #489 post-review C1: no-op guard compares against the true pre-transform body' {
+
+        It 'still writes the body when stale-spine changes but the cost-summary transform is a no-op against the post-stale-spine text' {
+            # An already-degraded prior cost_summary block makes
+            # Set-FCLPrBodyCostSummary's own early no-op path fire (Degraded
+            # + existing cost_summary bounds -> return $PrBody unchanged),
+            # regardless of the exact escaping/formatting Format-Cost et al.
+            # would otherwise produce — the simplest reliable way to force a
+            # true fixed-point transform for this regression test.
+            $prBody = & $script:NewV4PrBodyWithFallbackMetrics -MetricsPrelude @'
+dispatch-fallback-events:
+  stale-spine:
+    - step: 1
+      reason: generated_at-mismatch
+cost_summary:
+  capture_point: unavailable
+'@ -CreditRows @'
+  - port: implement-test
+    status: passed
+    evidence: "tests passed"
+'@
+            $bodyJson = (@{ body = $prBody } | ConvertTo-Json -Compress)
+
+            $ip = & $script:InvokeOrchestratorInProcess -Pr 429 -Mode 'warn' `
+                -PrBodyJson $bodyJson `
+                -CostSessionRenderOverride { & $script:NewFCLCostSessionResult -CostSection 'cost data present' -ShouldPostDegraded $true }
+
+            $ip.Result.ExitCode | Should -Be 0
+
+            $editIndices = @($ip.GhCallLog | Where-Object { $_ -match '^pr edit \d+ .*--body-file' })
+            $editIndices.Count | Should -Be 1 `
+                -Because 'the stale-spine change must not be silently dropped just because the already-degraded cost_summary transform is a no-op relative to the post-stale-spine text'
+
+            $ip.UpdatedPrBody | Should -Not -BeNullOrEmpty
+            $ip.UpdatedPrBody | Should -Match '(?m)^spine-stale-fallback-count:\s*1\s*$' `
+                -Because 'the no-op guard must compare the writer output against the true pre-transform (fresh, GitHub) body, not against the already stale-spine-mutated text'
+        }
+    }
+
+    Context 'Issue #489 post-review C2 (secondary instance): OutputEncoding pin ordering' {
+
+        It 'sets the UTF-8 OutputEncoding pin before this file''s earliest gh pr view call' {
+            $source = Get-Content -LiteralPath $script:OrchestratorPath -Raw
+
+            $pinMatch = [regex]::Match($source, '\[Console\]::OutputEncoding\s*=')
+            $pinMatch.Success | Should -BeTrue -Because 'the UTF-8 OutputEncoding pin must exist in this file'
+
+            # Match actual invocations (`& gh pr view ...`), not prose mentions of
+            # "gh pr view" in comments/docstrings (e.g. this very pin's own
+            # explanatory comment, or the file header) — those would produce a
+            # false-positive "earliest call" that sits before the pin's own
+            # rationale text rather than before any real stdout read.
+            $firstGhCallMatch = [regex]::Match($source, '&\s*gh pr view')
+            $firstGhCallMatch.Success | Should -BeTrue -Because 'this file must contain at least one gh pr view call'
+
+            $pinMatch.Index | Should -BeLessThan $firstGhCallMatch.Index `
+                -Because 'the encoding pin must be set before the earliest gh pr view call reads any stdout, so no unpinned read (e.g. the Step 2 body,comments fetch) can mangle non-ASCII PR-body content'
+        }
+    }
+
+    Context 'Issue #489 post-review C8: adapter-discovery/port-classification fail-open guard' {
+
+        It 'still performs the Step 7 stale-spine-only body write when adapter/port classification throws' {
+            $prBody = & $script:NewV4PrBodyWithFallbackMetrics -MetricsPrelude @'
+dispatch-fallback-events:
+  stale-spine:
+    - step: 1
+      reason: generated_at-mismatch
+'@ -CreditRows @'
+  - port: implement-test
+    status: passed
+    evidence: "tests passed"
+'@
+            $bodyJson = (@{ body = $prBody } | ConvertTo-Json -Compress)
+
+            $ip = & $script:InvokeOrchestratorInProcess -Pr 429 -Mode 'warn' `
+                -PrBodyJson $bodyJson `
+                -ForcePortClassificationThrow $true
+
+            $ip.Result.ExitCode | Should -Be 0 -Because 'a port-classification exception must not abort the run before Step 7'
+
+            $editIndices = @($ip.GhCallLog | Where-Object { $_ -match '^pr edit \d+ .*--body-file' })
+            $editIndices.Count | Should -Be 1 -Because 'Step 7 must still attempt the stale-spine-only fallback write'
+
+            $ip.UpdatedPrBody | Should -Not -BeNullOrEmpty
+            $ip.UpdatedPrBody | Should -Match '(?m)^spine-stale-fallback-count:\s*1\s*$' `
+                -Because 'the stale-spine metric write must survive an adapter-discovery/port-classification failure'
+            $ip.UpdatedPrBody | Should -Not -Match 'cost_summary\s*:' `
+                -Because 'cost composition is skipped once port classification has already failed for this run'
+        }
+    }
+
+    Context 'Issue #489 post-review C7 (constructor half): null cost preservation' {
+
+        It 'preserves cost_usd_total as an explicit null key when the source cost_estimate_usd is null' {
+            if (-not (Test-Path $script:OrchestratorPath)) {
+                throw "RED: orchestrator not found at $script:OrchestratorPath"
+            }
+            . $script:OrchestratorPath -Pr 0 -Mode warn -ErrorAction SilentlyContinue 2>$null
+
+            $costResult = & $script:NewFCLCostResultForSummaryTest -CostEstimateUsd $null
+
+            $summary = script:Build-FCLCostSummaryFromRenderResult -CostResult $costResult
+
+            $summary | Should -Not -BeNullOrEmpty
+            $summary.ContainsKey('cost_usd_total') | Should -BeTrue -Because 'an explicit null cost must be preserved through, not omitted'
+            $summary['cost_usd_total'] | Should -BeNullOrEmpty
+        }
+
+        It 'still populates a real numeric cost_usd_total when the source cost_estimate_usd is a real number' {
+            . $script:OrchestratorPath -Pr 0 -Mode warn -ErrorAction SilentlyContinue 2>$null
+
+            $costResult = & $script:NewFCLCostResultForSummaryTest -CostEstimateUsd 2.5
+
+            $summary = script:Build-FCLCostSummaryFromRenderResult -CostResult $costResult
+
+            $summary.ContainsKey('cost_usd_total') | Should -BeTrue
+            $summary['cost_usd_total'] | Should -Be 2.5
+        }
+    }
+
+    Context 'Issue #489 post-review C11: source_comment URL-shape validation' {
+
+        It 'omits source_comment when the upsert return value is not a clean URL' {
+            . $script:OrchestratorPath -Pr 0 -Mode warn -ErrorAction SilentlyContinue 2>$null
+
+            $costResult = & $script:NewFCLCostResultForSummaryTest
+            $notAUrl = @'
+{
+  "html_url": "https://github.com/example/example/pull/429#issuecomment-1"
+}
+'@
+
+            $summary = script:Build-FCLCostSummaryFromRenderResult -CostResult $costResult -BreakdownCommentUrl $notAUrl
+
+            $summary | Should -Not -BeNullOrEmpty
+            $summary.ContainsKey('source_comment') | Should -BeFalse `
+                -Because 'a multi-line JSON-looking blob is not a clean URL and must be omitted rather than passed through'
+        }
+
+        It 'accepts a clean https URL for source_comment' {
+            . $script:OrchestratorPath -Pr 0 -Mode warn -ErrorAction SilentlyContinue 2>$null
+
+            $costResult = & $script:NewFCLCostResultForSummaryTest
+
+            $summary = script:Build-FCLCostSummaryFromRenderResult -CostResult $costResult -BreakdownCommentUrl 'https://github.com/example/example/pull/429#issuecomment-1'
+
+            $summary.ContainsKey('source_comment') | Should -BeTrue
+            $summary['source_comment'] | Should -Be 'https://github.com/example/example/pull/429#issuecomment-1'
+        }
+
+        It 'omits source_comment when the URL contains a closing paren that would break the markdown link shape' {
+            . $script:OrchestratorPath -Pr 0 -Mode warn -ErrorAction SilentlyContinue 2>$null
+
+            $costResult = & $script:NewFCLCostResultForSummaryTest
+
+            $summary = script:Build-FCLCostSummaryFromRenderResult -CostResult $costResult -BreakdownCommentUrl 'https://github.com/example/example/pull/429#issuecomment-1)'
+
+            $summary.ContainsKey('source_comment') | Should -BeFalse
         }
     }
 

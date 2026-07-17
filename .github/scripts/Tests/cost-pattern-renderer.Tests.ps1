@@ -439,7 +439,7 @@ Describe 'Format-CostPatternMarkdown' {
             # design port not in attribution and carries no anomaly flag -> suppressed,
             # not rendered as a zero-dispatch dash row (issue #489 s1 changed this).
             $result | Should -Not -Match '\| design \|'
-            $result | Should -Match 'ports had zero attributed cost and are omitted from this table\.'
+            $result | Should -Match 'ports had zero dispatches, zero attributed cost, and zero token activity, and are omitted from this table\.'
         }
 
         It 'emits orchestrator-overhead row' {
@@ -610,6 +610,29 @@ Describe 'Format-CostPatternMarkdown' {
             $flags = @(script:New-AnomalyFlag -Metric 'dispatches.per_port[experience]' -Port 'experience')
             $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness -AnomalyFlags $flags
             # design port has no anomaly flag — its row should show " — " in anomaly column
+            $lines = $result -split "`n"
+            $designLine = $lines | Where-Object { $_ -match '\| design \|' }
+            $designLine | Should -Match ' — '
+        }
+
+        It 'treats a flag with a null metric as no anomaly rather than a blank name (C14)' {
+            $attribution = script:New-MinimalAttribution -PortNames @('design')
+            $completeness = script:New-Completeness
+            # Built directly (not via New-AnomalyFlag) — that helper's [string]
+            # parameter coerces a $null argument to '', which would not
+            # exercise the true-null case this fix targets.
+            $flags = @(@{ metric = $null; port = 'design'; direction = 'shrink'; confidence = 'medium' })
+            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness -AnomalyFlags $flags
+            $lines = $result -split "`n"
+            $designLine = $lines | Where-Object { $_ -match '\| design \|' }
+            $designLine | Should -Match ' — '
+        }
+
+        It 'treats a flag with a blank metric as no anomaly rather than a blank name (C14)' {
+            $attribution = script:New-MinimalAttribution -PortNames @('design')
+            $completeness = script:New-Completeness
+            $flags = @(script:New-AnomalyFlag -Metric '' -Port 'design')
+            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness -AnomalyFlags $flags
             $lines = $result -split "`n"
             $designLine = $lines | Where-Object { $_ -match '\| design \|' }
             $designLine | Should -Match ' — '
@@ -929,7 +952,7 @@ Describe 'Build-CostPatternTable suppression (issue #489 s1)' {
             $result = script:Build-CostPatternTable -Attribution $attribution -AnomalyFlags @()
 
             script:Get-SuppressionRow -Markdown $result -PortLabel 'design' | Should -BeNullOrEmpty
-            $result | Should -Match ([regex]::Escape("`n`n1 port had zero attributed cost and is omitted from this table."))
+            $result | Should -Match ([regex]::Escape("`n`n1 port had zero dispatches, zero attributed cost, and zero token activity, and is omitted from this table."))
         }
 
         It 'emits the plural omission line when more than one row is suppressed' {
@@ -942,7 +965,7 @@ Describe 'Build-CostPatternTable suppression (issue #489 s1)' {
 
             script:Get-SuppressionRow -Markdown $result -PortLabel 'design' | Should -BeNullOrEmpty
             script:Get-SuppressionRow -Markdown $result -PortLabel 'plan' | Should -BeNullOrEmpty
-            $result | Should -Match ([regex]::Escape("`n`n2 ports had zero attributed cost and are omitted from this table."))
+            $result | Should -Match ([regex]::Escape("`n`n2 ports had zero dispatches, zero attributed cost, and zero token activity, and are omitted from this table."))
         }
     }
 
@@ -981,6 +1004,28 @@ Describe 'Build-CostPatternTable suppression (issue #489 s1)' {
 
             script:Get-SuppressionRow -Markdown $result -PortLabel 'design' | Should -Not -BeNullOrEmpty
             $result | Should -Not -Match 'omitted from this table'
+        }
+    }
+
+    Context 'blank-metric-anomaly-does-not-block-suppression (C14)' {
+        It 'suppresses a zero-activity port whose only anomaly flag has a null metric' {
+            $attribution = script:New-SuppressionAttribution -PortOverrides @{ design = (script:New-SuppressionZeroPortBucket) }
+            $flags = @(@{ metric = $null; port = 'design'; direction = 'shrink'; confidence = 'medium' })
+
+            $result = script:Build-CostPatternTable -Attribution $attribution -AnomalyFlags $flags
+
+            script:Get-SuppressionRow -Markdown $result -PortLabel 'design' | Should -BeNullOrEmpty
+            $result | Should -Match 'omitted from this table'
+        }
+
+        It 'suppresses a zero-activity port whose only anomaly flag has a blank metric' {
+            $attribution = script:New-SuppressionAttribution -PortOverrides @{ design = (script:New-SuppressionZeroPortBucket) }
+            $flags = @(@{ metric = ''; port = 'design'; direction = 'shrink'; confidence = 'medium' })
+
+            $result = script:Build-CostPatternTable -Attribution $attribution -AnomalyFlags $flags
+
+            script:Get-SuppressionRow -Markdown $result -PortLabel 'design' | Should -BeNullOrEmpty
+            $result | Should -Match 'omitted from this table'
         }
     }
 

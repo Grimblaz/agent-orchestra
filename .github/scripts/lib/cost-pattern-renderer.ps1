@@ -609,8 +609,15 @@ function script:Get-PortAnomalyNames {
 
     $portFlags = @($AnomalyFlags | Where-Object {
             $flagPort = $_['port']
-            ($null -ne $flagPort -and $flagPort -eq $PortName) -or
+            $matchesPort = ($null -ne $flagPort -and $flagPort -eq $PortName) -or
             ($null -eq $flagPort -and [string]::IsNullOrEmpty($PortName))
+            # C14: a null/blank metric can't produce a real name — filter it out here
+            # so it never contributes an empty entry to the joined name list below.
+            # Without this, a port whose only "anomaly" is a malformed/blank metric
+            # field would still read as "has an anomaly" downstream (via
+            # Test-CostRendererPortHasAnomaly), incorrectly defeating zero-activity
+            # suppression for an otherwise-inactive port.
+            $matchesPort -and -not [string]::IsNullOrWhiteSpace([string]$_['metric'])
         })
 
     if ($portFlags.Count -eq 0) {
@@ -965,10 +972,10 @@ function script:Build-CostPatternTable {
     if ($suppressedPortCount -gt 0) {
         $lines.Add('')
         if ($suppressedPortCount -eq 1) {
-            $lines.Add('1 port had zero attributed cost and is omitted from this table.')
+            $lines.Add('1 port had zero dispatches, zero attributed cost, and zero token activity, and is omitted from this table.')
         }
         else {
-            $lines.Add("$suppressedPortCount ports had zero attributed cost and are omitted from this table.")
+            $lines.Add("$suppressedPortCount ports had zero dispatches, zero attributed cost, and zero token activity, and are omitted from this table.")
         }
     }
 

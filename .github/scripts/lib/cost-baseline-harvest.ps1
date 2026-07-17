@@ -252,12 +252,18 @@ function script:Get-CostBaselineHarvestCompositeComment {
     .SYNOPSIS
         Fetches the composite `<!-- frame-credit-ledger-$Pr -->` comment body for a PR.
     .DESCRIPTION
-        M2 (issue #824 post-review fix): sets [Console]::OutputEncoding to
-        UTF-8 before reading gh's stdout — the established repo-wide guard
-        (see orchestra-spine.ps1:15) against Windows silently decoding a
-        `gh` child process's UTF-8 stdout via the OEM code page, which
-        corrupts non-ASCII characters (—, ⚠, etc.) in the composite
-        comment's untouched sections on every write-back.
+        C2 (issue #489 post-review fix): the original M2 (issue #824
+        post-review fix) [Console]::OutputEncoding UTF-8 pin used to be set
+        HERE, guarding only calls that go through this function. That
+        scoping regressed once other `gh`-invoking call sites in this file
+        (Test-CostBaselineHarvestCandidateGate's own combined `gh pr view`
+        fetch, the s5 reconcile pass's direct `gh pr view` calls) could
+        execute before this function ever ran in the same process — most
+        commonly when the reconcile pass runs first and finds zero
+        candidates. The pin is now set UNCONDITIONALLY near the top of
+        Invoke-CostBaselineHarvest (the main entry function), before ANY
+        `gh`-invoking call in this file's execution path — see that
+        function's own .DESCRIPTION for the relocated rationale comment.
 
         M6 (issue #824 post-review fix): on a marker-matching duplicate,
         selects the SAME comment Find-OrUpsertComment will actually PATCH —
@@ -302,8 +308,6 @@ function script:Get-CostBaselineHarvestCompositeComment {
 
     $marker = "<!-- frame-credit-ledger-$Pr -->"
     $notFound = @{ Found = $false; Body = ''; Marker = $marker }
-
-    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 
     $commentsJson = $null
     try { $commentsJson = & gh pr view $Pr --json comments 2>$null }
@@ -546,6 +550,18 @@ function script:ConvertTo-CostBaselineHarvestSummaryFromRenderResult {
         sub-keys degrade to zero/empty defaults rather than throwing, since
         some render-result shapes (including several existing test doubles)
         omit them.
+
+        C6 companion fix (issue #489 post-review fix): distinguishes an
+        ABSENT `cost_estimate_usd` key (degrades to 0.0, per the
+        missing/absent convention above) from a key that is PRESENT but
+        explicitly `$null` — the render pipeline's own "genuinely unknown
+        cost" representation (mirrors cost-pattern-renderer.ps1's
+        Format-CostRendererNullableCostYaml, which renders exactly that
+        `$null` as the YAML literal `null`). A present-but-null value is
+        preserved as `$null` in the returned hashtable rather than
+        collapsed to a false-confident 0.0, matching
+        script:Set-FCLPrBodyCostSummary's own C7 costUnknown handling so
+        this constructor and the writer agree on what "unknown" means.
     .OUTPUTS
         [hashtable] shaped for script:Set-FCLPrBodyCostSummary /
         script:Update-FCLPrBodyCostSummary's -CostSummary parameter.
@@ -560,8 +576,19 @@ function script:ConvertTo-CostBaselineHarvestSummaryFromRenderResult {
     $sessionCompleteness = if ($completeness -is [hashtable] -and $null -ne $completeness['completeness']) { [string]$completeness['completeness'] } else { '' }
     $capturePoint = if ($completeness -is [hashtable] -and $null -ne $completeness['capture_point']) { [string]$completeness['capture_point'] } else { '' }
 
+    $costUsdTotal = 0.0
+    $costUnknown = $false
+    if ($totals.ContainsKey('cost_estimate_usd')) {
+        if ($null -eq $totals['cost_estimate_usd']) {
+            $costUnknown = $true
+        }
+        else {
+            $costUsdTotal = [double]$totals['cost_estimate_usd']
+        }
+    }
+
     return @{
-        cost_usd_total        = if ($null -ne $totals['cost_estimate_usd']) { [double]$totals['cost_estimate_usd'] } else { 0.0 }
+        cost_usd_total        = if ($costUnknown) { $null } else { $costUsdTotal }
         tokens                = @{
             input          = if ($null -ne $tokens['input']) { [long]$tokens['input'] } else { 0L }
             output         = if ($null -ne $tokens['output']) { [long]$tokens['output'] } else { 0L }
@@ -571,6 +598,35 @@ function script:ConvertTo-CostBaselineHarvestSummaryFromRenderResult {
         session_completeness  = $sessionCompleteness
         capture_point         = $capturePoint
     }
+}
+
+function script:ConvertTo-CostBaselineHarvestLongOrDefault {
+    <#
+    .SYNOPSIS
+        TryParse-defensive [long] parse for a raw YAML scalar string (issue
+        #489 post-review fix, C6 companion).
+    .DESCRIPTION
+        script:ConvertTo-CostBaselineHarvestSummaryFromSection's token
+        fields shared the identical bare-`[long]` cast pattern that made
+        that same function's cost field throw on the renderer's literal
+        `null` YAML value (see that function's own C6 doc note). The
+        renderer never actually emits `null` for a token count (only
+        cost_estimate_usd uses Format-CostRendererNullableCostYaml — token
+        fields always render as plain integers), so this helper has no
+        `null`-recognition branch; it exists purely to replace the bare
+        cast with a graceful TryParse so a malformed/non-numeric token
+        value degrades to this function's existing blank -> 0L convention
+        instead of throwing and failing the whole candidate.
+    .OUTPUTS
+        [long]
+    #>
+    param([AllowNull()][string]$Raw)
+
+    if ([string]::IsNullOrWhiteSpace($Raw)) { return 0L }
+
+    [long]$parsed = 0L
+    if ([long]::TryParse($Raw, [ref]$parsed)) { return $parsed }
+    return 0L
 }
 
 function script:ConvertTo-CostBaselineHarvestSummaryFromSection {
@@ -589,6 +645,28 @@ function script:ConvertTo-CostBaselineHarvestSummaryFromSection {
         terminal totals: block. Spends no re-count budget: this reads the
         comment's OWN already-computed numbers — never a re-walk, never the
         untrusted PR body.
+
+        C6 (issue #489 post-review fix, judge-sustained, AC6): cost_estimate_
+        usd can legitimately carry the literal YAML string `null`
+        (case-sensitive; cost-pattern-renderer.ps1's
+        Format-CostRendererNullableCostYaml) when the cost genuinely
+        couldn't be computed (e.g. a Copilot rate-unavailable session). A
+        bare `[double]` cast on that literal throws
+        ("Cannot convert value 'null' to type 'System.Double'"). This
+        function's caller (script:Invoke-CostBaselineHarvestReconcileCandidate)
+        catches that exception per-candidate and logs it as a failure — but
+        no reconcile-attempt marker exists, so the SAME candidate is
+        retried forever on every startup, permanently blocking the PR from
+        ever reconciling and violating this issue's AC6 ("the reconcile
+        path completes failed refreshes on later scans"). The literal
+        `null` now maps to an explicit `$null` in the returned hashtable
+        (never a thrown exception, never a silent 0) — the "genuinely
+        unknown" state script:Set-FCLPrBodyCostSummary's own C7 fix already
+        knows how to render honestly as "unknown". Any OTHER malformed,
+        non-numeric, non-`null` value degrades to this function's existing
+        blank-value convention (0.0) via TryParse rather than throwing —
+        the same graceful-degradation shape already established for blank
+        values, just extended to cover malformed ones too.
     .OUTPUTS
         [hashtable] shaped for script:Set-FCLPrBodyCostSummary /
         script:Update-FCLPrBodyCostSummary's -CostSummary parameter.
@@ -601,13 +679,36 @@ function script:ConvertTo-CostBaselineHarvestSummaryFromSection {
     $cacheCreationRaw = script:Get-FCLNestedScalar -Block $Section -ParentKey 'totals' -ChildKey 'cache_creation'
     $cacheReadRaw = script:Get-FCLNestedScalar -Block $Section -ParentKey 'totals' -ChildKey 'cache_read'
 
+    # C6: exact case-sensitive match against the renderer's literal 'null'
+    # (Format-CostRendererNullableCostYaml returns the bare word 'null',
+    # lowercase, four characters — never quoted, never any other casing).
+    $costUsdTotal =
+    if ($costUsdTotalRaw -cne 'null' -and -not [string]::IsNullOrWhiteSpace($costUsdTotalRaw)) {
+        [double]$parsedCost = 0.0
+        if ([double]::TryParse($costUsdTotalRaw, [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$parsedCost)) {
+            $parsedCost
+        }
+        else {
+            # Malformed, non-numeric, non-'null' value: graceful default,
+            # matching the existing blank-value convention rather than
+            # throwing.
+            0.0
+        }
+    }
+    elseif ($costUsdTotalRaw -ceq 'null') {
+        $null
+    }
+    else {
+        0.0
+    }
+
     return @{
-        cost_usd_total        = if ([string]::IsNullOrWhiteSpace($costUsdTotalRaw)) { 0.0 } else { [double]$costUsdTotalRaw }
+        cost_usd_total        = $costUsdTotal
         tokens                = @{
-            input          = if ([string]::IsNullOrWhiteSpace($inputRaw)) { 0L } else { [long]$inputRaw }
-            output         = if ([string]::IsNullOrWhiteSpace($outputRaw)) { 0L } else { [long]$outputRaw }
-            cache_creation = if ([string]::IsNullOrWhiteSpace($cacheCreationRaw)) { 0L } else { [long]$cacheCreationRaw }
-            cache_read     = if ([string]::IsNullOrWhiteSpace($cacheReadRaw)) { 0L } else { [long]$cacheReadRaw }
+            input          = script:ConvertTo-CostBaselineHarvestLongOrDefault -Raw $inputRaw
+            output         = script:ConvertTo-CostBaselineHarvestLongOrDefault -Raw $outputRaw
+            cache_creation = script:ConvertTo-CostBaselineHarvestLongOrDefault -Raw $cacheCreationRaw
+            cache_read     = script:ConvertTo-CostBaselineHarvestLongOrDefault -Raw $cacheReadRaw
         }
         session_completeness  = [string](script:Get-FCLScalar -Block $Section -Name 'session_completeness')
         capture_point         = [string](script:Get-FCLScalar -Block $Section -Name 'capture_point')
@@ -638,16 +739,43 @@ function script:Get-CostBaselineHarvestBodyCapturePoint {
         composite comment's own fail-closed-gated data (mirrors the
         forgery threat model Get-CostBaselineHarvestCompositeComment's own
         .DESCRIPTION documents).
+
+        C10 (issue #489 post-review fix): applies the same fence-aware
+        marker lookup discipline the writer already uses
+        (cost-fcl-helpers.ps1's Set-FCLPrBodyCostSummary) — redacts
+        ```-fenced regions to a same-length filler before searching for the
+        pipeline-metrics marker, so a fenced documentation example of a
+        pipeline-metrics block earlier in the body can never be mismatched
+        as the real block. The technique is replicated locally (same
+        length-preserving-filler approach) rather than pulled in as a
+        cross-file dependency — it is private/inline in
+        Set-FCLPrBodyCostSummary itself (a local scriptblock, not an
+        exported function), matching this file's own established precedent
+        for a small, self-contained algorithm kept in sync by comment
+        cross-reference rather than a hard dependency (see this file's top
+        .NOTES on script:Get-CostBaselineHarvestRestCommentId's identical
+        mirror-not-depend choice).
     #>
     param([Parameter(Mandatory)][AllowEmptyString()][string]$PrBody)
 
     if ([string]::IsNullOrEmpty($PrBody)) { return $null }
 
     $normalized = $PrBody -replace "`r`n", "`n" -replace "`r", "`n"
-    $blockMatch = [regex]::Match($normalized, '(?s)<!--\s*pipeline-metrics\s*(?<block>.*?)\s*-->')
+
+    # ---- Fence-aware marker lookup: redact ```-fenced regions to a
+    # same-length filler (so byte offsets stay aligned with $normalized)
+    # before searching for the pipeline-metrics marker — mirrors
+    # cost-fcl-helpers.ps1's Set-FCLPrBodyCostSummary exactly. ----
+    $fencePattern = '(?s)```.*?```'
+    $redacted = [regex]::Replace($normalized, $fencePattern, { param($m) [string]::new('x', $m.Value.Length) })
+
+    $blockMatch = [regex]::Match($redacted, '(?s)<!--\s*pipeline-metrics\s*(?<block>.*?)\s*-->')
     if (-not $blockMatch.Success) { return $null }
 
-    return script:Get-FCLNestedScalar -Block $blockMatch.Groups['block'].Value -ParentKey 'cost_summary' -ChildKey 'capture_point'
+    $blockGroup = $blockMatch.Groups['block']
+    $blockText = $normalized.Substring($blockGroup.Index, $blockGroup.Length)
+
+    return script:Get-FCLNestedScalar -Block $blockText -ParentKey 'cost_summary' -ChildKey 'capture_point'
 }
 
 function script:Test-CostBaselineHarvestBodySummaryStale {
@@ -660,10 +788,15 @@ function script:Test-CostBaselineHarvestBodySummaryStale {
         Mirrors the shape of the existing
         script:Test-CostBaselineHarvestSectionStillCurrent precedent (a
         single, narrowly-scoped predicate) rather than folding this check
-        into a larger function. "Stale" covers three cases: a
+        into a larger function. "Stale" covers four cases: a
         never-refreshed mid-session value, the degraded-write sentinel
-        (`unavailable`), and the block-absent case — no cost_summary
-        subtree at all, the watchdog-kill first-write-lost scenario.
+        (`unavailable`), the documented `n/a` value (issue #489
+        post-review fix, C13 — `capture_point: n/a` means "excluded from
+        rolling-baseline aggregation" per cost-pattern-data-schema.md, and a
+        body stamped `n/a` under an already-promoted comment is equally
+        eligible for reconcile as any other non-current value), and the
+        block-absent case — no cost_summary subtree at all, the
+        watchdog-kill first-write-lost scenario.
     .OUTPUTS
         [bool]
     #>
@@ -672,7 +805,7 @@ function script:Test-CostBaselineHarvestBodySummaryStale {
     $bodyCapturePoint = script:Get-CostBaselineHarvestBodyCapturePoint -PrBody $PrBody
     if ([string]::IsNullOrWhiteSpace($bodyCapturePoint)) { return $true }
 
-    return $bodyCapturePoint -in @('pr-creation-mid-session', 'unavailable')
+    return $bodyCapturePoint -in @('pr-creation-mid-session', 'unavailable', 'n/a')
 }
 
 function script:Invoke-CostBaselineHarvestBodySummaryWrite {
@@ -797,30 +930,29 @@ function script:Invoke-CostBaselineHarvestReconcileCandidate {
         Reconciles ONE shortlisted PR's body against its own composite
         comment (issue #489 s5).
     .DESCRIPTION
-        Re-fetches the composite comment through the SAME fail-closed
-        authorship gate every other write path in this file uses — the
-        rolling-history shortlist that selected this PR carries no such
-        gate (see script:Select-CostBaselineHarvestReconcileCandidates), so
-        this re-fetch IS the real eligibility bound, not an optional extra.
-        Only when the gated section confirms capture_point: end-of-session,
-        and the PR body's (advisory-only) value looks stale, is a reconcile
-        write attempted — reusing that SAME gated section's own
-        already-computed totals; the untrusted body is never a data source,
-        only a trigger. Spends no re-count budget: never calls
-        Invoke-CostSessionRender. Fully fail-open: any failure along this
-        path (gh call failure, unparseable JSON, no matching section) is a
-        silent no-op, never a throw.
+        C9 (issue #489 post-review fix): fetches and checks the PR body's
+        own (advisory-only) staleness FIRST — a single cheap `gh pr view
+        --json body` round-trip — before ever fetching the composite
+        comment. The prior ordering paid the composite comment's full
+        authorship-gated `gh pr view --json comments` round-trip even when
+        the body already agreed with the comment (nothing to reconcile),
+        doubling the cost of the common already-current case for every
+        candidate. The trust model is UNCHANGED: the write still only ever
+        uses the composite comment's own fail-closed-gated data (re-fetched
+        through the SAME authorship gate every other write path in this
+        file uses — the rolling-history shortlist that selected this PR
+        carries no such gate, see
+        script:Select-CostBaselineHarvestReconcileCandidates), never the
+        untrusted body's own values — the body is read only to decide
+        WHETHER to fetch/act, both before and after this reorder. Only when
+        the body looks stale, AND the gated section confirms capture_point:
+        end-of-session, is a reconcile write attempted — reusing that SAME
+        gated section's own already-computed totals. Spends no re-count
+        budget: never calls Invoke-CostSessionRender. Fully fail-open: any
+        failure along this path (gh call failure, unparseable JSON, no
+        matching section) is a silent no-op, never a throw.
     #>
     param([Parameter(Mandatory)][int]$Pr)
-
-    $fetchResult = script:Get-CostBaselineHarvestCompositeComment -Pr $Pr
-    if ($null -eq $fetchResult -or -not $fetchResult['Found']) { return }
-
-    $sectionMatch = [regex]::Match($fetchResult['Body'], $script:FCLCostPatternSectionRegex)
-    if (-not $sectionMatch.Success) { return }
-
-    $section = $sectionMatch.Groups['section'].Value
-    if ((script:Get-FCLScalar -Block $section -Name 'capture_point') -ne 'end-of-session') { return }
 
     $liveJson = $null
     try { $liveJson = & gh pr view $Pr --json 'body' 2>$null } catch { $liveJson = $null }
@@ -838,6 +970,15 @@ function script:Invoke-CostBaselineHarvestReconcileCandidate {
     $liveBody = [string]$liveInfo.body
 
     if (-not (script:Test-CostBaselineHarvestBodySummaryStale -PrBody $liveBody)) { return }
+
+    $fetchResult = script:Get-CostBaselineHarvestCompositeComment -Pr $Pr
+    if ($null -eq $fetchResult -or -not $fetchResult['Found']) { return }
+
+    $sectionMatch = [regex]::Match($fetchResult['Body'], $script:FCLCostPatternSectionRegex)
+    if (-not $sectionMatch.Success) { return }
+
+    $section = $sectionMatch.Groups['section'].Value
+    if ((script:Get-FCLScalar -Block $section -Name 'capture_point') -ne 'end-of-session') { return }
 
     $costSummary = script:ConvertTo-CostBaselineHarvestSummaryFromSection -Section $section
     script:Invoke-CostBaselineHarvestBodySummaryWrite -Pr $Pr -PrBody $liveBody -CostSummary $costSummary -Outcome 'reconciled'
@@ -970,6 +1111,22 @@ function Invoke-CostBaselineHarvest {
         [string]$ProjectsRoot = '',
         [int]$HorizonDays = 14
     )
+
+    # C2 (issue #489 post-review fix), relocated from
+    # script:Get-CostBaselineHarvestCompositeComment (originally M2, issue
+    # #824 post-review fix): sets [Console]::OutputEncoding to UTF-8 — the
+    # established repo-wide guard (see orchestra-spine.ps1:15) against
+    # Windows silently decoding a `gh` child process's UTF-8 stdout via the
+    # OEM code page, which corrupts non-ASCII characters (—, ⚠, etc.) on
+    # every write-back. Fires UNCONDITIONALLY here, before ANY
+    # `gh`-invoking call anywhere in this function's execution path —
+    # scoping the pin to only the composite-comment fetcher regressed once
+    # Test-CostBaselineHarvestCandidateGate's own combined `gh pr view`
+    # fetch and the s5 reconcile pass's direct `gh pr view` calls could
+    # both run before the composite-comment fetcher ever fired in the same
+    # process (most commonly: the reconcile pass runs first and finds zero
+    # candidates, then the promotion-gate fetch runs unpinned).
+    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 
     $result = @{ Attempted = $false; Promoted = $false; Pr = $null; Signal = $null }
 

@@ -39,6 +39,16 @@
     review would still have left Invoke-FCLCostWalkerWithTimeout and
     Set-FCLCostCoverageMetadata throwing on their own callees.
 
+    C17 (issue #489 post-review fix): despite the "pure relocation" framing
+    above, this file is not exclusively a relocation target for
+    Invoke-CostSessionRender's dependency chain. Set-FCLPrBodyCostSummary and
+    Update-FCLPrBodyCostSummary (issue #489 s3) are a real, independently-
+    added PR-body cost-summary writer: Update-FCLPrBodyCostSummary performs
+    actual I/O (`gh pr edit --body-file`) and is NOT one of
+    Invoke-CostSessionRender's dependencies — it is the shared writer
+    consumed separately by the pipeline hook (frame-credit-ledger.ps1) and
+    the baseline harvest (cost-baseline-harvest.ps1).
+
 .NOTES
     Empirical verification (issue #824 post-review fix) also found that
     Invoke-CostSessionRender's OWN dependency chain needs several whole lib
@@ -684,6 +694,11 @@ function script:Set-FCLPrBodyCostSummary {
     $newSubtreeLines.Add('cost_summary:')
 
     $costUsdTotal = 0.0
+    # C7 (issue #489 post-review fix): distinguishes a genuinely unknown cost
+    # (the key is present but explicitly $null) from an absent/zero cost. A
+    # confident $0.0000 headline is a false claim when the real total is
+    # unknown, not zero.
+    $costUnknown = $false
     $sessionCompleteness = ''
     $capturePoint = ''
     $sourceComment = ''
@@ -695,8 +710,13 @@ function script:Set-FCLPrBodyCostSummary {
     else {
         $summary = if ($null -ne $CostSummary) { $CostSummary } else { @{} }
 
-        if ($summary.ContainsKey('cost_usd_total') -and $null -ne $summary['cost_usd_total']) {
-            $costUsdTotal = [double]$summary['cost_usd_total']
+        if ($summary.ContainsKey('cost_usd_total')) {
+            if ($null -eq $summary['cost_usd_total']) {
+                $costUnknown = $true
+            }
+            else {
+                $costUsdTotal = [double]$summary['cost_usd_total']
+            }
         }
 
         $tokens = if ($summary.ContainsKey('tokens') -and $summary['tokens'] -is [hashtable]) { $summary['tokens'] } else { @{} }
@@ -719,7 +739,20 @@ function script:Set-FCLPrBodyCostSummary {
             $sourceComment = [string]$summary['source_comment']
         }
 
-        $newSubtreeLines.Add('  cost_usd_total: ' + (script:Escape-FCLScalar -Value (script:Format-CostYaml -Value $costUsdTotal)))
+        if ($costUnknown) {
+            # Bare, unquoted YAML null — matches this repo's existing
+            # convention for a null cost field (cost-pattern-renderer.ps1's
+            # Format-CostRendererNullableCostYaml). Escape-FCLScalar is
+            # skipped here: the literal 'null' never needs YAML quoting
+            # (no ':', '#', or leading/trailing whitespace), so bypassing it
+            # keeps this bare-null branch obviously distinct from the normal
+            # numeric-scalar branch below rather than relying on
+            # Escape-FCLScalar happening to be a no-op for this value.
+            $newSubtreeLines.Add('  cost_usd_total: null')
+        }
+        else {
+            $newSubtreeLines.Add('  cost_usd_total: ' + (script:Escape-FCLScalar -Value (script:Format-CostYaml -Value $costUsdTotal)))
+        }
         $newSubtreeLines.Add('  tokens:')
         foreach ($tk in $tokenNames) {
             $newSubtreeLines.Add('    ' + $tk + ': ' + (script:Escape-FCLScalar -Value ($tokenValues[$tk]).ToString($inv)))
@@ -777,10 +810,43 @@ function script:Set-FCLPrBodyCostSummary {
         $visibleLine = '**Session cost**: unavailable (attribution degraded)'
     }
     else {
-        $costMarkdown = script:Format-Cost -Value $costUsdTotal
-        $visibleLine = "**Session cost**: $costMarkdown ($sessionCompleteness, $capturePoint)"
-        if (-not [string]::IsNullOrWhiteSpace($sourceComment)) {
-            $visibleLine += " - [full breakdown]($sourceComment)"
+        # C7: an explicitly unknown cost renders "unknown" instead of a
+        # confident dollar figure.
+        $costMarkdown = if ($costUnknown) { 'unknown' } else { script:Format-Cost -Value $costUsdTotal }
+
+        # C4 (issue #489 post-review fix): the YAML side of these three
+        # values is already escaped via Escape-FCLScalar; the visible
+        # markdown line used to interpolate them RAW — a real asymmetry on
+        # this load-bearing writer even with no attacker-controlled caller
+        # yet. Strip sentinel/HTML-comment-breakout substrings before they
+        # ever reach the visible line, and additionally strip characters
+        # that would break the [text](url) link shape out of the link
+        # target. This sanitization is visible-line-only; the YAML section
+        # above is unaffected.
+        $sanitizeForVisibleLine = {
+            param([string]$Value)
+            if ([string]::IsNullOrEmpty($Value)) { return $Value }
+            return ($Value -replace '<!--', '' -replace '-->', '')
+        }
+        $visibleSessionCompleteness = & $sanitizeForVisibleLine $sessionCompleteness
+        $visibleCapturePoint = & $sanitizeForVisibleLine $capturePoint
+        $visibleSourceComment = & $sanitizeForVisibleLine $sourceComment
+        if (-not [string]::IsNullOrEmpty($visibleSourceComment)) {
+            # A markdown link target additionally cannot contain ')' or
+            # whitespace without breaking the [text](url) shape.
+            $visibleSourceComment = $visibleSourceComment -replace '\)', '' -replace '\s', ''
+        }
+
+        # C7: an empty completeness/capture_point pair used to render a bare
+        # "(, )" — guard so the parenthetical is simply omitted instead.
+        $parenthetical = ''
+        if (-not [string]::IsNullOrWhiteSpace($visibleSessionCompleteness) -or -not [string]::IsNullOrWhiteSpace($visibleCapturePoint)) {
+            $parenthetical = " ($visibleSessionCompleteness, $visibleCapturePoint)"
+        }
+
+        $visibleLine = "**Session cost**: $costMarkdown$parenthetical"
+        if (-not [string]::IsNullOrWhiteSpace($visibleSourceComment)) {
+            $visibleLine += " - [full breakdown]($visibleSourceComment)"
         }
     }
 
@@ -834,12 +900,41 @@ function script:Repair-FCLCostSummarySentinelSpan {
         [Parameter(Mandatory)][string]$MarkerPattern
     )
 
+    # C3 (issue #489 post-review fix): this line-scan used to match sentinel
+    # strings against every raw line, with no fence redaction — unlike the
+    # block-location step above (and in Set-FCLPrBodyCostSummary), which
+    # deliberately redacts fenced ``` regions before matching. A fenced
+    # documentation example containing the literal sentinel strings would be
+    # misread as a real begin/end pair (or a real orphan) and mutated. Compute
+    # fenced-region character spans on the raw $Body up front so the per-line
+    # scan below can skip any line that falls inside a fence, matching the
+    # same fence-redaction discipline used elsewhere in this transform.
+    $fenceSpans = [System.Collections.Generic.List[object]]::new()
+    foreach ($fenceMatch in [regex]::Matches($Body, $FencePattern)) {
+        $fenceSpans.Add([pscustomobject]@{ Start = $fenceMatch.Index; End = ($fenceMatch.Index + $fenceMatch.Length) })
+    }
+
     $lines = @($Body -split "`n")
     $beginPattern = '^\s*<!--\s*cost-summary:begin\s*-->\s*$'
     $endPattern = '^\s*<!--\s*cost-summary:end\s*-->\s*$'
+    # C3: this writer's own visible line always starts with this exact
+    # literal (see the visible-line composition in Set-FCLPrBodyCostSummary,
+    # both the degraded and non-degraded branches). Only a line matching this
+    # shape is presumed to be this writer's own lost span content.
+    $visibleLineShapePattern = '^\s*\*\*Session cost\*\*:'
     $toRemove = [System.Collections.Generic.HashSet[int]]::new()
     $openStack = [System.Collections.Generic.List[int]]::new()
+    $lineStartOffset = 0
     for ($i = 0; $i -lt $lines.Count; $i++) {
+        $thisLineStart = $lineStartOffset
+        $lineStartOffset += $lines[$i].Length + 1
+
+        $inFence = $false
+        foreach ($span in $fenceSpans) {
+            if ($thisLineStart -ge $span.Start -and $thisLineStart -lt $span.End) { $inFence = $true; break }
+        }
+        if ($inFence) { continue }
+
         if ($lines[$i] -match $beginPattern) {
             $openStack.Add($i)
         }
@@ -857,7 +952,7 @@ function script:Repair-FCLCostSummarySentinelSpan {
     foreach ($idx in $openStack) {
         [void]$toRemove.Add($idx)
         $nextIdx = $idx + 1
-        if ($nextIdx -lt $lines.Count -and -not [string]::IsNullOrWhiteSpace($lines[$nextIdx])) {
+        if ($nextIdx -lt $lines.Count -and $lines[$nextIdx] -match $visibleLineShapePattern) {
             [void]$toRemove.Add($nextIdx)
         }
     }
@@ -887,41 +982,80 @@ function script:Repair-FCLCostSummarySentinelSpan {
 }
 
 function script:Update-FCLPrBodyCostSummary {
+    <#
+    .SYNOPSIS
+        Writes the cost_summary transform to the PR body via `gh pr edit`.
+    .OUTPUTS
+        Hashtable classifying the outcome (C12+C16, issue #489 post-review
+        fix): @{ Outcome = 'edited' } when the write succeeded and changed
+        something, @{ Outcome = 'noop' } when the transform was a fixed
+        point (no write attempted), or @{ Outcome = 'failed'; Reason = '...' }
+        when an exception occurred (transform failure or `gh pr edit`
+        failure) — Reason carries a human-readable description. Callers can
+        classify the result from this return value instead of inferring
+        success/failure from $LASTEXITCODE or calling the pure transform a
+        second time as a preview.
+    #>
     [CmdletBinding()]
+    [OutputType([hashtable])]
     param(
         [Parameter(Mandatory)][int]$Pr,
         [Parameter(Mandatory)][AllowEmptyString()][string]$PrBody,
         [Parameter(Mandatory)][bool]$Degraded,
-        [AllowNull()][hashtable]$CostSummary = $null
+        [AllowNull()][hashtable]$CostSummary = $null,
+        # C1 (issue #489 post-review fix): the no-op guard below used to
+        # compare its output only against -PrBody — its OWN input — never
+        # against the true GitHub original. When a caller passes a $PrBody
+        # that has ALREADY been through another upstream transform (e.g. a
+        # stale-spine metric fix applied before this writer runs), and the
+        # cost-summary transform happens to be a fixed point on THAT
+        # already-mutated text, the whole write — including the upstream
+        # mutation — was silently skipped. When supplied, the no-op decision
+        # compares the final text against -OriginalBody (what GitHub
+        # currently actually has) instead of -PrBody. Omitted by default so
+        # any caller not yet updated keeps today's exact behavior.
+        [AllowEmptyString()][string]$OriginalBody = $null
     )
+
+    # Local helper: both failure return points below need the identical
+    # "log to stderr, then classify as a failed outcome" shape (matches this
+    # file's existing convention of small local scriptblocks for a repeated
+    # shape — see $redactFences / $findTopLevelKeySubtreeBounds /
+    # $sanitizeForVisibleLine above in Set-FCLPrBodyCostSummary).
+    $newFailedOutcome = {
+        param([string]$Reason)
+        [Console]::Error.WriteLine("frame-credit-ledger: $Reason")
+        return @{ Outcome = 'failed'; Reason = $Reason }
+    }
 
     $updatedBody = $PrBody
     try {
         $updatedBody = script:Set-FCLPrBodyCostSummary -PrBody $PrBody -Degraded $Degraded -CostSummary $CostSummary
     }
     catch {
-        [Console]::Error.WriteLine("frame-credit-ledger: cost-summary transform failed: $($_.Exception.Message)")
-        return
+        return (& $newFailedOutcome "cost-summary transform failed: $($_.Exception.Message)")
     }
 
-    if ($updatedBody -eq $PrBody) {
+    $noOpComparisonBody = if ($PSBoundParameters.ContainsKey('OriginalBody')) { $OriginalBody } else { $PrBody }
+    if ($updatedBody -eq $noOpComparisonBody) {
         # No-op guard (issue #489 AC2/AC5): a true fixed point closes the
         # encoding/EOL churn window and shrinks the concurrent-overwrite
         # exposure on every unchanged re-run.
-        return
+        return @{ Outcome = 'noop' }
     }
 
+    $outcome = @{ Outcome = 'edited' }
     $tempPath = Join-Path ([System.IO.Path]::GetTempPath()) ("frame-credit-ledger-cost-summary-$Pr-$([System.Guid]::NewGuid().ToString('N')).md")
     try {
         $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
         [System.IO.File]::WriteAllText($tempPath, $updatedBody, $utf8NoBom)
         $null = & gh pr edit $Pr --body-file $tempPath 2>$null
         if ($global:LASTEXITCODE -ne 0) {
-            [Console]::Error.WriteLine("frame-credit-ledger: PR body cost-summary update failed via gh pr edit --body-file")
+            $outcome = & $newFailedOutcome 'PR body cost-summary update failed via gh pr edit --body-file'
         }
     }
     catch {
-        [Console]::Error.WriteLine("frame-credit-ledger: PR body cost-summary update failed: $($_.Exception.Message)")
+        $outcome = & $newFailedOutcome "PR body cost-summary update failed: $($_.Exception.Message)"
     }
     finally {
         try {
@@ -933,4 +1067,6 @@ function script:Update-FCLPrBodyCostSummary {
             [Console]::Error.WriteLine("frame-credit-ledger: temporary PR body cost-summary file cleanup failed: $($_.Exception.Message)")
         }
     }
+
+    return $outcome
 }

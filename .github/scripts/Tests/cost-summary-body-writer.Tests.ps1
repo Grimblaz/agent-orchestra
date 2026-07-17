@@ -121,6 +121,56 @@ credits:
 -->
 '@
 
+    $script:FencedSentinelDecoyBody = @'
+## Summary
+
+Example fenced sentinel usage:
+
+```text
+<!-- cost-summary:begin -->
+**Session cost**: $1.0000 (partial, capture) - [full breakdown](https://example.com/decoy)
+<!-- cost-summary:end -->
+```
+
+<!-- pipeline-metrics
+metrics_version: 4
+frame_version: 1
+credits:
+  - port: implement-code
+    status: passed
+-->
+'@
+
+    $script:BodyWithOrphanBeginAndUnrelatedProse = @'
+## Summary
+
+<!-- cost-summary:begin -->
+This is unrelated maintainer prose that happens to follow an orphaned begin marker.
+
+<!-- pipeline-metrics
+metrics_version: 4
+frame_version: 1
+credits:
+  - port: implement-code
+    status: passed
+-->
+'@
+
+    $script:BodyWithOrphanBeginAndStaleSessionCostLine = @'
+## Summary
+
+<!-- cost-summary:begin -->
+**Session cost**: $9.0000 (partial, mid-session) - [full breakdown](https://example.com/stale)
+
+<!-- pipeline-metrics
+metrics_version: 4
+frame_version: 1
+credits:
+  - port: implement-code
+    status: passed
+-->
+'@
+
     $script:BodyWithOrphanEnd = @'
 ## Summary
 
@@ -322,6 +372,56 @@ Describe 'Set-FCLPrBodyCostSummary — pure transform (issue #489 s3)' {
         $visibleLineMatch.Value | Should -Match '\$13\.4269 \(complete, end-of-session\)'
     }
 
+    It 'renders an explicit-null cost_usd_total as YAML null and "unknown" on the visible line, not a false $0.0000 (Fix 3, C7)' {
+        $body = & $script:NewV4Body $script:BaseYaml
+        $summary = $script:NewCostSummary.Clone()
+        $summary['cost_usd_total'] = $null
+
+        $result = script:Set-FCLPrBodyCostSummary -PrBody $body -Degraded $false -CostSummary $summary
+
+        $result | Should -Match 'cost_usd_total: null' -Because 'a genuinely unknown cost must use the same bare YAML null convention as cost-pattern-renderer.ps1''s Format-CostRendererNullableCostYaml'
+        $result | Should -Not -Match 'cost_usd_total: 0\.0000'
+        $visibleLineMatch = [regex]::Match($result, '\*\*Session cost\*\*:[^\r\n]*')
+        $visibleLineMatch.Value | Should -Match '\*\*Session cost\*\*: unknown' -Because 'an explicitly unknown cost must not render a confident $0.0000 headline'
+    }
+
+    It 'omits the parenthetical entirely when session_completeness and capture_point are both empty, instead of rendering (, ) (Fix 3, C7)' {
+        $body = & $script:NewV4Body $script:BaseYaml
+        $summary = $script:NewCostSummary.Clone()
+        $summary['session_completeness'] = ''
+        $summary['capture_point'] = ''
+
+        $result = script:Set-FCLPrBodyCostSummary -PrBody $body -Degraded $false -CostSummary $summary
+
+        $visibleLineMatch = [regex]::Match($result, '\*\*Session cost\*\*:[^\r\n]*')
+        $visibleLineMatch.Value | Should -Not -Match '\(, \)' -Because 'an empty completeness/capture pair must not render as a bare (, )'
+    }
+
+    It 'sanitizes an embedded sentinel-close string out of the visible line so a crafted capture_point cannot forge a premature cost-summary:end (Fix 4, C4)' {
+        $body = & $script:NewV4Body $script:BaseYaml
+        $summary = $script:NewCostSummary.Clone()
+        $summary['capture_point'] = 'end-of-session <!-- cost-summary:end --> injected'
+
+        $result = script:Set-FCLPrBodyCostSummary -PrBody $body -Degraded $false -CostSummary $summary
+
+        $visibleLineMatch = [regex]::Match($result, '\*\*Session cost\*\*:[^\r\n]*')
+        $visibleLineMatch.Value | Should -Not -Match '-->' -Because 'an unescaped sentinel-close substring on the visible line would let a crafted value forge a premature cost-summary:end'
+        ([regex]::Matches($result, '<!-- cost-summary:end -->')).Count | Should -Be 1 -Because 'exactly one real end sentinel must remain — the injected one must not have become a second real marker'
+    }
+
+    It 'strips characters that would break the markdown link shape out of a crafted source_comment link target (Fix 4, C4)' {
+        $body = & $script:NewV4Body $script:BaseYaml
+        $summary = $script:NewCostSummary.Clone()
+        $summary['source_comment'] = 'https://example.com/pr)  <!-- cost-summary:end --> (evil'
+
+        $result = script:Set-FCLPrBodyCostSummary -PrBody $body -Degraded $false -CostSummary $summary
+
+        $visibleLineMatch = [regex]::Match($result, '\*\*Session cost\*\*:[^\r\n]*')
+        $visibleLineMatch.Value | Should -Not -Match '-->'
+        $linkMatch = [regex]::Match($visibleLineMatch.Value, '\[full breakdown\]\((?<url>[^)]*)\)')
+        $linkMatch.Success | Should -Be $true -Because 'the link target must not contain an unescaped ) that would prematurely close the markdown link'
+    }
+
     It 'repairs a begin-without-end sentinel pathology to a single canonical span (item 11)' {
         $result = script:Set-FCLPrBodyCostSummary -PrBody $script:BodyWithOrphanBegin -Degraded $false -CostSummary $script:NewCostSummary
 
@@ -338,6 +438,32 @@ Describe 'Set-FCLPrBodyCostSummary — pure transform (issue #489 s3)' {
         ([regex]::Matches($result, '<!-- cost-summary:end -->')).Count | Should -Be 1
         $result | Should -Match 'Some stray text' -Because 'only the orphan marker LINE is removed, not surrounding prose'
         $result | Should -Match 'More text'
+    }
+
+    It 'does not touch cost-summary sentinel strings inside a fenced code-block example when repairing (Fix 2, C3, item a)' {
+        $result = script:Set-FCLPrBodyCostSummary -PrBody $script:FencedSentinelDecoyBody -Degraded $false -CostSummary $script:NewCostSummary
+
+        $result | Should -Match '(?s)```text.*?<!-- cost-summary:begin -->.*?\$1\.0000 \(partial, capture\).*?<!-- cost-summary:end -->.*?```' -Because 'the fenced decoy sentinel pair must remain untouched by the repair'
+        ([regex]::Matches($result, '<!-- cost-summary:begin -->')).Count | Should -Be 2 -Because 'one inside the fence (untouched) plus one real fresh span'
+        ([regex]::Matches($result, '<!-- cost-summary:end -->')).Count | Should -Be 2
+        $result | Should -Match '\$13\.4269' -Because 'a real fresh span must still be inserted with current data'
+    }
+
+    It 'preserves unrelated prose following an orphan begin marker that does not match this writer''s visible-line shape (Fix 2, C3, item b)' {
+        $result = script:Set-FCLPrBodyCostSummary -PrBody $script:BodyWithOrphanBeginAndUnrelatedProse -Degraded $false -CostSummary $script:NewCostSummary
+
+        $result | Should -Match 'This is unrelated maintainer prose that happens to follow an orphaned begin marker\.' -Because 'unrelated prose is not orphaned span content and must survive'
+        ([regex]::Matches($result, '<!-- cost-summary:begin -->')).Count | Should -Be 1
+        ([regex]::Matches($result, '<!-- cost-summary:end -->')).Count | Should -Be 1
+    }
+
+    It 'removes a genuine stale Session cost line following an orphan begin marker (Fix 2, C3, item c — the legitimate case the repair exists for)' {
+        $result = script:Set-FCLPrBodyCostSummary -PrBody $script:BodyWithOrphanBeginAndStaleSessionCostLine -Degraded $false -CostSummary $script:NewCostSummary
+
+        $result | Should -Not -Match '\$9\.0000 \(partial, mid-session\)' -Because 'a stale **Session cost**: line right after an orphan begin is this writer''s own lost span content'
+        $result | Should -Match '\$13\.4269'
+        ([regex]::Matches($result, '<!-- cost-summary:begin -->')).Count | Should -Be 1
+        ([regex]::Matches($result, '<!-- cost-summary:end -->')).Count | Should -Be 1
     }
 
     It 'collapses duplicated well-formed sentinel pairs to a single canonical span carrying the fresh hidden-YAML-authoritative content (item 11)' {
@@ -452,6 +578,33 @@ return ''
         $global:GhBodyFileContent | Should -Match 'cost_usd_total: 13\.4269'
     }
 
+    It 'compares against -OriginalBody instead of -PrBody for the no-op decision, so an already-mutated PrBody does not mask a real change (Fix 1, C1)' {
+        Install-CostSummaryGhMock
+        $trueOriginal = & $script:NewV4Body $script:BaseYaml -Prefix "## Summary`n`nUpstream mutation not yet applied.`n"
+        # $PrBody has ALREADY been through an upstream transform the caller
+        # applied before calling this writer (simulated here as a prefix text
+        # change), and the cost-summary transform is a fixed point ON THAT
+        # already-mutated text (seed it first so Set-FCLPrBodyCostSummary is a
+        # no-op when applied to $mutatedPrBody a second time).
+        $mutatedPrBody = $trueOriginal -replace 'Upstream mutation not yet applied\.', 'Upstream mutation ALREADY applied.'
+        $mutatedPrBody = script:Set-FCLPrBodyCostSummary -PrBody $mutatedPrBody -Degraded $false -CostSummary $script:NewCostSummary
+
+        script:Update-FCLPrBodyCostSummary -Pr 4890008 -PrBody $mutatedPrBody -Degraded $false -CostSummary $script:NewCostSummary -OriginalBody $trueOriginal
+
+        $global:GhCalls.Count | Should -Be 1 -Because 'the final text differs from the TRUE original (still missing the upstream mutation), so the write must fire even though the cost-summary transform was a no-op on the already-mutated PrBody'
+        $global:GhBodyFileContent | Should -Match 'Upstream mutation ALREADY applied\.' -Because 'the write must carry the upstream mutation through, not silently drop it'
+    }
+
+    It 'falls back to comparing against -PrBody when -OriginalBody is omitted, preserving current no-op behavior exactly (Fix 1 backward compatibility)' {
+        Install-CostSummaryGhMock
+        $body = & $script:NewV4Body $script:BaseYaml
+        $seeded = script:Set-FCLPrBodyCostSummary -PrBody $body -Degraded $false -CostSummary $script:NewCostSummary
+
+        script:Update-FCLPrBodyCostSummary -Pr 4890009 -PrBody $seeded -Degraded $false -CostSummary $script:NewCostSummary
+
+        $global:GhCalls.Count | Should -Be 0 -Because 'no -OriginalBody supplied means the pre-existing PrBody-vs-transform-output comparison must still apply'
+    }
+
     It 'skips the gh pr edit call entirely when the transform is a fixed point (item 9 no-op guard)' {
         Install-CostSummaryGhMock
         $body = & $script:NewV4Body $script:BaseYaml
@@ -478,6 +631,35 @@ return ''
 
         $threw | Should -Be $false
         $stderrWriter.ToString() | Should -Match '(?i)cost-summary'
+    }
+
+    It 'returns an edited-class outcome when the write succeeds (Fix 5, C12+C16)' {
+        Install-CostSummaryGhMock
+        $body = & $script:NewV4Body $script:BaseYaml
+
+        $outcome = script:Update-FCLPrBodyCostSummary -Pr 4890005 -PrBody $body -Degraded $false -CostSummary $script:NewCostSummary
+
+        $outcome.Outcome | Should -Be 'edited'
+    }
+
+    It 'returns a noop-class outcome when the transform is a fixed point (Fix 5)' {
+        Install-CostSummaryGhMock
+        $body = & $script:NewV4Body $script:BaseYaml
+        $seeded = script:Set-FCLPrBodyCostSummary -PrBody $body -Degraded $false -CostSummary $script:NewCostSummary
+
+        $outcome = script:Update-FCLPrBodyCostSummary -Pr 4890006 -PrBody $seeded -Degraded $false -CostSummary $script:NewCostSummary
+
+        $outcome.Outcome | Should -Be 'noop'
+    }
+
+    It 'returns a failed-class outcome with a reason when gh pr edit fails (Fix 5)' {
+        Install-CostSummaryGhMock -ExitCode 1
+        $body = & $script:NewV4Body $script:BaseYaml
+
+        $outcome = script:Update-FCLPrBodyCostSummary -Pr 4890007 -PrBody $body -Degraded $false -CostSummary $script:NewCostSummary
+
+        $outcome.Outcome | Should -Be 'failed'
+        $outcome.Reason | Should -Match '(?i)cost-summary'
     }
 
     It 'fails open when the pure transform itself throws' {
