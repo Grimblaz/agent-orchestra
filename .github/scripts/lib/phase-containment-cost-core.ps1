@@ -969,6 +969,45 @@ function script:Get-DispositionsLandingGapSupplementalAuthorLogin {
     return [string]$author['login']
 }
 
+function script:ConvertTo-DispositionsLandingGapIsoString {
+    <#
+    .SYNOPSIS
+        Coerces a parsed GraphQL date/timestamp field back to a raw ISO8601
+        string, undoing PowerShell's own implicit ConvertFrom-Json date
+        auto-conversion (issue #869 post-review, found while adding finding
+        D1's real GraphQL-mock test coverage).
+    .DESCRIPTION
+        ConvertFrom-Json -AsHashtable (System.Text.Json-backed, PowerShell
+        7+) silently auto-converts an ISO8601-shaped JSON string value (e.g.
+        `mergedAt`/`createdAt`) into a real [datetime] object -- a bare
+        `[string]$value` cast on that object then renders it via the
+        CURRENT CULTURE's default DateTime format (e.g.
+        '05/01/2026 00:00:00'), silently dropping the 'Z'/UTC marker this
+        function's own .OUTPUTS docstring promises stays "raw, unconverted".
+        A downstream [datetime]::Parse(..., RoundtripKind) (as
+        Get-DispositionsLandingGap's ship-date floor partition performs)
+        then mis-resolves DateTimeKind.Unspecified instead of Utc for a
+        genuinely-UTC merge timestamp. Mirrors the frozen
+        phase-containment-rolling-history-core.ps1's own private
+        script:ConvertTo-PhaseContainmentIsoString helper (`if ($Value -is
+        [datetime]) { return $Value.ToString('o') }; return [string]$Value`)
+        -- duplicated here in miniature rather than reached into cross-file,
+        the SAME documented convention this file already uses for
+        Get-DispositionsLandingGapSupplementalAuthorLogin (that helper is
+        script:-scoped/private to the frozen file, unlike the exported
+        functions this file's other new code reuses).
+    .PARAMETER Value
+        The raw hashtable field value (either a [datetime], if
+        auto-converted, or the original [string]).
+    .OUTPUTS
+        [string] — ISO8601 round-trip ('o') format when Value was
+        auto-converted to [datetime]; otherwise Value cast to [string].
+    #>
+    param([AllowNull()]$Value)
+    if ($Value -is [datetime]) { return $Value.ToString('o') }
+    return [string]$Value
+}
+
 function script:Add-DispositionsLandingGapSupplementalCommentNodes {
     <#
     .SYNOPSIS
@@ -997,14 +1036,25 @@ function script:Add-DispositionsLandingGapSupplementalCommentNodes {
     #>
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Nodes,
-        [Parameter(Mandatory)][System.Collections.Generic.List[string]]$Bodies,
-        [Parameter(Mandatory)][System.Collections.Generic.List[string]]$CreatedAtValues,
-        [Parameter(Mandatory)][System.Collections.Generic.List[string]]$AuthorLogins
+        # [AllowEmptyCollection()] fix (found while adding issue #869
+        # post-review finding D1's own real GraphQL-mock test coverage):
+        # every call site passes a FRESHLY-CREATED, still-empty
+        # List[string] as the initial accumulator -- without this
+        # attribute, PowerShell's Mandatory collection-parameter binding
+        # rejects an empty List[string] outright ("Cannot bind argument...
+        # because it is an empty collection"), so this function has always
+        # thrown on its very first invocation per PR, silently degrading
+        # Get-DispositionsLandingGapSupplementalCorpus to a failed-fetch
+        # Source on every real run -- undetected until D1 added coverage
+        # that actually drives this function instead of mocking it whole.
+        [Parameter(Mandatory)][AllowEmptyCollection()][System.Collections.Generic.List[string]]$Bodies,
+        [Parameter(Mandatory)][AllowEmptyCollection()][System.Collections.Generic.List[string]]$CreatedAtValues,
+        [Parameter(Mandatory)][AllowEmptyCollection()][System.Collections.Generic.List[string]]$AuthorLogins
     )
     foreach ($cn in $Nodes) {
         if ($null -ne $cn) {
             $Bodies.Add([string]$cn['body'])
-            $CreatedAtValues.Add([string]$cn['createdAt'])
+            $CreatedAtValues.Add((script:ConvertTo-DispositionsLandingGapIsoString -Value $cn['createdAt']))
             $AuthorLogins.Add((script:Get-DispositionsLandingGapSupplementalAuthorLogin -CommentNode $cn))
         }
     }
@@ -1056,6 +1106,13 @@ function Get-DispositionsLandingGapSupplementalCorpus {
         Get-PhaseContainmentCommentCorpus's default so callers can pass the
         SAME -WindowDays to both fetches and get population-comparable
         results).
+    .PARAMETER Token
+        GitHub token. Currently unused (gh CLI uses ambient auth). Reserved
+        for future use (issue #869 post-review finding H6 — matches
+        Get-PhaseContainmentCommentCorpus's own -Token convention in the
+        frozen phase-containment-rolling-history-core.ps1, replicated here
+        rather than re-derived, so this fetch's call-site shape matches the
+        report's other corpus fetches).
     .PARAMETER TimeoutSeconds
         Per-run budget in seconds. Default: 30.
     .OUTPUTS
@@ -1065,7 +1122,8 @@ function Get-DispositionsLandingGapSupplementalCorpus {
                     [int]; Bodies [string[]]; CreatedAtValues [string[]];
                     AuthorLogins [string[]] }
           FetchedAt [datetime]
-          Source    [string] — 'graphql' | 'timeout' | 'repo-resolution-failed'
+          Source    [string] — 'graphql' | 'graphql-failed' | 'timeout' |
+                    'repo-resolution-failed'
           Truncated [bool]
     #>
     [CmdletBinding()]
@@ -1074,6 +1132,7 @@ function Get-DispositionsLandingGapSupplementalCorpus {
         [string]$RepoOwner   = '',
         [string]$RepoName    = '',
         [int]$WindowDays     = 90,
+        [string]$Token       = '',
         [int]$TimeoutSeconds = 30
     )
 
@@ -1146,14 +1205,21 @@ function Get-DispositionsLandingGapSupplementalCorpus {
 
             $output = & gh api graphql -f "query=$query" 2>$null
             if ($LASTEXITCODE -ne 0) {
+                # Issue #869 post-review finding H5: a non-zero gh exit here
+                # is a gh CLI / auth failure, NOT a stopwatch timeout --
+                # Source = 'graphql-failed' distinguishes it so a maintainer
+                # does not chase latency for an auth problem.
                 Write-Warning "phase-containment-cost-core: supplemental GraphQL search failed (exit $LASTEXITCODE)"
-                return [PSCustomObject]@{ Tuples = @(); FetchedAt = (Get-Date); Source = 'timeout'; Truncated = $false }
+                return [PSCustomObject]@{ Tuples = @(); FetchedAt = (Get-Date); Source = 'graphql-failed'; Truncated = $false }
             }
 
             $parsed = ($output | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop
             if ($parsed.ContainsKey('errors') -and $null -ne $parsed['errors'] -and @($parsed['errors']).Count -gt 0) {
+                # Issue #869 post-review finding H5: a GraphQL `errors`
+                # payload is a malformed-response failure, NOT a timeout --
+                # Source = 'graphql-failed'.
                 Write-Warning "phase-containment-cost-core: supplemental GraphQL returned errors"
-                return [PSCustomObject]@{ Tuples = @(); FetchedAt = (Get-Date); Source = 'timeout'; Truncated = $false }
+                return [PSCustomObject]@{ Tuples = @(); FetchedAt = (Get-Date); Source = 'graphql-failed'; Truncated = $false }
             }
 
             $searchBlock = $parsed['data']['search']
@@ -1162,7 +1228,7 @@ function Get-DispositionsLandingGapSupplementalCorpus {
             foreach ($prNode in $nodes) {
                 if ($null -eq $prNode) { continue }
                 $prNum = [int]$prNode['number']
-                $mergedAt = [string]$prNode['mergedAt']
+                $mergedAt = script:ConvertTo-DispositionsLandingGapIsoString -Value $prNode['mergedAt']
                 $additions = [int]$prNode['additions']
                 $deletions = [int]$prNode['deletions']
 
@@ -1244,8 +1310,11 @@ function Get-DispositionsLandingGapSupplementalCorpus {
         }
     }
     catch {
+        # Issue #869 post-review finding H5: a JSON parse failure is a
+        # malformed-response failure, NOT a timeout -- Source =
+        # 'graphql-failed'.
         Write-Warning "phase-containment-cost-core: failed to parse supplemental GraphQL response: $_"
-        return [PSCustomObject]@{ Tuples = @(); FetchedAt = (Get-Date); Source = 'timeout'; Truncated = $false }
+        return [PSCustomObject]@{ Tuples = @(); FetchedAt = (Get-Date); Source = 'graphql-failed'; Truncated = $false }
     }
 
     return [PSCustomObject]@{
@@ -1278,12 +1347,22 @@ function Get-DispositionsLandingGap {
 
         Two data paths:
 
-        (a) Landing gap — corpus (a) is rulings-anchored: Surface B only
-        admits a merged PR when its joined comment text matches the
-        judge-rulings head regex, so every Surface='pr' tuple here already
-        has judge-rulings evidence. For each such tuple, this checks
-        whether it ALSO carries a real, judge-authored
-        `review-dispositions-{PR}` marker head
+        (a) Landing gap — corpus (a)'s own admission test
+        (phase-containment-rolling-history-core.ps1, frozen) is a LOOSE raw
+        `<!--\s*judge-rulings` regex with NO vocab gate, so a Surface='pr'
+        tuple's admission does NOT by itself guarantee real judge-rulings
+        evidence — a decoy/malformed mention (e.g. inside a fenced
+        illustrative code block) can loose-admit a tuple here. Data path
+        (b) below's own skip-guard uses the STRICT vocab-gated
+        Test-JudgeRulingsRealHeadPresent; since strict is a subset of loose,
+        an un-rechecked tuple here could be processed by BOTH data paths at
+        once (double-counted) — issue #869 post-review finding A. This loop
+        therefore re-verifies each tuple with the SAME strict check (b)
+        uses before processing it: a tuple with no strict-passing body does
+        not belong to (a) at all and is skipped (picked up by (b) instead,
+        since (b)'s own strict check rejects it too). For each
+        strict-verified tuple, this checks whether it ALSO carries a real,
+        judge-authored `review-dispositions-{PR}` marker head
         (Get-DispositionsLandingGapMarkerContribution, above). No marker ->
         landing gap. This numerator stays corpus (a)-only, per locked
         design decision d2 — the supplemental fetch (b) below NEVER
@@ -1297,8 +1376,10 @@ function Get-DispositionsLandingGap {
         NO real judge-rulings head anywhere in its comments (unauthored-
         gated: judge-rulings evidence from ANY commenter counts, matching
         Get-ReviewCostRollup's own Test-JudgeRulingsRealHeadPresent reuse) —
-        a tuple WITH judge-rulings evidence is already data path (a)'s
-        domain and is skipped here to avoid double-counting — this derives:
+        a tuple WITH real (strict) judge-rulings evidence is already data
+        path (a)'s domain and is skipped here to avoid double-counting
+        (its PR number is tracked for the beyond-hunt-cap check (e) below)
+        — this derives:
           (i)  integrity-warning arm: a real, judge-authored
                review-dispositions marker head IS present -> a genuine
                data-integrity anomaly (marker without judge evidence),
@@ -1312,8 +1393,9 @@ function Get-DispositionsLandingGap {
         among PRs carrying a real, judge-authored review-dispositions
         marker from EITHER data path (data path (a)'s covered PRs, and data
         path (b)'s integrity-warning arm — mutually exclusive sets by
-        construction, since (a) requires judge-rulings evidence and (b)'s
-        arm requires its absence), counts how many carry the marker WITHOUT
+        construction now that (a) strict-verifies before processing:
+        (a) requires real judge-rulings evidence and (b)'s arm requires its
+        absence), counts how many carry the marker WITHOUT
         `external_sources_reconciled` present (internal-mode signature) vs
         WITH it present (GitHub-Review-Mode signature, S6-eligible). Per
         skills/review-judgment/SKILL.md, `external_sources_reconciled` is a
@@ -1334,6 +1416,21 @@ function Get-DispositionsLandingGap {
         silently guessed into either bucket. When -FixShipDate is omitted,
         the landing-gap count renders unpartitioned with a
         floor-not-configured note (see Format-DispositionsLandingGapSection).
+        -FixShipDate is interpreted as UTC: a date-only value parses with
+        DateTimeKind.Unspecified and is normalized to UTC midnight before
+        comparison, since mergedAt is always UTC (issue #869 post-review
+        finding G).
+
+        (e) Beyond-hunt-cap — a supplemental tuple skipped from (b) above
+        because it strict-passes judge-rulings ($hasJudgeRulingsAnywhere)
+        is assumed to be corpus (a)'s domain, but corpus (a)'s own marker
+        hunt is capped at 5 pages (phase-containment-rolling-history-core.ps1,
+        frozen): a judge-rulings marker beyond that cap leaves the PR
+        unadmitted to (a) entirely, making it silently invisible to BOTH
+        data paths. This is detected (only when both fetches succeeded) by
+        diffing the skipped-for-(a) PR numbers against corpus (a)'s actual
+        admitted PR numbers, and surfaced via BeyondHuntCapCount /
+        BeyondHuntCapPrNumbers — issue #869 post-review finding D2.
     .PARAMETER Tuples
         The Tuples array from Get-PhaseContainmentCommentCorpus (data path
         a; reused, never re-fetched by this function).
@@ -1346,8 +1443,8 @@ function Get-DispositionsLandingGap {
         The Tuples array from Get-DispositionsLandingGapSupplementalCorpus
         (data path b).
     .PARAMETER SupplementalSource
-        The supplemental fetch's Source flag: 'graphql' | 'timeout' |
-        'repo-resolution-failed'.
+        The supplemental fetch's Source flag: 'graphql' | 'graphql-failed' |
+        'timeout' | 'repo-resolution-failed'.
     .PARAMETER SupplementalTruncated
         The supplemental fetch's Truncated flag, passed through unchanged.
     .PARAMETER JudgeLogin
@@ -1359,7 +1456,11 @@ function Get-DispositionsLandingGap {
         callers must supply the resolved identity explicitly.
     .PARAMETER FixShipDate
         Optional. When supplied, partitions the landing-gap PRs into
-        post-ship / pre-ship-backlog (see (d) above).
+        post-ship / pre-ship-backlog (see (d) above). Interpreted as UTC:
+        a date-only value (e.g. '2026-07-18', which parses with
+        DateTimeKind.Unspecified) is normalized to UTC midnight before
+        comparison against mergedAt (always UTC) — issue #869 post-review
+        finding G.
     .OUTPUTS
         [PSCustomObject] with:
           FetchState              [string] — 'ok' | 'unavailable' (corpus a)
@@ -1380,6 +1481,16 @@ function Get-DispositionsLandingGap {
           InternalOnlyCoverage    [PSCustomObject] — InternalOnlyCount [int],
                                   ExternalReconciledCount [int],
                                   CouldNotVerifyCount [int]
+          BeyondHuntCapCount      [int] — supplemental tuples with real
+                                  judge-rulings evidence whose PR number never
+                                  made it into corpus (a) at all (corpus (a)'s
+                                  own marker hunt is capped at 5 pages,
+                                  frozen) — invisible to both data paths
+                                  otherwise. 0 when either fetch is
+                                  unavailable (issue #869 post-review finding
+                                  D2).
+          BeyondHuntCapPrNumbers  [int[]] — the PR numbers behind
+                                  BeyondHuntCapCount.
     #>
     [CmdletBinding()]
     [OutputType([PSCustomObject])]
@@ -1388,10 +1499,10 @@ function Get-DispositionsLandingGap {
         [Parameter(Mandatory)][ValidateSet('graphql', 'rest', 'timeout', 'repo-resolution-failed')][string]$Source,
         [Parameter(Mandatory)][bool]$Truncated,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$SupplementalTuples,
-        [Parameter(Mandatory)][ValidateSet('graphql', 'timeout', 'repo-resolution-failed')][string]$SupplementalSource,
+        [Parameter(Mandatory)][ValidateSet('graphql', 'graphql-failed', 'timeout', 'repo-resolution-failed')][string]$SupplementalSource,
         [Parameter(Mandatory)][bool]$SupplementalTruncated,
         [Parameter(Mandatory)][AllowEmptyString()][string]$JudgeLogin,
-        [Nullable[datetime]]$FixShipDate
+        [Nullable[datetime]]$FixShipDate = $null
     )
 
     if ([string]::IsNullOrWhiteSpace($JudgeLogin)) {
@@ -1399,7 +1510,7 @@ function Get-DispositionsLandingGap {
     }
 
     $fetchAUnavailable = $Source -in @('timeout', 'repo-resolution-failed')
-    $fetchBUnavailable = $SupplementalSource -in @('timeout', 'repo-resolution-failed')
+    $fetchBUnavailable = $SupplementalSource -in @('timeout', 'graphql-failed', 'repo-resolution-failed')
 
     $landingGapPrNumbers = [System.Collections.Generic.List[int]]::new()
     $landingGapMergedAtByNumber = [System.Collections.Generic.Dictionary[int, string]]::new()
@@ -1409,6 +1520,7 @@ function Get-DispositionsLandingGap {
     $integrityWarningPrNumbers = [System.Collections.Generic.List[int]]::new()
     $unreviewedTrivialCount = 0
     $unreviewedSubstantiveCount = 0
+    $skippedForAHandoffPrNumbers = [System.Collections.Generic.List[int]]::new()
 
     # ---- data path (a): landing gap + its internal-only-coverage contribution ----
     if (-not $fetchAUnavailable) {
@@ -1417,6 +1529,23 @@ function Get-DispositionsLandingGap {
             $number = [int]$tuple.Number
             $bodies = @($tuple.Bodies)
             $authorLogins = @($tuple.AuthorLogins)
+
+            # Finding A fix (issue #869 post-review, THE core fix): corpus
+            # (a)'s own admission regex is a LOOSE raw match with no vocab
+            # gate, while data path (b) below skip-guards on the STRICT
+            # vocab-gated Test-JudgeRulingsRealHeadPresent. Re-verify with
+            # the SAME strict check before processing -- a tuple with no
+            # strict-passing body does not belong to (a) at all (it belongs
+            # to (b)'s population instead; (b)'s own strict check rejects it
+            # too, so it lands there, never both, never neither).
+            $hasStrictJudgeRulings = $false
+            foreach ($b in $bodies) {
+                if (Test-JudgeRulingsRealHeadPresent -Body ([string]$b) -Surface 'code-review') {
+                    $hasStrictJudgeRulings = $true
+                    break
+                }
+            }
+            if (-not $hasStrictJudgeRulings) { continue }
 
             $contrib = Get-DispositionsLandingGapMarkerContribution -Bodies $bodies -AuthorLogins $authorLogins -JudgeLogin $JudgeLogin -Number $number
             if (-not $contrib.HasMarker) {
@@ -1454,6 +1583,10 @@ function Get-DispositionsLandingGap {
             }
             if ($hasJudgeRulingsAnywhere) {
                 # Already data path (a)'s domain -- never double-count here.
+                # Tracked for (e)'s beyond-hunt-cap check below (issue #869
+                # post-review finding D2): this PR may not actually have
+                # made it into corpus (a) at all.
+                $skippedForAHandoffPrNumbers.Add($number)
                 continue
             }
 
@@ -1478,12 +1611,47 @@ function Get-DispositionsLandingGap {
         }
     }
 
+    # ---- (e): beyond-hunt-cap detection (issue #869 post-review finding D2) ----
+    # A supplemental tuple strict-passing judge-rulings (skipped above as
+    # "already (a)'s domain") whose PR number never actually made it into
+    # corpus (a)'s Tuples -- because corpus (a)'s own marker hunt is capped
+    # at 5 pages (phase-containment-rolling-history-core.ps1, frozen) --
+    # would otherwise be silently invisible to BOTH data paths. Detected
+    # only when both fetches succeeded (no honest signal otherwise).
+    $beyondHuntCapPrNumbers = [System.Collections.Generic.List[int]]::new()
+    if (-not $fetchAUnavailable -and -not $fetchBUnavailable) {
+        $aAdmittedPrNumbers = [System.Collections.Generic.HashSet[int]]::new()
+        foreach ($t in $Tuples) {
+            if ([string]$t.Surface -eq 'pr') { [void]$aAdmittedPrNumbers.Add([int]$t.Number) }
+        }
+        foreach ($num in $skippedForAHandoffPrNumbers) {
+            if (-not $aAdmittedPrNumbers.Contains($num)) { $beyondHuntCapPrNumbers.Add($num) }
+        }
+    }
+
     # ---- (d): ship-date floor partition ----
     $landingGapTotalCount = $landingGapPrNumbers.Count
     $partitioned = $null -ne $FixShipDate
     $postShipCount = 0
     $preShipBacklogCount = 0
     $mergedAtUnresolvedCount = 0
+
+    # Finding G fix (issue #869 post-review): -FixShipDate is interpreted as
+    # UTC. mergedAt parses with RoundtripKind (always UTC), but a date-only
+    # CLI value (e.g. '2026-07-18') parses with DateTimeKind.Unspecified,
+    # and .NET DateTime comparison ignores Kind (raw ticks) -- normalize an
+    # Unspecified value to UTC before comparing so date-only input is
+    # unambiguously UTC-midnight. NOTE: PowerShell unwraps a bound
+    # [Nullable[datetime]] parameter to a plain [datetime] once a value is
+    # supplied (not a System.Nullable<DateTime> instance) -- $FixShipDate
+    # itself is used directly here, not $FixShipDate.Value.
+    $normalizedFixShipDate = $null
+    if ($partitioned) {
+        $normalizedFixShipDate = $FixShipDate
+        if ($normalizedFixShipDate.Kind -eq [DateTimeKind]::Unspecified) {
+            $normalizedFixShipDate = [DateTime]::SpecifyKind($normalizedFixShipDate, [DateTimeKind]::Utc)
+        }
+    }
 
     if ($partitioned) {
         foreach ($num in $landingGapPrNumbers) {
@@ -1496,7 +1664,7 @@ function Get-DispositionsLandingGap {
                 $mergedAtUnresolvedCount++
                 continue
             }
-            if ($mergedAtDt -gt $FixShipDate) {
+            if ($mergedAtDt -gt $normalizedFixShipDate) {
                 $postShipCount++
             }
             else {
@@ -1533,6 +1701,8 @@ function Get-DispositionsLandingGap {
             ExternalReconciledCount = $externalReconciledCount
             CouldNotVerifyCount     = $internalCoverageCouldNotVerifyCount
         }
+        BeyondHuntCapCount      = $beyondHuntCapPrNumbers.Count
+        BeyondHuntCapPrNumbers  = $beyondHuntCapPrNumbers.ToArray()
     }
 }
 
@@ -1566,6 +1736,12 @@ function Format-DispositionsLandingGapSection {
         is unavailable, since its count unions both data paths (issue #869
         s4 (c)) and a single-side outage silently undercounts it rather
         than zeroing it cleanly.
+
+        Also renders (issue #869 post-review finding B) a one-line
+        identity-mismatch caveat naming the -JudgeLogin value the
+        marker-authorship gate used this run, and (finding D2) a
+        beyond-hunt-cap CAUTION line naming any PR(s) invisible to both
+        data paths because corpus (a)'s marker hunt cap was exceeded.
     .PARAMETER Rollup
         The Get-DispositionsLandingGap return object.
     .PARAMETER WindowDays
@@ -1573,6 +1749,12 @@ function Format-DispositionsLandingGapSection {
         (A)). Rendered in the section header so readers can tell this
         metric's raw counts apart from issue #869's own hand-counted
         ~41-day-window figures without cross-referencing CLI defaults.
+    .PARAMETER JudgeLogin
+        The -JudgeLogin value passed to the Get-DispositionsLandingGap call
+        that produced Rollup (issue #869 post-review finding B). Rendered as
+        an identity-mismatch caveat: if this run's identity differs from the
+        actual review pipeline's judge account, the landing-gap count above
+        may be inflated (never falsely clean) — see issue #842.
     .OUTPUTS
         [string[]] — the report lines.
     #>
@@ -1580,7 +1762,8 @@ function Format-DispositionsLandingGapSection {
     [OutputType([string[]])]
     param(
         [Parameter(Mandatory)][object]$Rollup,
-        [Parameter(Mandatory)][int]$WindowDays
+        [Parameter(Mandatory)][int]$WindowDays,
+        [Parameter(Mandatory)][string]$JudgeLogin
     )
 
     $fetchAUnavailable = $Rollup.FetchState -eq 'unavailable'
@@ -1590,6 +1773,8 @@ function Format-DispositionsLandingGapSection {
     $lines.Add('')
     $lines.Add("Review-Dispositions Landing Gap (presentation-only, ${WindowDays}d window)")
     $lines.Add('')
+    $lines.Add("Note: marker authorship is gated on -JudgeLogin '$JudgeLogin'; if this run's identity differs from the actual review pipeline's judge account, the landing-gap count above may be inflated (never falsely clean) -- see issue #842.")
+    $lines.Add('')
 
     if ($Rollup.Truncated) {
         $lines.Add('CAUTION: the review-cost comment corpus fetch (data path a) was Truncated -- the landing-gap count below may be computed from an incomplete population.')
@@ -1598,6 +1783,14 @@ function Format-DispositionsLandingGapSection {
         $lines.Add('CAUTION: the supplemental fetch (data path b) was Truncated -- the integrity-warning/unreviewed-split counts below may be computed from an incomplete population.')
     }
     if ($Rollup.Truncated -or $Rollup.SupplementalTruncated) {
+        $lines.Add('')
+    }
+
+    $beyondHuntCapCountProp = $Rollup.PSObject.Properties['BeyondHuntCapCount']
+    $beyondHuntCapCount = if ($null -ne $beyondHuntCapCountProp) { [int]$beyondHuntCapCountProp.Value } else { 0 }
+    if ($beyondHuntCapCount -gt 0) {
+        $bhcPrList = ($Rollup.BeyondHuntCapPrNumbers | ForEach-Object { "#$_" }) -join ', '
+        $lines.Add("CAUTION: $beyondHuntCapCount PR(s) had judge-rulings evidence beyond corpus (a)'s hunt-page cap and are excluded from both the landing-gap and unreviewed-split counts: $bhcPrList")
         $lines.Add('')
     }
 

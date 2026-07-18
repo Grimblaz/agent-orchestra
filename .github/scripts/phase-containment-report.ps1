@@ -49,7 +49,7 @@
     pwsh -File .github/scripts/phase-containment-report.ps1
     pwsh -File .github/scripts/phase-containment-report.ps1 -WindowDays 30
     pwsh -File .github/scripts/phase-containment-report.ps1 -ValueCacheOk
-    pwsh -File .github/scripts/phase-containment-report.ps1 -FixShipDate '2026-07-18'
+    pwsh -File .github/scripts/phase-containment-report.ps1 -FixShipDate '2026-07-18'  # interpreted as UTC
 #>
 
 param(
@@ -71,7 +71,10 @@ param(
     # pre-ship backlog (not alarmed). Omitted by default -- the landing-gap
     # row then renders as a single unpartitioned count with a
     # floor-not-configured note (see Format-DispositionsLandingGapSection).
-    [Nullable[datetime]]$FixShipDate
+    # Interpreted as UTC: a date-only value (DateTimeKind.Unspecified) is
+    # normalized to UTC midnight before comparison (issue #869 post-review
+    # finding G).
+    [Nullable[datetime]]$FixShipDate = $null
 )
 
 Set-StrictMode -Version Latest
@@ -516,6 +519,12 @@ function Invoke-PhaseContainmentReportCli {
         alone -- that check can no longer distinguish an explicit caller
         value from an auto-resolved one once the script always forwards a
         concrete -JudgeLogin. Direct function callers normally omit this.
+    .PARAMETER FixShipDate
+        Issue #869 s4: forwarded to Get-DispositionsLandingGap unchanged.
+        Interpreted as UTC: a date-only value (e.g. '2026-07-18', which
+        parses with DateTimeKind.Unspecified) is normalized to UTC midnight
+        before comparison against mergedAt (always UTC) — issue #869
+        post-review finding G.
     .OUTPUTS
         [string[]] — the full report (value report + cost section, or value
         report + degradation/caveat lines), written via Write-Output.
@@ -540,7 +549,7 @@ function Invoke-PhaseContainmentReportCli {
         # below, unchanged from before this fix.
         [string]$JudgeLoginSource,
         # Issue #869 s4: forwarded to Get-DispositionsLandingGap unchanged.
-        [Nullable[datetime]]$FixShipDate
+        [Nullable[datetime]]$FixShipDate = $null
     )
 
     # ---- Function-level identity resolution gate (issue #842 M4) ----
@@ -788,14 +797,14 @@ function Invoke-PhaseContainmentReportCli {
             throw $corpusError
         }
 
-        $supplementalCorpus = Get-DispositionsLandingGapSupplementalCorpus -RepoOwner $RepoOwner -RepoName $RepoName -WindowDays $WindowDays
+        $supplementalCorpus = Get-DispositionsLandingGapSupplementalCorpus -RepoOwner $RepoOwner -RepoName $RepoName -WindowDays $WindowDays -Token $Token
 
         $landingGapRollup = Get-DispositionsLandingGap `
             -Tuples $corpus.Tuples -Source $corpus.Source -Truncated $corpus.Truncated `
             -SupplementalTuples $supplementalCorpus.Tuples -SupplementalSource $supplementalCorpus.Source -SupplementalTruncated $supplementalCorpus.Truncated `
             -JudgeLogin $JudgeLogin -FixShipDate $FixShipDate
 
-        Format-DispositionsLandingGapSection -Rollup $landingGapRollup -WindowDays $WindowDays | Write-Output
+        Format-DispositionsLandingGapSection -Rollup $landingGapRollup -WindowDays $WindowDays -JudgeLogin $JudgeLogin | Write-Output
     }
     catch {
         Write-Output ''
