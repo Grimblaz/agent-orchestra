@@ -61,6 +61,8 @@ When delegating discovery to a subagent, keep the brief read-only and scope it t
 - Missing information, technical unknowns, and feasibility risks
 - When the subagent discovers an artifact contradiction — a named path, function, or schema field in the design notes that does not match the live tree — report it as a finding. The parent Issue-Planner context applies the write-back correction; the subagent does not edit.
 
+For fan-out orientation reads within the discovery brief, route them to an Explore-tier dispatch per `research-methodology` § Two-Layer Research Delegation. Grounding Pass verification work (`## Discovery Workflow` § 4 below) always stays in-parent — it is never routed to a Layer-1 dispatch, per that section's Never delegate the verifier note.
+
 Do not let the discovery pass draft the full plan.
 
 ### 4. Grounding Pass
