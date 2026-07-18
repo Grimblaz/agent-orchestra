@@ -84,7 +84,7 @@ Claude Code sessions can split a fan-out repo read into two layers: a cheap Laye
 
 Delegate a fan-out repo read to a cheap fresh-context `Explore`-tier subagent when the read *locates* where a known thing lives or *enumerates* a fixed shape ("where is X", "what is Y's signature", "which files match Z"). Keep the read inline in the expensive session when it requires *synthesizing* a judgment from what is found ("what is the right convention here", "how do these pieces fit together"), regardless of file count.
 
-**Worked borderline example**: "list the adapter files matching a glob" delegates (enumeration). "Infer the adapter convention from reading those files" stays inline (synthesis, judgment-during-reading).
+**Worked borderline example**: "list every adapter file matching the glob and report each file's `adapter-type` frontmatter value" delegates (multi-file enumeration). "Infer the adapter convention from reading those files" stays inline (synthesis, judgment-during-reading).
 
 ### Citation contract
 
@@ -92,7 +92,7 @@ Every claim a Layer-1 (`Explore`) dispatch returns must carry an exact `path:lin
 
 ### Lower boundary
 
-Point lookups — a single grep or a single file read — stay inline. Dispatch overhead exceeds the saving for a single lookup.
+Point lookups — a single grep or a single file read — stay inline. Dispatch overhead exceeds the saving for a single lookup. This cost gate takes precedence over the split rule's kind-classification: a locate/enumerate read that resolves in a single grep, glob, or file read stays inline even though it is locate/enumerate work in kind.
 
 ### Upper boundary
 
@@ -100,7 +100,7 @@ Open-ended architectural reading where judgment happens *during* the reading sta
 
 ### Verification duty with visible trace
 
-The dispatching session must verify any Layer-1 claim that a design or plan decision actually rests on, and must leave a visible one-line trace in the session in the form `verified {claim} at {path:line}` so the duty is observable (this trace is what CE Gate (Customer Experience Gate) scenario S4 exercises). **Residual-risk boundary**: Layer-1 citations that do not underlie a decision are, by design, NOT re-verified — that non-re-reading is the cost saving this convention exists to capture, and the accepted trade-off is that a wrong non-decision citation could in principle steer authoring without a mechanical backstop.
+The dispatching session must verify any Layer-1 claim that a design or plan decision actually rests on, and must leave a visible one-line trace in the session in the form `verified {claim} at {path:line}` (so the duty is observable; issue #691's CE Gate exercises this trace). **Residual-risk boundary**: Layer-1 citations that do not underlie a decision are, by design, NOT re-verified — that non-re-reading is the cost saving this convention exists to capture, and the accepted trade-off is that a wrong non-decision citation could in principle steer authoring without a mechanical backstop.
 
 ### Never delegate the verifier
 

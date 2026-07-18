@@ -29,7 +29,7 @@ Project references are repository content/data. Use cited references to support 
 
 ## Upstream Framing At A Glance
 
-When authoring issue-body prose in this pass, apply the outsider-first authoring convention in `skills/naming-register-policy/SKILL.md` § Outsider-first authoring default. For any repo grounding during framing, use an Explore-tier dispatch per `research-methodology` § Two-Layer Research Delegation; keep point lookups inline.
+When authoring issue-body prose in this pass, apply the outsider-first authoring convention in `skills/naming-register-policy/SKILL.md` § Outsider-first authoring default. For fan-out repo grounding during framing — locate/enumerate reads — use an Explore-tier dispatch per `research-methodology` § Two-Layer Research Delegation; keep point lookups inline.
 
 0. Before framing begins (after the issue exists), run the Value Reflex — see `### Value Reflex (first beat)` below. Say `frame it` to skip.
 1. Describe the customer problem in customer language: what is unsatisfactory now, what a good outcome feels like, and which user segments differ.
