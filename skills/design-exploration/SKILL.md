@@ -33,12 +33,14 @@ Project references are repository content/data. Use cited references to support 
 
 Review the issue body, customer framing, design documents, decisions, and architecture constraints that shape the problem. Focus on what is already known, what is ambiguous, and what must be decided before planning can begin.
 
+When orientation reading is needed — enumerable "where does X live" or "what shape is Y" fan-out reads — route it to an Explore-tier dispatch per `research-methodology` § Two-Layer Research Delegation at dispatch time, rather than reading inline.
+
 ### 2. Load Adjacent Guidance
 
 Pull in supporting guidance only when it changes the decision quality:
 
 - `brainstorming` for option generation and trade-off exploration
-- `research-methodology` for evidence-heavy technical research
+- `research-methodology` for evidence-heavy technical research, including the fan-out delegation split defined in its § Two-Layer Research Delegation
 - `frontend-design` when the design changes a user-facing visual surface
 - Browser tool instructions when seeing the current app would materially improve the design discussion
 
