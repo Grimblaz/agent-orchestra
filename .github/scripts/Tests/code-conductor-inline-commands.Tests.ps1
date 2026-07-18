@@ -244,5 +244,20 @@ Describe 'Code-Conductor inline commands contract' {
 
             $content | Should -Match '(?is)once per judge pass' -Because 'response-loop-completion.md must document that the Post-Judge Disposition Gate fires once per judge pass (main and post-fix), not once total'
         }
+
+        It 'preserves the zero-sustained-pass emission clause verbatim' {
+            $content = Get-Content -Path $script:ResponseLoopCompletionPath -Raw -ErrorAction Stop
+
+            $content | Should -Match ([regex]::Escape('A zero-sustained judge pass still emits both markers below, with `entries: []` on the dispositions marker.')) -Because 'response-loop-completion.md must document that a zero-sustained judge pass still emits both markers with entries: []'
+        }
+
+        It 'preserves the R4 fail-closed clause in review-reconciliation.md verbatim' {
+            $reviewReconciliationPath = Join-Path $script:RepoRoot 'skills/validation-methodology/references/review-reconciliation.md'
+            Test-Path $reviewReconciliationPath | Should -BeTrue -Because 'skills/validation-methodology/references/review-reconciliation.md must exist'
+
+            $content = Get-Content -Path $reviewReconciliationPath -Raw -ErrorAction Stop
+
+            $content | Should -Match ([regex]::Escape('**Fail closed**: if neither the in-session set nor the posted marker is available for a finding, treat its disposition as unresolved and do not dispatch it')) -Because 'review-reconciliation.md Batch Specialist Dispatch (R4) must preserve the fail-closed clause verbatim'
+        }
     }
 }
