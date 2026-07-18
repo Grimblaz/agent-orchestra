@@ -19,6 +19,8 @@ Use this handshake for any dispatch where the subagent **may claim**:
 - `commit Z landed` / `commit Z is not in this branch`
 - any equivalent tree-grounded assertion
 
+Layer-1 `Explore` fan-out dispatches under `workspace_mode: shared` are an intentionally waived tree-claiming class — waived on live-shared-tree-reading grounds (not the ND-3 exemption below), per `research-methodology` § Two-Layer Research Delegation.
+
 Skip the handshake for dispatches that only consume task descriptions, web content, or passed-in documents without live-verifying against the working tree. The opt-in rubric keeps the prompt tax off research/non-tree subagents (ND-3).
 
 ## Scope (ND-4)
@@ -230,6 +232,8 @@ If the parent's `git` invocations fail during construction (non-zero exit on `gi
 1. **Parent-side construction:** construct the handshake via `New-SubagentDispatchPrompt` (or the inline prose template) in the dispatch prose, prepended to the `Agent` tool `prompt` parameter as its first content.
 2. **Subagent-side verification:** include a `## Step 0: Environment Handshake Verification` H2 in the subagent shell (or equivalent first-action section) that executes **before** shared-body load. The Step 0 prose directs parse → live-verify → branch (match/mismatch/error).
 3. **ND-2 finding template:** quote the ND-2 `## Finding: environment-divergence (halting)` template verbatim from the block in this SKILL. Do not paraphrase — the schema-parity test enforces byte parity.
+
+Layer-1 `Explore` fan-out dispatches under `workspace_mode: shared` are excepted per the canonical section referenced above.
 
 Research or non-tree-dependent dispatches may skip the handshake entirely; opt-in is intentional (ND-3).
 
