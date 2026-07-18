@@ -692,6 +692,56 @@ Describe 'Get-DispositionsLandingGap - D2: beyond-hunt-cap PRs are surfaced, not
         $result.BeyondHuntCapCount | Should -Be 0
         $result.BeyondHuntCapPrNumbers | Should -Not -Contain 1002
     }
+
+    It 'a PR with a decoy-only body in corpus (a) and a REAL judge-rulings body in corpus (b) is caught by beyond-hunt-cap, not silently absent from every bucket (F1 fix, issue #869 post-review)' {
+        # DIVERGENT bodies for the SAME PR: corpus (a)'s tuple carries only
+        # the decoy (loose-admits under corpus (a)'s raw regex, strict-fails
+        # here), while corpus (b)'s supplemental tuple carries a REAL,
+        # strict-passing judge-rulings body for the SAME PR number -- this is
+        # the exact divergent-bodies case the F1 fix addresses: corpus (a)
+        # and corpus (b) are independent fetches (corpus (a)'s marker hunt is
+        # capped at 5 pages, corpus (b) is unbounded), so the SAME PR can
+        # legitimately carry different comment bodies across the two fetches.
+        # Before the F1 fix, the beyond-hunt-cap check compared against RAW
+        # corpus-(a) membership -- this PR IS present in $Tuples (decoy-only),
+        # so it was wrongly treated as "already covered by (a)" even though
+        # (a)'s own strict-recheck gate actually skipped it, and data path
+        # (b) also skips it as "already (a)'s domain" -- the PR would
+        # silently vanish into NO bucket at all. After the fix, the check
+        # compares against the strict-PROCESSED subset instead, so this PR
+        # is correctly recognized as never actually processed by (a) and is
+        # flagged beyond-hunt-cap. The existing case-A regression test above
+        # cannot catch this: it reuses the SAME decoy body in BOTH corpora,
+        # so (b)'s hasJudgeRulingsAnywhere check is also false there, landing
+        # the PR in the unreviewed split rather than the skipped-for-(a)
+        # beyond-hunt-cap candidate list.
+        $tuple = @{
+            Number       = 1018
+            Surface      = 'pr'
+            Bodies       = @($script:LandingGapLooseAdmitDecoyPr1016Body)
+            AuthorLogins = @('some-reviewer')
+        }
+        $supplementalTuple = @{
+            Number       = 1018
+            MergedAt     = '2026-06-01T00:00:00Z'
+            Additions    = 5
+            Deletions    = 5
+            Bodies       = @($script:LandingGapJudgeRulingsPr1017Body)
+            AuthorLogins = @($script:LandingGapJudgeLogin)
+        }
+
+        $result = Get-DispositionsLandingGap `
+            -Tuples @($tuple) -Source 'graphql' -Truncated $false `
+            -SupplementalTuples @($supplementalTuple) -SupplementalSource 'graphql' -SupplementalTruncated $false `
+            -JudgeLogin $script:LandingGapJudgeLogin
+
+        $result.BeyondHuntCapCount | Should -Be 1
+        $result.BeyondHuntCapPrNumbers | Should -Contain 1018
+        $result.LandingGap.TotalCount | Should -Be 0
+        $result.UnreviewedSplit.TrivialCount | Should -Be 0
+        $result.UnreviewedSplit.SubstantiveCount | Should -Be 0
+        $result.IntegrityWarning.Count | Should -Be 0
+    }
 }
 
 Describe 'Format-DispositionsLandingGapSection - D2: beyond-hunt-cap CAUTION line' {

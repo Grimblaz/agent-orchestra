@@ -1359,8 +1359,16 @@ function Get-DispositionsLandingGap {
         once (double-counted) — issue #869 post-review finding A. This loop
         therefore re-verifies each tuple with the SAME strict check (b)
         uses before processing it: a tuple with no strict-passing body does
-        not belong to (a) at all and is skipped (picked up by (b) instead,
-        since (b)'s own strict check rejects it too). For each
+        not belong to (a) at all and is skipped. This does NOT guarantee
+        the tuple is "picked up by (b) instead" — corpus (a) and corpus (b)
+        are independent fetches that can carry DIVERGENT bodies for the
+        same PR (corpus (a)'s marker hunt is capped at 5 pages, corpus (b)
+        is unbounded), so a PR that is decoy-only (strict-fails) in corpus
+        (a) can still genuinely strict-pass in corpus (b) — a case data
+        path (b) below deliberately skips as "already (a)'s domain" (F1
+        fix, issue #869 post-review), which would otherwise silently
+        vanish from every bucket if section (e)'s beyond-hunt-cap check
+        below did not catch it. For each
         strict-verified tuple, this checks whether it ALSO carries a real,
         judge-authored `review-dispositions-{PR}` marker head
         (Get-DispositionsLandingGapMarkerContribution, above). No marker ->
@@ -1521,6 +1529,12 @@ function Get-DispositionsLandingGap {
     $unreviewedTrivialCount = 0
     $unreviewedSubstantiveCount = 0
     $skippedForAHandoffPrNumbers = [System.Collections.Generic.List[int]]::new()
+    # F1 fix (issue #869 post-review): PR numbers actually PROCESSED by data
+    # path (a) -- i.e. that passed the strict-recheck gate below -- as
+    # opposed to raw corpus-(a) membership (loose-admitted, possibly
+    # strict-dropped). Section (e)'s beyond-hunt-cap check needs this
+    # strict-processed subset, not raw membership; see that section for why.
+    $aStrictProcessedPrNumbers = [System.Collections.Generic.HashSet[int]]::new()
 
     # ---- data path (a): landing gap + its internal-only-coverage contribution ----
     if (-not $fetchAUnavailable) {
@@ -1535,9 +1549,17 @@ function Get-DispositionsLandingGap {
             # gate, while data path (b) below skip-guards on the STRICT
             # vocab-gated Test-JudgeRulingsRealHeadPresent. Re-verify with
             # the SAME strict check before processing -- a tuple with no
-            # strict-passing body does not belong to (a) at all (it belongs
-            # to (b)'s population instead; (b)'s own strict check rejects it
-            # too, so it lands there, never both, never neither).
+            # strict-passing body does not belong to (a) at all. NOTE: this
+            # does NOT guarantee the tuple "lands there [in (b)] instead" --
+            # corpus (a) and corpus (b) are independent fetches that can
+            # carry DIVERGENT bodies for the same PR (corpus (a)'s marker
+            # hunt is capped at 5 pages, corpus (b) is unbounded), so a PR
+            # that is decoy-only (strict-fails) in corpus (a) can still be
+            # genuinely strict-passing in corpus (b) -- a case data path (b)
+            # below deliberately skips as "already (a)'s domain" (F1 fix,
+            # issue #869 post-review). Without section (e)'s beyond-hunt-cap
+            # check below, such a PR would silently vanish from every
+            # bucket; section (e) now catches it instead.
             $hasStrictJudgeRulings = $false
             foreach ($b in $bodies) {
                 if (Test-JudgeRulingsRealHeadPresent -Body ([string]$b) -Surface 'code-review') {
@@ -1546,6 +1568,7 @@ function Get-DispositionsLandingGap {
                 }
             }
             if (-not $hasStrictJudgeRulings) { continue }
+            [void]$aStrictProcessedPrNumbers.Add($number)
 
             $contrib = Get-DispositionsLandingGapMarkerContribution -Bodies $bodies -AuthorLogins $authorLogins -JudgeLogin $JudgeLogin -Number $number
             if (-not $contrib.HasMarker) {
@@ -1618,14 +1641,19 @@ function Get-DispositionsLandingGap {
     # at 5 pages (phase-containment-rolling-history-core.ps1, frozen) --
     # would otherwise be silently invisible to BOTH data paths. Detected
     # only when both fetches succeeded (no honest signal otherwise).
+    # F1 fix (issue #869 post-review): checks against $aStrictProcessedPrNumbers
+    # (PRs that actually PASSED the strict-recheck gate and were processed by
+    # data path (a) above), not raw corpus-(a) membership. A PR that is
+    # decoy-only in corpus (a) (loose-admitted into $Tuples but strict-dropped
+    # by the gate above, so never actually processed by (a)) must NOT be
+    # treated as "present in (a)" here -- otherwise a PR that strict-passes in
+    # corpus (b) (and is therefore skipped there as "already (a)'s domain")
+    # would incorrectly appear covered by neither check and silently vanish
+    # from every bucket instead of being flagged beyond-hunt-cap.
     $beyondHuntCapPrNumbers = [System.Collections.Generic.List[int]]::new()
     if (-not $fetchAUnavailable -and -not $fetchBUnavailable) {
-        $aAdmittedPrNumbers = [System.Collections.Generic.HashSet[int]]::new()
-        foreach ($t in $Tuples) {
-            if ([string]$t.Surface -eq 'pr') { [void]$aAdmittedPrNumbers.Add([int]$t.Number) }
-        }
         foreach ($num in $skippedForAHandoffPrNumbers) {
-            if (-not $aAdmittedPrNumbers.Contains($num)) { $beyondHuntCapPrNumbers.Add($num) }
+            if (-not $aStrictProcessedPrNumbers.Contains($num)) { $beyondHuntCapPrNumbers.Add($num) }
         }
     }
 
@@ -1638,13 +1666,21 @@ function Get-DispositionsLandingGap {
 
     # Finding G fix (issue #869 post-review): -FixShipDate is interpreted as
     # UTC. mergedAt parses with RoundtripKind (always UTC), but a date-only
-    # CLI value (e.g. '2026-07-18') parses with DateTimeKind.Unspecified,
-    # and .NET DateTime comparison ignores Kind (raw ticks) -- normalize an
-    # Unspecified value to UTC before comparing so date-only input is
-    # unambiguously UTC-midnight. NOTE: PowerShell unwraps a bound
-    # [Nullable[datetime]] parameter to a plain [datetime] once a value is
-    # supplied (not a System.Nullable<DateTime> instance) -- $FixShipDate
-    # itself is used directly here, not $FixShipDate.Value.
+    # CLI value (e.g. '2026-07-18') parses with DateTimeKind.Unspecified.
+    # .NET DateTime comparison via -gt is TICK-based and ignores Kind
+    # entirely, so this SpecifyKind call does NOT itself change the
+    # comparison's result below -- ticks-wise, an Unspecified midnight and a
+    # Utc midnight compare identically either way, since SpecifyKind only
+    # overwrites the Kind metadata flag, never the underlying tick value.
+    # The call is declarative/documentation-only: it records UTC-midnight
+    # intent for any future reader or downstream consumer that DOES respect
+    # Kind (e.g. if this value is later serialized, or compared via a
+    # Kind-aware method instead of raw -gt). Kept for that documentation
+    # value even though it is a no-op for the comparison performed here.
+    # NOTE: PowerShell unwraps a bound [Nullable[datetime]] parameter to a
+    # plain [datetime] once a value is supplied (not a System.Nullable
+    # <DateTime> instance) -- $FixShipDate itself is used directly here, not
+    # $FixShipDate.Value.
     $normalizedFixShipDate = $null
     if ($partitioned) {
         $normalizedFixShipDate = $FixShipDate
