@@ -235,8 +235,8 @@ Describe 'Code-Conductor inline commands contract' {
 
             $content = Get-Content -Path $script:ResponseLoopCompletionPath -Raw -ErrorAction Stop
 
-            $content | Should -Match ([regex]::Escape('review-dispositions-{PR} not posted')) -Because 'response-loop-completion.md must preserve the review-dispositions loud literal verbatim'
-            $content | Should -Match ([regex]::Escape('engagement-record-review-{PR} not posted')) -Because 'response-loop-completion.md must preserve the engagement-record-review loud literal verbatim'
+            $content | Should -Match ([regex]::Escape('⚠️ review-dispositions-{PR} not posted — {reason}')) -Because 'response-loop-completion.md must preserve the review-dispositions loud literal verbatim'
+            $content | Should -Match ([regex]::Escape('⚠️ engagement-record-review-{PR} not posted — {reason}')) -Because 'response-loop-completion.md must preserve the engagement-record-review loud literal verbatim'
         }
 
         It 'preserves the per-judge-pass firing language' {

@@ -94,6 +94,19 @@ BeforeAll {
 ```
 '@
 
+    # R3b fix (issue #869 PR #880 post-review): PR-1018's own judge-rulings
+    # body, clone of the Pr1017Body shape above with the marker's PR number
+    # corrected to match the fixture's own Number = 1018 -- the test case
+    # below previously reused $script:LandingGapJudgeRulingsPr1017Body
+    # (marker pr=1017) for a PR numbered 1018, a genuine PR-number mismatch.
+    $script:LandingGapJudgeRulingsPr1018Body = @'
+```yaml
+<!-- judge-rulings pr=1018 -->
+- id: R1
+  judge_ruling: sustained
+```
+'@
+
 #endregion
 
 #region Fixture: review-dispositions marker bodies
@@ -726,7 +739,7 @@ Describe 'Get-DispositionsLandingGap - D2: beyond-hunt-cap PRs are surfaced, not
             MergedAt     = '2026-06-01T00:00:00Z'
             Additions    = 5
             Deletions    = 5
-            Bodies       = @($script:LandingGapJudgeRulingsPr1017Body)
+            Bodies       = @($script:LandingGapJudgeRulingsPr1018Body)
             AuthorLogins = @($script:LandingGapJudgeLogin)
         }
 

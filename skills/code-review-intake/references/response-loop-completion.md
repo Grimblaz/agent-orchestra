@@ -33,4 +33,4 @@ After all judgment states reach terminal, the GitHub-intake response loop comple
 
 This step sequence is what makes a bare `/review-github` complete the full response loop — accepted fixes are applied, committed, and pushed to the existing PR branch without requiring an additional user instruction.
 
-> **Invariant preserved**: the routing gate in the SKILL.md Gotchas table ("All items must reach terminal state… before any routing") applies to fix-dispatch routing only — this section documents the post-routing terminal completion steps.
+> **Invariant preserved**: the routing gate in the SKILL.md Gotchas table ("All items must reach terminal state… before any routing") applies to fix-dispatch routing only — this section documents both the pre-routing Post-Judge Disposition Gate (step 1, which runs *before* fix routing) and the post-routing terminal completion steps (steps 2-6), not post-routing steps alone.
