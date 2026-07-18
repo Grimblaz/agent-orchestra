@@ -233,7 +233,7 @@ If the parent's `git` invocations fail during construction (non-zero exit on `gi
 2. **Subagent-side verification:** include a `## Step 0: Environment Handshake Verification` H2 in the subagent shell (or equivalent first-action section) that executes **before** shared-body load. The Step 0 prose directs parse → live-verify → branch (match/mismatch/error).
 3. **ND-2 finding template:** quote the ND-2 `## Finding: environment-divergence (halting)` template verbatim from the block in this SKILL. Do not paraphrase — the schema-parity test enforces byte parity.
 
-Layer-1 Explore fan-out dispatches under `workspace_mode: shared` are excepted per the canonical section referenced above.
+Layer-1 `Explore` fan-out dispatches under `workspace_mode: shared` are excepted per the canonical section referenced above.
 
 Research or non-tree-dependent dispatches may skip the handshake entirely; opt-in is intentional (ND-3).
 

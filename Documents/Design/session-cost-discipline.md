@@ -200,12 +200,12 @@ discipline... together they are the behavioral share of the estimated 30-50%
 reduction."
 
 Issue #691's cost claim is deferred-measurement, not yet confirmed by a
-post-change measured PR. Per #691's own D6 design decision, verification
-compares upstream-phase absolute dollars — using the per-phase attribution
-rows `.github/scripts/lib/cost-attribution.ps1` already produces — against
-the PR #857 baseline this document already cites, rather than upstream share
-of total PR cost, which is confounded by implementation/review size variance
-across PRs.
+post-change measured PR. Per #691's own D6 design decision ("S3 measurement
+contract"), verification compares upstream-phase absolute dollars — using
+the per-phase attribution rows `.github/scripts/lib/cost-attribution.ps1`
+already produces — against the PR #857 baseline this document already
+cites, rather than upstream share of total PR cost, which is confounded by
+implementation/review size variance across PRs.
 
 Canonical rule text: `skills/research-methodology/SKILL.md` § Two-Layer
 Research Delegation.

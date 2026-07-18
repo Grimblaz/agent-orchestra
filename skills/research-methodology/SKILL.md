@@ -74,7 +74,7 @@ When multiple approaches are viable, compare them on:
 
 The final output should recommend one approach explicitly. Keep rejected alternatives out of the final research document unless they remain relevant as active risks or constraints.
 
-<!-- pointer-stability: this heading is referenced verbatim by six inbound pointer sites — design-exploration §1 (Gather the Current Context), design-exploration §2 (Load Adjacent Guidance), plan-authoring §3 (Keep the Research Subagent Bounded), customer-experience (Upstream Framing At A Glance), multi-issue-bundling.md (Agent Selection dispatch notes), subagent-env-handshake (tree-claim rubric + adoption guidance). Renaming this heading breaks all six; update every listed site before renaming. -->
+<!-- pointer-stability: this heading is referenced verbatim by seven inbound pointer sites — design-exploration §1 (Gather the Current Context), design-exploration §2 (Load Adjacent Guidance), plan-authoring §3 (Keep the Research Subagent Bounded), customer-experience (Upstream Framing At A Glance), multi-issue-bundling.md (Agent Selection dispatch notes), subagent-env-handshake (tree-claim rubric + adoption guidance), Documents/Design/session-cost-discipline.md (§ Related Mechanism + § Related Sources). Renaming this heading breaks all seven; update every listed site before renaming. -->
 
 ## Two-Layer Research Delegation
 
@@ -100,7 +100,7 @@ Open-ended architectural reading where judgment happens *during* the reading sta
 
 ### Verification duty with visible trace
 
-The dispatching session must verify any Layer-1 claim that a design or plan decision actually rests on, and must leave a visible one-line trace in the session in the form `verified {claim} at {path:line}` (so the duty is observable; issue #691's CE Gate exercises this trace). **Residual-risk boundary**: Layer-1 citations that do not underlie a decision are, by design, NOT re-verified — that non-re-reading is the cost saving this convention exists to capture, and the accepted trade-off is that a wrong non-decision citation could in principle steer authoring without a mechanical backstop.
+The dispatching session must verify any Layer-1 claim that a design or plan decision actually rests on, and must leave a visible one-line trace in the session in the form `verified {claim} at {path:line}` (so the duty is observable; issue #691's CE Gate exercises this trace). **Residual-risk boundary**: Layer-1 citations that do not underlie a decision are, by design, NOT re-verified — that skipped re-verification is the cost saving this convention exists to capture, and the accepted trade-off is that a wrong non-decision citation could in principle steer authoring without a mechanical backstop.
 
 ### Never delegate the verifier
 
@@ -122,11 +122,11 @@ Do not synthesize a judgment, recommendation, or convention from what you find; 
 
 ### Tier note
 
-`Explore`'s own default model tier is already cheap. If a different tier is ever needed for a specific dispatch, the per-invocation `model:` parameter on the `Agent` tool call is the override lever, per the inheritance order in `Documents/Design/agent-body-architecture.md`.
+As of Claude Code v2.1.198, `Explore` inherits the main conversation's model (capped at Opus on the Claude API) — it does not run on a fixed cheap tier by default. The dispatch's context-window saving (the parent never carries the fan-out read; `Explore` runs a short-lived fresh context) is real and model-independent regardless of tier. The per-invocation `model:` parameter remains the override lever, per the inheritance order in `Documents/Design/agent-body-architecture.md`.
 
 ### Handshake note
 
-Layer-1 `Explore` dispatches under `workspace_mode: shared` skip the `subagent-env-handshake` protocol. This is grounded on `Explore` reading the live shared tree in the parent's own working directory (not a stale or isolated copy), plus the verification-duty compensating control described above. This justification is independent of, and does not rely on, the handshake skill's research-subagent exemption (ND-3), which covers a different, non-tree-verifying class of dispatch. Layer-1 dispatches run under `isolation: worktree` are **NOT** covered by this waiver — a worktree-isolated dispatch reads a potentially divergent tree and must keep the ordinary handshake/halt behavior.
+Layer-1 `Explore` dispatches under `workspace_mode: shared` skip the `subagent-env-handshake` protocol. This is grounded on `Explore` reading the live shared tree in the parent's own working directory (not a stale or isolated copy), plus the verification-duty compensating control described above. This justification is independent of, and does not rely on, the handshake skill's research-subagent exemption (ND-3), which covers a different, non-tree-verifying class of dispatch. Layer-1 dispatches run under `isolation: worktree` are **NOT** covered by this waiver — a worktree-isolated dispatch reads a potentially divergent tree and remains subject to the handshake protocol — which in v1 treats `workspace_mode: worktree` as an error path: the subagent may proceed but must tag every tree-grounded finding `environment-unverified` (see `subagent-env-handshake` § Error path).
 
 ### Platform qualifier
 
