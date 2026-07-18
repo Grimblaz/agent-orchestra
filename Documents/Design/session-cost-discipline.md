@@ -185,10 +185,38 @@ counts against the hypothesis rather than being explained away.
   counts): rejected — new telemetry code is exactly what the issue's
   Out of Scope list excludes; qualitative spot-check covers rules 1–2 instead.
 
+## Related Mechanism: Two-Layer Research Delegation (#691)
+
+Issue #691 (same umbrella #476) shipped a companion mechanism, not a
+substitute. This document's subject (#474) keeps a session's own reads lean
+once a read stays inline (extract-don't-dump, batching, targeted edits,
+parent-side diagnostics). #691's Two-Layer Research Delegation instead routes
+upstream sessions' fan-out repo reads to a separate cheap fresh-context
+`Explore` subagent dispatch, so the expensive session never carries the read
+at all — a different mechanism (delegation vs. in-session discipline) under
+the same cost-reduction umbrella. The two compound rather than substitute for
+each other: per the issue's own framing, "#474 owns the stay-in-session
+discipline... together they are the behavioral share of the estimated 30-50%
+reduction."
+
+Issue #691's cost claim is deferred-measurement, not yet confirmed by a
+post-change measured PR. Per #691's own D6 design decision, verification
+compares upstream-phase absolute dollars — using the per-phase attribution
+rows `.github/scripts/lib/cost-attribution.ps1` already produces — against
+the PR #857 baseline this document already cites, rather than upstream share
+of total PR cost, which is confounded by implementation/review size variance
+across PRs.
+
+Canonical rule text: `skills/research-methodology/SKILL.md` § Two-Layer
+Research Delegation.
+
 ## Related Sources
 
 - [skills/terminal-hygiene/SKILL.md](../../skills/terminal-hygiene/SKILL.md)
   § Session-Cost Discipline — canonical operational rule text
+- [skills/research-methodology/SKILL.md](../../skills/research-methodology/SKILL.md)
+  § Two-Layer Research Delegation — companion delegation mechanism, same
+  umbrella #476, measurement deferred
 - [agents/Code-Conductor.agent.md](../../agents/Code-Conductor.agent.md) —
   Ownership Principles pointer bullet
 - [.github/scripts/Tests/session-cost-discipline-contract.Tests.ps1](../../.github/scripts/Tests/session-cost-discipline-contract.Tests.ps1) —
