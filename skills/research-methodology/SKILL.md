@@ -4,7 +4,7 @@ name: research-methodology
 description: "Evidence-driven research methodology for technical analysis and recommendation building. Use when gathering verified findings, cross-referencing internal and external sources, or converging multiple options into one recommended approach. DO NOT USE FOR: implementation work (use implementation-discipline) or debugging a live failure path (use systematic-debugging)"
 ---
 
-<!-- platform-assumptions: markdown skill guidance for VS Code custom agents in Agent Orchestra; assumes evidence is gathered from workspace and approved external sources. -->
+<!-- platform-assumptions: platform-neutral research methodology, plus a Claude Code-specific Two-Layer Research Delegation section (see below) for fan-out reads via the Explore subagent; assumes evidence is gathered from workspace and approved external sources. -->
 <!-- markdownlint-disable-file MD041 MD003 -->
 
 # Research Methodology
@@ -73,6 +73,64 @@ When multiple approaches are viable, compare them on:
 - Quality of supporting evidence in the codebase or authoritative sources
 
 The final output should recommend one approach explicitly. Keep rejected alternatives out of the final research document unless they remain relevant as active risks or constraints.
+
+<!-- pointer-stability: this heading is referenced verbatim by six inbound pointer sites — design-exploration §1 (Gather the Current Context), design-exploration §2 (Load Adjacent Guidance), plan-authoring §3 (Keep the Research Subagent Bounded), customer-experience (Upstream Framing At A Glance), multi-issue-bundling.md (Agent Selection dispatch notes), subagent-env-handshake (tree-claim rubric + adoption guidance). Renaming this heading breaks all six; update every listed site before renaming. -->
+
+## Two-Layer Research Delegation
+
+Claude Code sessions can split a fan-out repo read into two layers: a cheap Layer-1 (locate/enumerate) `Explore` subagent dispatch for locating or enumerating things, and the expensive parent session — Layer 2 — for any read that requires judgment while reading. This section is the canonical definition; other skills point here rather than restating it.
+
+### Split rule
+
+Delegate a fan-out repo read to a cheap fresh-context `Explore`-tier subagent when the read *locates* where a known thing lives or *enumerates* a fixed shape ("where is X", "what is Y's signature", "which files match Z"). Keep the read inline in the expensive session when it requires *synthesizing* a judgment from what is found ("what is the right convention here", "how do these pieces fit together"), regardless of file count.
+
+**Worked borderline example**: "list the adapter files matching a glob" delegates (enumeration). "Infer the adapter convention from reading those files" stays inline (synthesis, judgment-during-reading).
+
+### Citation contract
+
+Every claim a Layer-1 (`Explore`) dispatch returns must carry an exact `path:line` (or `path:line-line`) citation. If the dispatch cannot find something, it must say so explicitly ("not found") — never infer or guess a citation.
+
+### Lower boundary
+
+Point lookups — a single grep or a single file read — stay inline. Dispatch overhead exceeds the saving for a single lookup.
+
+### Upper boundary
+
+Open-ended architectural reading where judgment happens *during* the reading stays inline, regardless of how many files it touches. This is the flip side of the split rule's worked example above.
+
+### Verification duty with visible trace
+
+The dispatching session must verify any Layer-1 claim that a design or plan decision actually rests on, and must leave a visible one-line trace in the session in the form `verified {claim} at {path:line}` so the duty is observable (this trace is what CE Gate (Customer Experience Gate) scenario S4 exercises). **Residual-risk boundary**: Layer-1 citations that do not underlie a decision are, by design, NOT re-verified — that non-re-reading is the cost saving this convention exists to capture, and the accepted trade-off is that a wrong non-decision citation could in principle steer authoring without a mechanical backstop.
+
+### Never delegate the verifier
+
+Verification of Layer-1 claims — including the plan-authoring Grounding Pass work described elsewhere in this skill set — is in-parent work and must never be routed back to a Layer-1 dispatch.
+
+### Canonical dispatch-prompt template
+
+The template below is fenced with an outer `~~~~` (four tildes) block, not a plain triple-backtick fence, because the template's own citation examples can contain triple-backtick sequences that would otherwise prematurely close a triple-backtick block. This fencing choice is deliberate; keep the outer fence at four characters (tildes or backticks) if this template is ever edited.
+
+~~~~markdown
+Locate/enumerate task: {precise question — "where is X defined", "which files match glob Y", "what is Z's signature"}.
+
+Scope: {directory or glob to search}.
+
+Return every claim with an exact `path:line` (or `path:line-line`) citation. If you cannot find something, state "not found" explicitly — do not infer or guess a citation.
+
+Do not synthesize a judgment, recommendation, or convention from what you find; report locations and enumerations only.
+~~~~
+
+### Tier note
+
+`Explore`'s own default model tier is already cheap. If a different tier is ever needed for a specific dispatch, the per-invocation `model:` parameter on the `Agent` tool call is the override lever, per the inheritance order in `Documents/Design/agent-body-architecture.md`.
+
+### Handshake note
+
+Layer-1 `Explore` dispatches under `workspace_mode: shared` skip the `subagent-env-handshake` protocol. This is grounded on `Explore` reading the live shared tree in the parent's own working directory (not a stale or isolated copy), plus the verification-duty compensating control described above. This justification is independent of, and does not rely on, the handshake skill's research-subagent exemption (ND-3), which covers a different, non-tree-verifying class of dispatch. Layer-1 dispatches run under `isolation: worktree` are **NOT** covered by this waiver — a worktree-isolated dispatch reads a potentially divergent tree and must keep the ordinary handshake/halt behavior.
+
+### Platform qualifier
+
+Copilot (frozen, retiring per the repo's deprecation notice) has no native `Explore`-equivalent agent, so on that platform fan-out reads stay inline; this convention's Layer-1 delegation applies to Claude Code sessions.
 
 ## Completion Criteria
 
