@@ -11,15 +11,26 @@
     Get-PhaseContainmentCommentCorpus and rolls it up via
     Get-ReviewCostRollup / Format-ReviewCostSection to render per-stage
     dismiss-rate / defense-kill rate / defer cost metrics immediately after
-    the value report.
+    the value report. Finally (issue #869 s4), separately fetches a
+    supplemental merged-PR corpus (mergedAt/additions/deletions plus full
+    comment bodies) via Get-DispositionsLandingGapSupplementalCorpus and
+    rolls both the reused review-cost corpus and that supplemental corpus
+    up via Get-DispositionsLandingGap / Format-DispositionsLandingGapSection
+    to render the review-dispositions marker landing gap, an
+    integrity-warning arm, an unreviewed-PR split, and an internal-only-
+    coverage informational count immediately after the review-cost section.
 
     Output is intended as a CE Gate surface: insufficient_data and data_untrustworthy
     paths are displayed clearly so a maintainer cannot mistake "not enough data" for "clean."
 
     Dot-source order (issue #768 s6, judge-sustained M11): the value path
     (Get-PhaseContainmentHistory, Get-PhaseContainmentRollup,
-    Format-PhaseContainmentReport, Get-PhaseContainmentCommentCorpus) lives in
-    phase-containment-rolling-history-core.ps1 (frozen, dot-sourced first).
+    Format-PhaseContainmentReport, Get-PhaseContainmentCommentCorpus,
+    Select-PhaseContainmentJudgeAuthoredBodies) lives in
+    phase-containment-rolling-history-core.ps1 (frozen, dot-sourced first) —
+    issue #869 s4's Get-DispositionsLandingGap reuses that last function
+    (read-only, per 768-D2's NON-GOALS), so this file's dot-source order is
+    load-bearing for it too, not just for the value path.
     Get-DispositionTally — which phase-containment-cost-core.ps1's
     Get-ReviewCostRollup calls — lives in
     phase-containment-emission-check-core.ps1, so that file is dot-sourced
@@ -38,6 +49,7 @@
     pwsh -File .github/scripts/phase-containment-report.ps1
     pwsh -File .github/scripts/phase-containment-report.ps1 -WindowDays 30
     pwsh -File .github/scripts/phase-containment-report.ps1 -ValueCacheOk
+    pwsh -File .github/scripts/phase-containment-report.ps1 -FixShipDate '2026-07-18'
 #>
 
 param(
@@ -53,7 +65,13 @@ param(
     # s4 -- that function does not discover the judge identity itself).
     # Default mirrors the fixture convention Get-DispositionTally's own
     # Tests use for the repo's known CI poster identity.
-    [string]$JudgeLogin = 'github-actions[bot]'
+    [string]$JudgeLogin = 'github-actions[bot]',
+    # Issue #869 s4: the fix's ship date, threaded to Get-DispositionsLandingGap
+    # so its landing-gap count partitions into post-ship (expected 0) vs
+    # pre-ship backlog (not alarmed). Omitted by default -- the landing-gap
+    # row then renders as a single unpartitioned count with a
+    # floor-not-configured note (see Format-DispositionsLandingGapSection).
+    [Nullable[datetime]]$FixShipDate
 )
 
 Set-StrictMode -Version Latest
@@ -520,7 +538,9 @@ function Invoke-PhaseContainmentReportCli {
         # dot-sourcing this file and calling this function itself) omit
         # this and fall back to the original ContainsKey-based derivation
         # below, unchanged from before this fix.
-        [string]$JudgeLoginSource
+        [string]$JudgeLoginSource,
+        # Issue #869 s4: forwarded to Get-DispositionsLandingGap unchanged.
+        [Nullable[datetime]]$FixShipDate
     )
 
     # ---- Function-level identity resolution gate (issue #842 M4) ----
@@ -753,6 +773,34 @@ function Invoke-PhaseContainmentReportCli {
         Write-Output ''
         Write-Output "cost section unavailable: $($_.Exception.Message)"
     }
+
+    # ---- Landing-gap path (issue #869 s4) ----
+    # Isolated in its OWN try/catch, AFTER the cost path above -- a failure
+    # here (this new fetch, or Get-DispositionsLandingGap/
+    # Format-DispositionsLandingGapSection) must never suppress the value
+    # report or the cost section that already rendered, matching this
+    # file's established per-section isolation convention (issue #768 s6
+    # M5/M8). The FIRST statement re-throws the corpus (a) fetch's own
+    # captured error (if any), same as the cost path above, since data path
+    # (a) below reuses that same hoisted $corpus/$corpusError.
+    try {
+        if ($null -ne $corpusError) {
+            throw $corpusError
+        }
+
+        $supplementalCorpus = Get-DispositionsLandingGapSupplementalCorpus -RepoOwner $RepoOwner -RepoName $RepoName -WindowDays $WindowDays
+
+        $landingGapRollup = Get-DispositionsLandingGap `
+            -Tuples $corpus.Tuples -Source $corpus.Source -Truncated $corpus.Truncated `
+            -SupplementalTuples $supplementalCorpus.Tuples -SupplementalSource $supplementalCorpus.Source -SupplementalTruncated $supplementalCorpus.Truncated `
+            -JudgeLogin $JudgeLogin -FixShipDate $FixShipDate
+
+        Format-DispositionsLandingGapSection -Rollup $landingGapRollup | Write-Output
+    }
+    catch {
+        Write-Output ''
+        Write-Output "landing gap section unavailable: $($_.Exception.Message)"
+    }
 }
 
 # Only auto-invoke when this file is executed directly (e.g. `pwsh -File` or
@@ -767,5 +815,5 @@ function Invoke-PhaseContainmentReportCli {
 # here since this line always forwards a concrete -JudgeLogin value,
 # regardless of whether it was explicitly supplied or auto-resolved.
 if ($MyInvocation.InvocationName -ne '.') {
-    Invoke-PhaseContainmentReportCli -RepoOwner $RepoOwner -RepoName $RepoName -WindowDays $WindowDays -Token $Token -NoCache:$NoCache -ValueCacheOk:$ValueCacheOk -JudgeLogin $JudgeLogin -JudgeLoginSource $JudgeLoginSource
+    Invoke-PhaseContainmentReportCli -RepoOwner $RepoOwner -RepoName $RepoName -WindowDays $WindowDays -Token $Token -NoCache:$NoCache -ValueCacheOk:$ValueCacheOk -JudgeLogin $JudgeLogin -JudgeLoginSource $JudgeLoginSource -FixShipDate $FixShipDate
 }

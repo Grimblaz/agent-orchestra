@@ -31,6 +31,17 @@ Set-StrictMode -Version Latest
 # sub-section — see New-CostRateSubSection below.
 $script:CostRateInsufficientDataThreshold = 5
 
+# Trivial-diff heuristic threshold for Get-DispositionsLandingGap's
+# unreviewed-PR split (issue #869 s4): a merged PR whose additions+deletions
+# is <= this value is bucketed "trivial" rather than "substantive" when it
+# carries neither a judge-rulings head nor a review-dispositions marker.
+# Chosen as a conservative small-diff cutoff (e.g. a one-line doc fix, a
+# version bump, a single changelog entry) rather than derived from any
+# historical review-skip dataset -- no such dataset exists yet. Revisit if
+# evidence surfaces that this cutoff mis-buckets real review gaps as
+# trivial.
+$script:DispositionsLandingGapTrivialDiffThreshold = 20
+
 #endregion
 
 #region Private: head-presence detectors (routing, issue #768 s4 M1)
@@ -811,6 +822,774 @@ function Format-ReviewCostSection {
     }
     else {
         $lines.Add("PRs with value data but no cost marker: $($Rollup.ForwardGapCount)")
+    }
+    $lines.Add('')
+
+    return $lines.ToArray()
+}
+
+#endregion
+
+#region Private: review-dispositions marker contribution (issue #869 s4)
+
+function script:Get-DispositionsLandingGapMarkerContribution {
+    <#
+    .SYNOPSIS
+        Resolves whether a PR tuple carries a real, judge-authored
+        review-dispositions marker, and if so, that marker's latest
+        generation's ExternalSourcesFound/ParseStatus state (issue #869 s4).
+    .DESCRIPTION
+        Shared by Get-DispositionsLandingGap's data path (a) (landing-gap
+        detection + internal-only-coverage contribution) and data path (b)'s
+        integrity-warning arm (marker-without-judge-evidence detection +
+        its own internal-only-coverage contribution) — both need the SAME
+        "does this PR have a judge-authored review-dispositions head, and
+        what does its latest generation say" answer, just sourced from a
+        different fetch (corpus (a) vs the supplemental fetch (b)).
+
+        Reuses Select-PhaseContainmentJudgeAuthoredBodies
+        (phase-containment-rolling-history-core.ps1, exported/public — the
+        frozen file's own NON-GOALS explicitly permit read-only reuse of its
+        exported functions, issue #768-D2) for the author filter, rather
+        than re-deriving the judge-identity comparison here. Among the
+        judge-authored bodies carrying a real review-dispositions head
+        (Test-ReviewDispositionsHeadPresent, -ExpectedNumber-gated so a
+        quoted/cross-referenced marker for a DIFFERENT PR is never mistaken
+        for this PR's own), the LAST one in Bodies' original (creation)
+        order is treated as the latest generation.
+        Select-PhaseContainmentJudgeAuthoredBodies does not preserve each
+        body's original index, so this is a documented simplification of
+        this file's usual Select-LatestByCreatedAt dedup (acceptable here:
+        this function only ever feeds an informational/descriptive count —
+        Get-DispositionsLandingGap's (c) internal-only-coverage arm — never
+        a gating numerator).
+
+        Runtime dependency (documented, not a violation of 768-D2): this
+        function calls Select-PhaseContainmentJudgeAuthoredBodies, which
+        this file does not dot-source itself — the CALLER must already have
+        dot-sourced phase-containment-rolling-history-core.ps1 before this
+        function runs, exactly as phase-containment-report.ps1's documented
+        3-file dot-source order already guarantees for its own production
+        call path. A standalone Pester run covering this function would need
+        to add that dot-source too.
+    .PARAMETER Bodies
+        The tuple's Bodies[] array.
+    .PARAMETER AuthorLogins
+        The tuple's AuthorLogins[] array, index-paired with Bodies.
+    .PARAMETER JudgeLogin
+        The expected judge identity's login.
+    .PARAMETER Number
+        The PR number, passed to Test-ReviewDispositionsHeadPresent's
+        -ExpectedNumber.
+    .OUTPUTS
+        [PSCustomObject] with HasMarker [bool], ParseStatus [string]|$null
+        ('ok' | 'could-not-verify'), ExternalSourcesFound [bool].
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Bodies,
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$AuthorLogins,
+        [Parameter(Mandatory)][string]$JudgeLogin,
+        [Parameter(Mandatory)][int]$Number
+    )
+    $judgeBodies = Select-PhaseContainmentJudgeAuthoredBodies -Bodies $Bodies -AuthorLogins $AuthorLogins -JudgeLogin $JudgeLogin
+    $realHeadJudgeBodies = @($judgeBodies | Where-Object { Test-ReviewDispositionsHeadPresent -Body $_ -ExpectedNumber $Number })
+    if ($realHeadJudgeBodies.Count -eq 0) {
+        return [PSCustomObject]@{ HasMarker = $false; ParseStatus = $null; ExternalSourcesFound = $false }
+    }
+    $latestBody = $realHeadJudgeBodies[-1]
+    $tally = Get-DispositionTally -Surface 'code-review' -Body $latestBody
+    return [PSCustomObject]@{ HasMarker = $true; ParseStatus = $tally.ParseStatus; ExternalSourcesFound = [bool]$tally.ExternalSourcesFound }
+}
+
+#endregion
+
+#region Get-DispositionsLandingGapSupplementalCorpus
+
+function script:Get-DispositionsLandingGapSupplementalAuthorLogin {
+    <#
+    .SYNOPSIS
+        Extracts a GraphQL comment node's author login, defaulting to ''
+        (issue #869 s4 — mirrors phase-containment-rolling-history-core.ps1's
+        script:Get-PhaseContainmentCommentAuthorLogin, duplicated in miniature
+        here rather than reached into cross-file: that helper is script:-
+        scoped/private to the frozen file, unlike the exported functions this
+        file's other new code reuses).
+    .PARAMETER CommentNode
+        A single comment node hashtable (from ConvertFrom-Json -AsHashtable).
+    .OUTPUTS
+        [string] the author's login, or '' when unresolvable.
+    #>
+    param([AllowNull()]$CommentNode)
+    if ($null -eq $CommentNode -or $CommentNode -isnot [hashtable]) { return '' }
+    if (-not $CommentNode.ContainsKey('author')) { return '' }
+    $author = $CommentNode['author']
+    if ($null -eq $author -or $author -isnot [hashtable]) { return '' }
+    if (-not $author.ContainsKey('login')) { return '' }
+    return [string]$author['login']
+}
+
+function Get-DispositionsLandingGapSupplementalCorpus {
+    <#
+    .SYNOPSIS
+        Independent, scoped GraphQL fetch of merged PRs' mergedAt/additions/
+        deletions plus full comment corpus (issue #869 s4).
+    .DESCRIPTION
+        Get-PhaseContainmentCommentCorpus's Surface B
+        (phase-containment-rolling-history-core.ps1, frozen per 768-D2)
+        structurally DROPS any merged PR whose joined comment text never
+        matches the judge-rulings head regex, and never captures each PR's
+        mergedAt/additions/deletions — Get-DispositionsLandingGap's
+        integrity-warning arm, unreviewed split, and ship-date floor
+        partition all need exactly the population that fetch discards, plus
+        fields it never asked for. This is a SEPARATE, SCOPED fetch modeled
+        on script:Get-SurfaceBCorpusGraphQL's search-query shape (same
+        `repo:$Owner/$Repo is:pr is:merged merged:>$since` search, same
+        outer-cursor pagination style) — not a modification of that frozen
+        function, and its output never contributes to
+        Get-DispositionsLandingGap's landing-gap numerator (that stays
+        corpus (a)-only per locked design decision d2).
+
+        Unlike script:Get-SurfaceBCorpusGraphQL, this fetch does NOT skip
+        comment pagination for PRs lacking a judge-rulings marker — the
+        integrity-warning and unreviewed-split arms need to see PRs with NO
+        artifacts at all, so every discovered PR's full comment set is
+        collected (bounded by -TimeoutSeconds, the same fail-safe truncation
+        convention used throughout this codebase).
+
+        GraphQL-only (issue #869 s4 scope decision, YAGNI): unlike
+        Get-PhaseContainmentCommentCorpus, this fetch has no REST fallback.
+        A GraphQL failure degrades to Source 'timeout' |
+        'repo-resolution-failed' (an honest "unavailable" state — see
+        Format-DispositionsLandingGapSection) rather than silently retrying
+        via `gh issue/pr view`. The two arms this fetch feeds already render
+        an explicit unavailable state on failure, so a REST-fallback code
+        path (which would roughly double this function's size) is deferred
+        until evidence shows GraphQL failures actually matter for this seam.
+    .PARAMETER RepoOwner
+        GitHub repository owner. Resolved via `gh repo view` if not supplied.
+    .PARAMETER RepoName
+        GitHub repository name. Resolved via `gh repo view` if not supplied.
+    .PARAMETER WindowDays
+        Number of past days to scan. Default: 90 (matches
+        Get-PhaseContainmentCommentCorpus's default so callers can pass the
+        SAME -WindowDays to both fetches and get population-comparable
+        results).
+    .PARAMETER TimeoutSeconds
+        Per-run budget in seconds. Default: 30.
+    .OUTPUTS
+        [PSCustomObject] with:
+          Tuples    [array] — each entry: @{ Number [int]; MergedAt [string]
+                    ISO8601 (raw, unconverted); Additions [int]; Deletions
+                    [int]; Bodies [string[]]; CreatedAtValues [string[]];
+                    AuthorLogins [string[]] }
+          FetchedAt [datetime]
+          Source    [string] — 'graphql' | 'timeout' | 'repo-resolution-failed'
+          Truncated [bool]
+    #>
+    [CmdletBinding()]
+    [OutputType([PSCustomObject])]
+    param(
+        [string]$RepoOwner   = '',
+        [string]$RepoName    = '',
+        [int]$WindowDays     = 90,
+        [int]$TimeoutSeconds = 30
+    )
+
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+
+    # ---- Resolve repo owner/name (mirrors Get-PhaseContainmentCommentCorpus's
+    # own resolution block; duplicated rather than reached into cross-file --
+    # that block is not itself an exported function). ----
+    if (-not $RepoOwner -or -not $RepoName) {
+        if ($stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
+            Write-Warning "phase-containment-cost-core: timed out before supplemental repo resolution"
+            return [PSCustomObject]@{ Tuples = @(); FetchedAt = (Get-Date); Source = 'timeout'; Truncated = $false }
+        }
+        $repoViewJson = & gh repo view --json 'owner,name' 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "phase-containment-cost-core: gh repo view failed (exit $LASTEXITCODE)"
+            return [PSCustomObject]@{ Tuples = @(); FetchedAt = (Get-Date); Source = 'repo-resolution-failed'; Truncated = $false }
+        }
+        try {
+            $repoInfo = ($repoViewJson | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop
+            if (-not $RepoOwner) { $RepoOwner = [string]$repoInfo['owner']['login'] }
+            if (-not $RepoName) { $RepoName = [string]$repoInfo['name'] }
+        }
+        catch {
+            Write-Warning "phase-containment-cost-core: failed to parse repo view: $_"
+            return [PSCustomObject]@{ Tuples = @(); FetchedAt = (Get-Date); Source = 'repo-resolution-failed'; Truncated = $false }
+        }
+    }
+
+    if ($stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
+        Write-Warning "phase-containment-cost-core: timed out before supplemental GraphQL fetch"
+        return [PSCustomObject]@{ Tuples = @(); FetchedAt = (Get-Date); Source = 'timeout'; Truncated = $false }
+    }
+
+    $tuples = [System.Collections.Generic.List[hashtable]]::new()
+    $truncated = $false
+    $since = (Get-Date).ToUniversalTime().AddDays(-$WindowDays).ToString('yyyy-MM-dd')
+
+    $searchCursor = $null
+    $searchHasNext = $true
+
+    try {
+        while ($searchHasNext) {
+            if ($stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
+                Write-Warning "phase-containment-cost-core: timed out paginating supplemental search"
+                $truncated = $true
+                break
+            }
+
+            $searchAfterClause = if ($null -ne $searchCursor) { ", after: `"$searchCursor`"" } else { '' }
+            $query = @"
+{
+  search(query: "repo:$RepoOwner/$RepoName is:pr is:merged merged:>$since", type: ISSUE, first: 50$searchAfterClause) {
+    pageInfo { hasNextPage endCursor }
+    nodes {
+      ... on PullRequest {
+        number
+        mergedAt
+        additions
+        deletions
+        comments(first: 100) {
+          nodes { author { login } body createdAt }
+          pageInfo { hasNextPage endCursor }
+        }
+      }
+    }
+  }
+}
+"@
+
+            $output = & gh api graphql -f "query=$query" 2>$null
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "phase-containment-cost-core: supplemental GraphQL search failed (exit $LASTEXITCODE)"
+                return [PSCustomObject]@{ Tuples = @(); FetchedAt = (Get-Date); Source = 'timeout'; Truncated = $false }
+            }
+
+            $parsed = ($output | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop
+            if ($parsed.ContainsKey('errors') -and $null -ne $parsed['errors'] -and @($parsed['errors']).Count -gt 0) {
+                Write-Warning "phase-containment-cost-core: supplemental GraphQL returned errors"
+                return [PSCustomObject]@{ Tuples = @(); FetchedAt = (Get-Date); Source = 'timeout'; Truncated = $false }
+            }
+
+            $searchBlock = $parsed['data']['search']
+            $nodes = @($searchBlock['nodes'])
+
+            foreach ($prNode in $nodes) {
+                if ($null -eq $prNode) { continue }
+                $prNum = [int]$prNode['number']
+                $mergedAt = [string]$prNode['mergedAt']
+                $additions = [int]$prNode['additions']
+                $deletions = [int]$prNode['deletions']
+
+                $commentBodies = [System.Collections.Generic.List[string]]::new()
+                $commentCreatedAt = [System.Collections.Generic.List[string]]::new()
+                $commentAuthorLogins = [System.Collections.Generic.List[string]]::new()
+
+                $commentBlock = $prNode['comments']
+                $commentNodes = @($commentBlock['nodes'])
+                foreach ($cn in $commentNodes) {
+                    if ($null -ne $cn) {
+                        $commentBodies.Add([string]$cn['body'])
+                        $commentCreatedAt.Add([string]$cn['createdAt'])
+                        $commentAuthorLogins.Add((script:Get-DispositionsLandingGapSupplementalAuthorLogin -CommentNode $cn))
+                    }
+                }
+
+                $pageInfo = $commentBlock['pageInfo']
+                $cursor = if ([bool]$pageInfo['hasNextPage']) { [string]$pageInfo['endCursor'] } else { $null }
+
+                # Unlike script:Get-SurfaceBCorpusGraphQL, always paginate
+                # every PR's remaining comments regardless of marker
+                # presence — see .DESCRIPTION.
+                while ($null -ne $cursor) {
+                    if ($stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
+                        Write-Warning "phase-containment-cost-core: timed out paginating supplemental PR #$prNum"
+                        $truncated = $true
+                        break
+                    }
+
+                    $pageQuery = @"
+{
+  repository(owner: "$RepoOwner", name: "$RepoName") {
+    pullRequest(number: $prNum) {
+      comments(first: 100, after: "$cursor") {
+        nodes { author { login } body createdAt }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+}
+"@
+                    $pageOutput = & gh api graphql -f "query=$pageQuery" 2>$null
+                    if ($LASTEXITCODE -ne 0) {
+                        Write-Warning "phase-containment-cost-core: supplemental post-page gh call failed for PR #$prNum (exit $LASTEXITCODE)"
+                        $truncated = $true
+                        break
+                    }
+
+                    try {
+                        $pageParsed = ($pageOutput | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop
+                        $pageComments = $pageParsed['data']['repository']['pullRequest']['comments']
+                        foreach ($cn in @($pageComments['nodes'])) {
+                            if ($null -ne $cn) {
+                                $commentBodies.Add([string]$cn['body'])
+                                $commentCreatedAt.Add([string]$cn['createdAt'])
+                                $commentAuthorLogins.Add((script:Get-DispositionsLandingGapSupplementalAuthorLogin -CommentNode $cn))
+                            }
+                        }
+                        $pi = $pageComments['pageInfo']
+                        $cursor = if ([bool]$pi['hasNextPage']) { [string]$pi['endCursor'] } else { $null }
+                    }
+                    catch {
+                        Write-Warning "phase-containment-cost-core: failed to parse supplemental pagination response for PR #${prNum}: $_"
+                        $truncated = $true
+                        break
+                    }
+                }
+
+                $tuples.Add(@{
+                        Number          = $prNum
+                        MergedAt        = $mergedAt
+                        Additions       = $additions
+                        Deletions       = $deletions
+                        Bodies          = $commentBodies.ToArray()
+                        CreatedAtValues = $commentCreatedAt.ToArray()
+                        AuthorLogins    = $commentAuthorLogins.ToArray()
+                    })
+            }
+
+            $searchPageInfo = $searchBlock['pageInfo']
+            $nextCursor = if ($null -ne $searchPageInfo -and $searchPageInfo.ContainsKey('endCursor')) { [string]$searchPageInfo['endCursor'] } else { '' }
+            if ([bool]$searchPageInfo['hasNextPage'] -and -not [string]::IsNullOrEmpty($nextCursor)) {
+                $searchCursor = $nextCursor
+                $searchHasNext = $true
+            }
+            else {
+                $searchCursor = $null
+                $searchHasNext = $false
+            }
+        }
+    }
+    catch {
+        Write-Warning "phase-containment-cost-core: failed to parse supplemental GraphQL response: $_"
+        return [PSCustomObject]@{ Tuples = @(); FetchedAt = (Get-Date); Source = 'timeout'; Truncated = $false }
+    }
+
+    return [PSCustomObject]@{
+        Tuples    = $tuples.ToArray()
+        FetchedAt = (Get-Date)
+        Source    = 'graphql'
+        Truncated = $truncated
+    }
+}
+
+#endregion
+
+#region Get-DispositionsLandingGap
+
+function Get-DispositionsLandingGap {
+    <#
+    .SYNOPSIS
+        Aggregates the review-dispositions marker landing gap against the
+        judge-rulings-anchored corpus, an integrity-warning arm, an
+        unreviewed-PR split, and an internal-only-coverage informational
+        count (issue #869 s4).
+    .DESCRIPTION
+        Mirrors Get-ReviewCostRollup's shape: a rollup function that returns
+        a data object and performs no GitHub fetching itself — callers
+        supply both the existing corpus (a) (Get-PhaseContainmentCommentCorpus's
+        Tuples/Source/Truncated, already fetched once and shared with
+        Get-ReviewCostRollup) and the new supplemental corpus (b)
+        (Get-DispositionsLandingGapSupplementalCorpus's own
+        Tuples/Source/Truncated).
+
+        Two data paths:
+
+        (a) Landing gap — corpus (a) is rulings-anchored: Surface B only
+        admits a merged PR when its joined comment text matches the
+        judge-rulings head regex, so every Surface='pr' tuple here already
+        has judge-rulings evidence. For each such tuple, this checks
+        whether it ALSO carries a real, judge-authored
+        `review-dispositions-{PR}` marker head
+        (Get-DispositionsLandingGapMarkerContribution, above). No marker ->
+        landing gap. This numerator stays corpus (a)-only, per locked
+        design decision d2 — the supplemental fetch (b) below NEVER
+        contributes to or replaces it.
+
+        (b) Supplemental fetch arms — corpus (a) structurally drops any PR
+        lacking judge-rulings evidence, so it cannot see marker-without-
+        judge-evidence PRs or PRs with no artifacts at all.
+        SupplementalTuples (from Get-DispositionsLandingGapSupplementalCorpus)
+        covers exactly that population. For each supplemental tuple that has
+        NO real judge-rulings head anywhere in its comments (unauthored-
+        gated: judge-rulings evidence from ANY commenter counts, matching
+        Get-ReviewCostRollup's own Test-JudgeRulingsRealHeadPresent reuse) —
+        a tuple WITH judge-rulings evidence is already data path (a)'s
+        domain and is skipped here to avoid double-counting — this derives:
+          (i)  integrity-warning arm: a real, judge-authored
+               review-dispositions marker head IS present -> a genuine
+               data-integrity anomaly (marker without judge evidence),
+               rendered as an explicit warning, never folded into a count.
+          (ii) unreviewed split: NEITHER head is present -> bucketed
+               trivial (additions+deletions <=
+               $script:DispositionsLandingGapTrivialDiffThreshold) vs
+               substantive.
+
+        (c) Internal-only-coverage — an INFORMATIONAL count, not a "gap":
+        among PRs carrying a real, judge-authored review-dispositions
+        marker from EITHER data path (data path (a)'s covered PRs, and data
+        path (b)'s integrity-warning arm — mutually exclusive sets by
+        construction, since (a) requires judge-rulings evidence and (b)'s
+        arm requires its absence), counts how many carry the marker WITHOUT
+        `external_sources_reconciled` present (internal-mode signature) vs
+        WITH it present (GitHub-Review-Mode signature, S6-eligible). Per
+        skills/review-judgment/SKILL.md, `external_sources_reconciled` is a
+        SESSION property (GitHub Review Mode only), never inferred from
+        marker content — this deliberately does NOT flag the internal-only
+        case as a defect.
+
+        (d) Ship-date floor — when -FixShipDate is supplied, partitions the
+        landing-gap PRs (data path (a)) into post-ship (mergedAt >
+        FixShipDate, expected 0) and pre-ship backlog (not alarmed). Data
+        path (a)'s own corpus has no mergedAt; this reuses
+        SupplementalTuples' MergedAt for PR numbers that also appear there
+        (chosen over a second small supplemental lookup — both fetches
+        share the same "is:pr is:merged merged:>$since" search population
+        for the SAME -WindowDays, so the overlap is expected to be
+        near-total). A landing-gap PR whose MergedAt cannot be resolved
+        this way is counted in MergedAtUnresolvedCount instead of being
+        silently guessed into either bucket. When -FixShipDate is omitted,
+        the landing-gap count renders unpartitioned with a
+        floor-not-configured note (see Format-DispositionsLandingGapSection).
+    .PARAMETER Tuples
+        The Tuples array from Get-PhaseContainmentCommentCorpus (data path
+        a; reused, never re-fetched by this function).
+    .PARAMETER Source
+        The corpus (a) Source flag: 'graphql' | 'rest' | 'timeout' |
+        'repo-resolution-failed'.
+    .PARAMETER Truncated
+        The corpus (a) Truncated flag, passed through unchanged.
+    .PARAMETER SupplementalTuples
+        The Tuples array from Get-DispositionsLandingGapSupplementalCorpus
+        (data path b).
+    .PARAMETER SupplementalSource
+        The supplemental fetch's Source flag: 'graphql' | 'timeout' |
+        'repo-resolution-failed'.
+    .PARAMETER SupplementalTruncated
+        The supplemental fetch's Truncated flag, passed through unchanged.
+    .PARAMETER JudgeLogin
+        The judge identity's login. REQUIRED, no default — matches
+        Select-PhaseContainmentJudgeAuthoredBodies's own no-default
+        contract. A default here would risk the same default-trap
+        phase-containment-report.ps1's own -JudgeLogin history warns
+        against (a default that matches nothing silently reads 0 entries);
+        callers must supply the resolved identity explicitly.
+    .PARAMETER FixShipDate
+        Optional. When supplied, partitions the landing-gap PRs into
+        post-ship / pre-ship-backlog (see (d) above).
+    .OUTPUTS
+        [PSCustomObject] with:
+          FetchState              [string] — 'ok' | 'unavailable' (corpus a)
+          FetchSource             [string] — corpus (a) Source, passed through
+          Truncated               [bool] — corpus (a) Truncated
+          SupplementalFetchState  [string] — 'ok' | 'unavailable' (corpus b)
+          SupplementalFetchSource [string] — corpus (b) Source, passed through
+          SupplementalTruncated   [bool] — corpus (b) Truncated
+          LandingGap              [PSCustomObject] — Partitioned [bool],
+                                  TotalCount [int], PostShipCount [int]|$null,
+                                  PreShipBacklogCount [int]|$null,
+                                  MergedAtUnresolvedCount [int]
+          IntegrityWarning        [PSCustomObject] — Count [int],
+                                  PrNumbers [int[]]
+          UnreviewedSplit         [PSCustomObject] — TrivialCount [int],
+                                  SubstantiveCount [int],
+                                  TrivialThreshold [int]
+          InternalOnlyCoverage    [PSCustomObject] — InternalOnlyCount [int],
+                                  ExternalReconciledCount [int],
+                                  CouldNotVerifyCount [int]
+    #>
+    [CmdletBinding()]
+    [OutputType([PSCustomObject])]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Tuples,
+        [Parameter(Mandatory)][ValidateSet('graphql', 'rest', 'timeout', 'repo-resolution-failed')][string]$Source,
+        [Parameter(Mandatory)][bool]$Truncated,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$SupplementalTuples,
+        [Parameter(Mandatory)][ValidateSet('graphql', 'timeout', 'repo-resolution-failed')][string]$SupplementalSource,
+        [Parameter(Mandatory)][bool]$SupplementalTruncated,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$JudgeLogin,
+        [Nullable[datetime]]$FixShipDate
+    )
+
+    if ([string]::IsNullOrWhiteSpace($JudgeLogin)) {
+        throw "Get-DispositionsLandingGap: -JudgeLogin is required and must not be empty -- a default here would silently disable the judge-authorship gate (matches phase-containment-report.ps1's -JudgeLogin default-trap history)."
+    }
+
+    $fetchAUnavailable = $Source -in @('timeout', 'repo-resolution-failed')
+    $fetchBUnavailable = $SupplementalSource -in @('timeout', 'repo-resolution-failed')
+
+    $landingGapPrNumbers = [System.Collections.Generic.List[int]]::new()
+    $landingGapMergedAtByNumber = [System.Collections.Generic.Dictionary[int, string]]::new()
+    $internalOnlyCount = 0
+    $externalReconciledCount = 0
+    $internalCoverageCouldNotVerifyCount = 0
+    $integrityWarningPrNumbers = [System.Collections.Generic.List[int]]::new()
+    $unreviewedTrivialCount = 0
+    $unreviewedSubstantiveCount = 0
+
+    # ---- data path (a): landing gap + its internal-only-coverage contribution ----
+    if (-not $fetchAUnavailable) {
+        foreach ($tuple in $Tuples) {
+            if ([string]$tuple.Surface -ne 'pr') { continue }
+            $number = [int]$tuple.Number
+            $bodies = @($tuple.Bodies)
+            $authorLogins = @($tuple.AuthorLogins)
+
+            $contrib = Get-DispositionsLandingGapMarkerContribution -Bodies $bodies -AuthorLogins $authorLogins -JudgeLogin $JudgeLogin -Number $number
+            if (-not $contrib.HasMarker) {
+                $landingGapPrNumbers.Add($number)
+                continue
+            }
+            if ($contrib.ParseStatus -ne 'ok') {
+                $internalCoverageCouldNotVerifyCount++
+            }
+            elseif ($contrib.ExternalSourcesFound) {
+                $externalReconciledCount++
+            }
+            else {
+                $internalOnlyCount++
+            }
+        }
+    }
+
+    # ---- data path (b): integrity-warning arm + unreviewed split ----
+    if (-not $fetchBUnavailable) {
+        foreach ($tuple in $SupplementalTuples) {
+            $number = [int]$tuple.Number
+            $mergedAtRaw = [string]$tuple.MergedAt
+            $additions = [int]$tuple.Additions
+            $deletions = [int]$tuple.Deletions
+            $bodies = @($tuple.Bodies)
+            $authorLogins = @($tuple.AuthorLogins)
+
+            # Feed (d)'s ship-date lookup for EVERY supplemental PR (option
+            # (ii) in the .DESCRIPTION above), not just the ones classified
+            # below -- a landing-gap PR (data path a) resolves its MergedAt
+            # from here whenever the two fetches' populations overlap.
+            $landingGapMergedAtByNumber[$number] = $mergedAtRaw
+
+            $hasJudgeRulingsAnywhere = $false
+            foreach ($b in $bodies) {
+                if (Test-JudgeRulingsRealHeadPresent -Body ([string]$b) -Surface 'code-review') {
+                    $hasJudgeRulingsAnywhere = $true
+                    break
+                }
+            }
+            if ($hasJudgeRulingsAnywhere) {
+                # Already data path (a)'s domain -- never double-count here.
+                continue
+            }
+
+            $contrib = Get-DispositionsLandingGapMarkerContribution -Bodies $bodies -AuthorLogins $authorLogins -JudgeLogin $JudgeLogin -Number $number
+            if ($contrib.HasMarker) {
+                # (b)(i) integrity-warning arm.
+                $integrityWarningPrNumbers.Add($number)
+                if ($contrib.ParseStatus -ne 'ok') {
+                    $internalCoverageCouldNotVerifyCount++
+                }
+                elseif ($contrib.ExternalSourcesFound) {
+                    $externalReconciledCount++
+                }
+                else {
+                    $internalOnlyCount++
+                }
+            }
+            else {
+                # (b)(ii) unreviewed split.
+                $diffSize = $additions + $deletions
+                if ($diffSize -le $script:DispositionsLandingGapTrivialDiffThreshold) {
+                    $unreviewedTrivialCount++
+                }
+                else {
+                    $unreviewedSubstantiveCount++
+                }
+            }
+        }
+    }
+
+    # ---- (d): ship-date floor partition ----
+    $landingGapTotalCount = $landingGapPrNumbers.Count
+    $partitioned = $null -ne $FixShipDate
+    $postShipCount = 0
+    $preShipBacklogCount = 0
+    $mergedAtUnresolvedCount = 0
+
+    if ($partitioned) {
+        foreach ($num in $landingGapPrNumbers) {
+            $mergedAtStr = if ($landingGapMergedAtByNumber.ContainsKey($num)) { $landingGapMergedAtByNumber[$num] } else { $null }
+            $mergedAtDt = $null
+            if (-not [string]::IsNullOrWhiteSpace($mergedAtStr)) {
+                try { $mergedAtDt = [datetime]::Parse($mergedAtStr, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind) } catch { $mergedAtDt = $null }
+            }
+            if ($null -eq $mergedAtDt) {
+                $mergedAtUnresolvedCount++
+                continue
+            }
+            if ($mergedAtDt -gt $FixShipDate) {
+                $postShipCount++
+            }
+            else {
+                $preShipBacklogCount++
+            }
+        }
+    }
+
+    return [PSCustomObject]@{
+        FetchState              = if ($fetchAUnavailable) { 'unavailable' } else { 'ok' }
+        FetchSource             = $Source
+        Truncated                = $Truncated
+        SupplementalFetchState  = if ($fetchBUnavailable) { 'unavailable' } else { 'ok' }
+        SupplementalFetchSource = $SupplementalSource
+        SupplementalTruncated   = $SupplementalTruncated
+        LandingGap              = [PSCustomObject]@{
+            Partitioned             = $partitioned
+            TotalCount              = $landingGapTotalCount
+            PostShipCount           = if ($partitioned) { $postShipCount } else { $null }
+            PreShipBacklogCount     = if ($partitioned) { $preShipBacklogCount } else { $null }
+            MergedAtUnresolvedCount = if ($partitioned) { $mergedAtUnresolvedCount } else { 0 }
+        }
+        IntegrityWarning        = [PSCustomObject]@{
+            Count     = $integrityWarningPrNumbers.Count
+            PrNumbers = $integrityWarningPrNumbers.ToArray()
+        }
+        UnreviewedSplit          = [PSCustomObject]@{
+            TrivialCount     = $unreviewedTrivialCount
+            SubstantiveCount = $unreviewedSubstantiveCount
+            TrivialThreshold = $script:DispositionsLandingGapTrivialDiffThreshold
+        }
+        InternalOnlyCoverage     = [PSCustomObject]@{
+            InternalOnlyCount       = $internalOnlyCount
+            ExternalReconciledCount = $externalReconciledCount
+            CouldNotVerifyCount     = $internalCoverageCouldNotVerifyCount
+        }
+    }
+}
+
+#endregion
+
+#region Format-DispositionsLandingGapSection
+
+function Format-DispositionsLandingGapSection {
+    <#
+    .SYNOPSIS
+        Renders the Get-DispositionsLandingGap output as a landing-gap /
+        integrity-warning / unreviewed-split / internal-only-coverage
+        section (issue #869 s4), meant to be printed immediately after
+        Format-ReviewCostSection's output.
+    .DESCRIPTION
+        Presentation-only: never computes anything itself, mirroring
+        Format-ReviewCostSection's own contract. Renders, in order: the
+        landing-gap row (partitioned by -FixShipDate, or a single
+        unpartitioned count with a floor-not-configured note), the
+        integrity-warning line(s), the unreviewed trivial/substantive
+        counts, and the internal-only-coverage informational count
+        (explicitly labeled descriptive, never a "gap").
+
+        Honest states: the landing-gap row renders
+        "LANDING-GAP DATA UNAVAILABLE (fetch {source})" when
+        Rollup.FetchState is 'unavailable' (corpus (a) fetch failed) rather
+        than a confident zero. The integrity-warning and unreviewed-split
+        rows render "SUPPLEMENTAL DATA UNAVAILABLE (fetch {source})" when
+        Rollup.SupplementalFetchState is 'unavailable'.
+        Internal-only-coverage renders an explicit caveat when EITHER fetch
+        is unavailable, since its count unions both data paths (issue #869
+        s4 (c)) and a single-side outage silently undercounts it rather
+        than zeroing it cleanly.
+    .PARAMETER Rollup
+        The Get-DispositionsLandingGap return object.
+    .OUTPUTS
+        [string[]] — the report lines.
+    #>
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param(
+        [Parameter(Mandatory)][object]$Rollup
+    )
+
+    $fetchAUnavailable = $Rollup.FetchState -eq 'unavailable'
+    $fetchBUnavailable = $Rollup.SupplementalFetchState -eq 'unavailable'
+    $lines = [System.Collections.Generic.List[string]]::new()
+
+    $lines.Add('')
+    $lines.Add('Review-Dispositions Landing Gap (presentation-only)')
+    $lines.Add('')
+
+    if ($Rollup.Truncated) {
+        $lines.Add('CAUTION: the review-cost comment corpus fetch (data path a) was Truncated -- the landing-gap count below may be computed from an incomplete population.')
+    }
+    if ($Rollup.SupplementalTruncated) {
+        $lines.Add('CAUTION: the supplemental fetch (data path b) was Truncated -- the integrity-warning/unreviewed-split counts below may be computed from an incomplete population.')
+    }
+    if ($Rollup.Truncated -or $Rollup.SupplementalTruncated) {
+        $lines.Add('')
+    }
+
+    # ---- (a)/(d): landing gap, partitioned or not ----
+    if ($fetchAUnavailable) {
+        $lines.Add("Landing gap (judge-rulings present, no review-dispositions marker): LANDING-GAP DATA UNAVAILABLE (fetch $($Rollup.FetchSource))")
+    }
+    else {
+        $lg = $Rollup.LandingGap
+        if ($lg.Partitioned) {
+            $lines.Add("Landing gap (judge-rulings present, no review-dispositions marker): $($lg.TotalCount) total -- post-ship: $($lg.PostShipCount) (expected 0), pre-ship backlog: $($lg.PreShipBacklogCount)")
+            if ($lg.MergedAtUnresolvedCount -gt 0) {
+                $lines.Add("  NOTE: $($lg.MergedAtUnresolvedCount) of the $($lg.TotalCount) landing-gap PR(s) could not be assigned a mergedAt date (not found in the supplemental fetch, or unparseable) and are excluded from the post-ship/pre-ship split above.")
+            }
+        }
+        else {
+            $lines.Add("Landing gap (judge-rulings present, no review-dispositions marker): $($lg.TotalCount) (ship-date floor not configured -- pass -FixShipDate to partition into post-ship/pre-ship backlog)")
+        }
+    }
+    $lines.Add('')
+
+    # ---- (b)(i): integrity-warning arm ----
+    if ($fetchBUnavailable) {
+        $lines.Add("Integrity warning (review-dispositions marker present, NO judge-rulings evidence anywhere): SUPPLEMENTAL DATA UNAVAILABLE (fetch $($Rollup.SupplementalFetchSource))")
+    }
+    else {
+        $iw = $Rollup.IntegrityWarning
+        if ($iw.Count -gt 0) {
+            $prList = ($iw.PrNumbers | ForEach-Object { "#$_" }) -join ', '
+            $lines.Add("WARNING: $($iw.Count) PR(s) carry a review-dispositions marker with NO judge-rulings evidence anywhere in their comments -- a genuine data-integrity anomaly, not a benign case: $prList")
+        }
+        else {
+            $lines.Add('Integrity warning (review-dispositions marker present, NO judge-rulings evidence anywhere): 0 (none found)')
+        }
+    }
+    $lines.Add('')
+
+    # ---- (b)(ii): unreviewed split ----
+    if ($fetchBUnavailable) {
+        $lines.Add("Unreviewed merged PRs (neither judge-rulings nor review-dispositions): SUPPLEMENTAL DATA UNAVAILABLE (fetch $($Rollup.SupplementalFetchSource))")
+    }
+    else {
+        $us = $Rollup.UnreviewedSplit
+        $lines.Add("Unreviewed merged PRs (neither judge-rulings nor review-dispositions) -- trivial (additions+deletions <= $($us.TrivialThreshold)): $($us.TrivialCount); substantive: $($us.SubstantiveCount)")
+    }
+    $lines.Add('')
+
+    # ---- (c): internal-only-coverage informational count ----
+    $ioc = $Rollup.InternalOnlyCoverage
+    $iocLabel = "Informational: $($ioc.InternalOnlyCount) PR(s) reviewed via internal-only passes (review-dispositions marker present, no external_sources_reconciled), not S6-eligible. $($ioc.ExternalReconciledCount) PR(s) reviewed via GitHub Review Mode (external_sources_reconciled present), S6-eligible."
+    if ($ioc.CouldNotVerifyCount -gt 0) {
+        $iocLabel += " $(Format-CouldNotVerifySuffix -Count $ioc.CouldNotVerifyCount)"
+    }
+    $lines.Add($iocLabel)
+    if ($fetchAUnavailable -or $fetchBUnavailable) {
+        $lines.Add('  CAVEAT: this count unions data paths (a) and (b) above; one or both are unavailable this run, so it likely undercounts rather than reflecting the true total.')
     }
     $lines.Add('')
 
