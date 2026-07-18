@@ -226,9 +226,18 @@ This gate is owned by the calling workflow (e.g. `/orchestra:review-judge`, `/or
 
 ### When to Run
 
+This section splits two previously-conflated rules — marker emission and the maintainer-interaction gate — so the always-emit behavior below does not read as contradicting the sustained-only scoping that follows it.
+
+**Marker emission** (persisting `<!-- review-dispositions-{PR} -->` and `<!-- engagement-record-review-{PR} -->`) fires on **every** judge pass, including a zero-sustained pass:
+
 - After the `<!-- review-judge-produced-{PR} -->` sentinel is confirmed written
+- Even when no finding was judge-sustained this pass — per the M9 coverage semantics above (§ Scope, around line 277: "coverage means measurement, not presence"), a zero-sustained pass still emits both markers, with `entries: []` on the dispositions marker
+
+**Disposition gate** (the `AskUserQuestion` / maintainer-interaction step, classification into routine vs load-bearing) fires only when there are findings to disposition:
+
 - Over the judge-sustained findings from the `<!-- judge-rulings ... -->` block
 - Only for sustained findings (`judge_ruling: sustained`); defense-sustained findings (`judge_ruling: defense-sustained`) are skipped silently (not disposition-gated)
+- When there are zero judge-sustained findings, no finding enters classification and `AskUserQuestion` never fires this pass — but marker emission (above) still runs
 
 ### Classification
 

@@ -119,6 +119,19 @@ Describe 'Code-Conductor inline commands contract' {
             $content | Should -Not -Match '(?is)subagent_type:\s*code-conductor' -Because '/review-github must not dispatch Code-Conductor as a parent-side subagent'
             $content | Should -Not -Match '(?is)Review mode selector:' -Because '/review-github must not contain Review mode selector language'
         }
+
+        It 'carries the s3 Post-judgment disposition gate pointer block and still contains no Review mode selector literal (issue #869 s5)' {
+            # Part 2 of the s5 test slice: s3 rewrote the old "Review mode
+            # selector" block into a pointer at
+            # skills/code-review-intake/references/response-loop-completion.md's
+            # Post-Judge Disposition Gate step -- this is a contract
+            # assertion that the rewrite landed and stayed landed, not a
+            # regression test for a defect.
+            $content = Get-Content -Path $script:ReviewGithubCommandPath -Raw -ErrorAction Stop
+
+            $content | Should -Match '(?is)Post-judgment disposition gate' -Because '/review-github must carry the s3 Post-judgment disposition gate pointer block'
+            $content | Should -Not -Match '(?is)Review mode selector:' -Because '/review-github must still contain no Review mode selector literal after the s3 rewrite'
+        }
     }
 
     Context 'Code-Conductor.agent.md GitHub review sentence preservation' {
@@ -201,6 +214,50 @@ Describe 'Code-Conductor inline commands contract' {
             # Verify /code-conductor does NOT appear in the exception clause (it should skip hub mode, not re-enable it)
             $exceptionClause = $sentenceAndException[1]
             $exceptionClause | Should -Not -Match '/code-conductor' -Because '/code-conductor must remain in skip-hub-mode list, not the hub-mode exception'
+        }
+    }
+
+    Context 'response-loop-completion.md wording-lock contract (issue #869 s5, Part 3)' {
+        # Pinned-literal wording-lock on s1's rewrite of the Post-Judge
+        # Disposition Gate's loud-failure literals and per-judge-pass firing
+        # language. This is a FUTURE-regression guard: the exact erosion
+        # class that caused the original 15% landing rate (issue #869) was a
+        # quiet wording drift away from these loud literals -- this test
+        # exists so an accidental reversion fails CI instead of silently
+        # landing again.
+
+        BeforeAll {
+            $script:ResponseLoopCompletionPath = Join-Path $script:RepoRoot 'skills/code-review-intake/references/response-loop-completion.md'
+        }
+
+        It 'preserves both loud not-posted literals verbatim' {
+            Test-Path $script:ResponseLoopCompletionPath | Should -BeTrue -Because 'skills/code-review-intake/references/response-loop-completion.md must exist'
+
+            $content = Get-Content -Path $script:ResponseLoopCompletionPath -Raw -ErrorAction Stop
+
+            $content | Should -Match ([regex]::Escape('⚠️ review-dispositions-{PR} not posted — {reason}')) -Because 'response-loop-completion.md must preserve the review-dispositions loud literal verbatim'
+            $content | Should -Match ([regex]::Escape('⚠️ engagement-record-review-{PR} not posted — {reason}')) -Because 'response-loop-completion.md must preserve the engagement-record-review loud literal verbatim'
+        }
+
+        It 'preserves the per-judge-pass firing language' {
+            $content = Get-Content -Path $script:ResponseLoopCompletionPath -Raw -ErrorAction Stop
+
+            $content | Should -Match '(?is)once per judge pass' -Because 'response-loop-completion.md must document that the Post-Judge Disposition Gate fires once per judge pass (main and post-fix), not once total'
+        }
+
+        It 'preserves the zero-sustained-pass emission clause verbatim' {
+            $content = Get-Content -Path $script:ResponseLoopCompletionPath -Raw -ErrorAction Stop
+
+            $content | Should -Match ([regex]::Escape('A zero-sustained judge pass still emits both markers below, with `entries: []` on the dispositions marker.')) -Because 'response-loop-completion.md must document that a zero-sustained judge pass still emits both markers with entries: []'
+        }
+
+        It 'preserves the R4 fail-closed clause in review-reconciliation.md verbatim' {
+            $reviewReconciliationPath = Join-Path $script:RepoRoot 'skills/validation-methodology/references/review-reconciliation.md'
+            Test-Path $reviewReconciliationPath | Should -BeTrue -Because 'skills/validation-methodology/references/review-reconciliation.md must exist'
+
+            $content = Get-Content -Path $reviewReconciliationPath -Raw -ErrorAction Stop
+
+            $content | Should -Match ([regex]::Escape('**Fail closed**: if neither the in-session set nor the posted marker is available for a finding, treat its disposition as unresolved and do not dispatch it')) -Because 'review-reconciliation.md Batch Specialist Dispatch (R4) must preserve the fail-closed clause verbatim'
         }
     }
 }

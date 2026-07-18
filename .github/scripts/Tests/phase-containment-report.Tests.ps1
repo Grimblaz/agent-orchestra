@@ -99,6 +99,29 @@ BeforeAll {
             Truncated = $Truncated
         }
     }
+
+    function script:New-FixedSupplementalCorpusResult {
+        param([bool]$Truncated = $false, [string]$Source = 'graphql')
+        [PSCustomObject]@{
+            Tuples    = @()
+            FetchedAt = $script:FixedFetchedAt
+            Source    = $Source
+            Truncated = $Truncated
+        }
+    }
+
+    # Issue #869 s4/s6: Invoke-PhaseContainmentReportCli now calls
+    # Get-DispositionsLandingGapSupplementalCorpus (its own, separate GraphQL
+    # fetch) unconditionally on every run, in its own isolated try/catch
+    # (see the "Landing-gap path" region of phase-containment-report.ps1).
+    # Without this default mock, every test in this file that invokes the
+    # CLI would make a LIVE `gh repo view` / `gh api graphql` call against
+    # the real Grimblaz/agent-orchestra repo (the RepoOwner/RepoName every
+    # call site below passes) -- slow, network-dependent, and a genuine
+    # sandbox/CI-flakiness risk this suite must not carry. Individual tests
+    # that need to exercise the landing-gap section's own rendering (below)
+    # override this default with their own Mock.
+    Mock Get-DispositionsLandingGapSupplementalCorpus { New-FixedSupplementalCorpusResult }
 }
 
 Describe 'phase-containment-report.ps1 dot-source order (issue #768 s6, judge-sustained M11)' {
@@ -111,6 +134,10 @@ Describe 'phase-containment-report.ps1 dot-source order (issue #768 s6, judge-su
         (Get-Command Get-ReviewCostRollup -ErrorAction SilentlyContinue) | Should -Not -BeNullOrEmpty
         (Get-Command Format-ReviewCostSection -ErrorAction SilentlyContinue) | Should -Not -BeNullOrEmpty
         (Get-Command Invoke-PhaseContainmentReportCli -ErrorAction SilentlyContinue) | Should -Not -BeNullOrEmpty
+        # Issue #869 s4/s6 landing-gap path.
+        (Get-Command Get-DispositionsLandingGapSupplementalCorpus -ErrorAction SilentlyContinue) | Should -Not -BeNullOrEmpty
+        (Get-Command Get-DispositionsLandingGap -ErrorAction SilentlyContinue) | Should -Not -BeNullOrEmpty
+        (Get-Command Format-DispositionsLandingGapSection -ErrorAction SilentlyContinue) | Should -Not -BeNullOrEmpty
     }
 }
 
@@ -372,6 +399,44 @@ Describe 'Invoke-PhaseContainmentReportCli' {
             }
         }
 
+    }
+
+    Context 'Landing-gap section rendering and isolation (issue #869 s4/s6, Part 4)' {
+        # The landing-gap path is wired into Invoke-PhaseContainmentReportCli
+        # AFTER the cost section, in its own isolated try/catch (mirrors the
+        # #768 s6 M5/M8 cost-path isolation invariant, extended one section
+        # further). These tests prove the new section actually renders in
+        # the full CLI output, and that a landing-gap-path failure never
+        # suppresses the value report or the cost section that already
+        # rendered before it.
+        BeforeEach {
+            Mock Get-PhaseContainmentHistory { New-FixedHistoryResult }
+            Mock Get-PhaseContainmentCommentCorpus { New-FixedCorpusResult }
+        }
+
+        It 'renders the Review-Dispositions Landing Gap section header with the WindowDays value when both fetches succeed' {
+            Mock Get-DispositionsLandingGapSupplementalCorpus { New-FixedSupplementalCorpusResult }
+
+            $output = Invoke-PhaseContainmentReportCli -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 90 -Token ''
+            $joined = $output -join "`n"
+
+            $joined | Should -Match 'Review-Dispositions Landing Gap \(presentation-only, 90d window\)' -Because (
+                "Actual output:`n$joined"
+            )
+        }
+
+        It 'still renders the value report AND the cost section when the landing-gap path throws' {
+            Mock Get-DispositionsLandingGapSupplementalCorpus { throw 'simulated supplemental fetch failure' }
+
+            $output = Invoke-PhaseContainmentReportCli -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 90 -Token ''
+            $joined = $output -join "`n"
+
+            $joined | Should -Match 'Phase-Containment Escape-Rate Ledger'
+            $joined | Should -Match 'Review Cost \(presentation-only\)'
+            $joined | Should -Match 'landing gap section unavailable: simulated supplemental fetch failure'
+            # The degraded landing-gap path must not print its own normal section header.
+            $joined | Should -Not -Match 'Review-Dispositions Landing Gap'
+        }
     }
 }
 

@@ -31,6 +31,10 @@ Adopt the resolved Code-Conductor body inline. Process this invocation as `revie
 
 This command completes the full response loop: accepted fixes are applied by specialists, committed, and pushed to the existing PR branch — or a loud not-pushed reason is surfaced when push is not possible (detached HEAD, default branch, fork without write access, non-fast-forward conflict, or Commit-Policy opt-out). See `skills/code-review-intake/SKILL.md § Response Loop Completion` and `skills/persist-changes/SKILL.md` for the terminal-step executor contract.
 
+**Post-judgment disposition gate**:
+
+This path does not run a separate gate step here. `skills/code-review-intake/SKILL.md § Response Loop Completion` loads `skills/code-review-intake/references/response-loop-completion.md`, whose step 1 is the sole executor of the Post-Judge Disposition Gate (`skills/review-judgment/SKILL.md § Post-Judge Disposition Gate`) on this path: it fires once per judge pass (main and post-fix), persists `<!-- review-dispositions-{PR} -->` then `<!-- engagement-record-review-{PR} -->`, and fires even on zero-sustained passes. AC-refs: AC1, AC2, AC10.
+
 ## Downstream Agent handshakes
 
 Before each downstream `Agent` dispatch, reconstruct a fresh `subagent-env-handshake` by capturing live HEAD, branch, CWD, and dirty fingerprint immediately before that dispatch. The working tree mutates during orchestration, so do not reuse or carry forward a command-entry-captured handshake, a single entry-time handshake, or any earlier per-dispatch block for later specialist calls.
