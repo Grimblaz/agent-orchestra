@@ -1510,13 +1510,19 @@ function Format-DispositionsLandingGapSection {
         than zeroing it cleanly.
     .PARAMETER Rollup
         The Get-DispositionsLandingGap return object.
+    .PARAMETER WindowDays
+        The -WindowDays value the corpus was fetched over (issue #869 s6
+        (A)). Rendered in the section header so readers can tell this
+        metric's raw counts apart from issue #869's own hand-counted
+        ~41-day-window figures without cross-referencing CLI defaults.
     .OUTPUTS
         [string[]] — the report lines.
     #>
     [CmdletBinding()]
     [OutputType([string[]])]
     param(
-        [Parameter(Mandatory)][object]$Rollup
+        [Parameter(Mandatory)][object]$Rollup,
+        [Parameter(Mandatory)][int]$WindowDays
     )
 
     $fetchAUnavailable = $Rollup.FetchState -eq 'unavailable'
@@ -1524,7 +1530,7 @@ function Format-DispositionsLandingGapSection {
     $lines = [System.Collections.Generic.List[string]]::new()
 
     $lines.Add('')
-    $lines.Add('Review-Dispositions Landing Gap (presentation-only)')
+    $lines.Add("Review-Dispositions Landing Gap (presentation-only, ${WindowDays}d window)")
     $lines.Add('')
 
     if ($Rollup.Truncated) {
@@ -1553,6 +1559,8 @@ function Format-DispositionsLandingGapSection {
             $lines.Add("Landing gap (judge-rulings present, no review-dispositions marker): $($lg.TotalCount) (ship-date floor not configured -- pass -FixShipDate to partition into post-ship/pre-ship backlog)")
         }
     }
+    $lines.Add('')
+    $lines.Add('Expected rate: live sessions post both markers same-pass (judgment-terminal implies both, 100%), so landing gap is expected to be 0 for PRs merged after the fix''s ship date (see -FixShipDate above); pre-fix backlog is not alarmed. Internal-only-coverage below is informational, not a defect.')
     $lines.Add('')
 
     # ---- (b)(i): integrity-warning arm ----

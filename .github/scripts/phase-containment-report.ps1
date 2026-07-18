@@ -795,7 +795,7 @@ function Invoke-PhaseContainmentReportCli {
             -SupplementalTuples $supplementalCorpus.Tuples -SupplementalSource $supplementalCorpus.Source -SupplementalTruncated $supplementalCorpus.Truncated `
             -JudgeLogin $JudgeLogin -FixShipDate $FixShipDate
 
-        Format-DispositionsLandingGapSection -Rollup $landingGapRollup | Write-Output
+        Format-DispositionsLandingGapSection -Rollup $landingGapRollup -WindowDays $WindowDays | Write-Output
     }
     catch {
         Write-Output ''
