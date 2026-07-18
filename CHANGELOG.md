@@ -6,7 +6,7 @@ All notable changes to agent-orchestra will be documented in this file.
 
 ### Added
 
-- Add Two-Layer Research Delegation convention to research-methodology (#691): routes upstream-phase fan-out repo reads to a cheap native Explore-tier subagent dispatch with a file:line citation contract; wires pointers into design-exploration, plan-authoring, customer-experience, multi-issue-bundling.md, and subagent-env-handshake.
+- Add Two-Layer Research Delegation convention to research-methodology (#691): routes upstream-phase fan-out repo reads to a native Explore subagent dispatch with a file:line citation contract; wires pointers into design-exploration, plan-authoring, customer-experience, multi-issue-bundling.md, and subagent-env-handshake.
 
 ## [3.3.19] — 2026-07-17
 

@@ -78,11 +78,11 @@ The final output should recommend one approach explicitly. Keep rejected alterna
 
 ## Two-Layer Research Delegation
 
-Claude Code sessions can split a fan-out repo read into two layers: a cheap Layer-1 (locate/enumerate) `Explore` subagent dispatch for locating or enumerating things, and the expensive parent session — Layer 2 — for any read that requires judgment while reading. This section is the canonical definition; other skills point here rather than restating it.
+Claude Code sessions can split a fan-out repo read into two layers: a Layer-1 (locate/enumerate) `Explore` subagent dispatch for locating or enumerating things, and the expensive parent session — Layer 2 — for any read that requires judgment while reading. This section is the canonical definition; other skills point here rather than restating it.
 
 ### Split rule
 
-Delegate a fan-out repo read to a cheap fresh-context `Explore`-tier subagent when the read *locates* where a known thing lives or *enumerates* a fixed shape ("where is X", "what is Y's signature", "which files match Z"). Keep the read inline in the expensive session when it requires *synthesizing* a judgment from what is found ("what is the right convention here", "how do these pieces fit together"), regardless of file count.
+Delegate a fan-out repo read to a fresh-context `Explore` subagent when the read *locates* where a known thing lives or *enumerates* a fixed shape ("where is X", "what is Y's signature", "which files match Z"). Keep the read inline in the expensive session when it requires *synthesizing* a judgment from what is found ("what is the right convention here", "how do these pieces fit together"), regardless of file count.
 
 **Worked borderline example**: "list every adapter file matching the glob and report each file's `adapter-type` frontmatter value" delegates (multi-file enumeration). "Infer the adapter convention from reading those files" stays inline (synthesis, judgment-during-reading).
 

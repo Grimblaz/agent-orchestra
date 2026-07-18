@@ -191,7 +191,7 @@ Issue #691 (same umbrella #476) shipped a companion mechanism, not a
 substitute. This document's subject (#474) keeps a session's own reads lean
 once a read stays inline (extract-don't-dump, batching, targeted edits,
 parent-side diagnostics). #691's Two-Layer Research Delegation instead routes
-upstream sessions' fan-out repo reads to a separate cheap fresh-context
+upstream sessions' fan-out repo reads to a separate fresh-context
 `Explore` subagent dispatch, so the expensive session never carries the read
 at all — a different mechanism (delegation vs. in-session discipline) under
 the same cost-reduction umbrella. The two compound rather than substitute for
