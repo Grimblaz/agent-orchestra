@@ -901,6 +901,47 @@ function script:Get-DispositionsLandingGapMarkerContribution {
     return [PSCustomObject]@{ HasMarker = $true; ParseStatus = $tally.ParseStatus; ExternalSourcesFound = [bool]$tally.ExternalSourcesFound }
 }
 
+function script:Update-DispositionsLandingGapInternalCoverageCounts {
+    <#
+    .SYNOPSIS
+        Classifies one Get-DispositionsLandingGapMarkerContribution result
+        into could-not-verify / external-reconciled / internal-only and
+        increments the matching counter (issue #869 s4).
+    .DESCRIPTION
+        Get-DispositionsLandingGap's data path (a) (a landing-gap-covered
+        PR's own marker) and data path (b)'s integrity-warning arm (a
+        marker-without-judge-evidence PR's own marker) both need this SAME
+        three-way classification over a HasMarker=true contribution --
+        extracted so the two call sites cannot drift apart, mirroring this
+        file's existing Format-CouldNotVerifySuffix extraction (issue #842
+        CM15) for the same reason.
+    .PARAMETER Contrib
+        A Get-DispositionsLandingGapMarkerContribution result with HasMarker
+        already confirmed $true by the caller.
+    .PARAMETER InternalOnlyCount
+        [ref] to the caller's running InternalOnlyCount.
+    .PARAMETER ExternalReconciledCount
+        [ref] to the caller's running ExternalReconciledCount.
+    .PARAMETER CouldNotVerifyCount
+        [ref] to the caller's running CouldNotVerifyCount.
+    #>
+    param(
+        [Parameter(Mandatory)][object]$Contrib,
+        [Parameter(Mandatory)][ref]$InternalOnlyCount,
+        [Parameter(Mandatory)][ref]$ExternalReconciledCount,
+        [Parameter(Mandatory)][ref]$CouldNotVerifyCount
+    )
+    if ($Contrib.ParseStatus -ne 'ok') {
+        $CouldNotVerifyCount.Value++
+    }
+    elseif ($Contrib.ExternalSourcesFound) {
+        $ExternalReconciledCount.Value++
+    }
+    else {
+        $InternalOnlyCount.Value++
+    }
+}
+
 #endregion
 
 #region Get-DispositionsLandingGapSupplementalCorpus
@@ -926,6 +967,47 @@ function script:Get-DispositionsLandingGapSupplementalAuthorLogin {
     if ($null -eq $author -or $author -isnot [hashtable]) { return '' }
     if (-not $author.ContainsKey('login')) { return '' }
     return [string]$author['login']
+}
+
+function script:Add-DispositionsLandingGapSupplementalCommentNodes {
+    <#
+    .SYNOPSIS
+        Appends each non-null GraphQL comment node's body/createdAt/author-
+        login onto the caller's three parallel accumulator lists (issue #869
+        s4).
+    .DESCRIPTION
+        Get-DispositionsLandingGapSupplementalCorpus's initial search-page
+        comment block and its own per-PR pagination follow-up both walk a
+        GraphQL comments-page's nodes[] and append the same three fields in
+        the same order -- extracted so the two call sites cannot drift apart,
+        the same reason this file already extracts
+        Get-DispositionsLandingGapSupplementalAuthorLogin and
+        Format-CouldNotVerifySuffix (issue #842 CM15) rather than inlining
+        each duplicate twice.
+    .PARAMETER Nodes
+        The GraphQL comments-page's nodes[] array (may contain $null
+        entries -- a node can be null when a comment was deleted).
+    .PARAMETER Bodies
+        The caller's accumulator List[string] for comment bodies (mutated
+        in place; PowerShell List[T] is a reference type).
+    .PARAMETER CreatedAtValues
+        The caller's accumulator List[string] for comment createdAt values.
+    .PARAMETER AuthorLogins
+        The caller's accumulator List[string] for comment author logins.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Nodes,
+        [Parameter(Mandatory)][System.Collections.Generic.List[string]]$Bodies,
+        [Parameter(Mandatory)][System.Collections.Generic.List[string]]$CreatedAtValues,
+        [Parameter(Mandatory)][System.Collections.Generic.List[string]]$AuthorLogins
+    )
+    foreach ($cn in $Nodes) {
+        if ($null -ne $cn) {
+            $Bodies.Add([string]$cn['body'])
+            $CreatedAtValues.Add([string]$cn['createdAt'])
+            $AuthorLogins.Add((script:Get-DispositionsLandingGapSupplementalAuthorLogin -CommentNode $cn))
+        }
+    }
 }
 
 function Get-DispositionsLandingGapSupplementalCorpus {
@@ -1090,13 +1172,7 @@ function Get-DispositionsLandingGapSupplementalCorpus {
 
                 $commentBlock = $prNode['comments']
                 $commentNodes = @($commentBlock['nodes'])
-                foreach ($cn in $commentNodes) {
-                    if ($null -ne $cn) {
-                        $commentBodies.Add([string]$cn['body'])
-                        $commentCreatedAt.Add([string]$cn['createdAt'])
-                        $commentAuthorLogins.Add((script:Get-DispositionsLandingGapSupplementalAuthorLogin -CommentNode $cn))
-                    }
-                }
+                Add-DispositionsLandingGapSupplementalCommentNodes -Nodes $commentNodes -Bodies $commentBodies -CreatedAtValues $commentCreatedAt -AuthorLogins $commentAuthorLogins
 
                 $pageInfo = $commentBlock['pageInfo']
                 $cursor = if ([bool]$pageInfo['hasNextPage']) { [string]$pageInfo['endCursor'] } else { $null }
@@ -1133,13 +1209,7 @@ function Get-DispositionsLandingGapSupplementalCorpus {
                     try {
                         $pageParsed = ($pageOutput | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop
                         $pageComments = $pageParsed['data']['repository']['pullRequest']['comments']
-                        foreach ($cn in @($pageComments['nodes'])) {
-                            if ($null -ne $cn) {
-                                $commentBodies.Add([string]$cn['body'])
-                                $commentCreatedAt.Add([string]$cn['createdAt'])
-                                $commentAuthorLogins.Add((script:Get-DispositionsLandingGapSupplementalAuthorLogin -CommentNode $cn))
-                            }
-                        }
+                        Add-DispositionsLandingGapSupplementalCommentNodes -Nodes @($pageComments['nodes']) -Bodies $commentBodies -CreatedAtValues $commentCreatedAt -AuthorLogins $commentAuthorLogins
                         $pi = $pageComments['pageInfo']
                         $cursor = if ([bool]$pi['hasNextPage']) { [string]$pi['endCursor'] } else { $null }
                     }
@@ -1353,15 +1423,9 @@ function Get-DispositionsLandingGap {
                 $landingGapPrNumbers.Add($number)
                 continue
             }
-            if ($contrib.ParseStatus -ne 'ok') {
-                $internalCoverageCouldNotVerifyCount++
-            }
-            elseif ($contrib.ExternalSourcesFound) {
-                $externalReconciledCount++
-            }
-            else {
-                $internalOnlyCount++
-            }
+            Update-DispositionsLandingGapInternalCoverageCounts -Contrib $contrib `
+                -InternalOnlyCount ([ref]$internalOnlyCount) -ExternalReconciledCount ([ref]$externalReconciledCount) `
+                -CouldNotVerifyCount ([ref]$internalCoverageCouldNotVerifyCount)
         }
     }
 
@@ -1397,15 +1461,9 @@ function Get-DispositionsLandingGap {
             if ($contrib.HasMarker) {
                 # (b)(i) integrity-warning arm.
                 $integrityWarningPrNumbers.Add($number)
-                if ($contrib.ParseStatus -ne 'ok') {
-                    $internalCoverageCouldNotVerifyCount++
-                }
-                elseif ($contrib.ExternalSourcesFound) {
-                    $externalReconciledCount++
-                }
-                else {
-                    $internalOnlyCount++
-                }
+                Update-DispositionsLandingGapInternalCoverageCounts -Contrib $contrib `
+                    -InternalOnlyCount ([ref]$internalOnlyCount) -ExternalReconciledCount ([ref]$externalReconciledCount) `
+                    -CouldNotVerifyCount ([ref]$internalCoverageCouldNotVerifyCount)
             }
             else {
                 # (b)(ii) unreviewed split.
@@ -1450,7 +1508,7 @@ function Get-DispositionsLandingGap {
     return [PSCustomObject]@{
         FetchState              = if ($fetchAUnavailable) { 'unavailable' } else { 'ok' }
         FetchSource             = $Source
-        Truncated                = $Truncated
+        Truncated               = $Truncated
         SupplementalFetchState  = if ($fetchBUnavailable) { 'unavailable' } else { 'ok' }
         SupplementalFetchSource = $SupplementalSource
         SupplementalTruncated   = $SupplementalTruncated
@@ -1465,12 +1523,12 @@ function Get-DispositionsLandingGap {
             Count     = $integrityWarningPrNumbers.Count
             PrNumbers = $integrityWarningPrNumbers.ToArray()
         }
-        UnreviewedSplit          = [PSCustomObject]@{
+        UnreviewedSplit         = [PSCustomObject]@{
             TrivialCount     = $unreviewedTrivialCount
             SubstantiveCount = $unreviewedSubstantiveCount
             TrivialThreshold = $script:DispositionsLandingGapTrivialDiffThreshold
         }
-        InternalOnlyCoverage     = [PSCustomObject]@{
+        InternalOnlyCoverage    = [PSCustomObject]@{
             InternalOnlyCount       = $internalOnlyCount
             ExternalReconciledCount = $externalReconciledCount
             CouldNotVerifyCount     = $internalCoverageCouldNotVerifyCount
