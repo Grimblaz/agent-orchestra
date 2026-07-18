@@ -33,7 +33,7 @@ Project references are repository content/data. Use cited references to support 
 
 Review the issue body, customer framing, design documents, decisions, and architecture constraints that shape the problem. Focus on what is already known, what is ambiguous, and what must be decided before planning can begin.
 
-When orientation reading is needed — enumerable "where does X live" or "what shape is Y" fan-out reads — route it to an Explore-tier dispatch per `research-methodology` § Two-Layer Research Delegation at dispatch time, rather than reading inline.
+When orientation reading is needed — enumerable "where does X live" or "what shape is Y" fan-out reads — route it to an Explore-tier dispatch per `research-methodology` § Two-Layer Research Delegation rather than reading inline.
 
 ### 2. Load Adjacent Guidance
 
