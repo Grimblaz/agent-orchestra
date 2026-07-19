@@ -1,0 +1,452 @@
+#Requires -Version 7.0
+#Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
+
+<#
+.SYNOPSIS
+    RED-phase Pester suite for the not-yet-implemented persist-phase-ledger
+    helper (issue #878, plan slice s4). Implementation lands in s5 at
+    skills/session-memory-contract/scripts/persist-phase-ledger-core.ps1,
+    exporting Invoke-PersistPhaseLedger.
+
+.DESCRIPTION
+    This suite pins the parameter surface and observable behavior of
+    Invoke-PersistPhaseLedger BEFORE it exists (s4 does not implement it —
+    that is s5's job). Every test dot-sources the two REAL, already-shipped
+    primitives it composes — find-or-upsert-comment.ps1 and
+    phase-containment-emission-check-core.ps1 — for real, and mocks only the
+    true external seam (`gh`), so these are genuine integration tests per
+    skills/test-driven-development/SKILL.md's Critical Integration Rule: they
+    exercise the actual primitive contracts (Find-OrUpsertComment's $null
+    failure mode; Add-CommentBlocks'/Add-JudgeRulingsBlock's
+    {Success;Reason} failure mode; Add-JudgeRulingsBlock's append-only
+    nature; Add-CommentBlocks' schema preflight) rather than a synthetic
+    stand-in that could stay green while the real wiring is missing.
+
+    Each Context below maps to one load-bearing invariant the issue #878
+    five-pass stress-test found the ORIGINAL design would have violated
+    (see plan-issue-878 comment 5013462111, Challenges M1-M34). A test
+    asserting `$null` against an Add-* return is itself the defect class
+    this suite exists to prevent (M5) — Find-OrUpsertComment and the two
+    Add-* primitives have DIFFERENT failure contracts and are asserted on
+    differently throughout.
+
+    Fixture shapes (marker text, pointer line, judge-rulings bare-head form,
+    phase-containment paired-block fields, zero-findings placeholder) are
+    taken verbatim from skills/plan-authoring/SKILL.md:204,227-254 — the
+    authoritative writer contract — not invented ad hoc.
+#>
+
+BeforeDiscovery {
+    $script:CoreLibPath = Join-Path $PSScriptRoot '../../../skills/session-memory-contract/scripts/persist-phase-ledger-core.ps1'
+}
+
+Describe 'Invoke-PersistPhaseLedger' {
+    BeforeAll {
+        $script:CoreLibPath = Join-Path $PSScriptRoot '../../../skills/session-memory-contract/scripts/persist-phase-ledger-core.ps1'
+        $script:FindOrUpsertLibPath = Join-Path $PSScriptRoot '../lib/find-or-upsert-comment.ps1'
+        $script:EmissionCoreLibPath = Join-Path $PSScriptRoot '../lib/phase-containment-emission-check-core.ps1'
+
+        $script:Owner = 'Grimblaz'
+        $script:Repo = 'agent-orchestra'
+        $script:IssueNumber = 878
+        $script:PlanMarker = '<!-- plan-issue-878 -->'
+        $script:LedgerMarker = '<!-- phase-containment-ledger-878 -->'
+
+        # Builds one schema-valid <!-- phase-containment-878 -->...<!-- /phase-containment-878 -->
+        # block. Field set mirrors the proven fixture already in
+        # phase-containment-emission-check-core.Tests.ps1 (New-ValidPhaseContainmentBlockText),
+        # re-derived here rather than cross-imported since Pester test files
+        # in this repo are standalone.
+        function script:New-LedgerBlockText {
+            param(
+                [Parameter(Mandatory)][string]$FindingSuffix,
+                [string]$Severity = 'low',
+                [string]$CatchablePhase = 'implementation',
+                [string]$CaughtStage = 'code-review',
+                [int]$EscapeDistance = 0
+            )
+            $findingKey = "plan-stress-test:878:$FindingSuffix"
+            $lines = @(
+                '<!-- phase-containment-878 -->'
+                "finding_key: $findingKey"
+                "introduced_phase: $CatchablePhase"
+                "catchable_phase: $CatchablePhase"
+                "caught_stage: $CaughtStage"
+                "escape_distance: $EscapeDistance"
+                "severity: $Severity"
+                'systemic_fix_type: none'
+                'category: pattern'
+                'apparatus_meta: false'
+                '<!-- /phase-containment-878 -->'
+            )
+            return ($lines -join "`n")
+        }
+
+        # Builds a bare-head judge-rulings block per plan-authoring/SKILL.md:227-234.
+        function script:New-JudgeRulingsText {
+            param([Parameter(Mandatory)][hashtable[]]$Entries)
+            $lines = @('<!-- judge-rulings')
+            foreach ($e in $Entries) {
+                $lines += "- finding_id: $($e.FindingId)"
+                $lines += "  judge_ruling: $($e.Ruling)"
+            }
+            $lines += '-->'
+            return ($lines -join "`n")
+        }
+
+        # plan-authoring/SKILL.md:244-251 pinned placeholder shape.
+        $script:ZeroFindingsJudgeRulings = New-JudgeRulingsText -Entries @(
+            @{ FindingId = 'none'; Ruling = 'defense-sustained' }
+        )
+    }
+
+    BeforeEach {
+        # --- Simulated GitHub comment store (mutable across gh calls). ---
+        $script:mockComments = [System.Collections.Generic.List[object]]::new()
+        $script:NextCommentId = 90000
+        $script:ghCallLog = [System.Collections.Generic.List[string]]::new()
+        $script:PatchLog = [System.Collections.Generic.List[object]]::new()
+        $script:PostLog = [System.Collections.Generic.List[object]]::new()
+        $script:simulateListFailure = $false
+        $script:simulatePostFailure = $false
+        $script:simulatePatchFailure = @()
+        $script:simulateGetFailure = @()
+
+        function script:Add-MockComment {
+            param([Parameter(Mandatory)][long]$Id, [Parameter(Mandatory)][string]$Body)
+            $url = "https://github.com/$script:Owner/$script:Repo/issues/$script:IssueNumber#issuecomment-$Id"
+            $script:mockComments.Add([PSCustomObject]@{ Id = $Id; NodeId = "IC_fake_$Id"; body = $Body; url = $url })
+        }
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $script:ghCallLog.Add($joined)
+
+            # LIST: gh issue view <N> --json comments
+            if ($joined -match '^issue view \d+ --json comments$') {
+                if ($script:simulateListFailure) { $global:LASTEXITCODE = 1; return '' }
+                $payload = @{
+                    comments = @($script:mockComments | ForEach-Object {
+                            @{ id = $_.NodeId; body = $_.body; url = $_.url }
+                        })
+                } | ConvertTo-Json -Depth 8
+                $global:LASTEXITCODE = 0
+                return $payload
+            }
+
+            # Repo probe (Find-OrUpsertComment internal): gh api repos/<o>/<r> --jq .full_name
+            if ($Args.Count -ge 2 -and $Args[0] -eq 'api' -and $Args[1] -match '^repos/[^/]+/[^/]+$' -and ($Args -contains '--jq')) {
+                $global:LASTEXITCODE = 0
+                return "$script:Owner/$script:Repo"
+            }
+
+            # GET by numeric id (no -X): gh api repos/<o>/<r>/issues/comments/<id>
+            if ($Args.Count -ge 2 -and $Args[0] -eq 'api' -and $Args[1] -match '^repos/[^/]+/[^/]+/issues/comments/(\d+)$' -and ($Args -notcontains '-X')) {
+                $id = [long]$Matches[1]
+                if ($script:simulateGetFailure -contains $id) { $global:LASTEXITCODE = 1; return '' }
+                $c = $script:mockComments | Where-Object { $_.Id -eq $id }
+                if (-not $c) { $global:LASTEXITCODE = 1; return '' }
+                $global:LASTEXITCODE = 0
+                return (@{ id = $c.Id; body = $c.body; url = $c.url } | ConvertTo-Json -Depth 8)
+            }
+
+            # PATCH: gh api -X PATCH repos/<o>/<r>/issues/comments/<id> --input <file>
+            if ($joined -match '^api -X PATCH repos/[^/]+/[^/]+/issues/comments/(\d+) --input') {
+                $id = [long]$Matches[1]
+                if ($script:simulatePatchFailure -contains $id) { $global:LASTEXITCODE = 1; return '' }
+                $inputIdx = [Array]::IndexOf($Args, '--input')
+                $filePath = $Args[$inputIdx + 1]
+                $payloadObj = Get-Content -LiteralPath $filePath -Raw | ConvertFrom-Json
+                $newBody = [string]$payloadObj.body
+                $existing = $script:mockComments | Where-Object { $_.Id -eq $id }
+                if ($existing) { $existing.body = $newBody } else { Add-MockComment -Id $id -Body $newBody }
+                $script:PatchLog.Add([PSCustomObject]@{ CommentId = $id; Body = $newBody })
+                $global:LASTEXITCODE = 0
+                return (@{ html_url = "https://github.com/$script:Owner/$script:Repo/issues/$script:IssueNumber#issuecomment-$id" } | ConvertTo-Json)
+            }
+
+            # POST: gh issue comment <N> --body <text>  (or gh pr comment)
+            if ($joined -match '^(issue|pr) comment \d+ --body') {
+                if ($script:simulatePostFailure) { $global:LASTEXITCODE = 1; return '' }
+                $newId = $script:NextCommentId
+                $script:NextCommentId++
+                $bodyIdx = [Array]::IndexOf($Args, '--body')
+                $bodyText = $Args[$bodyIdx + 1]
+                Add-MockComment -Id $newId -Body $bodyText
+                $script:PostLog.Add([PSCustomObject]@{ Body = $bodyText })
+                $global:LASTEXITCODE = 0
+                return "https://github.com/$script:Owner/$script:Repo/issues/$script:IssueNumber#issuecomment-$newId"
+            }
+
+            $global:LASTEXITCODE = 0
+            return ''
+        }
+
+        # Real primitives first (so the core's unqualified calls to
+        # Find-OrUpsertComment / Add-CommentBlocks / Add-JudgeRulingsBlock
+        # resolve to the genuine, already-shipped implementations — never a
+        # synthetic stand-in), then the core itself. Per the established
+        # convention in find-or-upsert-comment.Tests.ps1: when the core file
+        # does not exist yet, a CommandNotFoundException at the Act line
+        # below is itself the sanctioned RED signal.
+        if (Test-Path $script:FindOrUpsertLibPath) { . $script:FindOrUpsertLibPath }
+        if (Test-Path $script:EmissionCoreLibPath) { . $script:EmissionCoreLibPath }
+        if (Test-Path $script:CoreLibPath) { . $script:CoreLibPath }
+    }
+
+    AfterEach {
+        Remove-Item Function:gh -ErrorAction SilentlyContinue
+    }
+
+    Context 'Per-primitive failure contract (M5): Find-OrUpsertComment $null vs Add-* {Success;Reason}' {
+        It 'reports failure (not a silent Success=$true) when the ledger sibling cannot be created — Find-OrUpsertComment''s $null contract (find-or-upsert-comment.ps1:111,176,201)' {
+            Add-MockComment -Id 111222333 -Body "$script:PlanMarker`n`nRealistic plan body with no pointer yet."
+            $script:simulatePostFailure = $true
+
+            $judgeContent = New-JudgeRulingsText -Entries @(@{ FindingId = 'F1'; Ruling = 'sustained' })
+            $result = Invoke-PersistPhaseLedger -Owner $script:Owner -Repo $script:Repo -Mode plan `
+                -IssueNumber $script:IssueNumber -JudgeRulingsContent $judgeContent `
+                -PhaseContainmentBlocks @((New-LedgerBlockText -FindingSuffix 'F1'))
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Not -BeNullOrEmpty
+        }
+
+        It 'reads .Success/.Reason (never a $null check) on Add-JudgeRulingsBlock''s refusal — a non-null PSCustomObject with Success=$false must not read as success (phase-containment-emission-check-core.ps1:3358-3360)' {
+            # First-ever persist: the sibling does not exist yet. Per
+            # plan-authoring/SKILL.md:105's own ExpectedMarker reasoning
+            # ("not the docstring's judge-rulings example, which does not
+            # exist on a first persist"), the only shape consistent with that
+            # constraint is create-marker-only-then-append: the sibling is
+            # created carrying just the identity marker, and
+            # Add-JudgeRulingsBlock is the (unambiguous, not a routing
+            # choice) mechanism that appends the actual judge-rulings content
+            # onto it. $script:NextCommentId's starting value (90000, set in
+            # BeforeEach) is what the freshly created sibling will be
+            # assigned, since no other POST happens earlier in this test.
+            Add-MockComment -Id 111222333 -Body "$script:PlanMarker`n`nRealistic plan body with no pointer yet."
+            $script:simulatePatchFailure = @(90000)
+
+            $judgeContent = New-JudgeRulingsText -Entries @(@{ FindingId = 'F1'; Ruling = 'sustained' })
+            $result = Invoke-PersistPhaseLedger -Owner $script:Owner -Repo $script:Repo -Mode plan `
+                -IssueNumber $script:IssueNumber -JudgeRulingsContent $judgeContent `
+                -PhaseContainmentBlocks @((New-LedgerBlockText -FindingSuffix 'F1'))
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match 'PATCH failed'
+        }
+    }
+
+    Context 'Existing-sibling preservation (M1/M17): a sibling already carrying blocks is never body-replaced' {
+        It 'preserves a pre-existing phase-containment block byte-identical when a new finding is added to the same sibling' {
+            $siblingId = 700002
+            $existingBlock = New-LedgerBlockText -FindingSuffix 'A'
+            $existingJudge = New-JudgeRulingsText -Entries @(@{ FindingId = 'A'; Ruling = 'sustained' })
+            $siblingBody = "$script:LedgerMarker`n`n$existingJudge`n`n$existingBlock"
+            Add-MockComment -Id 111222333 -Body "$script:PlanMarker`n`n<!-- phase-containment-ledger-ref: $siblingId -->`n`nRealistic plan body."
+            Add-MockComment -Id $siblingId -Body $siblingBody
+
+            $newBlock = New-LedgerBlockText -FindingSuffix 'B'
+            $newJudge = New-JudgeRulingsText -Entries @(
+                @{ FindingId = 'A'; Ruling = 'sustained' }
+                @{ FindingId = 'B'; Ruling = 'sustained' }
+            )
+            $result = Invoke-PersistPhaseLedger -Owner $script:Owner -Repo $script:Repo -Mode plan `
+                -IssueNumber $script:IssueNumber -JudgeRulingsContent $newJudge `
+                -PhaseContainmentBlocks @($newBlock)
+
+            $result.Success | Should -Be $true
+            $finalSibling = ($script:mockComments | Where-Object { $_.Id -eq $siblingId }).body
+            $finalSibling | Should -Match ([regex]::Escape($existingBlock))
+            # No PATCH ever sent to the sibling with a body missing the original block.
+            foreach ($p in ($script:PatchLog | Where-Object { $_.CommentId -eq $siblingId })) {
+                $p.Body | Should -Match ([regex]::Escape('finding_key: plan-stress-test:878:A'))
+            }
+        }
+    }
+
+    Context 'Plan-comment body survival (M2): pointer insertion leaves the rest of the plan body byte-identical' {
+        It 'inserts the pointer line immediately after the plan-issue marker and reproduces the original body exactly once the pointer is stripped back out' {
+            $originalBody = "$script:PlanMarker`n`n---`nstatus: pending`npriority: p2`nissue_id: 878`n---`n`n## Plan: Persistence-burst integrity`n`nSome realistic multi-paragraph plan prose that must survive untouched.`n`n**Plan Stress-Test**`n- Challenge M1 - sustained"
+            Add-MockComment -Id 111222333 -Body $originalBody
+            # No sibling yet -> first persist creates one.
+
+            $judgeContent = New-JudgeRulingsText -Entries @(@{ FindingId = 'F1'; Ruling = 'sustained' })
+            $result = Invoke-PersistPhaseLedger -Owner $script:Owner -Repo $script:Repo -Mode plan `
+                -IssueNumber $script:IssueNumber -JudgeRulingsContent $judgeContent `
+                -PhaseContainmentBlocks @((New-LedgerBlockText -FindingSuffix 'F1'))
+
+            $result.Success | Should -Be $true
+            $finalPlanBody = ($script:mockComments | Where-Object { $_.Id -eq 111222333 }).body
+            $finalPlanBody | Should -Match '^<!-- plan-issue-878 -->\r?\n\r?\n<!-- phase-containment-ledger-ref: \d+ -->\r?\n'
+
+            # Strip exactly the inserted pointer line (plus its own blank-line
+            # spacer) back out and assert byte-identical recovery of the
+            # original body — proves nothing else in the body was touched.
+            $stripped = $finalPlanBody -replace '(?m)^<!-- phase-containment-ledger-ref: \d+ -->\r?\n\r?\n', ''
+            $stripped | Should -Be $originalBody
+        }
+    }
+
+    Context 'Wrong-comment targeting incl. the prose-mention variant (M2/M7): earliest-REST-id tie-break must not select a prose mention' {
+        It 'never selects an earlier comment that only quotes the plan marker in prose, even though it has the lowest REST id' {
+            # Posted BEFORE the real plan comment -> lowest id -> would win a
+            # naive earliest-id -like tie-break.
+            Add-MockComment -Id 50 -Body 'Note: this plan uses the `<!-- plan-issue-878 -->` marker for tracking status. See the linked issue for context.'
+            Add-MockComment -Id 111222333 -Body "$script:PlanMarker`n`n---`nstatus: pending`n---`n`nReal plan body."
+
+            $judgeContent = New-JudgeRulingsText -Entries @(@{ FindingId = 'F1'; Ruling = 'sustained' })
+            $result = Invoke-PersistPhaseLedger -Owner $script:Owner -Repo $script:Repo -Mode plan `
+                -IssueNumber $script:IssueNumber -JudgeRulingsContent $judgeContent `
+                -PhaseContainmentBlocks @((New-LedgerBlockText -FindingSuffix 'F1'))
+
+            $result.Success | Should -Be $true
+            $prosecomment = $script:mockComments | Where-Object { $_.Id -eq 50 }
+            $prosecomment.body | Should -Be 'Note: this plan uses the `<!-- plan-issue-878 -->` marker for tracking status. See the linked issue for context.'
+            $script:PatchLog | Where-Object { $_.CommentId -eq 50 } | Should -BeNullOrEmpty
+            $script:PatchLog | Where-Object { $_.CommentId -eq 111222333 } | Should -Not -BeNullOrEmpty
+        }
+    }
+
+    Context 'Judge-rulings span replacement (M4): re-persist replaces the prior block in place, adjacent blocks survive' {
+        It 'replaces the old judge-rulings entries without duplicating the head, while a neighboring phase-containment block survives byte-identical' {
+            $siblingId = 700003
+            $survivingBlock = New-LedgerBlockText -FindingSuffix 'SURVIVOR'
+            $oldJudge = New-JudgeRulingsText -Entries @(@{ FindingId = 'OLD1'; Ruling = 'sustained' })
+            $siblingBody = "$script:LedgerMarker`n`n$oldJudge`n`n$survivingBlock"
+            Add-MockComment -Id 111222333 -Body "$script:PlanMarker`n`n<!-- phase-containment-ledger-ref: $siblingId -->`n`nplan body."
+            Add-MockComment -Id $siblingId -Body $siblingBody
+
+            $newJudge = New-JudgeRulingsText -Entries @(
+                @{ FindingId = 'NEW1'; Ruling = 'sustained' }
+                @{ FindingId = 'NEW2'; Ruling = 'defense-sustained' }
+            )
+            $result = Invoke-PersistPhaseLedger -Owner $script:Owner -Repo $script:Repo -Mode plan `
+                -IssueNumber $script:IssueNumber -JudgeRulingsContent $newJudge -PhaseContainmentBlocks @()
+
+            $result.Success | Should -Be $true
+            $finalSibling = ($script:mockComments | Where-Object { $_.Id -eq $siblingId }).body
+            $finalSibling | Should -Match 'finding_id: NEW1'
+            $finalSibling | Should -Not -Match 'finding_id: OLD1'
+            ([regex]::Matches($finalSibling, '<!--\s*judge-rulings')).Count | Should -Be 1
+            $finalSibling | Should -Match ([regex]::Escape($survivingBlock))
+        }
+    }
+
+    Context 'Id extraction (M6): the numeric REST id must be extracted from html_url before calling Add-*' {
+        It 'extracts the numeric REST comment id from the found sibling''s url field rather than passing a GraphQL/string id to Add-*' {
+            $siblingId = 700004
+            # Deliberately GraphQL-shaped NodeId in the LIST payload (matches
+            # Find-OrUpsertComment's own real Get-RestCommentId precedent at
+            # find-or-upsert-comment.ps1:64-67) to prove extraction, not a
+            # coincidental numeric id, drives the subsequent PATCH target.
+            Add-MockComment -Id 111222333 -Body "$script:PlanMarker`n`n<!-- phase-containment-ledger-ref: $siblingId -->`n`nplan body."
+            Add-MockComment -Id $siblingId -Body "$script:LedgerMarker`n`n$($script:ZeroFindingsJudgeRulings)"
+
+            $judgeContent = New-JudgeRulingsText -Entries @(@{ FindingId = 'F1'; Ruling = 'sustained' })
+            $result = Invoke-PersistPhaseLedger -Owner $script:Owner -Repo $script:Repo -Mode plan `
+                -IssueNumber $script:IssueNumber -JudgeRulingsContent $judgeContent `
+                -PhaseContainmentBlocks @((New-LedgerBlockText -FindingSuffix 'F1'))
+
+            $result.Success | Should -Be $true
+            $script:PatchLog | Where-Object { $_.CommentId -eq $siblingId } | Should -Not -BeNullOrEmpty
+            # Every PATCH this run issued targeted a purely numeric comment id
+            # (never the string NodeId "IC_fake_700004" or a raw html_url).
+            foreach ($entry in $script:ghCallLog) {
+                if ($entry -match 'issues/comments/([^ /]+)') {
+                    $Matches[1] | Should -Match '^\d+$'
+                }
+            }
+        }
+    }
+
+    Context 'Zero-sustained-findings legal clean path (M15): skips the phase-containment append, still writes the placeholder' {
+        It 'reports success and writes only the pinned zero-findings placeholder when PhaseContainmentBlocks is empty' {
+            Add-MockComment -Id 111222333 -Body "$script:PlanMarker`n`nplan body."
+            # No sibling yet.
+
+            $result = Invoke-PersistPhaseLedger -Owner $script:Owner -Repo $script:Repo -Mode plan `
+                -IssueNumber $script:IssueNumber -JudgeRulingsContent $script:ZeroFindingsJudgeRulings `
+                -PhaseContainmentBlocks @()
+
+            $result.Success | Should -Be $true
+            $result.Reason | Should -BeNullOrEmpty
+            $sibling = $script:mockComments | Where-Object { $_.body -match [regex]::Escape($script:LedgerMarker) }
+            $sibling | Should -Not -BeNullOrEmpty
+            $sibling.body | Should -Match 'finding_id: none'
+            $sibling.body | Should -Not -Match '<!-- phase-containment-878 -->'
+        }
+    }
+
+    Context 'Re-run idempotency (M21/M28): re-running with identical inputs must not double-append' {
+        It 'does not duplicate the phase-containment block, the judge-rulings head, or the pointer line on a second identical run' {
+            Add-MockComment -Id 111222333 -Body "$script:PlanMarker`n`nplan body."
+            $judgeContent = New-JudgeRulingsText -Entries @(@{ FindingId = 'F1'; Ruling = 'sustained' })
+            $block = New-LedgerBlockText -FindingSuffix 'F1'
+
+            $firstResult = Invoke-PersistPhaseLedger -Owner $script:Owner -Repo $script:Repo -Mode plan `
+                -IssueNumber $script:IssueNumber -JudgeRulingsContent $judgeContent -PhaseContainmentBlocks @($block)
+            $firstResult.Success | Should -Be $true
+
+            $secondResult = Invoke-PersistPhaseLedger -Owner $script:Owner -Repo $script:Repo -Mode plan `
+                -IssueNumber $script:IssueNumber -JudgeRulingsContent $judgeContent -PhaseContainmentBlocks @($block)
+            $secondResult.Success | Should -Be $true
+
+            $finalPlanBody = ($script:mockComments | Where-Object { $_.Id -eq 111222333 }).body
+            ([regex]::Matches($finalPlanBody, '<!-- phase-containment-ledger-ref: \d+ -->')).Count | Should -Be 1
+
+            $sibling = $script:mockComments | Where-Object { $_.body -match [regex]::Escape($script:LedgerMarker) }
+            ([regex]::Matches($sibling.body, '<!--\s*judge-rulings')).Count | Should -Be 1
+            ([regex]::Matches($sibling.body, 'finding_key: plan-stress-test:878:F1')).Count | Should -Be 1
+        }
+    }
+
+    Context 'Same-key/different-content replacement (M16): a corrected same-key finding replaces, never freezes stale content' {
+        It 'replaces the stale severity/catchable_phase for an existing finding_key rather than skipping the update' {
+            $siblingId = 700005
+            $staleBlock = New-LedgerBlockText -FindingSuffix 'K' -Severity 'low' -CatchablePhase 'implementation'
+            $judge = New-JudgeRulingsText -Entries @(@{ FindingId = 'K'; Ruling = 'sustained' })
+            Add-MockComment -Id 111222333 -Body "$script:PlanMarker`n`n<!-- phase-containment-ledger-ref: $siblingId -->`n`nplan body."
+            Add-MockComment -Id $siblingId -Body "$script:LedgerMarker`n`n$judge`n`n$staleBlock"
+
+            # Only Severity varies here (not CatchablePhase/CaughtStage): those
+            # two fields are ordinally coupled to escape_distance
+            # (Test-PhaseContainmentEntry Rule 11, phase-containment-core.ps1)
+            # — changing CatchablePhase without recomputing escape_distance
+            # would make the "corrected" fixture itself schema-invalid, which
+            # would fail Add-CommentBlocks' preflight for an unrelated reason
+            # and mask the same-key/different-content invariant this test
+            # exists to pin.
+            $correctedBlock = New-LedgerBlockText -FindingSuffix 'K' -Severity 'high'
+            $result = Invoke-PersistPhaseLedger -Owner $script:Owner -Repo $script:Repo -Mode plan `
+                -IssueNumber $script:IssueNumber -JudgeRulingsContent $judge -PhaseContainmentBlocks @($correctedBlock)
+
+            $result.Success | Should -Be $true
+            $finalSibling = ($script:mockComments | Where-Object { $_.Id -eq $siblingId }).body
+            ([regex]::Matches($finalSibling, 'finding_key: plan-stress-test:878:K')).Count | Should -Be 1
+            $finalSibling | Should -Match 'severity: high'
+            $finalSibling | Should -Not -Match 'severity: low'
+        }
+    }
+
+    Context 'Design-mode append (M22): straight append onto the design-completion comment, no sibling, no pointer' {
+        It 'appends directly onto the design completion comment with no plan-comment interaction and no sibling creation' {
+            $designCommentId = 321321321
+            $designMarker = '<!-- design-phase-complete-878 -->'
+            Add-MockComment -Id $designCommentId -Body "$designMarker`n`nDesign completion summary."
+
+            $judgeContent = New-JudgeRulingsText -Entries @(@{ FindingId = 'D1'; Ruling = 'sustained' })
+            $result = Invoke-PersistPhaseLedger -Owner $script:Owner -Repo $script:Repo -Mode design `
+                -DesignCommentId $designCommentId -JudgeRulingsContent $judgeContent -PhaseContainmentBlocks @()
+
+            $result.Success | Should -Be $true
+            ($script:ghCallLog | Where-Object { $_ -match '^issue view' }) | Should -BeNullOrEmpty
+            ($script:PostLog) | Should -BeNullOrEmpty
+            $script:PatchLog | ForEach-Object { $_.CommentId | Should -Be $designCommentId }
+            $finalBody = ($script:mockComments | Where-Object { $_.Id -eq $designCommentId }).body
+            $finalBody | Should -Match ([regex]::Escape($designMarker))
+            $finalBody | Should -Match 'finding_id: D1'
+        }
+    }
+}
