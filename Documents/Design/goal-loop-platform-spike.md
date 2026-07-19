@@ -1,20 +1,27 @@
 # Goal-Loop Platform Spike
 
-Issue #871 (child of #848, implementing that umbrella's AC0) verified the two
-Claude Code `/goal` platform assumptions the #848 design challenge rated its only
-unverified load-bearing dependencies. This is an exploratory artifact only: no
-production scripts, skills, tests, or schemas are changed. Findings that require a
-design response are proposed as amendments on #848, not applied here.
+Issue #871 (child of #848, implementing that umbrella's AC0) **investigated** the
+two Claude Code `/goal` platform assumptions the #848 design challenge rated its
+only unverified load-bearing dependencies. Neither was confirmed in the strong
+sense: the predicate assumption is refuted as stated and replaced with a narrower
+mechanism, and the programmatic-launch assumption remains unproven end to end.
+This is an exploratory artifact only: no production scripts, skills, tests, or
+schemas are changed. Findings that require a design response are proposed as
+amendments on #848, not applied here.
 
-**Platform under test**: Claude Code `2.1.150` (Windows 11). All findings are
-n=1 observations against that build. The version travels with the findings
-because most surfaces described here are undocumented implementation details, not
-a published contract.
+**Platform under test**: Claude Code `2.1.150` (Windows 11). Run-scoped findings
+are n=1 observations against that build; `documented` claims come from that build's
+published CLI help and `static` claims from its binary. The version travels with the
+findings because most surfaces described here are undocumented implementation
+details, not a published contract.
 
 ## Evidence labelling
 
-Every claim below carries one of four labels, and the distinction is
-load-bearing:
+Every claim in the **Findings** sections and the assumption table carries one of
+four labels, and the distinction is load-bearing. Procedural and dispositional prose
+elsewhere — the method record, limitations, downstream impact, and retrospective —
+is deliberately unlabelled: this taxonomy grades *platform-behaviour* evidence and
+has no honest slot for those claims.
 
 - `observed` — behaviour seen in a live run, with an artifact backing it.
 - `documented` — read from published CLI help. A vendor contract, but *not*
@@ -83,7 +90,7 @@ would not appear.
 
 ## Findings
 
-### The completion condition is judged from the transcript, not by executing the validator
+### The completion condition is judged from the transcript, not by executing the validator (probe A3)
 
 `observed`. Across three goal lifecycles and more than a dozen Stop-hook firings,
 the validator was executed exactly twice — see the log above. Neither entry is
@@ -271,9 +278,19 @@ Recorded explicitly rather than left as silent absences:
 - **B4 (external halt)** — **not run.** The in-session arm is covered (`/goal clear`
   cleanly removes the hook), but supervisor-side termination of a running loop —
   the case #874 actually needs — was never attempted. Reason: the session reached
-  its findings without a non-converging run that warranted a forced kill. Note the
-  B5 branch "if no external halt exists, both budget arms are advisory" does **not**
-  fire, because an in-session halt path demonstrably exists.
+  its findings without a non-converging run that warranted a forced kill.
+  **B5's branch remains unresolved.** Its antecedent is "if **B4** finds no external
+  halt exists" — and B4 found nothing because it did not run, so the antecedent is
+  *undetermined*, not false. The in-session `/goal clear` path is not equivalent to
+  supervisor-side termination and does not discharge it. Until supervisor-side
+  termination is demonstrated, treat **both** budget arms as advisory for the pilot.
+- **B5 (case selection)** — **not completed.** The plan required B5 to select one of
+  four cases and state its consequence definitely. No case is selected here: the
+  budget evidence leans toward case (c) — observable but terminal-only or agent-only
+  → token arm advisory **and** D9's whole-run sub-ceiling claim needs amendment —
+  while a per-turn reading would suggest case (d) (enforcing, one-turn overshoot).
+  Those have opposite consequences. Selection depends on the unproduced B2 tuple and
+  the unrun B4; #848 owns the resulting D9 decision.
 - **B2 tuple** — not produced; see the budget section.
 - **A4 evaluator verdict field** — **not recorded.** The plan required either the
   verdict field (`ok` vs `impossible`) or an explicit finding that it is not exposed
@@ -299,7 +316,7 @@ request), **D5** is the post-run validation contract, **D7** is the halt model, 
 | — | Contract = targets, invariants, evidence, halt conditions, budget (#848's contract statement, not D4) | Executor expanded a terse condition into "execute the whole issue" | `observed`, n=1, intent not action | Add **scope boundaries**; owner is the contract statement and #872's schema |
 | D5 | Post-run validator provides environmental independence | Unaffected — and now the chain's only independent verification | `inferred` | No amendment; record the reinforced rationale |
 | D7 | Five-value halt enum | Two members platform-dependent and undetermined; three harness/validator-generated | `static` + `inferred` | Only `unachievable-target` and `budget-exhausted` are blocked |
-| D9 | Token observable may not exist; token arm may be advisory | Live per-turn counter observed; harness-reachable path documented but never exercised | `observed` + `documented` | Token arm can be harness-enforced; native `--max-budget-usd` unverified |
+| D9 | Token observable may not exist; token arm may be advisory | Live per-turn counter observed; harness-reachable path documented but never exercised | `observed` + `documented` | **Unresolved** — B5's case selection is undetermined (see Probes not completed). Evidence leans case (c): token arm advisory, and D9's whole-run sub-ceiling claim needs amendment. Harness enforcement is plausible but the reader/actionability test was not established for any single observable |
 | D9 | Ceilings convert non-convergence into a halt | No cutoff within 7 turns / ~11.2k tokens | `observed`, bounded | Harness owns bounding for interactive runs |
 
 ## Limitations
@@ -323,8 +340,8 @@ request), **D5** is the post-run validation contract, **D7** is the halt model, 
 | --- | --- | --- |
 | #872 | constrains as follows | Contract schema should carry **scope boundaries** — what the executor may read and mutate — alongside targets and invariants. This lands in the umbrella's contract statement and #872's schema, not D4 |
 | #873 | no change | Unblocked and reinforced: D5's independent re-validation is untouched by the finding and is now the chain's only non-transcript verification |
-| #874 | blocks pending | Two items only: (1) end-to-end headless launch — `claude agents` non-TTY `--json` is an untested candidate; (2) terminal-outcome readability, which blocks **only** `unachievable-target` and `budget-exhausted`. Three enum members are buildable now. Budget: the live counter is per-turn, so a harness ceiling overshoots by up to one turn; `--max-budget-usd` is unexercised and, as a process kill, may produce no halt report at all — verify before relying on it, since D7 requires `budget-exhausted` to be *reported*. Durable credentials must be scoped, stored outside the repo, excluded from captured transcripts and hook logs, and revocable |
-| #875 | blocks pending | Blocked by #874. Interactive pilot runs need an operator-side abort procedure and a pre-registered cap; no platform cutoff was observed within the tested envelope, and supervisor-side termination (B4) was never verified |
+| #874 | blocks pending | Three items: (1) end-to-end headless launch — `claude agents` non-TTY `--json` is an untested candidate; (2) terminal-outcome readability, which blocks **only** `unachievable-target` and `budget-exhausted` — three enum members are buildable now; (3) **supervisor-side external halt** (probe B4, never run) — the plan states #874's budget-exhaustion fixture is unbuildable without it, so it blocks here rather than at #875. Budget: B5's case selection is undetermined, so treat both arms as advisory until (3) lands; the live counter is per-turn, so any harness ceiling overshoots by up to one turn; `--max-budget-usd` is unexercised and, as a process kill, may produce no halt report at all — verify before relying on it, since D7 requires `budget-exhausted` to be *reported*. Durable credentials must be scoped, stored outside the repo, excluded from captured transcripts and hook logs, and revocable |
+| #875 | blocks pending | Blocked by #874, which now carries the B4 external-halt item. Interactive pilot runs still need an operator-side abort procedure and a pre-registered cap; no platform cutoff was observed within the tested envelope |
 | #883 | constrains as follows | Beyond the plan's four-child scope; addresses #883's AC1 only, and #883 remains gated on #875 by its own terms. Probe **A3** — the identifier #883 keys on — found the evaluator never executes the validator. Two mechanisms fit: prose-mediated (exposure: misreporting) and tool-result-mediated (exposure: omission). Executor tier is therefore partly an integrity question, but **which** integrity question is unresolved, and the decisive credulity case is untested |
 
 ## Retrospective
