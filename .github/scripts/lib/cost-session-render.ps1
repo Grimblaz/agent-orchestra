@@ -388,7 +388,7 @@ function Invoke-CostSessionRender {
         $priorCostData = $null
         $priorComment = $null
         if ($null -ne $PriorComments) {
-            $priorComment = @($PriorComments | Where-Object { $_.body -match '<!-- cost-pattern-data' }) | Select-Object -Last 1
+            $priorComment = @($PriorComments | Where-Object { $_.body -match '(?m)^\s*<!-- cost-pattern-data' }) | Select-Object -Last 1
             if ($priorComment) {
                 # Fix #760-D1-c: parse the actual prior comment body rather than using a
                 # hardcoded stub, and use a flat shape so Resolve-CostDataPreservation can
@@ -516,7 +516,7 @@ function Invoke-CostSessionRender {
                 # exact opposite of the D1 invariant.  Carry the raw block verbatim instead.
                 $rawBlockMatch = [regex]::Match(
                     $priorComment.body,
-                    '<!--\s*cost-pattern-data[\s\S]*?-->'
+                    '(?m)^[ \t]*<!--\s*cost-pattern-data[\s\S]*?-->'
                 )
                 if ($rawBlockMatch.Success) {
                     $costSection = $noticeBlock + $rawBlockMatch.Value

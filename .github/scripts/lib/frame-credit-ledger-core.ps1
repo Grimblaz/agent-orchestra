@@ -1192,7 +1192,7 @@ function ConvertFrom-JudgeRulingsComment {
         [Parameter(Mandatory)][AllowEmptyString()][string]$CommentBody
     )
 
-    $blockMatch = [regex]::Match($CommentBody, '(?ms)<!--\s*judge-rulings\s*\r?\n(?<body>.*?)\r?\n-->')
+    $blockMatch = [regex]::Match($CommentBody, '(?ms)^[ \t]*<!--\s*judge-rulings\s*\r?\n(?<body>.*?)\r?\n-->')
     if (-not $blockMatch.Success) { return @() }
 
     $rows    = [System.Collections.Generic.List[object]]::new()
@@ -3191,7 +3191,11 @@ function Test-PipelineMetricsV4Block {
         # documentation examples do not inflate the count.
         # ------------------------------------------------------------------
         $strippedBody = [regex]::Replace($Body, '(?s)```.*?```', '')
-        $markerMatches = [regex]::Matches($strippedBody, '<!--\s*pipeline-metrics')
+        # Anchored + lookahead-guarded (issue #878 s6), standardizing on the
+        # same shape as :709/:750's splice-writer/reader pair per the
+        # marker-reader-inventory's "Observation for s6" -- excludes a
+        # `pipeline-metrics-foo` superstring and a mid-line prose mention.
+        $markerMatches = [regex]::Matches($strippedBody, '(?m)^[ \t]*<!--\s*pipeline-metrics(?![\w-])')
         $markerCount = $markerMatches.Count
 
         # ------------------------------------------------------------------

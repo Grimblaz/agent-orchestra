@@ -1,0 +1,30 @@
+<!-- design-phase-complete-878 -->
+
+Technical design complete — decisions documented, acceptance criteria defined, adversarial design challenge complete. Ready for planning with @Issue-Planner.
+
+Phase summary: 20 finding(s) classified, 0 load-bearing, 0 dismissed — all classified routine. Decisions taken: d1-shape-authority = docs-fix + strict parser; d2-burst-mechanism = skill-shipped composed helper (skills/session-memory-contract/scripts/persist-phase-ledger.ps1); d3-reader-hardening-scope = full-inventory per-pattern anchoring + shared writer rule, detector deferred to the AC6 follow-up. Convergence filter: 32-entry pre-filter union (18 merged finder findings + 14 cold-read observations) converged to 20 kept / 12 filtered — M18 filtered as answered by the enumeration text; CR4–CR14 filtered as duplicates of kept finder findings. One classification re-audit occurred (CR3; see recommendation_shifts).
+
+```yaml
+finding_dispositions:
+  schema_version: 1
+  passes_run: [1, 2, 3, 4]
+  entries:
+    - finding_id: M1
+      pass: 1
+      disposition: incorporate
+      classification: routine
+      disposition_rationale: "Incorporated: helper gains explicit plan-mode/design-mode surface routing and the mandate list gains design-exploration — the design surface appends to its own completion comment with no sibling, pointer, or judge-rulings step."
+      also_flagged_by: [2, 4]
+    - finding_id: M2
+      pass: 3
+      disposition: incorporate
+      classification: routine
+      disposition_rationale: "Incorporated: sibling step is create-only-if-absent with REST-id reuse — an existing sibling is never body-replaced, structurally excluding the verbatim-PATCH wipe class."
+      also_flagged_by: [4]
+    - finding_id: M3
+      pass: 3
+      disposition: incorporate
+      classification: routine
+      disposition_rationale: "Incorporated: helper dedupes blocks by finding_key before append, making re-run after a mid-burst failure safe and non-inflating."
+      also_flagged_by: [4]
+```

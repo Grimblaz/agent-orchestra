@@ -179,6 +179,74 @@ shape plus a line-start anchor, not just bolt `^` onto the weaker variant.
 | `frame-credit-ledger-core.ps1:2675-2678` | (construction only) | `"<!-- experience-owner-complete-$IssueNumber -->"`, `"<!-- design-phase-complete-$IssueNumber -->"`, `"<!-- plan-issue-$IssueNumber -->"`, `"<!-- engagement-record-orchestration-$IssueNumber -->"` | n/a | n/a | n/a | Builds `$script:CompletionMarkerByPort`; consumed as literal-substring `-like` comment-selectors below, not as its own regex scan. |
 | `frame-credit-ledger-core.ps1:2757,2828` | comment-selector | `-like "*$completionPrefix*"` / `-like "*$completionMarker*"` | n/a | n/a | n/a | Wildcard-wrapped exact-literal substring matches (the marker text itself already has `$IssueNumber` interpolated) — comment-selector class, not block-selector; no regex to anchor. |
 
+#### s6 batch 2 disposition (issue #878)
+
+`cost-fcl-helpers.ps1:95` and `Get-FCLOriginContext.ps1:101` are anchored to
+`(?im)^\s*<!--\s*(?:plan|design)-issue-(?<issue>\d+)\s*-->`.
+`gate-reconciliation-core.ps1:95` (the third copy of the drift-risk trio) is
+explicitly out of s6 batch 2's scope, tracked for the step 7 follow-up issue.
+
+**`gate-reconciliation-core.ps1:158` — investigated, ANCHORED (not excluded).**
+Despite the surface resemblance to `:800`'s danger shape (a presence-gate
+whose `$true` branch drives further verification), tracing the *actual*
+consumer at `:271-306` (`Read-FindingDispositionIds`'s caller) shows the
+opposite polarity. Narrowing this gate can only ever cause an
+**under-approximation** of `$recordedIds` (a real marker, if ever posted
+off-line-start, gets skipped, never a spurious match — narrowing never
+creates new matches). An under-populated `$recordedIds` causes
+`$id -notin $allRecordedIds` (`:296`) to flip **true** for an id that really
+was recorded, which emits an extra `severity: 'warn'` finding
+("no corresponding recorded decision"). That is a **loud, visible,
+investigable false-positive** — never a silent false-clean. This is the
+same `false→loud, safe-to-narrow` class already documented for the
+`adversarial-pipeline-atomic-{ID}:1280` fallback below, the **opposite** of
+`:800`'s `false→quiet/false-clean` danger. Empirically verified besides:
+every real `design-phase-complete-{ID}` marker harvested from this repo
+(issues #489 and #878's own comments) is posted at true column 0, line 1 of
+its own comment — see the harvested fixtures under
+`.github/scripts/Tests/fixtures/marker-reader-anchoring/`. Anchored to
+`(?m)^\s*<!--\s*design-phase-complete`; rationale duplicated as an inline
+code comment at the anchoring site itself.
+
+`phase-containment-rolling-history-core.ps1:711-712,781-782,1387-1388`
+(the design-phase-complete/plan-issue OR-gate) and its Surface B sibling
+`:1053,1123,1475` (the bare judge-rulings gate) were polarity-checked using
+the same method: tracing the `$false` branch shows a `continue`/exclusion
+that is silent ONLY on natural pagination exhaustion (the code's own comment
+at `:786-792` already treats that as "a correct exclusion, not a
+degradation"), otherwise a `Write-Warning` "possible undercount" fires. Given
+no documented historical-placement risk was found for these two families
+(unlike the pre-811-writer `plan-issue`+heading combination `:800` guards
+against) and the same empirical column-0 verification above, all six sites
+are anchored to `(?m)^\s*<!--\s*design-phase-complete-$N\s*-->` /
+`(?m)^\s*<!--\s*plan-issue-$N\s*-->` / `(?m)^\s*<!--\s*judge-rulings`.
+
+Also anchored in s6 batch 2: `frame-credit-ledger-core.ps1:1195`
+(`ConvertFrom-JudgeRulingsComment`, the judge-rulings PR-surface reader) to
+`(?ms)^[ \t]*<!--\s*judge-rulings\s*\r?\n(?<body>.*?)\r?\n-->`;
+`frame-credit-ledger-core.ps1`'s `Test-PipelineMetricsV4Block` non-fenced
+count-scan (drifted to `:3194` from the plan's cited `:3176-3178`) to the
+same lookahead-guarded shape as `:709`/`:750`
+(`(?m)^[ \t]*<!--\s*pipeline-metrics(?![\w-])`); `frame-credit-ledger.ps1`
+(wrapper, not `-core`) `:513` (`Get-FCLFrameSpineComments`) and `:1208`
+(drifted from `:1201`, the judge-rulings `Select-Object -Last 1` selector);
+`cost-rolling-history.ps1:33,36,726,785` and `cost-session-render.ps1:391,519`
+(cost-pattern-data family — `:519`'s raw-block fallback anchored with
+`[ \t]*` rather than `\s*` since it is a splice-adjacent site whose `.Value`
+is used wholesale for body reconstruction). Per-family Pester fixture tests
+(prose-mention-rejection, count/parse-result assertion, harvested historical
+placement) live in `.github/scripts/Tests/marker-reader-anchoring.Tests.ps1`,
+extending the batch-1 suite; fixtures harvested from real posted comments on
+issues #489, #878, and #879/#691 under
+`.github/scripts/Tests/fixtures/marker-reader-anchoring/`. The one exception
+is the `plan-issue`/`design-issue` combined family's historical-placement
+fixture: no real PR body carrying that literal marker was found in this
+repo (PR bodies link issues via branch name/`issue_id` field in practice;
+this is a last-resort fallback), so the fixture reuses issue #878's own real
+`<!-- plan-issue-878 -->` line — the marker family's line-start placement
+convention is identical regardless of which surface (issue comment vs. PR
+body) it is posted on.
+
 ### frame-spine / frame-slice(s)
 
 | Site | Class | Pattern | Alternation | End-anchor | Polarity | Notes |

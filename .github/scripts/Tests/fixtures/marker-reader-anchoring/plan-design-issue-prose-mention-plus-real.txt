@@ -1,0 +1,9 @@
+## Summary
+
+This PR closes out the work tracked by a marker shaped like `<!-- plan-issue-878 -->`
+or `<!-- design-issue-878 -->` mid-sentence like this one -- Resolve-FCLLinkedIssueNumber's
+PR-body fallback must never treat either inline mention as the real marker.
+
+<!-- design-issue-878 -->
+
+Trailer text after the block, untouched by any splice.

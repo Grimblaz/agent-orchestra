@@ -510,7 +510,7 @@ function script:Get-FCLFrameSpineComments {
     param([AllowEmptyCollection()][AllowNull()][object[]]$Comments)
 
     if ($null -eq $Comments) { return @() }
-    return @($Comments | Where-Object { (script:Get-FCLCommentBody -Comment $_) -match '<!--\s*frame-spine' })
+    return @($Comments | Where-Object { (script:Get-FCLCommentBody -Comment $_) -match '(?m)^\s*<!--\s*frame-spine' })
 }
 
 function script:Resolve-FCLRepoRoot {
@@ -1205,7 +1205,7 @@ function Invoke-FrameCreditLedger {
         # identifier resolves at runtime (not just in tests). Without this, the
         # post-fix-review predicate always falls through to the deferred-unknown path.
         if ($null -ne $script:PrComments) {
-            $judgeRulingsComment = @($script:PrComments | Where-Object { $_.body -match '<!--\s*judge-rulings' }) | Select-Object -Last 1
+            $judgeRulingsComment = @($script:PrComments | Where-Object { $_.body -match '(?m)^\s*<!--\s*judge-rulings' }) | Select-Object -Last 1
             if ($null -ne $judgeRulingsComment) {
                 $findings = @(ConvertFrom-JudgeRulingsComment -CommentBody ([string]$judgeRulingsComment.body))
                 $changeset['JudgeScore'] = @{ Findings = $findings }

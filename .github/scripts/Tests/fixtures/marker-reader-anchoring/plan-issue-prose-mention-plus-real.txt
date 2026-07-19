@@ -1,0 +1,15 @@
+Heads up — the plan writer posts a marker shaped like `<!-- plan-issue-878 -->`
+mid-sentence like this one, and no presence-gate should ever treat that inline
+mention as the real marker.
+
+<!-- plan-issue-878 -->
+
+<!-- phase-containment-ledger-ref: 5013464861 -->
+
+---
+status: pending
+priority: p2
+issue_id: 878
+---
+
+Trailer text after the block, untouched by any splice.

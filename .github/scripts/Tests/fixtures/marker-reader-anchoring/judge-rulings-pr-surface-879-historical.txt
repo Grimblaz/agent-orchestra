@@ -1,0 +1,37 @@
+<!-- judge-rulings
+- id: G1
+  stable_finding_key: gh-5009741498-7cbd4498
+  judge_ruling: defense-sustained
+  judge_confidence: high
+  points_awarded: D+1
+- id: G2
+  stable_finding_key: gh-5009741498-68e64a03
+  judge_ruling: defense-sustained
+  judge_confidence: high
+  points_awarded: D+1
+- id: G3
+  stable_finding_key: gh-3607496036
+  judge_ruling: sustained
+  judge_confidence: high
+  points_awarded: P+1
+- id: G4
+  stable_finding_key: gh-3607496039
+  judge_ruling: sustained
+  judge_confidence: high
+  points_awarded: P+1
+- id: G6
+  stable_finding_key: gh-3607497733
+  judge_ruling: sustained
+  judge_confidence: high
+  points_awarded: P+10
+- id: G7
+  stable_finding_key: gh-3607500086
+  judge_ruling: sustained
+  judge_confidence: high
+  points_awarded: P+1
+- id: G9
+  stable_finding_key: gh-3607500088
+  judge_ruling: defense-sustained
+  judge_confidence: high
+  points_awarded: D+1
+-->

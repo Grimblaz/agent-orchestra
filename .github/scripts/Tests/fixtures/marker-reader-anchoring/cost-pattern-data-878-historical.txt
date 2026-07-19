@@ -1,0 +1,33 @@
+## Cost Pattern
+
+> **Copilot telemetry fallback**: Copilot telemetry may be incomplete or not included for this run. Run ``Initialize-CopilotCostCollection`` to configure Copilot-side collection before the next capture.
+<!-- cost-pattern-data
+version: 1
+coverage: claude-only-with-copilot-fallback-warning
+install_status: ok
+unmapped_session_count: 0
+session_completeness: partial
+excluded_from_rolling_baseline: false
+generated_at: 2026-07-18T06:16:17Z
+phase_scope: branch-session-only
+pr: 879
+branch: feature/issue-691-cheap-research-delegation
+capture_point: pr-creation-mid-session
+session_id: 172fcb6e-7665-4c41-9e89-3a28ad7a48b1
+head_ref: feature/issue-691-cheap-research-delegation
+unknown_models: []
+malformed_rate_models: []
+null_cost_events_by_reason:
+  unknown_key: 0
+  rate_unavailable: 0
+  rate_unavailable_malformed: 0
+  empty_model: 0
+totals:
+  tokens:
+    input: 47637
+    output: 1037253
+    cache_creation: 9212670
+    cache_read: 293244810
+  cost_estimate_usd: 236.5105
+anomaly_flags: []
+-->

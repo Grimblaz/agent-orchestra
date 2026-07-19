@@ -1,0 +1,20 @@
+### Reconciliation
+
+A comment that merely says judge-rulings in prose, like this sentence
+quoting the `<!-- judge-rulings` convention mid-paragraph, must never be
+treated as the real block by any reader.
+
+<!-- judge-rulings
+- id: G1
+  stable_finding_key: gh-5009741498-7cbd4498
+  judge_ruling: sustained
+  judge_confidence: high
+  points_awarded: P+1
+- id: G2
+  stable_finding_key: gh-5009741498-68e64a03
+  judge_ruling: sustained
+  judge_confidence: high
+  points_awarded: P+1
+-->
+
+Trailer text after the block, untouched by any splice.

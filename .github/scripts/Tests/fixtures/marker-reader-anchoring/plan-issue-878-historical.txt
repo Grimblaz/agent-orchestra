@@ -1,0 +1,13 @@
+<!-- plan-issue-878 -->
+
+<!-- phase-containment-ledger-ref: 5013464861 -->
+
+---
+status: pending
+priority: p2
+issue_id: 878
+created: 2026-07-18
+ce_gate: true
+---
+
+# Implementation Plan — issue #878

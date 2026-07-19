@@ -708,8 +708,8 @@ function script:Get-SurfaceACorpusGraphQL {
 
                 # Check whether this issue has a design-phase-complete or plan-issue marker
                 $allBodiesText = $commentBodies -join "`n"
-                $hasMarker = ($allBodiesText -match "<!--\s*design-phase-complete-$issueNum\s*-->") -or
-                             ($allBodiesText -match "<!--\s*plan-issue-$issueNum\s*-->")
+                $hasMarker = ($allBodiesText -match "(?m)^\s*<!--\s*design-phase-complete-$issueNum\s*-->") -or
+                             ($allBodiesText -match "(?m)^\s*<!--\s*plan-issue-$issueNum\s*-->")
 
                 $pageInfo = $commentBlock['pageInfo']
                 $cursor   = if ([bool]$pageInfo['hasNextPage']) { [string]$pageInfo['endCursor'] } else { $null }
@@ -778,8 +778,8 @@ function script:Get-SurfaceACorpusGraphQL {
 
                         $huntPagesUsed++
                         $allBodiesText = $commentBodies -join "`n"
-                        $hasMarker = ($allBodiesText -match "<!--\s*design-phase-complete-$issueNum\s*-->") -or
-                                     ($allBodiesText -match "<!--\s*plan-issue-$issueNum\s*-->")
+                        $hasMarker = ($allBodiesText -match "(?m)^\s*<!--\s*design-phase-complete-$issueNum\s*-->") -or
+                                     ($allBodiesText -match "(?m)^\s*<!--\s*plan-issue-$issueNum\s*-->")
                     }
 
                     if (-not $hasMarker) {
@@ -1050,7 +1050,7 @@ function script:Get-SurfaceBCorpusGraphQL {
 
                 # Check whether this PR has a judge-rulings block (marks review pipeline)
                 $allBodiesText = $commentBodies -join "`n"
-                $hasJudgeRulings = ($allBodiesText -match '<!--\s*judge-rulings')
+                $hasJudgeRulings = ($allBodiesText -match '(?m)^\s*<!--\s*judge-rulings')
 
                 $pageInfo = $commentBlock['pageInfo']
                 $cursor   = if ([bool]$pageInfo['hasNextPage']) { [string]$pageInfo['endCursor'] } else { $null }
@@ -1120,7 +1120,7 @@ function script:Get-SurfaceBCorpusGraphQL {
 
                         $huntPagesUsed++
                         $allBodiesText = $commentBodies -join "`n"
-                        $hasJudgeRulings = ($allBodiesText -match '<!--\s*judge-rulings')
+                        $hasJudgeRulings = ($allBodiesText -match '(?m)^\s*<!--\s*judge-rulings')
                     }
 
                     if (-not $hasJudgeRulings) {
@@ -1384,8 +1384,8 @@ function script:Get-PhaseContainmentCorpusRest {
                         # carrying a design-phase-complete-{N} or
                         # plan-issue-{N} marker.
                         $allBodiesText = $bodies -join "`n"
-                        $hasMarker = ($allBodiesText -match "<!--\s*design-phase-complete-$num\s*-->") -or
-                                     ($allBodiesText -match "<!--\s*plan-issue-$num\s*-->")
+                        $hasMarker = ($allBodiesText -match "(?m)^\s*<!--\s*design-phase-complete-$num\s*-->") -or
+                                     ($allBodiesText -match "(?m)^\s*<!--\s*plan-issue-$num\s*-->")
                         if (-not $hasMarker) { continue }
                         $tuples.Add(@{ Number = $num; Surface = 'issue'; Bodies = $bodies; CreatedAtValues = $createdAtValues; AuthorLogins = $authorLogins })
                     }
@@ -1472,7 +1472,7 @@ function script:Get-PhaseContainmentCorpusRest {
                         $createdAtValues = $commentCreatedAt.ToArray()
                         $authorLogins    = $commentAuthorLogins.ToArray()
                         # Only scan PRs that have judge-rulings
-                        if (-not (($bodies -join "`n") -match '<!--\s*judge-rulings')) { continue }
+                        if (-not (($bodies -join "`n") -match '(?m)^\s*<!--\s*judge-rulings')) { continue }
                         $tuples.Add(@{ Number = $num; Surface = 'pr'; Bodies = $bodies; CreatedAtValues = $createdAtValues; AuthorLogins = $authorLogins })
                     }
                     catch {
