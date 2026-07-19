@@ -252,11 +252,49 @@ Describe 'Doc-embedded phase-containment examples (issue #878 s2, RED)' {
         It 'the doc contains at least one fenced phase-containment example (extractor floor)' {
             $script:DesignExplorationCandidates.Count | Should -BeGreaterOrEqual 1 -Because 'AC1 requires one fully literal canonical example in this section; today the section is prose-bullets-only with no fenced example at all (s3 adds it)'
         }
+
+        It 'the concretized doc example is byte-identical to the committed canonical paired-shape fixture' {
+            $span = Get-DeclaredPhaseContainmentSpan -CandidateText $script:DesignExplorationCandidates[0]
+            $span | Should -Not -BeNullOrEmpty -Because 'a declared phase-containment span must be locatable inside the matched candidate'
+
+            $concretized = Set-PhaseContainmentPlaceholders -Text $span -Substitutions @{}
+            $fixture = (Get-Content -Raw (Join-Path $script:FixtureRoot 'design-challenge.phase-containment.txt')) -replace "`r`n?", "`n"
+
+            $concretized.Trim() | Should -BeExactly $fixture.Trim() -Because 'AC1: the design-challenge example (SKILL.md:206-217) is already fully literal (no placeholders left) and must match the committed canonical fixture byte-for-byte'
+        }
+
+        It 'the concretized doc example parses via the production Get-PhaseContainmentBlock parser' {
+            $span = Get-DeclaredPhaseContainmentSpan -CandidateText $script:DesignExplorationCandidates[0]
+            $concretized = Set-PhaseContainmentPlaceholders -Text $span -Substitutions @{}
+
+            $result = Get-PhaseContainmentBlock -Text $concretized -Id '878'
+
+            $result | Should -Not -BeNullOrEmpty -Because 'Get-PhaseContainmentBlock requires both a self-closed open tag "<!-- phase-containment-878 -->" and a separate "<!-- /phase-containment-878 -->" close tag; the design-challenge example already supplies both'
+        }
     }
 
     Context 'review-judgment: code-review variant (SKILL.md:138)' {
         It 'the doc contains at least one fenced phase-containment example (extractor floor)' {
             $script:ReviewJudgmentCandidates.Count | Should -BeGreaterOrEqual 1 -Because 'AC1 requires one fully literal canonical example for the code-review variant; today the section is prose-bullets-only with no fenced example at all (s3 adds it; AC6 scopes the emission routing itself out of this step)'
+        }
+
+        It 'the concretized doc example is byte-identical to the committed canonical paired-shape fixture' {
+            $span = Get-DeclaredPhaseContainmentSpan -CandidateText $script:ReviewJudgmentCandidates[0]
+            $span | Should -Not -BeNullOrEmpty -Because 'a declared phase-containment span must be locatable inside the matched candidate'
+
+            $concretized = Set-PhaseContainmentPlaceholders -Text $span -Substitutions @{}
+            $fixture = (Get-Content -Raw (Join-Path $script:FixtureRoot 'code-review.phase-containment.txt')) -replace "`r`n?", "`n"
+
+            $concretized.Trim() | Should -BeExactly $fixture.Trim() -Because 'AC1: the code-review example (SKILL.md:149-164) is already fully literal (no placeholders left) and must match the committed canonical fixture byte-for-byte'
+        }
+
+        It 'the concretized doc example parses via the production Get-PhaseContainmentBlock parser' {
+            $span = Get-DeclaredPhaseContainmentSpan -CandidateText $script:ReviewJudgmentCandidates[0]
+            $concretized = Set-PhaseContainmentPlaceholders -Text $span -Substitutions @{}
+
+            $result = Get-PhaseContainmentBlock -Text $concretized -Id '879'
+
+            $result | Should -Not -BeNullOrEmpty -Because 'Get-PhaseContainmentBlock requires both a self-closed open tag "<!-- phase-containment-879 -->" and a separate "<!-- /phase-containment-879 -->" close tag; the code-review example already supplies both'
         }
     }
 
@@ -268,6 +306,25 @@ Describe 'Doc-embedded phase-containment examples (issue #878 s2, RED)' {
             # here is >= 2, not >= 1 -- a single shared example would satisfy
             # only the code-review variant and leave this one uncovered.
             $script:ReviewJudgmentCandidates.Count | Should -BeGreaterOrEqual 2 -Because 'AC1 requires one canonical example PER VARIANT, not per section (M10) -- review-judgment alone has two variants (code-review, post-review-observer) and today has zero fenced examples for either'
+        }
+
+        It 'the concretized doc example is byte-identical to the committed canonical paired-shape fixture' {
+            $span = Get-DeclaredPhaseContainmentSpan -CandidateText $script:ReviewJudgmentCandidates[1]
+            $span | Should -Not -BeNullOrEmpty -Because 'a declared phase-containment span must be locatable inside the matched candidate -- this is the SECOND review-judgment candidate (index 1), distinct from the code-review variant at index 0'
+
+            $concretized = Set-PhaseContainmentPlaceholders -Text $span -Substitutions @{}
+            $fixture = (Get-Content -Raw (Join-Path $script:FixtureRoot 'post-review-observer.phase-containment.txt')) -replace "`r`n?", "`n"
+
+            $concretized.Trim() | Should -BeExactly $fixture.Trim() -Because 'AC1: the post-review-observer example (SKILL.md:177-191) is already fully literal (no placeholders left) and must match the committed canonical fixture byte-for-byte'
+        }
+
+        It 'the concretized doc example parses via the production Get-PhaseContainmentBlock parser' {
+            $span = Get-DeclaredPhaseContainmentSpan -CandidateText $script:ReviewJudgmentCandidates[1]
+            $concretized = Set-PhaseContainmentPlaceholders -Text $span -Substitutions @{}
+
+            $result = Get-PhaseContainmentBlock -Text $concretized -Id '879'
+
+            $result | Should -Not -BeNullOrEmpty -Because 'Get-PhaseContainmentBlock requires both a self-closed open tag "<!-- phase-containment-879 -->" and a separate "<!-- /phase-containment-879 -->" close tag; the post-review-observer example already supplies both'
         }
     }
 
