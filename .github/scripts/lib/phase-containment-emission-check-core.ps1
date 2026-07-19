@@ -52,7 +52,7 @@ Set-StrictMode -Version Latest
 # Get-RealJudgeRulingsHeadMatches (Get-JudgeRulingsDuplicateDiagnosis :478,
 # Test-EmissionMarkerPresent :778, the M1 duplicate-head guard :1974, the
 # cross-body sibling check :2558, the design-challenge sibling check :2599,
-# and phase-containment-cost-core.ps1's Test-JudgeRulingsRealHeadPresent :102
+# and Test-JudgeRulingsRealHeadPresent :102 in phase-containment-cost-core.ps1
 # via Get-ReviewCostRollup) consume only .Index/.Length pairs, whose sum is
 # invariant under this same-line-only anchor (Index decreases by exactly the
 # leading-whitespace count the match absorbs; Length grows by the same
