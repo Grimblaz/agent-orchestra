@@ -431,14 +431,23 @@ Describe 'Invoke-PersistPhaseLedger' {
     }
 
     Context 'Design-mode append (M22): straight append onto the design-completion comment, no sibling, no pointer' {
-        It 'appends directly onto the design completion comment with no plan-comment interaction and no sibling creation' {
+        It 'appends the phase-containment blocks directly onto the design completion comment with no plan-comment interaction and no sibling creation' {
             $designCommentId = 321321321
             $designMarker = '<!-- design-phase-complete-878 -->'
             Add-MockComment -Id $designCommentId -Body "$designMarker`n`nDesign completion summary."
 
+            # Design-challenge review is prosecution-only (no judge stage --
+            # skills/adversarial-review/adapters/design-challenge.md: "Defense
+            # and judge stages are intentionally absent"), so a real caller
+            # never has genuine judge-rulings data to supply here. This test
+            # deliberately still passes a populated -JudgeRulingsContent (the
+            # value the parameter's Mandatory attribute forces every caller
+            # to supply regardless of -Mode) specifically to prove design
+            # mode ignores it rather than merely happening not to receive it.
             $judgeContent = New-JudgeRulingsText -Entries @(@{ FindingId = 'D1'; Ruling = 'sustained' })
+            $block = New-LedgerBlockText -FindingSuffix 'D1'
             $result = Invoke-PersistPhaseLedger -Owner $script:Owner -Repo $script:Repo -Mode design `
-                -DesignCommentId $designCommentId -JudgeRulingsContent $judgeContent -PhaseContainmentBlocks @()
+                -DesignCommentId $designCommentId -JudgeRulingsContent $judgeContent -PhaseContainmentBlocks @($block)
 
             $result.Success | Should -Be $true
             ($script:ghCallLog | Where-Object { $_ -match '^issue view' }) | Should -BeNullOrEmpty
@@ -446,7 +455,37 @@ Describe 'Invoke-PersistPhaseLedger' {
             $script:PatchLog | ForEach-Object { $_.CommentId | Should -Be $designCommentId }
             $finalBody = ($script:mockComments | Where-Object { $_.Id -eq $designCommentId }).body
             $finalBody | Should -Match ([regex]::Escape($designMarker))
-            $finalBody | Should -Match 'finding_id: D1'
+            # The phase-containment block DOES land on the design comment
+            # (Add-CommentBlocks stamps its own appended_at:, so match on the
+            # finding_key identity line rather than the literal input block).
+            $finalBody | Should -Match ([regex]::Escape('finding_key: plan-stress-test:878:D1'))
+            # ...but a judge-rulings block must never be written to the
+            # design surface, even though -JudgeRulingsContent carried a
+            # real, populated block with finding_id: D1. Assert both the
+            # head pattern is absent and no PATCH body sent for this comment
+            # ever contained a judge-rulings block.
+            $finalBody | Should -Not -Match '<!--\s*judge-rulings'
+            foreach ($p in ($script:PatchLog | Where-Object { $_.CommentId -eq $designCommentId })) {
+                $p.Body | Should -Not -Match '<!--\s*judge-rulings'
+            }
+        }
+
+        It 'never writes a judge-rulings block even when PhaseContainmentBlocks is empty (zero-findings design path)' {
+            $designCommentId = 321321322
+            $designMarker = '<!-- design-phase-complete-878 -->'
+            Add-MockComment -Id $designCommentId -Body "$designMarker`n`nDesign completion summary."
+
+            $judgeContent = New-JudgeRulingsText -Entries @(@{ FindingId = 'D2'; Ruling = 'sustained' })
+            $result = Invoke-PersistPhaseLedger -Owner $script:Owner -Repo $script:Repo -Mode design `
+                -DesignCommentId $designCommentId -JudgeRulingsContent $judgeContent -PhaseContainmentBlocks @()
+
+            $result.Success | Should -Be $true
+            # No blocks to write and no judge-rulings step -- nothing should
+            # touch the design comment at all.
+            $script:PatchLog | Where-Object { $_.CommentId -eq $designCommentId } | Should -BeNullOrEmpty
+            $finalBody = ($script:mockComments | Where-Object { $_.Id -eq $designCommentId }).body
+            $finalBody | Should -Not -Match '<!--\s*judge-rulings'
+            $finalBody | Should -Not -Match 'finding_id: D2'
         }
     }
 }
