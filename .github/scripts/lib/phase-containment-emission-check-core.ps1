@@ -48,14 +48,15 @@ Set-StrictMode -Version Latest
 # in every differing case -- M25, dismissed on this verified counter-evidence)
 # but `\Z` does not depend on that alternation ordering the way `\z` would if
 # a future edit changed it, so it is adopted as a sturdiness preference.
-# Audited before this change: all five callers of
+# Audited before this change: all six callers of
 # Get-RealJudgeRulingsHeadMatches (Get-JudgeRulingsDuplicateDiagnosis :478,
 # Test-EmissionMarkerPresent :778, the M1 duplicate-head guard :1974, the
-# cross-body sibling check :2558, the design-challenge sibling check :2599)
-# consume only .Index/.Length pairs, whose sum is invariant under this
-# same-line-only anchor (Index decreases by exactly the leading-whitespace
-# count the match absorbs; Length grows by the same amount), so no caller's
-# window-end or region-start arithmetic changes.
+# cross-body sibling check :2558, the design-challenge sibling check :2599,
+# and phase-containment-cost-core.ps1's Test-JudgeRulingsRealHeadPresent :102
+# via Get-ReviewCostRollup) consume only .Index/.Length pairs, whose sum is
+# invariant under this same-line-only anchor (Index decreases by exactly the
+# leading-whitespace count the match absorbs; Length grows by the same
+# amount), so no caller's window-end or region-start arithmetic changes.
 $script:JudgeRulingsHeadPattern = '(?m)^[ \t]*<!--\s*judge-rulings(?:\s|-->|\Z)'
 
 # Bounded lookahead window after a matched head, within which real marker
@@ -2025,7 +2026,16 @@ function script:Get-JudgeRulingsIsolatedRegion {
     # $regionStart below actually needs — the attributed match's full length
     # when a candidate is attributed, else the candidate's own head-pattern
     # length for a bare head.
-    $attributedPattern = '\G<!--\s*judge-rulings\s+pr=\d+\s*-->'
+    # M4b fix (issue #878 judge-sustained review): $script:JudgeRulingsHeadPattern
+    # is `(?m)^[ \t]*<!--\s*judge-rulings...`, so an indented head's
+    # candidate.Index points at the LEADING WHITESPACE, not at `<!--`. The
+    # `\G`-anchored re-test below must tolerate that same leading
+    # `[ \t]*` run at the substring's start, or every indented attributed
+    # head (`pr=N` form, as used on the PR-review surface) fails this
+    # re-test, falls through to the bare-head branch, and mis-computes the
+    # region boundary using the shorter bare-head length instead of the
+    # attributed head's full length.
+    $attributedPattern = '\G[ \t]*<!--\s*judge-rulings\s+pr=\d+\s*-->'
     $regionIndex = -1
     $regionHeadLength = 0
     foreach ($candidate in $realHeadMatches) {

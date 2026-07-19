@@ -84,10 +84,23 @@ $result = Invoke-PersistPhaseLedger -Owner $Owner -Repo $Repo -Mode $Mode `
     -IssueNumber $IssueNumber -DesignCommentId $DesignCommentId `
     -JudgeRulingsContent $JudgeRulingsContent -PhaseContainmentBlocks $PhaseContainmentBlocks
 
+# M12 fix (issue #878 judge-sustained review, AC2): surface the landed/
+# not-landed artifact manifest alongside the top-level Success/Reason on
+# both the failure and success paths, so a caller reading this wrapper's
+# stdout/stderr can tell what happened at each step, not just the name of
+# the step that ultimately failed.
+function script:Format-PersistPhaseLedgerArtifacts {
+    param($Artifacts)
+    if ($null -eq $Artifacts) { return '(no artifact manifest)' }
+    return ($Artifacts.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ', '
+}
+
 if (-not $result.Success) {
     [Console]::Error.WriteLine("persist-phase-ledger (mode=$Mode): FAILED -- $($result.Reason)")
+    [Console]::Error.WriteLine("persist-phase-ledger (mode=$Mode): artifacts -- $(script:Format-PersistPhaseLedgerArtifacts -Artifacts $result.Artifacts)")
     exit 1
 }
 
 Write-Output "persist-phase-ledger (mode=$Mode): success"
+Write-Output "persist-phase-ledger (mode=$Mode): artifacts -- $(script:Format-PersistPhaseLedgerArtifacts -Artifacts $result.Artifacts)"
 exit 0

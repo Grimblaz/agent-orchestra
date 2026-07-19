@@ -2477,6 +2477,41 @@ Describe 'GH-1 (PR #815 review, rider on GH-3): hasRealHead no longer misclassif
     }
 }
 
+Describe 'M4b (issue #878 judge-sustained review): indented attributed judge-rulings head' {
+    It 'the region-isolation \G re-test tolerates leading whitespace so an indented attributed head still isolates its own YAML content, not just its own self-closing tag' {
+        # Before the fix, $script:JudgeRulingsHeadPattern's own
+        # `(?m)^[ \t]*<!--...` already admitted this indented candidate as a
+        # REAL head (it passes the vocab gate), but the attributed-form
+        # re-test at Get-JudgeRulingsIsolatedRegion's `\G<!--...` was anchored
+        # to the candidate's raw Match.Index, which now points at the
+        # leading whitespace, not `<!--`. `\G` failed to match, the loop
+        # fell through to the bare-head branch, and the region was isolated
+        # from immediately after "judge-rulings " through the attributed
+        # head's OWN closing `-->` (i.e. just the literal text "pr=878 "),
+        # never reaching the real `judge_ruling: sustained` line below --
+        # silently producing SustainedCount=0 with ParseStatus 'ok'.
+        $body = @'
+```yaml
+  <!-- judge-rulings pr=878 -->
+  judge_ruling: sustained
+```
+'@
+        $result = Get-SustainedFindingCount -Surface 'code-review' -Body $body
+        $result.ParseStatus | Should -Be 'ok'
+        $result.SustainedCount | Should -Be 1
+    }
+
+    It 'Test-EmissionMarkerPresent still reports the indented attributed head as present (unaffected by the region-isolation fix, regression check)' {
+        $body = @'
+```yaml
+  <!-- judge-rulings pr=878 -->
+  judge_ruling: sustained
+```
+'@
+        Test-EmissionMarkerPresent -Surface 'code-review' -Body $body | Should -Be $true
+    }
+}
+
 Describe '811-D1: Get-EmissionGap Reason field (head-missing vs head-corrupt vs ok)' {
     It 'reports Reason head-missing for a prose-only plan-issue comment (fallback fired, no real head)' {
         $result = Get-EmissionGap -Bodies @($script:ProseOnlyPlanStressTestBody) -Id 700 -Surface 'plan-stress-test'

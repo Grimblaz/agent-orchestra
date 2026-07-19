@@ -123,8 +123,11 @@ Describe 'Invoke-PersistPhaseLedger' {
             $joined = $Args -join ' '
             $script:ghCallLog.Add($joined)
 
-            # LIST: gh issue view <N> --json comments
-            if ($joined -match '^issue view \d+ --json comments$') {
+            # LIST: gh issue view <N> --json comments [-R <owner>/<repo>]
+            # M15 fix (issue #878 judge-sustained review): Find-CommentIdByExactMarker
+            # now passes -R explicitly, so this mock must match with or
+            # without the trailing -R argument.
+            if ($joined -match '^issue view \d+ --json comments(\s|$)') {
                 if ($script:simulateListFailure) { $global:LASTEXITCODE = 1; return '' }
                 $payload = @{
                     comments = @($script:mockComments | ForEach-Object {

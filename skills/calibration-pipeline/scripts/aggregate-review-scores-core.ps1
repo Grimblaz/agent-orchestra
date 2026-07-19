@@ -785,7 +785,14 @@ function Invoke-AggregateReviewScores {
         $body = if ($pr.body) { $pr.body } else { '' }
 
         # Extract <!-- pipeline-metrics ... --> block
-        $metricsMatch = [regex]::Match($body, '(?s)<!--\s*pipeline-metrics\s*(.*?)-->')
+        # Issue #878 M3 fix: line-anchored (`(?m)^[ \t]*`) plus the negative
+        # lookahead `(?![\w-])`, matching the shape already applied to this
+        # marker's other load-bearing readers/writers (see
+        # .github/scripts/lib/frame-credit-ledger-core.ps1's
+        # Read-PRMetricsBlock) -- an unanchored match here lets a
+        # `pipeline-metrics-foo` superstring or a mid-line prose mention win
+        # the first match instead of the real marker.
+        $metricsMatch = [regex]::Match($body, '(?m)(?s)^[ \t]*<!--\s*pipeline-metrics(?![\w-])\s*(.*?)-->')
 
         if (-not $metricsMatch.Success) {
             # Union merge: fall back to local calibration entry if GitHub PR body has no metrics block

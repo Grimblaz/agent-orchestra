@@ -234,19 +234,21 @@ Describe 'pipeline-metrics anchoring (frame-credit-ledger-core.ps1:709, :750)' -
     }
 
     It 'count validator (non-fenced marker scan) reports exactly one real block' {
+        # M17 fix (issue #878 judge-sustained review): this assertion used to
+        # re-derive its own hand-copied regex literal instead of calling the
+        # real production count validator (Test-PipelineMetricsV4Block) --
+        # so a production-side edit to that function's own anchoring could
+        # drift out of sync with this literal and this test would stay green
+        # regardless. Test-PipelineMetricsV4Block is already dot-sourced in
+        # this file's BeforeAll (frame-credit-ledger-core.ps1) and is
+        # exercised against this exact fixture by the sibling 'pipeline-
+        # metrics count-validator anchoring' Describe block below -- assert
+        # against its real DetectedMarkerCount output here too, rather than a
+        # copied pattern.
         $body = & $script:ReadFixture -Name 'pipeline-metrics-prose-mention-plus-real.txt'
-        # Mirrors the shape of frame-credit-ledger-core.ps1's own post-write
-        # non-fenced-marker count validator (Test-PipelineMetricsV4Block):
-        # strip fenced code spans first, since the anchored pattern alone
-        # cannot distinguish a real head from a decoy that happens to also
-        # start a line -- inline-code-span stripping is explicitly a
-        # non-goal of this step (RC), so this assertion targets the
-        # anchored, non-fenced pattern directly against a decoy that is
-        # NOT inside a fenced code span (only backtick-wrapped inline).
-        $anchored = '(?m)^[ \t]*<!--\s*pipeline-metrics(?![\w-])'
-        $matchCount = ([regex]::Matches($body, $anchored)).Count
+        $result = Test-PipelineMetricsV4Block -PRBody $body
 
-        $matchCount | Should -Be 1
+        $result.DetectedMarkerCount | Should -Be 1
     }
 
     It 'still matches the real historical placement from PR #879''s own body' {
