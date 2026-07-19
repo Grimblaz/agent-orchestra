@@ -14,11 +14,22 @@
       Get-GCContractBlock -CommentBody <string>
         Extracts the goal-contract block payload (the text between the
         `<!-- goal-contract` head marker and the terminator), or $null when
-        no single unambiguous block is present. Multi-block arity (two or
-        more `<!-- goal-contract` occurrences anywhere in the body, including
-        one inside a fenced documentation example -- extraction is
+        no single unambiguous block is present. The comment body is
+        CRLF/CR-normalized to LF before extraction, consistent with this
+        file's other functions (Get-GCContractHash's canonicalizer,
+        Test-GCVariantFrontmatter); callers do not need to pre-normalize line
+        endings. The head marker tolerates trailing whitespace before its
+        newline. Multi-block arity (two or more `<!-- goal-contract`
+        head-marker lines occurring anywhere in the body, including one
+        inside a fenced documentation example -- extraction is
         markdown-blind) FAILS rather than first-winning: a first-win rule
-        would silently prefer a documentation example over the real contract.
+        would silently prefer a documentation example over the real
+        contract. A marker is only counted when it is immediately followed
+        by (optional trailing whitespace then) a newline; a bare occurrence
+        of the marker text with no following line break at all is not
+        counted. Zero counted markers (no block present) and two-or-more
+        counted markers (ambiguous) currently both return $null; the caller
+        cannot yet distinguish the two cases (a known, deferred gap).
         The terminator is column-0-anchored (a line whose first characters
         are `-->`), so an indented `-->` inside a block scalar (e.g. inside
         `general_experience_standard: |`) cannot truncate the payload.
@@ -89,10 +100,39 @@
 #>
 
 # Pre-parse guard pattern: rejects a YAML anchor (`&name`) or alias (`*name`)
-# token wherever it appears in a value position (preceded by line-start,
-# whitespace, `:`, `[`, `,`, or `-`). The goal-contract shape needs neither
+# token, but ONLY when it sits at an actual YAML value-start position --
+# immediately after `:`, `-`, or `,` (each optionally followed by spaces/
+# tabs), immediately after `[` (optionally followed by spaces/tabs), or at
+# true line-start (optionally indented). This is a deliberate narrowing from
+# a bare `[\s:\[,-]` prefix class (design-challenge finding M8): that bare
+# class treated ANY whitespace before `&`/`*` as a value-start position, so
+# it false-fired on markdown emphasis (`*clear*`) and glob-style tokens
+# (`-Filter *contract*`) inside ordinary prose -- both reachable through
+# mandated verbatim content such as general_experience_standard (#848 D8),
+# with no way for the author to avoid the trigger. Requiring the prefix
+# whitespace (when present) to be immediately preceded by a real YAML
+# value-introducing character -- not by other prose/word content sharing the
+# same token -- keeps real aliases like `key: *anchor`, `- *anchor`, and
+# `[*a,*a]` matching while letting "see *clear* feedback" and
+# "-Filter *contract*" fall through untouched.
+#
+# The anchor/alias NAME character class is separately widened from
+# `[A-Za-z0-9_-]` to `[^\s,\[\]{}]` (anything but whitespace and the YAML
+# flow indicators `,[]{}`) so a dot-prefixed anchor (`&.a` / `*.a`) -- which
+# powershell-yaml accepts and expands, and which the old narrower class
+# missed entirely -- is now recognized (design-challenge finding M2, a real
+# alias-expansion-DoS bypass of this exact guard).
+#
+# Trade-off, stated explicitly: this is the same regex pulling in opposite
+# directions for M2 (widen to catch more real anchors) and M8 (narrow to stop
+# false-rejecting prose). Where a clean split is not achievable, this guard
+# is biased toward being MORE permissive of anchor/alias *shapes* -- i.e.
+# still erring toward catching real anchors -- rather than toward stricter
+# prefix matching, because a false-rejection of a mandated-content contract
+# is the more customer-visible failure mode than a narrow false-negative on
+# an unusual anchor placement. The goal-contract shape needs neither
 # construct (872-D6).
-$script:GCAnchorAliasPattern = '(?m)(^|[\s:\[,-])[&*][A-Za-z0-9_-]+'
+$script:GCAnchorAliasPattern = '(?m)(?:^[ \t]*|:[ \t]+|-[ \t]+|,[ \t]*|\[[ \t]*)[&*][^\s,\[\]{}]+'
 
 # Size cap: named constant, expressed in UTF-8 bytes (not UTF-16 chars --
 # non-ASCII fixtures sit on that seam). Bounds raw-size denial-of-service
@@ -105,8 +145,19 @@ function Get-GCContractBlock {
         [Parameter(Mandatory)][AllowEmptyString()][string]$CommentBody
     )
 
-    $headPattern = [regex]::Escape('<!-- goal-contract') + "`n"
-    $headMatches = [regex]::Matches($CommentBody, $headPattern)
+    # Normalize CRLF/CR line endings to LF before extraction (CRLF first,
+    # then any remaining bare CR), matching the convention this file already
+    # establishes in ConvertTo-GCCanonicalPayload and Test-GCVariantFrontmatter.
+    # The raw comment body sourced from the GitHub API is never guaranteed to
+    # use bare LF; without this, a CRLF-authored contract silently fails to
+    # extract (design-challenge finding M1).
+    $normalizedBody = $CommentBody -replace "`r`n", "`n" -replace "`r", "`n"
+
+    # Head marker: tolerates trailing whitespace before the newline (M16b) --
+    # a stray trailing space after `<!-- goal-contract` must not hide an
+    # otherwise well-formed block.
+    $headPattern = [regex]::Escape('<!-- goal-contract') + '[ \t]*\n'
+    $headMatches = [regex]::Matches($normalizedBody, $headPattern)
 
     if ($headMatches.Count -ne 1) {
         # Zero matches: no block present. Two or more: ambiguous arity --
@@ -116,7 +167,7 @@ function Get-GCContractBlock {
     }
 
     $headMatch = $headMatches[0]
-    $remainder = $CommentBody.Substring($headMatch.Index + $headMatch.Length)
+    $remainder = $normalizedBody.Substring($headMatch.Index + $headMatch.Length)
 
     $terminatorMatch = [regex]::Match($remainder, '(?m)^-->')
     if (-not $terminatorMatch.Success) {

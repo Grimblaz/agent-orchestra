@@ -151,6 +151,18 @@ real-block-content
             $exampleWon | Should -BeFalse -Because 'extraction is markdown-blind, so a fenced documentation example textually matches the block pattern too; it must not be silently preferred over (or merged with) the real block'
         }
 
+        It 'extracts the payload from a CRLF-authored comment body' {
+            script:Assert-GCFunctionExists -Name 'Get-GCContractBlock'
+            $body = "Some prose above.`r`n`r`n<!-- goal-contract`r`nschema_version: 1`r`nissue: 872`r`n-->`r`n`r`nSome prose below."
+            Get-GCContractBlock -CommentBody $body | Should -Be "schema_version: 1`nissue: 872" -Because 'the raw comment body sourced from the GitHub API is never CRLF-normalized by the caller (M1); Get-GCContractBlock must normalize it internally, consistent with Get-GCContractHash and Test-GCVariantFrontmatter'
+        }
+
+        It 'extracts the payload when the head marker has trailing whitespace before its newline' {
+            script:Assert-GCFunctionExists -Name 'Get-GCContractBlock'
+            $body = "<!-- goal-contract `nschema_version: 1`nissue: 872`n-->"
+            Get-GCContractBlock -CommentBody $body | Should -Be "schema_version: 1`nissue: 872" -Because 'a stray trailing space before the marker newline must not hide an otherwise well-formed block (M16b)'
+        }
+
         It 'does not truncate a payload at an indented --> inside a block scalar' {
             script:Assert-GCFunctionExists -Name 'Get-GCContractBlock'
             $body = @"
@@ -187,6 +199,52 @@ d: [*c,*c,*c,*c,*c,*c,*c,*c,*c]
 
             $outcome.Violations | Should -Not -BeNullOrEmpty -Because 'anchor/alias syntax must be rejected as a violation, not silently expanded'
             $stopwatch.Elapsed.TotalSeconds | Should -BeLessThan 2 -Because 'a pre-parse guard must reject the payload before it ever reaches ConvertFrom-Yaml, so this must return quickly rather than expanding tens of thousands of nodes'
+        }
+
+        It 'rejects a dot-prefixed anchor/alias name pre-parse (M2 bypass class)' {
+            script:Assert-GCFunctionExists -Name 'ConvertFrom-GCContractBlock'
+            # powershell-yaml accepts and expands a dot-prefixed anchor name.
+            # The old `[A-Za-z0-9_-]` name character class missed this
+            # entirely, letting it bypass the exact guard meant to prevent
+            # alias-expansion DoS (design-challenge finding M2).
+            $dotAnchorPayload = @'
+a: &.a [1,1,1,1,1,1,1,1,1]
+b: &.b [*.a,*.a,*.a,*.a,*.a,*.a,*.a,*.a,*.a]
+c: &.c [*.b,*.b,*.b,*.b,*.b,*.b,*.b,*.b,*.b]
+d: [*.c,*.c,*.c,*.c,*.c,*.c,*.c,*.c,*.c]
+'@
+            $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+            $outcome = ConvertFrom-GCContractBlock -Payload $dotAnchorPayload -RepoRoot $script:RepoRoot
+            $stopwatch.Stop()
+
+            $outcome.Violations | Should -Not -BeNullOrEmpty -Because 'a dot-prefixed anchor/alias name must be rejected exactly like an ASCII-named one; the guard must not be name-charset-limited'
+            $stopwatch.Elapsed.TotalSeconds | Should -BeLessThan 2 -Because 'the pre-parse guard must reject this before it ever reaches ConvertFrom-Yaml, so this must return quickly rather than expanding tens of thousands of nodes'
+        }
+
+        It 'does not reject markdown emphasis asterisks in mandated prose content' {
+            script:Assert-GCFunctionExists -Name 'ConvertFrom-GCContractBlock'
+            # general_experience_standard is mandated verbatim content
+            # (#848 D8); the author has no way to avoid this shape if the
+            # guard over-matches on bare whitespace before an asterisk
+            # (design-challenge finding M8).
+            $emphasisPayload = @'
+schema_version: 1
+issue: 872
+general_experience_standard: "Users must see *clear* feedback."
+'@
+            $outcome = ConvertFrom-GCContractBlock -Payload $emphasisPayload -RepoRoot $script:RepoRoot
+            ($outcome.Violations -join ' ') | Should -Not -Match '(?i)anchor|alias' -Because 'markdown emphasis asterisks around a word in prose must not be misread as a YAML alias token'
+        }
+
+        It 'does not reject a glob-style token that follows a keyword and space' {
+            script:Assert-GCFunctionExists -Name 'ConvertFrom-GCContractBlock'
+            $globPayload = @'
+schema_version: 1
+issue: 872
+check: "Get-ChildItem -Filter *contract*"
+'@
+            $outcome = ConvertFrom-GCContractBlock -Payload $globPayload -RepoRoot $script:RepoRoot
+            ($outcome.Violations -join ' ') | Should -Not -Match '(?i)anchor|alias' -Because 'a glob-style token following a keyword and space (not a real YAML value-start position) must not be misread as a YAML alias token'
         }
 
         It 'rejects an oversized payload using a literal test-owned byte count' {
