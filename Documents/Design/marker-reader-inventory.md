@@ -1,8 +1,7 @@
 # Marker-Reader Inventory (issue #878, s1)
 
 Exhaustive scan of raw-text HTML-comment-marker scanning sites across
-`.github/scripts/**` and `skills/**/scripts/**`, produced for [issue
-#878](https://github.com/Grimblaz/agent-orchestra/issues/878) Part C
+`.github/scripts/**` and `skills/**/scripts/**`, produced for [issue #878](https://github.com/Grimblaz/agent-orchestra/issues/878) Part C
 (per-pattern regex anchoring). This file is the s1 deliverable; s6 consumes
 it to apply anchoring per family. **Non-goals of this document: no source
 edits, no review-judgment PR-surface emission work.**
