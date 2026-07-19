@@ -1,0 +1,40 @@
+## Summary
+
+This PR wires the v4 marker convention documented at `frame/pipeline-metrics-v4-schema.md`. In prose, a block shaped like `<!-- pipeline-metrics ... -->` should never be treated as a real block by the parser.
+
+## Test plan
+
+- [x] Verified locally
+
+<!-- cost-summary:begin -->
+**Session cost**: $236.5105 (partial, pr-creation-mid-session) - [full breakdown](https://github.com/Grimblaz/agent-orchestra/pull/879#issuecomment-5009741930)
+<!-- cost-summary:end -->
+
+<!-- pipeline-metrics
+pr_number: 879
+branch: feature/issue-691-cheap-research-delegation
+review_mode: full
+ce_gate_result: passed
+ce_gate_intent: strong
+metrics_version: 4
+frame_version: 1
+credits:
+  - port: experience
+    adapter: work-adapter
+    status: passed
+    evidence: 'issue #691; experience completion marker posted'
+  - port: design
+    adapter: work-adapter
+    status: passed
+    evidence: 'issue #691; design completion marker posted'
+cost_summary:
+  cost_usd_total: 236.5105
+  tokens:
+    input: 47637
+    output: 1037253
+  session_completeness: partial
+  capture_point: pr-creation-mid-session
+  source_comment: 'https://github.com/Grimblaz/agent-orchestra/pull/879#issuecomment-5009741930'
+-->
+
+Trailer text after the block, untouched by any splice.

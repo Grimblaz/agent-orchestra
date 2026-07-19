@@ -706,7 +706,19 @@ function script:Set-FCLDispatchCostSamplesInPrBody {
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Samples
     )
 
-    $match = [regex]::Match($PrBody, '(?s)(?<open><!--\s*pipeline-metrics\s*)(?<block>.*?)(?<close>\s*-->)')
+    # Issue #878 s6: line-anchored (`(?m)^[ \t]*`) plus the negative lookahead
+    # `(?![\w-])` already used by the lookahead-guarded pipeline-metrics
+    # variant elsewhere in this file, so a `pipeline-metrics-foo` superstring
+    # or a mid-line prose mention can never win the first match. This is a
+    # SPLICE-WRITER, not a reader: it reconstructs the body via
+    # `$PrBody.Substring(0, $match.Index)` + replacement, so anchoring must
+    # not just prefix the pattern -- doing that alone would shift
+    # `$match.Index` onto any leading same-line whitespace, which then gets
+    # consumed by the match but is never re-emitted by the splice below,
+    # silently deleting that whitespace on every write. Fix: capture the
+    # leading whitespace in its own named group (`indent`) and re-emit it
+    # explicitly in the reconstruction instead of folding it into `open`.
+    $match = [regex]::Match($PrBody, '(?m)(?s)^(?<indent>[ \t]*)(?<open><!--\s*pipeline-metrics(?![\w-])\s*)(?<block>.*?)(?<close>\s*-->)')
     if (-not $match.Success) { return $PrBody }
 
     $updatedBlock = script:Set-FCLDispatchCostSamplesSection -MetricsBlock $match.Groups['block'].Value -Samples $Samples
@@ -714,7 +726,7 @@ function script:Set-FCLDispatchCostSamplesInPrBody {
     $suffixStart = $match.Index + $match.Length
     $suffix = $PrBody.Substring($suffixStart)
 
-    return $prefix + $match.Groups['open'].Value + $updatedBlock + $match.Groups['close'].Value + $suffix
+    return $prefix + $match.Groups['indent'].Value + $match.Groups['open'].Value + $updatedBlock + $match.Groups['close'].Value + $suffix
 }
 
 # endregion ---------------------------------------------------------------------
@@ -747,7 +759,12 @@ function Read-PRMetricsBlock {
 
     $normalized = $PrBody -replace "`r`n", "`n" -replace "`r", "`n"
 
-    $match = [regex]::Match($normalized, '(?s)<!--\s*pipeline-metrics\s*(?<block>.*?)\s*-->')
+    # Issue #878 s6: line-anchored plus the negative lookahead `(?![\w-])`
+    # (already used by the lookahead-guarded variant elsewhere in this file)
+    # so a `pipeline-metrics-foo` superstring or a mid-line prose mention can
+    # never win the first match. Pure reader (no positional reconstruction),
+    # so no whitespace-capture concern here unlike the splice-writer above.
+    $match = [regex]::Match($normalized, '(?m)(?s)^[ \t]*<!--\s*pipeline-metrics(?![\w-])\s*(?<block>.*?)\s*-->')
     if (-not $match.Success) {
         return $null
     }

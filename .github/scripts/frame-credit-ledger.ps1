@@ -831,7 +831,14 @@ function script:Set-FCLStaleSpineFallbackMetric {
 function script:Update-FCLPrBodyStaleSpineFallbackMetric {
     param([Parameter(Mandatory)][AllowEmptyString()][string]$PrBody)
 
-    $match = [regex]::Match($PrBody, '(?s)(?<open><!--\s*pipeline-metrics\s*)(?<block>.*?)(?<close>\s*-->)')
+    # Issue #878 s6: byte-identical duplicate of frame-credit-ledger-core.ps1's
+    # Set-FCLDispatchCostSamplesInPrBody splice-writer pattern (s1 inventory:
+    # "wrapper-script duplicate of the :709 pattern"). Same fix for the same
+    # reason: line-anchor plus the negative lookahead `(?![\w-])`, with the
+    # leading same-line whitespace captured in its own `indent` group and
+    # re-emitted explicitly, since folding it into `open` would silently drop
+    # it from the reconstructed body on every write.
+    $match = [regex]::Match($PrBody, '(?m)(?s)^(?<indent>[ \t]*)(?<open><!--\s*pipeline-metrics(?![\w-])\s*)(?<block>.*?)(?<close>\s*-->)')
     if (-not $match.Success) { return $PrBody }
 
     $updatedBlock = script:Set-FCLStaleSpineFallbackMetric -MetricsBlock $match.Groups['block'].Value
@@ -839,7 +846,7 @@ function script:Update-FCLPrBodyStaleSpineFallbackMetric {
     $prefix = $PrBody.Substring(0, $match.Index)
     $suffixStart = $match.Index + $match.Length
     $suffix = $PrBody.Substring($suffixStart)
-    return $prefix + $match.Groups['open'].Value + $updatedBlock + $match.Groups['close'].Value + $suffix
+    return $prefix + $match.Groups['indent'].Value + $match.Groups['open'].Value + $updatedBlock + $match.Groups['close'].Value + $suffix
 }
 
 function script:Update-FCLPrBodyMetricsBestEffort {

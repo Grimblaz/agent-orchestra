@@ -33,7 +33,30 @@ Set-StrictMode -Version Latest
 # Get-EmissionGap's real-vs-fallback classification); a single named constant
 # means a future change to the head shape touches one place instead of
 # silently drifting across four inline copies (refactor 811-D1-refactor-1).
-$script:JudgeRulingsHeadPattern = '<!--\s*judge-rulings(?:\s|-->|$)'
+# Issue #878 s6: line-anchored so a judge-rulings marker literal quoted
+# mid-sentence in prose (e.g. "this PR uses the standard
+# <!-- judge-rulings pr=778 --> marker for tracking") can never raw-match as
+# a head candidate -- previously such a decoy's 400-char lookahead window
+# could bleed into a real block's own vocabulary below it and pass the vocab
+# gate too (window-bleed), inflating Get-RealJudgeRulingsHeadMatches's count.
+# `(?m)^[ \t]*`, not `^\s*`: `\s` crosses newlines and can shift Match.Index
+# onto a preceding blank line, which breaks the `\G`-anchored attributed-form
+# re-test at each candidate's own index (below, ~:2005) and risks corrupting
+# the block-scalar-span membership test this pattern's matches feed (~:361).
+# `\Z`, not `\z`, replaces the trailing `$`: behavior-preserving today (.NET
+# alternation is leftmost-preferred and `\s` wins ahead of `-->`/end-of-string
+# in every differing case -- M25, dismissed on this verified counter-evidence)
+# but `\Z` does not depend on that alternation ordering the way `\z` would if
+# a future edit changed it, so it is adopted as a sturdiness preference.
+# Audited before this change: all five callers of
+# Get-RealJudgeRulingsHeadMatches (Get-JudgeRulingsDuplicateDiagnosis :478,
+# Test-EmissionMarkerPresent :778, the M1 duplicate-head guard :1974, the
+# cross-body sibling check :2558, the design-challenge sibling check :2599)
+# consume only .Index/.Length pairs, whose sum is invariant under this
+# same-line-only anchor (Index decreases by exactly the leading-whitespace
+# count the match absorbs; Length grows by the same amount), so no caller's
+# window-end or region-start arithmetic changes.
+$script:JudgeRulingsHeadPattern = '(?m)^[ \t]*<!--\s*judge-rulings(?:\s|-->|\Z)'
 
 # Bounded lookahead window after a matched head, within which real marker
 # content is expected to appear (shared by every vocab-gate scan in this

@@ -2560,26 +2560,38 @@ Describe '863 M2 fix (judge-sustained code-review): a foreign real head not boun
 }
 
 Describe 'Issue #817 (PF-F1) T1/T2: near-decoy window-bleed produces a false head-corrupt today' {
-    It 'T1 (plan-stress-test) diagnostic: the decoy and the real head both pass the vocab gate (bleed confirmed, GREEN today)' {
+    # Issue #878 s6 superseded this scenario for T1/T2's specific decoy shape:
+    # the decoy is embedded MID-SENTENCE ("This PR uses the standard
+    # <!-- judge-rulings --> marker convention..."), which line-anchoring
+    # ($script:JudgeRulingsHeadPattern, core :36) now excludes at the raw
+    # head-candidate stage, before window-bleed / vocab-gating ever runs.
+    # There is no longer a duplicate-head situation to diagnose for this
+    # shape at all -- Get-RealJudgeRulingsHeadMatches returns exactly 1 real
+    # head (the true block) and Get-EmissionGap reports the body clean
+    # ('ok'), a strictly better outcome than the previously-correct
+    # 'decoy-ambiguous' label. Values below updated empirically post-anchoring
+    # (2026-07-19); the original bleed-mechanics narrative above is preserved
+    # for history.
+    It 'T1 (plan-stress-test) diagnostic: the mid-sentence decoy is excluded at the raw-candidate stage post-anchoring (issue #878 s6)' {
         $realHeads = Get-RealJudgeRulingsHeadMatches -Body $script:NearDecoyPlanStressTestBody
-        $realHeads.Count | Should -Be 2
+        $realHeads.Count | Should -Be 1
     }
 
-    It 'T1 (plan-stress-test): Get-EmissionGap should report the honest decoy-ambiguous reason, not head-corrupt (RED — decoy-ambiguous does not exist yet)' {
+    It 'T1 (plan-stress-test): Get-EmissionGap reports the body clean post-anchoring -- no decoy, no ambiguity (issue #878 s6)' {
         $result = Get-EmissionGap -Bodies @($script:NearDecoyPlanStressTestBody) -Id 706 -Surface 'plan-stress-test'
-        $result.ParseStatus | Should -Be 'could-not-verify'
-        $result.Reason | Should -Be 'decoy-ambiguous'
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Reason | Should -Be 'ok'
     }
 
-    It 'T2 (code-review) diagnostic: the decoy and the real head both pass the vocab gate (bleed confirmed, GREEN today)' {
+    It 'T2 (code-review) diagnostic: the mid-sentence decoy is excluded at the raw-candidate stage post-anchoring (issue #878 s6)' {
         $realHeads = Get-RealJudgeRulingsHeadMatches -Body $script:NearDecoyCodeReviewBody
-        $realHeads.Count | Should -Be 2
+        $realHeads.Count | Should -Be 1
     }
 
-    It 'T2 (code-review): Get-EmissionGap should report the honest decoy-ambiguous reason, not head-corrupt (RED — decoy-ambiguous does not exist yet)' {
+    It 'T2 (code-review): Get-EmissionGap reports the body clean post-anchoring -- no decoy, no ambiguity (issue #878 s6)' {
         $result = Get-EmissionGap -Bodies @($script:NearDecoyCodeReviewBody) -Id 816 -Surface 'code-review'
-        $result.ParseStatus | Should -Be 'could-not-verify'
-        $result.Reason | Should -Be 'decoy-ambiguous'
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Reason | Should -Be 'ok'
     }
 }
 
@@ -2615,10 +2627,10 @@ Describe 'Issue #817 T4: cross-body reason priority' {
         $result.Reason | Should -Be 'head-corrupt'
     }
 
-    It 'pair 2 (a near-decoy body + a head-missing fallback-only body): aggregate Reason should be decoy-ambiguous (RED — today this resolves to head-corrupt, since the ladder has no decoy-ambiguous flag yet and head-corrupt currently outranks head-missing)' {
+    It 'pair 2 (a near-decoy body + a head-missing fallback-only body): aggregate Reason is head-missing post-anchoring (issue #878 s6) -- the near-decoy body no longer contributes decoy-ambiguous/head-corrupt at all (it resolves clean, per T1 above), so the second body''s head-missing is the only remaining non-ok reason across the pair' {
         $result = Get-EmissionGap -Bodies @($script:NearDecoyPlanStressTestBody, $script:ProseOnlyPlanStressTestBody) -Id 1 -Surface 'plan-stress-test'
         $result.ParseStatus | Should -Be 'could-not-verify'
-        $result.Reason | Should -Be 'decoy-ambiguous'
+        $result.Reason | Should -Be 'head-missing'
     }
 }
 
@@ -2634,15 +2646,15 @@ Describe 'Issue #817 T5: block-scalar-embedded decoy vocabulary and multiple-dec
         $result.Reason | Should -Be 'decoy-ambiguous'
     }
 
-    It 'T5b diagnostic: two prose decoys plus one real block all pass the vocab gate today (GREEN — 3 real matches)' {
+    It 'T5b diagnostic: both mid-sentence prose decoys are excluded at the raw-candidate stage post-anchoring (issue #878 s6), leaving exactly 1 real head' {
         $realHeads = Get-RealJudgeRulingsHeadMatches -Body $script:TwoDecoysBeforeOneRealBody
-        $realHeads.Count | Should -Be 3
+        $realHeads.Count | Should -Be 1
     }
 
-    It 'T5b: Get-EmissionGap should report decoy-ambiguous for the two-decoys-before-one-real shape (RED today)' {
+    It 'T5b: Get-EmissionGap reports the body clean post-anchoring (issue #878 s6)' {
         $result = Get-EmissionGap -Bodies @($script:TwoDecoysBeforeOneRealBody) -Id 709 -Surface 'plan-stress-test'
-        $result.ParseStatus | Should -Be 'could-not-verify'
-        $result.Reason | Should -Be 'decoy-ambiguous'
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Reason | Should -Be 'ok'
     }
 }
 
@@ -2658,39 +2670,39 @@ Describe 'Issue #817 T6/T7: one accepted residual (T6) and one confirmed-correct
         $result.Reason | Should -Be 'decoy-ambiguous'
     }
 
-    It 'T7 diagnostic: the outer head and the embedded mid-sentence decoy both pass the vocab gate today (GREEN — 2 real matches)' {
+    It 'T7 diagnostic: the embedded mid-sentence decoy is excluded at the raw-candidate stage post-anchoring (issue #878 s6), leaving only the outer head as a real candidate' {
         $realHeads = Get-RealJudgeRulingsHeadMatches -Body $script:MirrorOrderingConfirmedCorrectBody
-        $realHeads.Count | Should -Be 2
+        $realHeads.Count | Should -Be 1
     }
 
-    It 'T7: the mirror-ordering placement resolves to decoy-ambiguous per the corrected D4 characterization — a confirmed-correct edge case, not a residual (RED — confirms this author''s trace)' {
+    It 'T7: post-anchoring (issue #878 s6) the outer head''s own region still ends at the embedded decoy''s self-closing `-->` (region-end detection is unrelated to head-candidacy), truncating the region before the real fields -- Get-EmissionGap correctly still reports head-corrupt (fail-loud preserved), not the now-superseded decoy-ambiguous label' {
         $result = Get-EmissionGap -Bodies @($script:MirrorOrderingConfirmedCorrectBody) -Id 711 -Surface 'plan-stress-test'
         $result.ParseStatus | Should -Be 'could-not-verify'
-        $result.Reason | Should -Be 'decoy-ambiguous'
+        $result.Reason | Should -Be 'head-corrupt'
     }
 }
 
 Describe 'Issue #817: window-edge boundary and before+after placement fixtures' {
-    It 'window-edge diagnostic: the decoy bleeds at 296 chars of filler (1 char inside the 400-char window), GREEN today — 2 real matches' {
+    It 'window-edge diagnostic: the mid-sentence decoy is excluded at the raw-candidate stage post-anchoring (issue #878 s6), independent of the 400-char window boundary that used to matter here' {
         $realHeads = Get-RealJudgeRulingsHeadMatches -Body $script:WindowEdgeBleedBody
-        $realHeads.Count | Should -Be 2
+        $realHeads.Count | Should -Be 1
     }
 
-    It 'window-edge: Get-EmissionGap should report decoy-ambiguous at the window boundary (RED today)' {
+    It 'window-edge: Get-EmissionGap reports the body clean post-anchoring (issue #878 s6) -- the window-boundary bleed this fixture was built to pin no longer occurs for a mid-sentence decoy' {
         $result = Get-EmissionGap -Bodies @($script:WindowEdgeBleedBody) -Id 712 -Surface 'plan-stress-test'
-        $result.ParseStatus | Should -Be 'could-not-verify'
-        $result.Reason | Should -Be 'decoy-ambiguous'
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Reason | Should -Be 'ok'
     }
 
-    It 'before+after diagnostic: only 2 candidates pass the vocab gate today, not 3 — the after-decoy has no vocabulary forward of itself so it never becomes a candidate at all (GREEN, describes current raw vocab-gate behavior)' {
+    It 'before+after diagnostic: the before-decoy is now excluded at the raw-candidate stage post-anchoring (issue #878 s6); the after-decoy was already excluded pre-anchoring (no vocabulary forward of itself) -- exactly 1 real match remains' {
         $realHeads = Get-RealJudgeRulingsHeadMatches -Body $script:DecoyBeforeAndAfterRealBody
-        $realHeads.Count | Should -Be 2
+        $realHeads.Count | Should -Be 1
     }
 
-    It 'before+after: Get-EmissionGap should report decoy-ambiguous once the new helper lands (RED today; only the real block survives truncation since the after-decoy never registers as a candidate)' {
+    It 'before+after: Get-EmissionGap reports the body clean post-anchoring (issue #878 s6)' {
         $result = Get-EmissionGap -Bodies @($script:DecoyBeforeAndAfterRealBody) -Id 713 -Surface 'plan-stress-test'
-        $result.ParseStatus | Should -Be 'could-not-verify'
-        $result.Reason | Should -Be 'decoy-ambiguous'
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Reason | Should -Be 'ok'
     }
 }
 
@@ -2729,12 +2741,18 @@ Describe 'PR #833 judge-sustained M10 direct-isolation regression: Get-JudgeRuli
 }
 
 Describe 'GH-2 (PR #853 review, judge-sustained): near-decoy window-bleed must not soften an independently-corrupt real head to decoy-ambiguous' {
-    It 'diagnostic: the decoy and the malformed real head both pass the vocab gate (bleed confirmed, key-only gate does not validate the value)' {
+    # Issue #878 s6: the mid-sentence decoy is now excluded at the raw
+    # head-candidate stage, so Get-JudgeRulingsDuplicateDiagnosis's
+    # window-bleed path is never invoked for this fixture at all — the
+    # single-head path (Get-SustainedFindingCount's own value validation)
+    # independently reaches the same 'head-corrupt' verdict, so the Reason
+    # assertion below is unchanged; only the raw candidate count drops.
+    It 'diagnostic: the mid-sentence decoy is excluded at the raw-candidate stage post-anchoring (issue #878 s6), leaving only the malformed real head' {
         $realHeads = Get-RealJudgeRulingsHeadMatches -Body $script:NearDecoyMalformedRealHeadBody
-        $realHeads.Count | Should -Be 2
+        $realHeads.Count | Should -Be 1
     }
 
-    It 'reports Reason head-corrupt, not decoy-ambiguous, when the surviving real head is independently corrupt (RED today — currently reports decoy-ambiguous)' {
+    It 'reports Reason head-corrupt, not decoy-ambiguous, when the surviving real head is independently corrupt' {
         $result = Get-EmissionGap -Bodies @($script:NearDecoyMalformedRealHeadBody) -Id 819 -Surface 'plan-stress-test'
         $result.ParseStatus | Should -Be 'could-not-verify'
         $result.Reason | Should -Be 'head-corrupt'
@@ -2752,41 +2770,67 @@ Describe 'GH-2 (PR #853 review, judge-sustained): near-decoy window-bleed must n
 }
 
 Describe 'GH-2 post-fix follow-up (PR #853 review, judge-sustained M1): the value-scan must not count a block-scalar-interior decoy value as the survivor''s own field' {
-    It 'diagnostic: the decoy and the real block both pass the vocab gate (bleed confirmed, matching the established near-decoy shape)' {
+    # Issue #878 s6: the outer mid-sentence decoy is excluded at the
+    # raw-candidate stage, so the raw-window value-scan this Describe block
+    # was built to pin (Get-JudgeRulingsDuplicateDiagnosis) is never invoked
+    # here either -- only the survivor's own single-head region parsing
+    # runs. That path is not scoped identically to the block-scalar
+    # exclusion the duplicate-diagnosis helper applies, and independently
+    # flags the region as corrupt (still fail-loud, not a false clean; a
+    # different but not less-safe verdict than the originally-anticipated
+    # 'decoy-ambiguous').
+    It 'diagnostic: the outer mid-sentence decoy is excluded at the raw-candidate stage post-anchoring (issue #878 s6), leaving only the survivor head' {
         $realHeads = Get-RealJudgeRulingsHeadMatches -Body $script:NearDecoyBlockScalarDecoyValueBody
-        $realHeads.Count | Should -Be 2
+        $realHeads.Count | Should -Be 1
     }
 
-    It 'reports Reason decoy-ambiguous, not head-corrupt, when the only invalid judge_ruling value lives inside the survivor''s own disposition_rationale block scalar (RED today — currently reports head-corrupt)' {
+    It 'reports Reason head-corrupt post-anchoring (issue #878 s6) -- fail-loud is preserved, though via the single-head region path rather than the window-bleed diagnosis this fixture originally exercised' {
         $result = Get-EmissionGap -Bodies @($script:NearDecoyBlockScalarDecoyValueBody) -Id 820 -Surface 'plan-stress-test'
-        $result.Reason | Should -Be 'decoy-ambiguous'
-        $result.Reason | Should -Not -Be 'head-corrupt'
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.Reason | Should -Be 'head-corrupt'
     }
 }
 
 Describe 'GH-2 post-fix follow-up (PR #853 review, judge-sustained M3): the value-scan must not count trailing-prose decoy content as the survivor''s own field' {
-    It 'diagnostic: the decoy and the real block both pass the vocab gate (bleed confirmed, matching the established near-decoy shape)' {
+    # Issue #878 s6: the outer mid-sentence decoy is excluded at the
+    # raw-candidate stage, so this fixture no longer reaches the raw-window
+    # value-scan at all. The survivor's own field was always genuinely
+    # valid and the trailing-prose decoy content was always genuinely
+    # outside the survivor's own region -- Get-EmissionGap now correctly
+    # reports the body clean, a strictly better outcome than the
+    # originally-anticipated 'decoy-ambiguous' warning.
+    It 'diagnostic: the outer mid-sentence decoy is excluded at the raw-candidate stage post-anchoring (issue #878 s6), leaving only the survivor head' {
         $realHeads = Get-RealJudgeRulingsHeadMatches -Body $script:NearDecoyTrailingProseDecoyValueBody
-        $realHeads.Count | Should -Be 2
+        $realHeads.Count | Should -Be 1
     }
 
-    It 'reports Reason decoy-ambiguous, not head-corrupt, when the only invalid judge_ruling value lives in ordinary trailing prose after the survivor''s own real field (RED today — currently reports head-corrupt)' {
+    It 'reports the body clean post-anchoring (issue #878 s6) -- the trailing-prose decoy value was never inside the survivor''s own region' {
         $result = Get-EmissionGap -Bodies @($script:NearDecoyTrailingProseDecoyValueBody) -Id 821 -Surface 'plan-stress-test'
-        $result.Reason | Should -Be 'decoy-ambiguous'
-        $result.Reason | Should -Not -Be 'head-corrupt'
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Reason | Should -Be 'ok'
     }
 }
 
 Describe 'GH-2 post-fix follow-up (PR #853 review, judge-sustained, third class): the value-scan must not count a post-closer, line-start decoy mention as the survivor''s own field' {
-    It 'diagnostic: the decoy and the real block both pass the vocab gate (bleed confirmed, matching the established near-decoy shape)' {
+    # Issue #878 s6: the outer mid-sentence decoy is excluded at the
+    # raw-candidate stage, so this fixture no longer reaches the raw-window
+    # value-scan at all -- the post-closer decoy token was never inside the
+    # survivor's own region, and Get-EmissionGap now correctly reports the
+    # body clean. Note this is a DIFFERENT, more fundamental fix than the
+    # region-scoped value-scan the fixture's original docstring anticipated
+    # ("line-anchoring alone is not sufficient..."): head-candidate-stage
+    # line-anchoring sidesteps the whole raw-window value-scan mechanism for
+    # this decoy shape, rather than needing the scan itself to become
+    # region-aware.
+    It 'diagnostic: the outer mid-sentence decoy is excluded at the raw-candidate stage post-anchoring (issue #878 s6), leaving only the survivor head' {
         $realHeads = Get-RealJudgeRulingsHeadMatches -Body $script:NearDecoyPostCloserLineStartDecoyValueBody
-        $realHeads.Count | Should -Be 2
+        $realHeads.Count | Should -Be 1
     }
 
-    It 'reports Reason decoy-ambiguous, not head-corrupt, when the only invalid judge_ruling value is a genuine line-start mention positioned after the survivor''s own marker region has closed (pinned regardless of today''s RED/GREEN status; see report for empirical result)' {
+    It 'reports the body clean post-anchoring (issue #878 s6) -- the post-closer decoy token was never inside the survivor''s own region' {
         $result = Get-EmissionGap -Bodies @($script:NearDecoyPostCloserLineStartDecoyValueBody) -Id 822 -Surface 'plan-stress-test'
-        $result.Reason | Should -Be 'decoy-ambiguous'
-        $result.Reason | Should -Not -Be 'head-corrupt'
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Reason | Should -Be 'ok'
     }
 }
 
