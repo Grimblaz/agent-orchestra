@@ -1174,3 +1174,63 @@ The convergence filter is modeled as Solution-Designer Stage-3 methodology layer
 ### Claude 5 Re-tier
 
 Alongside the convergence-filter methodology, #785 re-tiers two roles to Fable: the judge (`agents/code-review-response.md`) and the standard-panel generalist-B pass move to `model: fable`. Specialist prosecution passes — including spec-security (Pass 4 of the `standard` panel), which is durably pinned to `opus` and never mapped to `fable` regardless of future generalist or judge tier changes — stay on `opus`. See `Documents/Design/agent-body-architecture.md` § Per-agent model + reasoning routing for the full per-shell routing table and the monotonic-ladder rule governing judge-tier selection.
+
+---
+
+## Sibling Write-Path Guarantee Parity & Post-Fix Scope Widening
+
+**Issue**: #886 | **Root cause**: two gaps the #878 incident exposed — (1) #878 F1's sibling guarantee lived in a downstream helper, not the branch body, so a branch-local comparison in the Architecture checklist would have missed it; (2) commit `4cf5219` showed the post-fix **judge**, not just prosecution, performed the under-scoped mutation testing the prior post-fix rule only bound prosecution against.
+
+### Summary
+
+Three changes closing the #878 review-process gap: a sibling write-path guarantee-parity checklist item in Code Prosecution Workflow's Architecture perspective (worded to trace full write paths, not just branch bodies), a post-fix verification-scope widening bound on all three surfaces that own it (prosecution, the canonical pipeline rule, and the judge), and a consolidation of the twin append/replace candidate-preflight loops in `persist-phase-ledger-core.ps1` behind one shared helper with two new regression tests.
+
+### Decision Log
+
+| # | Decision | Choice | Rationale |
+|---|----------|--------|-----------|
+| d3-preflight-consolidation-886 | Preflight loop consolidation | Take — extract into one shared helper | #887 F1 already closed the *behavioral* validation gap; the DRY-only consolidation of the two identical loops was a genuine maintainer trade-off (touching a hot, recently-stabilized file for cleanliness alone) that no inherited artifact settled |
+| d4-postfix-scope-widening-886 | Post-fix verification scope | Widen — every branch the fix commit modified, not only the guard named in the sustained finding | The issue's "consider also" wording explicitly deferred this choice to a later phase; no inherited artifact settled it |
+| c3-mutation-scope-ownership-886 | Which surface(s) own the widened scope | Bind all three surfaces (prosecution line, canonical pipeline rule, judge mirror) | Commit `4cf5219` attributed the live mis-scoped mutation testing to the post-fix **judge**, contradicting the issue body's prosecution-only attribution — binding all three means the actor that actually failed in the live incident is bound by its own methodology, not just the one originally suspected |
+
+### Sibling Write-Path Guarantee Parity Check
+
+`skills/adversarial-review/SKILL.md` § Code Prosecution Workflow → **1. Architecture** gains a new checklist item (line 110): trace **both** write paths to the persisted target — the branch body plus every downstream helper the branch routes through — and verify by name that the changed branch's path carries every guarantee the sibling's path has (write-time preflight, schema validation, existence checks, post-write verification). A guarantee living only in a sibling's downstream call chain still counts as that sibling's guarantee. This wording is deliberately full-write-path, not branch-local, because the #878 F1 exemplar's sibling guarantee lived in a downstream call, not the branch body — a branch-local comparison would have missed it.
+
+The **2. Security** perspective's "Full-record overwrite risks" bullet (line 120) cross-references the Architecture item by section anchor (`§ Code Prosecution Workflow → 1. Architecture`) rather than restating the check, so the two perspectives cannot drift apart.
+
+### Post-Fix Scope Widening (Three Surfaces, One Canonical Statement)
+
+The post-fix verification-scope rule is now stated once, canonically, and cross-referenced from the other two surfaces — the same contract at three altitudes, not verbatim triplication:
+
+- **Canonical** — `skills/validation-methodology/references/review-reconciliation.md` line 173, renamed from "Prosecution scope constraint" to **"Post-fix scope constraint"**: post-fix prosecution *and judgment* now both extend coverage (including mutation testing) to every branch the fix commit modified, not only the guard named in the sustained finding. Findings outside the fix diff still classify as DEFERRED-SIGNIFICANT, with the pre-existing out-of-diff AC-exception preserved and a new qualifier: an in-diff pre-existing finding that maps to an explicit acceptance-criterion item routes through the AC Cross-Check Gate before deferral, rather than being reported as a side effect of the widened coverage and then dropped.
+- **Prosecution** — `agents/Code-Critic.agent.md` line 225 keeps the fix-introduced-regressions restriction and states the widened coverage, cross-referencing the canonical statement instead of re-deriving it.
+- **Judge** — `skills/review-judgment/SKILL.md` § Independent Verification Expectations (H2, line 52) gains a conditional **POST-FIX-SCOPED** note (line 62): when a verification pass follows post-fix targeted prosecution with mutation-tested verification, judgment coverage extends to every branch the fix commit modified, per the canonical statement. The note is explicitly scoped to post-fix passes so a non-post-fix (main-review) judgment does not read an inapplicable rule.
+
+### Consolidated Phase-Containment Preflight Helper
+
+`skills/session-memory-contract/scripts/persist-phase-ledger-core.ps1` extracts the append-loop and replace-loop candidate preflight — identical since the #887 F1 fix (gated-parser `Get-PhaseContainmentBlock` with `-SkippedCount`, `ConvertFrom-PhaseContainmentYaml`, `Test-PhaseContainmentEntry`) — into one `script:`-scoped helper, `Test-PPLPhaseContainmentCandidate` (params `Block`, `BlockId`, `FindingKey`, `Kind` ∈ `'Append'`\|`'Replacement'`). It returns `$null` on pass or the existing `[PSCustomObject]@{ Success = $false; Reason = ...; Action = $null }` shape on failure, preserving the per-`Kind` Reason wording byte-for-byte. Both call sites now delegate to the shared helper rather than reimplementing the preflight inline; this is a behavior-preserving consolidation (#887 already closed the validation gap) with no runspace/parallel-marshaling risk.
+
+Two new regression tests in `.github/scripts/Tests/persist-phase-ledger.Tests.ps1` guard this consolidation:
+
+- **Append-candidate rejection** (behavioral, through `Invoke-PersistPhaseLedger`): a schema-invalid append candidate and an unclosed append candidate are both refused, asserting whole-body byte-identity of the surviving sibling and zero PATCH fired — the append branch refuses before any `$workingBody` mutation, a stronger guarantee than the pre-existing replace-path assertions. Exact `Reason` prefix (`Append candidate for finding_key '...'`) is asserted. This path had zero behavioral coverage before this change.
+- **Source-introspection consolidation guard**: reads the core script and asserts `Test-PPLPhaseContainmentCandidate` is referenced from within each of the append-branch and replace-branch line spans (anchored by their F1-fix comments), excluding the helper's own function-definition line — a source-introspection check rather than a whole-file substring count or a `Mock`/`Should -Invoke` (Pester cannot intercept `script:`-qualified calls), so it cannot be satisfied by merely defining the helper without either branch calling it.
+
+### Acceptance Criteria (from issue #886)
+
+- `skills/adversarial-review/SKILL.md` Architecture checklist includes the sibling write-path guarantee-parity item; the Security bullet cross-references it by section anchor.
+- Post-fix scope widening lands as one canonical statement (`review-reconciliation.md`, renamed "Post-fix scope constraint") plus two cross-references (`Code-Critic.agent.md`, `review-judgment/SKILL.md`), binding both prosecution and judge.
+- The append/replace candidate-preflight duplication in `persist-phase-ledger-core.ps1` is consolidated behind `Test-PPLPhaseContainmentCandidate`, guarded by an append-candidate-rejection test and a source-introspection consolidation-guard test, with no behavior change.
+- Exactly one version bump (`bump-version.ps1`) covers every cache-keyed entry point touched.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `skills/adversarial-review/SKILL.md` | New Architecture checklist item (sibling write-path guarantee parity, full-write-path wording); Security bullet cross-references it by section anchor |
+| `agents/Code-Critic.agent.md` | Post-fix scope bullet states widened branch-level coverage, cross-references the canonical statement |
+| `skills/validation-methodology/references/review-reconciliation.md` | "Prosecution scope constraint" renamed to "Post-fix scope constraint"; coverage widened to bind prosecution and judge; AC Cross-Check Gate qualifier added for in-diff pre-existing findings mapping to an explicit AC |
+| `skills/review-judgment/SKILL.md` | Conditional POST-FIX-SCOPED note added under § Independent Verification Expectations, cross-referencing the canonical statement |
+| `skills/session-memory-contract/scripts/persist-phase-ledger-core.ps1` | Append/replace candidate preflight consolidated into shared `Test-PPLPhaseContainmentCandidate` helper |
+| `.github/scripts/Tests/persist-phase-ledger.Tests.ps1` | New append-candidate-rejection test and source-introspection consolidation-guard test |
+| `Documents/Design/code-review.md` | This section |
