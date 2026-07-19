@@ -650,5 +650,43 @@ Describe 'Frame validator plan mode CLI' -Tag 'unit' {
 
             Test-GCVariantFrontmatter -CommentBody $comment | Should -BeTrue
         }
+
+        It 'Test-GCVariantFrontmatter recognizes a double-quoted plan-variant value (M11)' {
+            (Get-Command Test-GCVariantFrontmatter -ErrorAction SilentlyContinue) | Should -Not -BeNullOrEmpty -Because 'goal-contract-core.ps1 (frame-slice s2) must define Test-GCVariantFrontmatter'
+            $comment = & $script:NewGCPlanCommentBody -ContractBlockLines $null
+            $quotedComment = $comment -replace 'plan-variant: goal-contract', 'plan-variant: "goal-contract"'
+
+            Test-GCVariantFrontmatter -CommentBody $quotedComment | Should -BeTrue -Because 'YAML treats plan-variant: goal-contract and plan-variant: "goal-contract" as the identical value'
+        }
+
+        It 'Test-GCVariantFrontmatter recognizes a single-quoted plan-variant value (M11)' {
+            (Get-Command Test-GCVariantFrontmatter -ErrorAction SilentlyContinue) | Should -Not -BeNullOrEmpty -Because 'goal-contract-core.ps1 (frame-slice s2) must define Test-GCVariantFrontmatter'
+            $comment = & $script:NewGCPlanCommentBody -ContractBlockLines $null
+            $quotedComment = $comment -replace 'plan-variant: goal-contract', "plan-variant: 'goal-contract'"
+
+            Test-GCVariantFrontmatter -CommentBody $quotedComment | Should -BeTrue -Because 'YAML treats plan-variant: goal-contract and plan-variant: ''goal-contract'' as the identical value'
+        }
+
+        It 'does not throw when the plan-issue-{ID} marker id exceeds Int32 range (M12)' {
+            # Same fixture shape as the passing issue-cross-check tests above,
+            # with only the marker id swapped to a value far beyond
+            # Int32.MaxValue (2147483647). An unguarded [int] cast on this
+            # capture throws OverflowException, which unwinds through this
+            # file's ambient $ErrorActionPreference = 'Stop'.
+            $contractLines = & $script:NewGCContractBlockLines -Shape 'valid' -AcRef 'AC2' -IssueField '872'
+            $comment = & $script:NewGCPlanCommentBody -IssueNumber 872 -ContractBlockLines $contractLines
+            $oversizedComment = $comment -replace '<!-- plan-issue-872 -->', '<!-- plan-issue-99999999999999999999 -->'
+
+            $threw = $false
+            $result = $null
+            try {
+                $result = & $script:InvokeFrameValidateCli -Arguments @('-Mode', 'plan') -InputText $oversizedComment
+            } catch {
+                $threw = $true
+            }
+
+            $threw | Should -BeFalse -Because 'an out-of-range plan-issue marker id must degrade gracefully (skip the issue: cross-check) instead of throwing OverflowException'
+            $result.ExitCode | Should -Be 0 -Because 'with the cross-check skipped, the rest of a well-formed goal-contract plan should still pass'
+        }
     }
 }

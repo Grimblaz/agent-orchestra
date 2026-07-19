@@ -325,6 +325,41 @@ budget:
             $outcome.Violations | Should -BeNullOrEmpty -Because "a well-formed contract must round-trip cleanly: $($outcome.Violations -join '; ')"
             $outcome.Contract | Should -Not -BeNullOrEmpty
         }
+
+        It 'returns a Violations entry instead of throwing for a comment-only payload that parses to an empty document' {
+            script:Assert-GCFunctionExists -Name 'ConvertFrom-GCContractBlock'
+            # A comment-only payload makes ConvertFrom-Yaml emit nothing at
+            # all (not even an explicit $null document), so piping the
+            # result into ConvertTo-Json/Test-Json would throw a
+            # ParameterBindingValidationException on a $null -Json argument
+            # -- breaching the never-throws-on-schema-failure contract (M4).
+            $threw = $false
+            $outcome = $null
+            try {
+                $outcome = ConvertFrom-GCContractBlock -Payload '# just a comment' -RepoRoot $script:RepoRoot
+            } catch {
+                $threw = $true
+            }
+
+            $threw | Should -BeFalse -Because 'a comment-only payload must return a Violations entry, never throw'
+            $outcome.Violations | Should -Not -BeNullOrEmpty -Because 'a comment-only payload parses to an empty document, which is a schema-pipeline violation'
+        }
+
+        It 'rejects a payload containing a YAML document separator pre-parse (M13)' {
+            script:Assert-GCFunctionExists -Name 'ConvertFrom-GCContractBlock'
+            # ConvertFrom-Yaml only returns the FIRST document of a
+            # multi-document payload; a second document would otherwise ride
+            # along unvalidated inside whatever Get-GCContractHash hashes.
+            $multiDocPayload = @'
+schema_version: 1
+issue: 872
+---
+arbitrary_unvalidated_content: this must not silently ride along
+'@
+            $outcome = ConvertFrom-GCContractBlock -Payload $multiDocPayload -RepoRoot $script:RepoRoot
+            $outcome.Violations | Should -Not -BeNullOrEmpty -Because 'a payload containing a column-0 document separator must be rejected pre-parse, not silently truncated to its first document'
+            ($outcome.Violations -join ' ') | Should -Match '(?i)document separator' -Because 'the violation should name the document-separator reason'
+        }
     }
 
     Context 'Get-GCContractHash — golden vectors' {
@@ -422,6 +457,23 @@ general_experience_standard: |
             $digestOne = Get-GCContractHash -Payload $variantOne
             $digestTwo = Get-GCContractHash -Payload $variantTwo
             $digestOne | Should -Not -Be $digestTwo -Because 'an indented contract_hash: line is prose content, not the elided field, so differing prose must change the digest'
+        }
+
+        It 'elides a "contract_hash :" line with a space before the colon identically to the tight spelling (M14)' {
+            script:Assert-GCFunctionExists -Name 'Get-GCContractHash'
+            $variantA = @"
+schema_version: 1
+issue: 872
+contract_hash : A
+"@
+            $variantB = @"
+schema_version: 1
+issue: 872
+contract_hash : B
+"@
+            $digestA = Get-GCContractHash -Payload $variantA
+            $digestB = Get-GCContractHash -Payload $variantB
+            $digestA | Should -Be $digestB -Because 'the elision regex must tolerate optional whitespace before the colon, so the digest must be identical whether the field value is A or B'
         }
 
         It 'reflects the full payload past an indented --> inside a block scalar (no truncation)' {

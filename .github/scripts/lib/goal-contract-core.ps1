@@ -37,11 +37,15 @@
       ConvertFrom-GCContractBlock -Payload <string> -RepoRoot <string>
         Returns [pscustomobject]@{ Contract; Violations }. Never throws on
         schema failure -- the caller builds a check-result row from
-        Violations. Pipeline, in order: pre-parse anchor/alias guard -> size
+        Violations. Pipeline, in order: pre-parse anchor/alias guard ->
+        pre-parse column-0 YAML document-separator (`---`) guard -> size
         cap -> Import-Module powershell-yaml (loud rethrow when the module is
-        missing) -> ConvertFrom-Yaml -> ConvertTo-Json -Depth 20 (the depth is
-        load-bearing: the default of 2 renders nested arrays such as
-        experience_obligations[] as the literal string
+        missing) -> ConvertFrom-Yaml -> empty-parsed-document guard (a
+        comment-only payload that yields nothing from ConvertFrom-Yaml
+        returns a Violations entry here rather than reaching ConvertTo-Json/
+        Test-Json with a $null argument) -> ConvertTo-Json -Depth 20 (the
+        depth is load-bearing: the default of 2 renders nested arrays such
+        as experience_obligations[] as the literal string
         System.Collections.Hashtable) -> Test-Json against the schema file.
         -RepoRoot is mandatory, matching the phase-containment-core.ps1:577-584
         precedent for reading a skills/**/schemas/*.json file.
@@ -198,6 +202,18 @@ function ConvertFrom-GCContractBlock {
         return [pscustomobject]@{ Contract = $null; Violations = $violations.ToArray() }
     }
 
+    # 1b. Reject a column-0 YAML document separator (`---` on its own line)
+    #    pre-parse. ConvertFrom-Yaml only returns the FIRST document of a
+    #    multi-document payload (`<valid contract>\n---\n<arbitrary content>`),
+    #    so a second document would pass closed-schema validation against the
+    #    first document while riding along, unvalidated, inside whatever
+    #    Get-GCContractHash hashes. The goal-contract shape is a single YAML
+    #    mapping and never legitimately needs a document separator.
+    if ($Payload -match '(?m)^---[ \t]*$') {
+        $violations.Add('Contract payload contains a YAML document separator (---), which is rejected before parsing; the goal-contract shape is a single YAML mapping and never uses multi-document syntax.') | Out-Null
+        return [pscustomobject]@{ Contract = $null; Violations = $violations.ToArray() }
+    }
+
     # 2. Size cap -- must precede parsing so an oversized-and-malformed
     #    payload fails with the cap reason, not a downstream parse error.
     $payloadByteCount = [System.Text.Encoding]::UTF8.GetByteCount($Payload)
@@ -223,6 +239,29 @@ function ConvertFrom-GCContractBlock {
         $parsed = ConvertFrom-Yaml -Yaml $Payload -ErrorAction Stop
     } catch {
         $violations.Add("YAML parse error: $($_.Exception.Message)") | Out-Null
+        return [pscustomobject]@{ Contract = $null; Violations = $violations.ToArray() }
+    }
+
+    # 4b. A payload that is non-empty but parses to a genuinely empty
+    #    document (e.g. a comment-only payload with no real YAML content)
+    #    makes ConvertFrom-Yaml emit NOTHING onto the pipeline at all (not
+    #    even a single $null object). `$parsed -eq $null` cannot detect this
+    #    reliably -- both the "nothing emitted" case and the "one explicit
+    #    $null document emitted" case (below) leave the *variable* holding
+    #    $null. Wrapping in @(...) and checking .Count distinguishes them: a
+    #    genuinely-empty document yields Count 0, so piping it into
+    #    ConvertTo-Json below would also emit nothing (not the JSON string
+    #    "null"), and Test-Json then throws ParameterBindingValidationException
+    #    on a $null -Json argument -- breaching this function's
+    #    never-throws-on-schema-failure contract. This is distinct from a
+    #    bare `---` document-separator payload: ConvertFrom-Yaml there
+    #    returns exactly one explicit $null document (Count 1), which
+    #    `$null | ConvertTo-Json` renders as the string "null" -- Test-Json
+    #    validates that string normally and rejects it as an ordinary schema
+    #    violation, no throw. Catch only the genuinely-empty-document (Count
+    #    0) case here, before it ever reaches ConvertTo-Json/Test-Json.
+    if (@($parsed).Count -eq 0) {
+        $violations.Add('Contract payload parsed to an empty document.') | Out-Null
         return [pscustomobject]@{ Contract = $null; Violations = $violations.ToArray() }
     }
 
@@ -278,7 +317,7 @@ function script:ConvertTo-GCCanonicalPayload {
     # content, not the field, and must NOT be elided.
     $keptLines = [System.Collections.Generic.List[string]]::new()
     foreach ($line in $lines) {
-        if ($line -notmatch '^contract_hash:') {
+        if ($line -notmatch '^contract_hash\s*:') {
             $keptLines.Add($line) | Out-Null
         }
     }
@@ -362,7 +401,7 @@ function Test-GCVariantFrontmatter {
     if (-not $closed) { return $false }
 
     foreach ($line in $frontmatterLines) {
-        if ($line -match '^plan-variant:\s*goal-contract\s*$') { return $true }
+        if ($line -match '^plan-variant:\s*(?:"goal-contract"|''goal-contract''|goal-contract)\s*$') { return $true }
     }
 
     return $false

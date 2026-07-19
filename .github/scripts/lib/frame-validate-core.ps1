@@ -483,10 +483,12 @@ function Invoke-FVGoalContractPlanValidate {
     # marker is present in the comment body; skipped otherwise (872-D5).
     $issueMarkerMatch = [regex]::Match($CommentBody, '<!--\s*plan-issue-(?<id>\d+)\s*-->')
     if ($issueMarkerMatch.Success) {
-        $markerIssue = [int]$issueMarkerMatch.Groups['id'].Value
-        $contractIssue = 0
-        if ([int]::TryParse([string]$contract.issue, [ref]$contractIssue) -and $contractIssue -ne $markerIssue) {
-            $structuralViolations.Add("contract issue: $contractIssue does not match the plan-issue-$markerIssue marker.") | Out-Null
+        $markerIssue = 0
+        if ([int]::TryParse([string]$issueMarkerMatch.Groups['id'].Value, [ref]$markerIssue)) {
+            $contractIssue = 0
+            if ([int]::TryParse([string]$contract.issue, [ref]$contractIssue) -and $contractIssue -ne $markerIssue) {
+                $structuralViolations.Add("contract issue: $contractIssue does not match the plan-issue-$markerIssue marker.") | Out-Null
+            }
         }
     }
 
