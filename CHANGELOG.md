@@ -2,6 +2,12 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.3.22] — 2026-07-18
+
+### Fixed
+
+- Fix phase-containment block doc examples in plan-authoring, design-exploration, and review-judgment SKILL.md to the paired-tag shape the parser accepts, closing the doc/parser shape mismatch that silently starved the phase-containment escape-rate ledger (#878).
+
 ## [3.3.21] — 2026-07-18
 
 ### Fixed
