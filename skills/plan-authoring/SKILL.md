@@ -395,15 +395,23 @@ ac-refs: [AC#]
 -->
 ```
 
-The phase-containment blocks (`### Phase-containment emission` above) and the machine-readable `judge-rulings` block (`### Judge-rulings machine block (811-D1, co-moved by 863-D4)` above) are posted into the `<!-- phase-containment-ledger-{ID} -->` sibling comment, co-located together (863-D4):
+The phase-containment blocks (`### Phase-containment emission` above) and the machine-readable `judge-rulings` block (`### Judge-rulings machine block (811-D1, co-moved by 863-D4)` above) are posted into the `<!-- phase-containment-ledger-{ID} -->` sibling comment, co-located together (863-D4). The two block families are intentionally different shapes and are not interchangeable: `judge-rulings` stays **bare** — a single unclosed `<!-- judge-rulings ... -->` comment, per rule 3 above — while `phase-containment` is **paired** — a self-closed `<!-- phase-containment-{ID} -->` open tag followed by plain-text YAML fields and a separate `<!-- /phase-containment-{ID} -->` close tag — because the close tag is what powers `Get-PhaseContainmentBlock`'s pair-matching malformation detection (issue #772 D6: an open tag with no matching close tag is skipped as an unclosed, malformed block rather than silently absorbing whatever text follows it). A fully literal worked example, with `{ID}`, `{issue}`, `{marker}`, and `{finding_id}` left as the only placeholders:
 
 ```markdown
 <!-- phase-containment-ledger-{ID} -->
 
-<!-- phase-containment-{ID}
+<!-- phase-containment-{ID} -->
 finding_key: plan-stress-test:{issue}:{marker}:{finding_id}
-...
--->
+introduced_phase: design
+catchable_phase: plan
+caught_stage: plan-stress-test
+escape_distance: 0
+severity: medium
+systemic_fix_type: instruction
+category: pattern
+apparatus_meta: false
+appended_at: 2026-07-18T22:20:00Z
+<!-- /phase-containment-{ID} -->
 
 <!-- judge-rulings
 - finding_id: {finding_id}

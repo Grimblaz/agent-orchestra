@@ -215,6 +215,22 @@ After the disposition summary is finalized and after posting the `design-phase-c
 - `severity`, `systemic_fix_type`, `category`: carry forward from the finding
 - `apparatus_meta: false` unless a stated criterion justifies `true`
 
+Unlike the plan-surface `judge-rulings` block (bare — a single unclosed `<!-- judge-rulings ... -->` comment; `design-challenge` is prosecution-only and does not emit one), `phase-containment` blocks are always **paired**: a self-closed `<!-- phase-containment-{ID} -->` open tag followed by plain-text YAML fields and a separate `<!-- /phase-containment-{ID} -->` close tag. The close tag is what powers `Get-PhaseContainmentBlock`'s pair-matching malformation detection (issue #772 D6). A fully literal canonical example, for a sustained design-challenge finding on issue 878:
+
+```markdown
+<!-- phase-containment-878 -->
+finding_key: design-challenge:878:design-phase-complete-878:M1
+introduced_phase: design
+catchable_phase: design
+caught_stage: design-challenge
+escape_distance: 0
+severity: medium
+systemic_fix_type: instruction
+category: pattern
+apparatus_meta: false
+<!-- /phase-containment-878 -->
+```
+
 **Setter rule**: `catchable_phase` and `introduced_phase` must each be set by explicit agent judgment with no default — the agent must reason about which phase was the earliest in which this specific defect was catchable, and which phase introduced it. Validate each block against `skills/calibration-pipeline/schemas/phase-containment.schema.json`.
 
 **Emission check (hub maintainers only)**: after posting the `design-phase-complete` marker comment, run `pwsh ./.github/scripts/phase-containment-emission-check.ps1 -Issue {N}` and treat its output as advisory — warn-only, never blocking. The repo-relative script path does not resolve from a consumer repo's CWD, so this nudge applies only when working in the Agent Orchestra hub repo itself; see the script header for the full contract.
