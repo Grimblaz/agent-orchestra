@@ -502,6 +502,35 @@ function script:Set-PhaseContainmentBlocksOnComment {
             continue
         }
 
+        # F1 fix (issue #878 CE Gate review): a same-finding_key replacement
+        # candidate must pass the SAME write-time preflight the append path
+        # already gets for free via Add-CommentBlocks (phase-containment-
+        # emission-check-core.ps1:3037-3088) before it is ever spliced into
+        # $workingBody -- this branch used to check only finding_key
+        # presence and opening-tag recognizability, then splice
+        # unconditionally, so a schema-invalid or unclosed/malformed
+        # replacement candidate landed on the comment untouched. Reuse the
+        # same gated parser (Get-PhaseContainmentBlock, -SkippedCount
+        # tracked) and the same schema validator (Test-PhaseContainmentEntry)
+        # the append path calls -- not a bespoke reimplementation -- and
+        # refuse BEFORE splicing when:
+        #   - SkippedCount > 0 or zero blocks parsed (unclosed/malformed), OR
+        #   - a parsed block fails Test-PhaseContainmentEntry's schema rules.
+        # Fail loud with the same shape the append path uses: Success=$false
+        # and a Reason naming the finding_key and the specific failure.
+        $replaceSkippedCount = 0
+        $replaceGatedBlocks = Get-PhaseContainmentBlock -Text $block -Id $blockId -SkippedCount ([ref]$replaceSkippedCount)
+        if ($replaceSkippedCount -gt 0 -or $null -eq $replaceGatedBlocks -or $replaceGatedBlocks.Count -eq 0) {
+            return [PSCustomObject]@{ Success = $false; Reason = "Replacement candidate for finding_key '$findingKey' (phase-containment-$blockId) is unclosed or malformed ($replaceSkippedCount skipped)"; Action = $null }
+        }
+        foreach ($rawReplaceBlock in $replaceGatedBlocks) {
+            $replaceEntry = ConvertFrom-PhaseContainmentYaml -Yaml $rawReplaceBlock
+            $replaceValidation = Test-PhaseContainmentEntry -Entry $replaceEntry
+            if (-not $replaceValidation.IsValid) {
+                return [PSCustomObject]@{ Success = $false; Reason = "Replacement candidate for finding_key '$findingKey' (phase-containment-$blockId) fails schema validation: $($replaceValidation.Errors -join '; ')"; Action = $null }
+            }
+        }
+
         # M5 fix: stamp appended_at into the replacement content the same
         # way Add-CommentBlocks stamps a freshly-appended block (reusing its
         # own Add-AppendedAtStampToPhaseContainmentBlocks helper, in scope
