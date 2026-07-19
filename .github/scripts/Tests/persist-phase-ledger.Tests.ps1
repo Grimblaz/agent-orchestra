@@ -484,6 +484,78 @@ Describe 'Invoke-PersistPhaseLedger' {
         }
     }
 
+    Context 'Replace-path write-time validation (F1, issue #878 CE Gate review): a same-finding_key replacement candidate must be validated before ever being spliced into the sibling body' {
+        It 'refuses a same-finding_key replacement with a schema-invalid field and leaves the sibling body byte-identical' {
+            $siblingId = 700007
+            $staleBlock = New-LedgerBlockText -FindingSuffix 'K' -Severity 'low'
+            $judge = New-JudgeRulingsText -Entries @(@{ FindingId = 'K'; Ruling = 'sustained' })
+            Add-MockComment -Id 111222333 -Body "$script:PlanMarker`n`n<!-- phase-containment-ledger-ref: $siblingId -->`n`nplan body."
+            Add-MockComment -Id $siblingId -Body "$script:LedgerMarker`n`n$judge`n`n$staleBlock"
+
+            # Same finding_key ('K') as the pre-existing block above, but the
+            # candidate's severity value is outside ValidSeverities
+            # (phase-containment-core.ps1:40 -- critical|high|medium|low).
+            # The append path routes every candidate through Add-CommentBlocks'
+            # #842/s4 preflight (phase-containment-emission-check-core.ps1:
+            # 3037-3088), which runs Test-PhaseContainmentEntry and refuses
+            # BEFORE ever posting; the replace branch
+            # (persist-phase-ledger-core.ps1:493-513) has no equivalent gate
+            # today -- it only checks finding_key presence and opening-tag
+            # recognizability, then splices unconditionally.
+            $badBlock = New-LedgerBlockText -FindingSuffix 'K' -Severity 'catastrophic'
+            $result = Invoke-PersistPhaseLedger -Owner $script:Owner -Repo $script:Repo -Mode plan `
+                -IssueNumber $script:IssueNumber -JudgeRulingsContent $judge -PhaseContainmentBlocks @($badBlock)
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match ([regex]::Escape('plan-stress-test:878:K'))
+            $result.Reason | Should -Match 'severity'
+
+            $finalSibling = ($script:mockComments | Where-Object { $_.Id -eq $siblingId }).body
+            $finalSibling | Should -Match ([regex]::Escape($staleBlock))
+            $finalSibling | Should -Not -Match 'severity: catastrophic'
+            foreach ($p in ($script:PatchLog | Where-Object { $_.CommentId -eq $siblingId })) {
+                $p.Body | Should -Not -Match 'severity: catastrophic'
+            }
+        }
+
+        It 'refuses a same-finding_key replacement candidate that is an unclosed block, without corrupting a different, valid neighboring block' {
+            $siblingId = 700008
+            $survivingBlock = New-LedgerBlockText -FindingSuffix 'SAFE'
+            $targetBlock = New-LedgerBlockText -FindingSuffix 'UNCLOSED'
+            $judge = New-JudgeRulingsText -Entries @(
+                @{ FindingId = 'SAFE'; Ruling = 'sustained' }
+                @{ FindingId = 'UNCLOSED'; Ruling = 'sustained' }
+            )
+            Add-MockComment -Id 111222333 -Body "$script:PlanMarker`n`n<!-- phase-containment-ledger-ref: $siblingId -->`n`nplan body."
+            Add-MockComment -Id $siblingId -Body "$script:LedgerMarker`n`n$judge`n`n$survivingBlock`n`n$targetBlock"
+
+            # Same finding_key ('UNCLOSED') as $targetBlock above, but with
+            # the closing `<!-- /phase-containment-878 -->` tag stripped --
+            # the unclosed-block class Add-CommentBlocks' preflight refuses
+            # via SkippedCount (#772 D6, #863 M6) before ever posting.
+            $unclosedBlock = ($targetBlock -split "`n" | Where-Object { $_ -ne '<!-- /phase-containment-878 -->' }) -join "`n"
+            $result = Invoke-PersistPhaseLedger -Owner $script:Owner -Repo $script:Repo -Mode plan `
+                -IssueNumber $script:IssueNumber -JudgeRulingsContent $judge -PhaseContainmentBlocks @($unclosedBlock)
+
+            $result.Success | Should -Be $false
+
+            $finalSibling = ($script:mockComments | Where-Object { $_.Id -eq $siblingId }).body
+            # The unrelated, valid neighboring block must survive
+            # byte-identical -- it must never be silently absorbed by a
+            # malformed splice that is missing its own closing tag.
+            $finalSibling | Should -Match ([regex]::Escape($survivingBlock))
+            # Structural sanity: every opening phase-containment-878 tag
+            # still has a matching closing tag. A refuse-before-splice
+            # implementation leaves this pair-count untouched; the current
+            # raw-splice replace path drops one closing tag -- an imbalance
+            # that leaves the neighboring block's own boundary ambiguous to
+            # any future parse of this same body.
+            $openCount = ([regex]::Matches($finalSibling, '<!--\s*phase-containment-878\s*-->')).Count
+            $closeCount = ([regex]::Matches($finalSibling, '<!--\s*/phase-containment-878\s*-->')).Count
+            $closeCount | Should -Be $openCount
+        }
+    }
+
     Context 'Design-mode append (M22): straight append onto the design-completion comment, no sibling, no pointer' {
         It 'appends the phase-containment blocks directly onto the design completion comment with no plan-comment interaction and no sibling creation' {
             $designCommentId = 321321321
