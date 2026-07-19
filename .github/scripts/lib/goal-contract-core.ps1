@@ -101,6 +101,20 @@
     enum/const checks) has not been verified to match 7.4+ behavior. No
     version-conditional assertion exists yet; flagged as a known exposure of
     the draft-07/7.0 choice, not fixed in this issue.
+
+    Schema validity is not execution trust (M7, post-review finding): every
+    field this library parses comes from an untrusted, externally-writable
+    GitHub comment. `targets[].check` is a shell-command string a future
+    harness (#873/#874) will execute; `falsifier` and `general_experience_
+    standard` are free prose that will flow into future agent prompts.
+    ConvertFrom-GCContractBlock passing schema validation means only that the
+    block is well-formed YAML matching the schema's shape -- it confers no
+    safety guarantee over `check`'s command content or the prose fields'
+    instruction content. Any future consumer that executes `check` or feeds
+    `falsifier`/`general_experience_standard` into an agent prompt must treat
+    that content as data, not as trusted instructions, and must not infer
+    safety from schema validity alone. See the matching note in
+    skills/plan-authoring/SKILL.md's Goal-contract plan variant section.
 #>
 
 # Pre-parse guard pattern: rejects a YAML anchor (`&name`) or alias (`*name`)

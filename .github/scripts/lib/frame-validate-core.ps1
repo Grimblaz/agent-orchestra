@@ -573,6 +573,24 @@ function Invoke-FVPlanValidate {
         return (New-FVAggregateResult -Results @((New-FVCheckResult -Name 'PlanStructuralCoverage' -Passed $false -Detail 'Missing frame-spine block.')))
     }
 
+    # 872-D5 row 4 carve-out (post-review finding M3): the six-row state
+    # matrix's row 4 — (no variant frontmatter, spine block present, contract
+    # block present) -> fail: "contract block without variant metadata" — is
+    # intentionally NOT enforced on this branch (spine present). The check
+    # above at line ~557-559 only fires when $spineBlock is $null; a stray
+    # $contractPayload found alongside a present $spineBlock falls through
+    # silently to ordinary spine validation below. This is deliberate, not an
+    # oversight: Get-GCContractBlock is markdown-blind (cannot tell a real
+    # contract block from one quoted inside a fenced documentation example),
+    # so naively extending this check to the spine-present case would flag
+    # any frame-spine plan whose prose includes a fenced goal-contract
+    # authoring example as a structural failure. The regression this would
+    # cause is pinned by the existing false-positive guard test at
+    # .github/scripts/Tests/frame-validate-plan-mode.Tests.ps1:617 ("does not
+    # trip the contract-block-without-variant-metadata row for a frame-spine
+    # plan whose prose contains a fenced goal-contract example block"). See
+    # skills/plan-authoring/SKILL.md's Goal-contract plan variant section for
+    # the reconciliation note on this accepted carve-out.
     $spine = ConvertFrom-FVPlanSpineBlock -SpineBlock $spineBlock
     if ($null -eq $spine) {
         return (New-FVAggregateResult -Results @((New-FVCheckResult -Name 'PlanStructuralCoverage' -Passed $false -Detail 'Invalid canonical frame-spine block.')))
