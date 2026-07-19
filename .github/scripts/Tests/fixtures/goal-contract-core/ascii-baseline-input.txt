@@ -1,0 +1,4 @@
+schema_version: 1
+issue: 872
+contract_hash: 0000000000000000000000000000000000000000000000000000000000000000
+note: ascii baseline oracle vector for Get-GCContractHash
