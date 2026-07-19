@@ -267,6 +267,57 @@ Describe 'Invoke-PersistPhaseLedger' {
                 $p.Body | Should -Match ([regex]::Escape('finding_key: plan-stress-test:878:A'))
             }
         }
+
+        It 'reuses a pre-existing ledger sibling and preserves its content when the plan comment''s pointer line is missing (M1 guard: pointer-absent path must not wipe the sibling)' {
+            # This is the scenario the M1 guard (persist-phase-ledger-core.ps1,
+            # Invoke-PersistPhaseLedgerPlanMode's $existingSibling check) exists
+            # to protect, and the ONE that the sibling It block above does not
+            # reach: here the plan comment carries NO
+            # phase-containment-ledger-ref pointer, yet the ledger sibling
+            # already exists on the issue with real accumulated content. A
+            # neutralized guard falls straight through to
+            # Find-OrUpsertComment's create-or-PATCH path, which would PATCH
+            # the existing sibling's body down to just $ledgerMarker before
+            # judge-rulings/phase-containment ever get a chance to write
+            # anything -- silently destroying $existingBlock below.
+            $siblingId = 700006
+            $existingBlock = New-LedgerBlockText -FindingSuffix 'PRE'
+            $existingJudge = New-JudgeRulingsText -Entries @(@{ FindingId = 'PRE'; Ruling = 'sustained' })
+            $siblingBody = "$script:LedgerMarker`n`n$existingJudge`n`n$existingBlock"
+            Add-MockComment -Id 111222333 -Body "$script:PlanMarker`n`nRealistic plan body with no pointer yet."
+            Add-MockComment -Id $siblingId -Body $siblingBody
+
+            $newBlock = New-LedgerBlockText -FindingSuffix 'NEW'
+            $newJudge = New-JudgeRulingsText -Entries @(
+                @{ FindingId = 'PRE'; Ruling = 'sustained' }
+                @{ FindingId = 'NEW'; Ruling = 'sustained' }
+            )
+            $result = Invoke-PersistPhaseLedger -Owner $script:Owner -Repo $script:Repo -Mode plan `
+                -IssueNumber $script:IssueNumber -JudgeRulingsContent $newJudge `
+                -PhaseContainmentBlocks @($newBlock)
+
+            $result.Success | Should -Be $true
+            $result.Artifacts.Sibling | Should -Be 'reused'
+
+            # No new sibling comment was ever created -- the only legal way a
+            # new comment lands is via a POST, and a correctly-guarded run
+            # must never issue one here: the sibling already exists and the
+            # M1 guard must find it before ever falling through to
+            # Find-OrUpsertComment's create path.
+            $script:PostLog | Should -BeNullOrEmpty
+            ($script:mockComments | Where-Object { $_.body -match [regex]::Escape($script:LedgerMarker) }).Count | Should -Be 1
+
+            # The core anti-wipe assertion: the pre-existing block survives
+            # byte-identical, and the new finding's block also lands.
+            $finalSibling = ($script:mockComments | Where-Object { $_.Id -eq $siblingId }).body
+            $finalSibling | Should -Match ([regex]::Escape($existingBlock))
+            $finalSibling | Should -Match ([regex]::Escape('finding_key: plan-stress-test:878:NEW'))
+
+            # The pointer gets (re-)inserted into the plan comment, pointing
+            # at the REUSED sibling's id (not a newly created one).
+            $finalPlanBody = ($script:mockComments | Where-Object { $_.Id -eq 111222333 }).body
+            $finalPlanBody | Should -Match "<!-- phase-containment-ledger-ref: $siblingId -->"
+        }
     }
 
     Context 'Plan-comment body survival (M2): pointer insertion leaves the rest of the plan body byte-identical' {
