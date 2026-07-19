@@ -64,6 +64,28 @@
     a handful of anchors aliased repeatedly can expand to tens of thousands of
     nodes if handed to ConvertFrom-Yaml. The size cap's job is bounding raw
     payload size only.
+
+    Manual version-bump obligation (M31): this file lives under
+    `.github/scripts/**`, which is outside `Get-FVPluginEntryPointPatterns`
+    (`.github/scripts/lib/frame-predicate-core.ps1:998-1015`), so editing it
+    alone does not trigger the plugin-release-hygiene version-bump gate. The
+    scripts here still ship inside the version-keyed plugin cache, though, so
+    ANY future change to Get-GCContractHash's canonicalization rules (the
+    elision anchor, line-ending normalization, trailing-newline collapse, or
+    the UTF-8/no-BOM encoding) requires a manual version bump regardless of
+    the gate's silence: 872-D3 defines a contract_hash mismatch as a run
+    halt, and a canonicalization drift between two plugin-cache versions
+    would make an approval-time digest computed under one install fail
+    #873's verification under another. Bump on canonicalization change even
+    when nothing else in this PR touches an entry-point file.
+
+    Test-Json engine floor (M38): draft-07 validation under PowerShell
+    7.0-7.3 uses NJsonSchema; 7.4+ uses the JsonSchema.Net engine. This repo's
+    floor is #Requires -Version 7.0, so a 7.0-7.3 host is a supported runtime
+    for this file, but its draft-07 strictness (closed-object enforcement,
+    enum/const checks) has not been verified to match 7.4+ behavior. No
+    version-conditional assertion exists yet; flagged as a known exposure of
+    the draft-07/7.0 choice, not fixed in this issue.
 #>
 
 # Pre-parse guard pattern: rejects a YAML anchor (`&name`) or alias (`*name`)
