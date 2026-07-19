@@ -185,6 +185,39 @@ Do not edit specialist shells for this contract unless a future test proves the 
 - A custom MCP server lookup path is deferred and is a non-goal for this skill.
 - This skill is supporting methodology only. It declares no `provides:` field
   and does not fill a frame port.
+- **Goal-contract plans (issue #872) are out of scope for this skill's slice
+  dispatch.** A `plan-variant: goal-contract` plan (see
+  `skills/plan-authoring/SKILL.md § Goal-contract plan variant`) carries no
+  `<!-- frame-spine ... -->` block and no `<!-- frame-slices-{ID} -->` sibling
+  comment — the `<!-- goal-contract -->` block replaces both (872-D8). Such
+  plans are never slice-dispatched through this skill's Operational Contract.
+  `Invoke-FSCSpineLookupCli` returning `missing-spine` (§ Exit Codes and
+  Status Values above) for a goal-contract-only plan body is the **intended
+  fail-loud backstop, not a bug** (872-D7 item 2): no code change closes this
+  path, because a goal-contract plan is meant to be executed by the future
+  goal-run harness (#874), not walked by Spine-Runner or looked up
+  mid-turn by a specialist.
+- **Spine-reader enumeration (872-D7 / AC2).** The production readers of the
+  frame-spine mechanism, in full, are: `frame-validate-core.ps1` (the
+  structural-coverage validator, `.github/scripts/lib/frame-validate-core.ps1`),
+  `orchestra-spine.ps1` (`.github/scripts/orchestra-spine.ps1`, the
+  human-readable spine renderer), `frame-credit-ledger.ps1`
+  (`.github/scripts/frame-credit-ledger.ps1`, the terminal-credit harvester),
+  and `Invoke-FSCSpineLookupCli` — the lookup shim implemented in
+  `frame-spine-core.ps1` that this skill's Operational Contract dispatches to.
+  This is the shipped home for that enumeration; AC2's "spine-reader
+  enumeration documented" requirement is satisfied here rather than living
+  only inside the #872 plan comment.
+- **Credit-ledger degradation note (872-D7 item 3).** `frame-credit-ledger.ps1`'s
+  `Get-FCLLatestParsedFrameSpine` (`.github/scripts/frame-credit-ledger.ps1:623-637`)
+  already degrades to returning `$null`/`$null.Ports` gracefully when no spine
+  is found (`.github/scripts/frame-credit-ledger.ps1:673-674`:
+  `if ($null -eq $spine -or $null -eq $spine.Ports) { return @() }`) — for a
+  goal-contract (spine-less) plan, this is **expected behavior, not a
+  defect**: the ledger silently contributes zero spine-sourced credit rows for
+  that plan rather than throwing, which is documented here rather than fixed,
+  since a goal-contract plan legitimately has no spine-sourced credits to
+  harvest.
 
 ## Platform-specific invocation
 

@@ -283,9 +283,13 @@ Writer rules, in order:
 
 Plans with three or more implementation steps must be authored as a first-class frame-spine deliverable. Put one `<!-- frame-spine ... -->` block in the approved `<!-- plan-issue-{ID} -->` comment; put one `<!-- frame-slice ... -->` block per implementation step in a separate `<!-- frame-slices-{ID} -->` sibling comment (863-D1/863-D2), not in the plan comment. The spine is the port-to-step routing index and stays with the plan prose it routes; each slice is the addressable contract that Code-Conductor and Spine-Runner fetch from the sibling — by the `slice_comment_id` pointer below — and pass to a specialist without the full plan.
 
+This spine-and-slice requirement does not apply to `plan-variant: goal-contract` plans (issue #872): the goal-contract block is a full plan-seat replacement for both the frame-spine and the frame-slices sibling, regardless of implementation-step count; see `### Goal-contract plan variant` below for the full authoring contract.
+
 At persist time, write `slice_comment_id` (863-D3) into the `frame-spine` block, pointing at the `frame-slices-{ID}` sibling comment's id, and stamp the sibling with `<!-- frame-slices-generated-at: {value} -->` set to the same ISO-8601 UTC value as the spine's `generated_at` (863-D7). Re-stamp `frame-slices-generated-at` to match `generated_at` on every re-persist that touches the spine or any slice, even when a given slice's own content did not change — a stale stamp is indistinguishable from a genuinely stale slice sibling to the drift check that reads it (`frame-spine-lookup`'s `stale-spine`/`sibling-unstamped` cross-check), and a silently-served torn state is exactly what that check exists to prevent.
 
 Omit the spine only when the plan has fewer than three implementation steps. In that case, emit `spine-omitted: plan-too-small` in the plan metadata and keep the plan in the legacy shape. An implementation step means a numbered step whose `Execution Mode` is `serial` or `parallel` and whose Requirement Contract contains a GREEN code or test action. Adversarial review, CE Gate, and post-retrospective steps do not count toward this threshold.
+
+A plan whose frontmatter declares `plan-variant: goal-contract` is a separate, size-independent carve-out from this omission rule: it never emits `spine-omitted: plan-too-small`, and it never emits a frame-spine block for any reason — not because the plan is too small, but because the goal-contract block replaces the spine outright. See `### Goal-contract plan variant` below.
 
 Legacy plans stay legacy when amended. Do not retrofit a frame spine into an older approved plan during amendment; preserve its original routing model unless a new planning pass explicitly replaces the plan.
 
@@ -298,6 +302,79 @@ Use `ac-refs:` for D11 traceability from every implementation slice to acceptanc
 Use `depends-on:` for explicit depth-1 dependencies only. A slice may name the immediate step IDs it needs for local context, such as `depends-on: [s2]`; it must not pull a dependency chain recursively. The depth-1 cap keeps specialist prompts bounded and prevents the spine from becoming a second full plan.
 
 Spine port values must use flow-style inline lists. Cycle tokens use `sN[#cycle:N][#terminal]`: omit `#cycle:1` for the first cycle, add `#cycle:N` when a later step continues the same port in another implementation cycle, and add `#terminal` only to the last step that must produce the terminal credit for that port. In the matching slice metadata, use `cycle: N` and `terminal: true`. Append monotonic follow-up work after earlier tokens; use non-monotonic insertion only when an amendment inserts a new step between existing steps, and preserve list order as the execution order even when step numbers are not monotonic.
+
+### Goal-contract plan variant
+
+A goal-contract plan (issue #872, design decisions 872-D1 through 872-D9) is the plan-seat artifact for autonomous, budget-capped `/goal` runs. It replaces the frame-spine mechanism entirely rather than layering on top of it — a goal-contract plan carries no `<!-- frame-spine ... -->` block, no `<!-- frame-slice ... -->` blocks, no `<!-- frame-slices-{ID} -->` sibling comment, and no `slice_comment_id`. **Spine-Runner is ineligible to walk a goal-contract plan**: there is no spine for it to fetch, so goal-contract plans stay outside Spine-Runner's dispatch surface entirely and are executed by the future goal-run harness (#874) instead.
+
+**Frontmatter**: add `plan-variant: goal-contract` as a plan frontmatter key, alongside the existing `status`/`priority`/`issue_id`/`created`/`ce_gate` keys:
+
+```yaml
+---
+status: pending
+priority: { priority }
+issue_id: { issue-id }
+created: { date }
+ce_gate: { true|false }
+plan-variant: goal-contract
+---
+```
+
+**Five-part prose rendering**: above the `<!-- goal-contract -->` block, render the contract's five parts in the owner's language, in this order, so a one-read approval never requires opening the YAML: (1) **verification targets** — what proves each acceptance criterion, one line per target; (2) **invariants** — the standing constraints every target must respect; (3) **evidence obligations** — what gets committed, logged, and marked at each checkpoint; (4) **general experience standard** — the canonical clause and guardrails every target is held to; (5) **halt conditions and budget** — what makes the run stop and report instead of pressing on, and what it may spend. Regenerate this prose from the YAML block on every amendment; never hand-edit the prose independently of the block.
+
+Immediately above the block, state this banner verbatim:
+
+> This prose is a rendering of the YAML block below; the YAML block governs.
+
+This banner defends the approval-reads-prose / machine-reads-YAML seam: the owner approves by reading prose, but the machine-checkable block is what a validator and #873's future harness actually consume. Residual risk of a hand-edited prose rendering drifting from its YAML is accepted and recorded here (872-D2).
+
+**`## Acceptance Criteria` section is mandatory**: every goal-contract plan comment must carry a literal `## Acceptance Criteria` H2 with `- **ACn**` bullets, and that heading must not have any other `## `-level heading between it and its bullets — `Get-FVPlanAcceptanceCriterionId` (`.github/scripts/lib/frame-validate-core.ps1:333-358`) collects AC ids only inside that section and breaks at the next `^##\s+` line (`:347`). A goal-contract plan whose `## Acceptance Criteria` section is empty, missing, or interrupted by another H2 fails the AC-coverage cross-check even when every target names a valid `ac_ref`.
+
+**The `<!-- goal-contract -->` block** carries the fields defined by `skills/plan-authoring/schemas/goal-contract.schema.json` (872-D1/872-D2 — the schema is the single authority for every enum and required-field set in the block; do not re-encode `targets[].category`, `halt_conditions`, or any other schema enum here or in any other consumer):
+
+```yaml
+<!-- goal-contract
+schema_version: 1
+issue: { issue-id }
+contract_hash: "0000000000000000000000000000000000000000000000000000000000000000"
+targets:
+  - id: T1
+    ac_ref: AC1
+    category: structure-presence
+    check: "pwsh -NoProfile -File ..."
+    expected: "exit 0; <one-line expected result>"
+    falsifier: "<what a vacuous pass would look like and why this check is not it>"
+    source: null
+invariants:
+  - full-pester-suite-no-new-failures
+  - test-diff-integrity
+evidence_obligations:
+  checkpoint_commits: per-target-green
+  run_log: deviation entries + experience observations per checkpoint
+  experience_obligations:
+    - scenario: S1
+      surface: cli
+  required_markers: [pipeline-metrics-credits]
+general_experience_standard: |
+  <canonical clause + four guardrails, verbatim from #848 D8>
+halt_conditions: [unachievable-target, invariant-conflict, budget-exhausted, gate-input-needed, chain-stage-failure]
+budget:
+  tokens: <ceiling or advisory per #871 finding>
+  wall_clock: <ceiling>
+  chain_sub_ceiling: <bounds the post-loop chain>
+  non_convergence: halt-report
+-->
+```
+
+Write the literal 64-zero placeholder shown above into `contract_hash` while the contract is still a draft; a placeholder digest is how a draft is structurally distinguished from an approved contract. **At approval**, invoke `Get-GCContractHash` (`.github/scripts/lib/goal-contract-core.ps1`) over the extracted block payload and write its 64-hex digest into `contract_hash` in place of the placeholder. The payload passed to `Get-GCContractHash` must come from the comment body as returned by the GitHub API JSON `body` field (`gh api ... --jq .body`) — never console-rendered output; this repo has documented OEM-mangling history on the console-output path (#862), and 872-D3 names the API-JSON field as the only safe byte source.
+
+**The `contract_hash` mechanism provides edit-coherence, not tamper-evidence** (owner decision on escalated design-challenge finding M11): the digest's only copy lives inside the same comment it digests, so anyone able to edit that comment can also recompute the hash. What it reliably detects is an *incoherent* edit — a changed contract body with a stale digest — not a deliberate, hash-updating tamper. Any prose describing this mechanism, including Customer Experience Gate scenario S1, must use edit-coherence framing; do not describe it as tamper-evident.
+
+**`falsifier` is optional in the schema, conditionally mandatory in authoring** (872-D4): any target whose check was flagged by a letter-vs-intent finding during the plan stress-test MUST carry a `falsifier` capturing that vacuous-pass analysis, even though the schema field itself stays optional for every other target. This keeps the schema permissive while making the vacuity analysis survive to the end-of-run reviewer instead of dying in the stress-test ledger.
+
+**No frame-slices sibling, no `slice_comment_id`**: because there is no frame-spine, there is nothing to route into a `<!-- frame-slices-{ID} -->` sibling — a goal-contract plan comment stands alone. Do not create a frame-slices sibling and do not write a `slice_comment_id` for a goal-contract plan.
+
+**Enum-drift disposition**: `targets[].category` reuses the same five-value set already used for `**Verification Evidence**` row categories above (`:150`, `:361`): `text-presence`, `structure-presence`, `downstream-consumer`, `numeric-or-structural`, `named-standard`. `skills/plan-authoring/schemas/goal-contract.schema.json` is the single authority for that value set; the precedence order stated at `:150` (`text-presence > structure-presence > downstream-consumer > numeric-or-structural > named-standard`) is a plan-authoring-only refinement that JSON Schema's `enum` keyword cannot express and is intentionally not restated in the schema file. There is no automated check keeping this file's category list and the schema's `enum` in sync — that is an **explicit non-goal for #872**; a maintainer changing either list must update the other by hand. The same manual-sync disposition applies to `general_experience_standard`: its canonical clause and four guardrails are defined verbatim in umbrella issue #848 decision D8, and this file's copy (and any future goal-contract prose) must be checked against #848 D8 by hand whenever either side is amended — no automated drift check exists between them.
 
 ### Adapter and executor selection
 
