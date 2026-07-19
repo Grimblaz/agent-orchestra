@@ -8,9 +8,11 @@
     Owns the dot-source of the hub primitives this feature composes:
     find-or-upsert-comment.ps1 (Find-OrUpsertComment, Get-RestCommentId) and
     phase-containment-emission-check-core.ps1 (Add-CommentBlocks,
-    Add-JudgeRulingsBlock, Get-DispositionTally; this file's own line 24
-    transitively dot-sources phase-containment-core.ps1, so no third
-    dot-source line is needed here). persist-phase-ledger-core.ps1 does NOT
+    Add-JudgeRulingsBlock, Get-DispositionTally;
+    phase-containment-emission-check-core.ps1's own line 24 (`. (Join-Path
+    $PSScriptRoot 'phase-containment-core.ps1')`) transitively dot-sources
+    phase-containment-core.ps1, so no third dot-source line is needed
+    here). persist-phase-ledger-core.ps1 does NOT
     dot-source these itself -- it assumes they are already in scope, which
     lets Pester dot-source the core directly against the real primitives
     without ever loading this wrapper (see

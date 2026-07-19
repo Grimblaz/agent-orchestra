@@ -3,7 +3,7 @@
 
 <#!
 .SYNOPSIS
-    RED-phase contract test for issue #878 s2 (Part A doc-example contract).
+    Contract test for issue #878 s2 (Part A doc-example contract).
 
 .DESCRIPTION
     Extracts every doc-embedded phase-containment example from
@@ -13,10 +13,13 @@
     unmodified) accepts each one, byte-identical to a committed canonical
     fixture.
 
-    THIS IS A RED-ONLY STEP (s2). Docs are NOT touched here — that is s3
-    ("[GREEN] Part A doc fixes"). This file is authored to describe the
-    DESIRED end state; several assertions below are expected to fail today
-    and are expected to turn green once s3 lands.
+    HISTORICAL NOTE: this file was originally authored as a RED-only step
+    (s2) — docs were deliberately NOT touched here, describing the DESIRED
+    end state before the fix landed in s3 ("[GREEN] Part A doc fixes").
+    s3 fixed the docs and this suite has been green ever since (18/18 as
+    of the latest fix); the RED/GREEN split is retained below only as
+    historical context for why this file and s3 are separate steps, not
+    as a signal that any assertion is still expected to fail today.
 
     Why this file exists (M9 / M10 from the plan's stress test): "every
     extracted example parses" is vacuously true over an empty set. Two
@@ -211,7 +214,7 @@ BeforeAll {
     $script:ReviewJudgmentCandidates = Get-FencedPhaseContainmentCandidates -Text $script:ReviewJudgmentContent
 }
 
-Describe 'Doc-embedded phase-containment examples (issue #878 s2, RED)' {
+Describe 'Doc-embedded phase-containment examples (issue #878 s2)' {
 
     Context 'plan-authoring: plan-stress-test variant (SKILL.md:401-404)' {
         It 'the doc contains at least one fenced phase-containment example (extractor floor)' {
