@@ -41,6 +41,45 @@ function New-FVAggregateResult {
     }
 }
 
+function New-FVStructuralCoverageResult {
+    # Shared aggregation tail for both plan-validation paths (legacy frame-spine
+    # and the goal-contract variant): turns accumulated structural-violation and
+    # warn-only coverage-gap lists into the standard PlanStructuralCoverage /
+    # PlanCoverageGap two-row result set. Extracted so the two callers don't
+    # hand-roll the same pass/fail wording independently (872-D6's
+    # no-hand-rolled-duplication intent, applied here to result assembly).
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][AllowNull()][object[]]$StructuralViolations,
+        [Parameter(Mandatory)][AllowEmptyCollection()][AllowNull()][object[]]$CoverageGaps
+    )
+
+    # Plain assignment, not an if/else-used-as-expression: PowerShell flattens
+    # a single-element array returned as a branch's captured output down to a
+    # scalar, which then loses .Count under Set-StrictMode. Assigning inside
+    # the if-statement body instead of assigning its result keeps @() intact.
+    $violations = [object[]]@()
+    if ($null -ne $StructuralViolations) { $violations = @($StructuralViolations) }
+    $gaps = [object[]]@()
+    if ($null -ne $CoverageGaps) { $gaps = @($CoverageGaps) }
+
+    $results = [System.Collections.Generic.List[PSCustomObject]]::new()
+    if ($violations.Count -eq 0) {
+        $results.Add((New-FVCheckResult -Name 'PlanStructuralCoverage' -Passed $true -Detail '')) | Out-Null
+    }
+    else {
+        $results.Add((New-FVCheckResult -Name 'PlanStructuralCoverage' -Passed $false -Detail "$($violations.Count) structural violation(s): $($violations -join '; ')")) | Out-Null
+    }
+
+    if ($gaps.Count -eq 0) {
+        $results.Add((New-FVCheckResult -Name 'PlanCoverageGap' -Passed $true -Detail '')) | Out-Null
+    }
+    else {
+        $results.Add((New-FVCheckResult -Name 'PlanCoverageGap' -Passed $true -Detail "$($gaps.Count) warn-only coverage gap(s): $($gaps -join '; ')")) | Out-Null
+    }
+
+    return (New-FVAggregateResult -Results $results.ToArray())
+}
+
 function Resolve-FVRootPath {
     param([AllowNull()][string]$RootPath)
 
@@ -478,22 +517,7 @@ function Invoke-FVGoalContractPlanValidate {
         }
     }
 
-    $results = [System.Collections.Generic.List[PSCustomObject]]::new()
-    if ($structuralViolations.Count -eq 0) {
-        $results.Add((New-FVCheckResult -Name 'PlanStructuralCoverage' -Passed $true -Detail '')) | Out-Null
-    }
-    else {
-        $results.Add((New-FVCheckResult -Name 'PlanStructuralCoverage' -Passed $false -Detail "$($structuralViolations.Count) structural violation(s): $($structuralViolations -join '; ')")) | Out-Null
-    }
-
-    if ($coverageGaps.Count -eq 0) {
-        $results.Add((New-FVCheckResult -Name 'PlanCoverageGap' -Passed $true -Detail '')) | Out-Null
-    }
-    else {
-        $results.Add((New-FVCheckResult -Name 'PlanCoverageGap' -Passed $true -Detail "$($coverageGaps.Count) warn-only coverage gap(s): $($coverageGaps -join '; ')")) | Out-Null
-    }
-
-    return (New-FVAggregateResult -Results $results.ToArray())
+    return (New-FVStructuralCoverageResult -StructuralViolations $structuralViolations -CoverageGaps $coverageGaps)
 }
 
 function Invoke-FVPlanValidate {
@@ -634,22 +658,7 @@ function Invoke-FVPlanValidate {
         }
     }
 
-    $results = [System.Collections.Generic.List[PSCustomObject]]::new()
-    if ($structuralViolations.Count -eq 0) {
-        $results.Add((New-FVCheckResult -Name 'PlanStructuralCoverage' -Passed $true -Detail '')) | Out-Null
-    }
-    else {
-        $results.Add((New-FVCheckResult -Name 'PlanStructuralCoverage' -Passed $false -Detail "$($structuralViolations.Count) structural violation(s): $($structuralViolations -join '; ')")) | Out-Null
-    }
-
-    if ($coverageGaps.Count -eq 0) {
-        $results.Add((New-FVCheckResult -Name 'PlanCoverageGap' -Passed $true -Detail '')) | Out-Null
-    }
-    else {
-        $results.Add((New-FVCheckResult -Name 'PlanCoverageGap' -Passed $true -Detail "$($coverageGaps.Count) warn-only coverage gap(s): $($coverageGaps -join '; ')")) | Out-Null
-    }
-
-    return (New-FVAggregateResult -Results $results.ToArray())
+    return (New-FVStructuralCoverageResult -StructuralViolations $structuralViolations -CoverageGaps $coverageGaps)
 }
 
 function Invoke-FrameValidate {
