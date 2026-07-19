@@ -402,6 +402,38 @@ Describe 'Issue-Planner frame spine emission contract' -Tag 'contract' {
         $script:Content | Should -Match '(?i)/memories/session/design-issue-\{id\}\.md' -Because 'canonical design session-memory cache reference must remain present (now in the Phase-specific persistence notes section per #620)'
     }
 
+    It 'documents the plan-variant: goal-contract carve-out from the spine-and-slice requirement (issue #872 s5)' {
+        $script:PlanAuthoringContent | Should -Match '(?is)does not apply to.{0,40}`?plan-variant:\s*goal-contract' -Because 'the three-or-more-implementation-steps spine mandate must carve out goal-contract plans, not forbid the variant outright'
+        $script:PlanAuthoringContent | Should -Match '(?is)plan.{0,20}declares.{0,20}`?plan-variant:\s*goal-contract.{0,400}(never emits|does not emit).{0,80}spine-omitted' -Because 'the fewer-than-three-steps omission rule must exempt goal-contract plans as a size-independent carve-out, not lump them in with spine-omitted: plan-too-small'
+        $script:PlanAuthoringContent | Should -Match '(?i)###\s+Goal-contract plan variant' -Because 'the goal-contract authoring contract must have its own named subsection for the two carve-outs above to reference'
+    }
+
+    It 'documents the goal-contract plan-variant authoring contract: frontmatter, banner, hash-at-approval, falsifier, no-sibling, Spine-Runner ineligibility' {
+        $script:PlanAuthoringContent | Should -Match 'plan-variant: goal-contract' -Because 'the variant frontmatter key must be documented literally'
+        $script:PlanAuthoringContent | Should -Match '<!--\s*goal-contract' -Because 'the contract block head marker must be documented literally'
+        $script:PlanAuthoringContent | Should -Match ([regex]::Escape('This prose is a rendering of the YAML block below; the YAML block governs.')) -Because 'the governing-YAML banner must appear verbatim (872-D2)'
+        $script:PlanAuthoringContent | Should -Match 'Get-GCContractHash' -Because 'the hash-at-approval step must name the actual helper invocation'
+        $script:PlanAuthoringContent | Should -Match '(?i)GitHub API JSON' -Because '872-D3 byte-source rule: the hash payload must come from the API JSON body field'
+        $script:PlanAuthoringContent | Should -Match '(?i)never console-rendered output' -Because '872-D3 byte-source rule must forbid the console-rendered path (#862 mojibake history)'
+        $script:PlanAuthoringContent | Should -Match '(?is)letter-vs-intent.{0,120}MUST.{0,120}falsifier' -Because '872-D4: any target flagged by a letter-vs-intent stress-test finding MUST carry a falsifier, even though the schema field itself stays optional'
+        $script:PlanAuthoringContent | Should -Match '(?i)no frame-slices sibling' -Because 'goal-contract plans emit no frame-slices sibling (872-D8)'
+        $script:PlanAuthoringContent | Should -Match '(?i)no `?slice_comment_id`?' -Because 'goal-contract plans emit no slice_comment_id (872-D8)'
+        $script:PlanAuthoringContent | Should -Match '(?i)Spine-Runner.{0,40}ineligib' -Because 'Spine-Runner ineligibility for goal-contract plans must be documented (872-D7)'
+        $script:PlanAuthoringContent | Should -Match '(?i)edit-coherence' -Because 'the contract_hash mechanism must be described as edit-coherence, per the owner correction of escalated finding M11'
+    }
+
+    It 'documents the category enum-drift and general_experience_standard verbatim-drift dispositions as explicit non-goals' {
+        $script:PlanAuthoringContent | Should -Match '(?i)explicit non-goal' -Because 'the category-enum drift between this file''s Verification Evidence categories and the goal-contract schema must carry an explicit disposition rather than silently risking drift'
+        $script:PlanAuthoringContent | Should -Match '(?is)general_experience_standard.{0,300}#848.{0,20}D8' -Because 'the general_experience_standard verbatim-drift disposition must reference the source-of-truth decision (#848 D8)'
+    }
+
+    It 'requires the Issue-Planner persist contract to document the goal-contract variant escape from frame-spine emission (872-D8)' {
+        $script:PersistPlanSection | Should -Match 'plan-variant: goal-contract' -Because 'the persist contract must name the variant frontmatter key that triggers the escape'
+        $script:PersistPlanSection | Should -Match '(?i)skip' -Because 'the persist contract must instruct the emitting agent to skip spine emission for goal-contract plans'
+        $script:PersistPlanSection | Should -Match '<!--\s*frame-spine' -Because 'the escape language must name the frame-spine block it is skipping'
+        $script:PersistPlanSection | Should -Match '872-D8' -Because 'the escape must cite the design decision it implements'
+    }
+
     It 'preserves the agent identity and Core Principles stance while adding spine guidance' {
         $script:Content | Should -Match 'You are a meticulous strategist who leaves nothing to chance' -Because 'the top identity hook must remain stance-preserving'
         $script:CorePrinciplesSection | Should -Match '\*\*The plan is the contract\.\*\*' -Because 'Core Principles must keep the plan-contract identity wording'

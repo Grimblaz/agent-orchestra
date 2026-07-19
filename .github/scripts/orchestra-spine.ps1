@@ -17,6 +17,7 @@ param(
 try {
     . (Join-Path $PSScriptRoot 'lib/frame-spine-core.ps1')
     . (Join-Path $PSScriptRoot 'lib/frame-shared-discovery.ps1')
+    . (Join-Path $PSScriptRoot 'lib/goal-contract-core.ps1')
 }
 catch {
     [Console]::Error.WriteLine("orchestra-spine: library load failed: $($_.Exception.Message)")
@@ -326,6 +327,15 @@ function Invoke-OrchestraSpineRender {
 
     if ($null -eq $planComment) {
         throw "No plan-issue-$IssueNumber comment found for issue #$IssueNumber. $(Get-OrchestraSpineUsageText)"
+    }
+
+    # 872-D5/872-D7: goal-contract variant detection is hoisted above both
+    # the plan-too-small escape and the legacy-plan-shape fall-through, so a
+    # variant-declared plan always renders the variant-aware message instead
+    # of either misleading no-spine message (identical precedence to
+    # Invoke-FVPlanValidate in frame-validate-core.ps1).
+    if (Test-GCVariantFrontmatter -CommentBody $planComment.Body) {
+        return 'plan uses the goal-contract variant — no spine; see the plan comment for the contract'
     }
 
     if ($planComment.Body -match '(?m)^\s*spine-omitted\s*:\s*plan-too-small\s*$') {

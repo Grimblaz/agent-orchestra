@@ -122,7 +122,9 @@ ce_gate: { true|false }
 
 Add `escalation_recommended: true` and `escalation_reason` when scope exceeds the issue's stated scope.
 
-For any platform path that writes or re-emits the approved SMC-01 `<!-- plan-issue-{ID} -->` comment, keep the legacy plan frontmatter and step body readable by existing consumers, then append the frame-spine block and coverage manifest inside that same comment, in this order (863-D1):
+**Goal-contract variant escape**: when the plan comment's frontmatter declares `plan-variant: goal-contract` (issue #872), skip this entire append. Do not emit a `<!-- frame-spine -->` block, a coverage manifest, a `slice_comment_id`, or a `<!-- frame-slices-{ID} -->` sibling comment for that plan — the `<!-- goal-contract -->` contract block replaces all three (872-D8). See `skills/plan-authoring/SKILL.md § Goal-contract plan variant` for the full authoring contract (frontmatter key, five-part prose rendering, hash-at-approval step, and the `## Acceptance Criteria` requirement). Without this escape, a goal-contract plan would still get an appended frame-spine block, which `frame-validate-core.ps1`'s variant branch (872-D5) hard-rejects as an ambiguous both-blocks plan.
+
+For any platform path that writes or re-emits the approved SMC-01 `<!-- plan-issue-{ID} -->` comment for a plan that is NOT a `plan-variant: goal-contract` plan, keep the legacy plan frontmatter and step body readable by existing consumers, then append the frame-spine block and coverage manifest inside that same comment, in this order (863-D1):
 
 1. `<!-- frame-spine -->` with `spine_schema_version: 2`, a `generated_at` value set at plan creation time, and `slice_comment_id` (863-D3) pointing at the `<!-- frame-slices-{ID} -->` sibling comment created for this plan.
 2. A coverage manifest section with `ac-refs-by-slice:` mapping each slice ID to the acceptance criteria it covers.

@@ -2,6 +2,12 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.4.0] — 2026-07-19
+
+### Added
+
+- Goal-contract artifact: schema, parser library, and frame-validate structural branch for the goal-contract plan-authoring variant (#872). Adds `skills/plan-authoring/schemas/goal-contract.schema.json`, `.github/scripts/lib/goal-contract-core.ps1`, and a `plan-variant: goal-contract` branch in `frame-validate-core.ps1`/`orchestra-spine.ps1` that accepts the new variant while still rejecting bare spine-less plans. Registers the `goal-contract` and `goal-halt-report` marker heads in the handoff-markers catalog.
+
 ## [3.3.22] — 2026-07-18
 
 ### Fixed
