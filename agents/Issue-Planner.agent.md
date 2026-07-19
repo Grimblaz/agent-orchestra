@@ -129,7 +129,7 @@ For any platform path that writes or re-emits the approved SMC-01 `<!-- plan-iss
 
 The `<!-- frame-slice -->` blocks themselves do NOT go inside the plan comment. Post one bare `<!-- frame-slice -->` block per implementation step — addressed by its `step_id: s{N}` field, same shape as before — into a separate `<!-- frame-slices-{ID} -->` sibling comment (863-D1/863-D2). Create that sibling before finalizing the plan comment's `frame-spine` block, since the sibling's comment id is what `slice_comment_id` points at. Stamp the sibling with `<!-- frame-slices-generated-at: {value} -->` set equal to the spine's `generated_at` (863-D7) — at initial persist and again on every re-persist that touches the spine or any slice, since a stale stamp there is indistinguishable from a genuinely stale slice sibling to the drift check that reads it.
 
-Also write a standalone `<!-- phase-containment-ledger-ref: {comment_id} -->` marker (863-D11) onto the plan comment, immediately after the `<!-- plan-issue-{ID} -->` marker, pointing at the `<!-- phase-containment-ledger-{ID} -->` sibling created for the `phase-containment` and `judge-rulings` blocks (see `### Phase-containment emission (plan-stress-test)` below) — this pointer is added once that sibling exists, which is after the plan approval burst.
+The `<!-- phase-containment-ledger-ref: {comment_id} -->` pointer onto the plan comment (863-D11), immediately after the `<!-- plan-issue-{ID} -->` marker, is written by the same helper invocation as the ledger sibling itself — see `### Phase-containment emission (plan-stress-test)` below. Do not hand-author this pointer; it is created once, on first persist, as part of `Invoke-PersistPhaseLedger`'s plan-mode write.
 
 For plans with fewer than 3 implementation steps, emit `spine-omitted: plan-too-small` and do not emit any `<!-- frame-spine -->` frame-spine block or the `<!-- frame-slices-{ID} -->` sibling — this small-plan omission does not extend to the `<!-- phase-containment-ledger-{ID} -->` sibling, which is still created lazily and independently at emission time per § Phase-containment emission below, regardless of plan size.
 
@@ -210,7 +210,25 @@ The canonical session-memory handoff artifacts remain `/memories/session/plan-is
 
 ### Phase-containment emission (plan-stress-test)
 
-After emitting the plan approval burst, for each sustained plan-stress-test finding append one `<!-- phase-containment-{ID} -->` block to the `<!-- phase-containment-ledger-{ID} -->` sibling comment — not the plan comment (863-D4; see `skills/plan-authoring/SKILL.md` § Post-Judge Reconciliation → Phase-containment emission for the full field contract, including the co-moved `judge-rulings` block). Create the sibling if it does not yet exist, then write the `<!-- phase-containment-ledger-ref: {comment_id} -->` pointer back onto the plan comment (863-D11; see `## 6. Persist Plan` above). Validate each block against `skills/calibration-pipeline/schemas/phase-containment.schema.json`.
+After emitting the plan approval burst, persist the `judge-rulings` machine block plus one `<!-- phase-containment-{ID} -->` block per sustained plan-stress-test finding by invoking `skills/session-memory-contract/scripts/persist-phase-ledger.ps1` with `-Mode plan` — never by hand-authoring the sibling comment, the pointer, or the blocks (863-D4/863-D11; see `skills/plan-authoring/SKILL.md` § Post-Judge Reconciliation → Phase-containment emission for the full field contract, including the co-moved `judge-rulings` block). The helper is the ONLY documented path for this write: it creates the `<!-- phase-containment-ledger-{ID} -->` sibling comment on first persist, writes the `<!-- phase-containment-ledger-ref: {comment_id} -->` pointer back onto the plan comment, and reuses both on re-persist. Validate each block against `skills/calibration-pipeline/schemas/phase-containment.schema.json` before passing it to `-PhaseContainmentBlocks`.
+
+Repo-relative (hub-repo contributors):
+
+```powershell
+pwsh skills/session-memory-contract/scripts/persist-phase-ledger.ps1 `
+    -Owner {owner} -Repo {repo} -Mode plan -IssueNumber {ISSUE_NUMBER} `
+    -JudgeRulingsContent $judgeRulingsBlockText -PhaseContainmentBlocks @($block1, $block2)
+```
+
+Plugin-root-absolute (consumer installs — mirror the dual-form pattern at `skills/session-startup/SKILL.md` Step 3):
+
+```powershell
+pwsh {plugin-root}/skills/session-memory-contract/scripts/persist-phase-ledger.ps1 `
+    -Owner {owner} -Repo {repo} -Mode plan -IssueNumber {ISSUE_NUMBER} `
+    -JudgeRulingsContent $judgeRulingsBlockText -PhaseContainmentBlocks @($block1, $block2)
+```
+
+When the merged stress-test produced zero sustained findings, omit `-PhaseContainmentBlocks` (it defaults to an empty array) but still pass `-JudgeRulingsContent` with the zero-findings placeholder entry (`skills/plan-authoring/SKILL.md` rule 7) — a legal, first-class invocation that never calls `Add-CommentBlocks`. On failure, the helper exits non-zero, names the failing step, and propagates the underlying primitive's `Reason` — surface that message rather than retrying blind.
 
 ## Context Management
 
