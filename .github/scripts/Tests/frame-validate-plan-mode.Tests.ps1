@@ -131,10 +131,13 @@ Describe 'Frame validator plan mode CLI' -Tag 'unit' {
         }
 
         # --- 872-D5 goal-contract variant fixtures ---
-        # Dot-sourced so direct Test-GCVariantFrontmatter coverage and
-        # goal-contract fixture construction share the one parser lib
-        # (872-D6); frame-validate-core.ps1 does not yet dot-source this
-        # file (that wiring is frame-slice s4, not yet implemented).
+        # frame-validate-core.ps1:10 now dot-sources goal-contract-core.ps1
+        # directly, so this file is already reachable transitively through
+        # that load. This explicit dot-source here is a redundant-but-harmless
+        # direct load, kept for Test-GCVariantFrontmatter fixture-construction
+        # convenience (872-D6): it lets direct coverage and goal-contract
+        # fixture construction share the one parser lib without depending on
+        # frame-validate-core.ps1's own load order.
         $script:GCLibFile = Join-Path $script:RepoRoot '.github/scripts/lib/goal-contract-core.ps1'
         if (Test-Path $script:GCLibFile) {
             . $script:GCLibFile

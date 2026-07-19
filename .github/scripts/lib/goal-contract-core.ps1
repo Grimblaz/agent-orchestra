@@ -37,10 +37,13 @@
       ConvertFrom-GCContractBlock -Payload <string> -RepoRoot <string>
         Returns [pscustomobject]@{ Contract; Violations }. Never throws on
         schema failure -- the caller builds a check-result row from
-        Violations. Pipeline, in order: pre-parse anchor/alias guard ->
-        pre-parse column-0 YAML document-separator (`---`) guard -> size
-        cap -> Import-Module powershell-yaml (loud rethrow when the module is
-        missing) -> ConvertFrom-Yaml -> empty-parsed-document guard (a
+        Violations. Pipeline, in order: CRLF/CR line-ending normalization
+        (consistent with Get-GCContractBlock, Get-GCContractHash's
+        canonicalizer, and Test-GCVariantFrontmatter; callers do not need to
+        pre-normalize) -> pre-parse anchor/alias guard -> pre-parse column-0
+        YAML document-separator (`---`) guard -> size cap -> Import-Module
+        powershell-yaml (loud rethrow when the module is missing) ->
+        ConvertFrom-Yaml -> empty-parsed-document guard (a
         comment-only payload that yields nothing from ConvertFrom-Yaml
         returns a Violations entry here rather than reaching ConvertTo-Json/
         Test-Json with a $null argument) -> ConvertTo-Json -Depth 20 (the
@@ -208,6 +211,21 @@ function ConvertFrom-GCContractBlock {
     )
 
     $violations = [System.Collections.Generic.List[string]]::new()
+
+    # 0. Normalize CRLF/CR line endings to LF before any guard runs (CRLF
+    #    first, then any remaining bare CR), matching the convention this
+    #    file already establishes in Get-GCContractBlock,
+    #    ConvertTo-GCCanonicalPayload, and Test-GCVariantFrontmatter. This
+    #    function's sole production caller (Get-GCContractBlock's payload)
+    #    always normalizes first, but this function is a named future
+    #    direct-consumer surface (#873's harness), so it must not rely on
+    #    every caller pre-normalizing: a raw CRLF-terminated `---` line
+    #    could otherwise escape the column-0 document-separator guard
+    #    below. Normalizing here, before the anchor/alias guard, size cap,
+    #    and document-separator guard all run, keeps every downstream guard
+    #    operating on consistently normalized text rather than patching the
+    #    document-separator regex alone.
+    $Payload = $Payload -replace "`r`n", "`n" -replace "`r", "`n"
 
     # 1. Pre-parse guard -- must precede parsing entirely, not merely fail
     #    slowly after ConvertFrom-Yaml has already expanded the payload.

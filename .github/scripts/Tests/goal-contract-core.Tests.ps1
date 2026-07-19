@@ -360,6 +360,26 @@ arbitrary_unvalidated_content: this must not silently ride along
             $outcome.Violations | Should -Not -BeNullOrEmpty -Because 'a payload containing a column-0 document separator must be rejected pre-parse, not silently truncated to its first document'
             ($outcome.Violations -join ' ') | Should -Match '(?i)document separator' -Because 'the violation should name the document-separator reason'
         }
+
+        It 'rejects a payload containing a CRLF-terminated YAML document separator pre-parse (gh-3611111471)' {
+            script:Assert-GCFunctionExists -Name 'ConvertFrom-GCContractBlock'
+            # ConvertFrom-GCContractBlock normalizes CRLF/CR to LF at entry,
+            # before the anchor/alias guard, size cap, and document-separator
+            # guard all run -- matching the convention already used by
+            # Get-GCContractBlock, Get-GCContractHash's canonicalizer, and
+            # Test-GCVariantFrontmatter. Without that normalization, a raw
+            # CRLF-terminated `---` line could escape the column-0
+            # document-separator guard above, since that guard's regex
+            # anchors only on `^---[ \t]*$` per line. This function's sole
+            # production caller always normalizes first (via
+            # Get-GCContractBlock), so this gap is unreachable today, but the
+            # function is a named future direct-consumer surface (#873's
+            # harness) and must not rely on every caller pre-normalizing.
+            $crlfMultiDocPayload = "schema_version: 1`r`n---`r`nrogue: content`r`n"
+            $outcome = ConvertFrom-GCContractBlock -Payload $crlfMultiDocPayload -RepoRoot $script:RepoRoot
+            $outcome.Violations | Should -Not -BeNullOrEmpty -Because 'a CRLF-terminated document separator must be rejected pre-parse just like the LF case'
+            ($outcome.Violations -join ' ') | Should -Match '(?i)document separator' -Because 'the violation should name the document-separator reason, matching the LF-based assertion'
+        }
     }
 
     Context 'Get-GCContractHash — golden vectors' {

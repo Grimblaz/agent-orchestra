@@ -354,7 +354,7 @@ evidence_obligations:
   experience_obligations:
     - scenario: S1
       surface: cli
-  required_markers: [pipeline-metrics-credits]
+  required_markers: [pipeline-metrics-credits, goal-run-class]
 general_experience_standard: |
   <canonical clause + four guardrails, verbatim from #848 D8>
 halt_conditions: [unachievable-target, invariant-conflict, budget-exhausted, gate-input-needed, chain-stage-failure]
