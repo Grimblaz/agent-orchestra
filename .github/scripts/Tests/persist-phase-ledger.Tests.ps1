@@ -618,12 +618,13 @@ Describe 'Invoke-PersistPhaseLedger' {
     Context 'Append-path write-time validation (issue #886 plan slice s3): a first-time append candidate must be validated before it is ever queued into $toAppend' {
         # Design mode (not plan mode) is used for both Its below: plan mode's
         # own ordering ("judge-rulings FIRST, then phase-containment blocks",
-        # persist-phase-ledger-core.ps1:746) means Set-PPLJudgeRulingsBlockOnComment
+        # Invoke-PPLPersistPhaseLedgerPlanMode's plan-mode ordering comment
+        # in persist-phase-ledger-core.ps1) means Set-PPLJudgeRulingsBlockOnComment
         # ALWAYS issues its own PATCH before the phase-containment branch ever
         # runs -- there is no unchanged-content no-op check on that path, so a
         # true zero-PATCH assertion is not obtainable through plan mode. Design
-        # mode (Invoke-PPLPersistPhaseLedgerDesignMode, persist-phase-ledger-
-        # core.ps1:769) has no judge-rulings step and no plan-comment/pointer
+        # mode (Invoke-PPLPersistPhaseLedgerDesignMode in persist-phase-ledger-
+        # core.ps1) has no judge-rulings step and no plan-comment/pointer
         # lookup at all -- it calls Set-PPLPhaseContainmentBlocksOnComment
         # directly, so it is the only path where "zero PATCH fired" proves
         # what it claims: that the append branch's own preflight refused
@@ -638,12 +639,14 @@ Describe 'Invoke-PersistPhaseLedger' {
             # Brand-new finding_key ('DBAD') that does not exist on the
             # comment yet, so Find-PPLPhaseContainmentBlockSpanByFindingKey
             # returns $null and this candidate is routed through the APPEND
-            # branch (persist-phase-ledger-core.ps1:519-543), not the replace
-            # branch the Context above already covers. Severity is outside
-            # ValidSeverities (phase-containment-core.ps1:40 --
+            # branch (Set-PPLPhaseContainmentBlocksOnComment's
+            # $null -eq $existingSpan branch in persist-phase-ledger-core.ps1),
+            # not the replace branch the Context above already covers.
+            # Severity is outside ValidSeverities (phase-containment-core.ps1:40 --
             # critical|high|medium|low), so the append branch's own
-            # write-time preflight (persist-phase-ledger-core.ps1:528-539)
-            # must refuse it before it is ever added to $toAppend.
+            # write-time preflight (delegated to the shared
+            # Test-PPLPhaseContainmentCandidate helper) must refuse it
+            # before it is ever added to $toAppend.
             $findingKey = 'plan-stress-test:878:DBAD'
             $badAppendBlock = New-LedgerBlockText -FindingSuffix 'DBAD' -Severity 'catastrophic'
             $judgeContent = New-JudgeRulingsText -Entries @(@{ FindingId = 'D1'; Ruling = 'sustained' })
@@ -676,8 +679,9 @@ Describe 'Invoke-PersistPhaseLedger' {
             # unclosed-block class Add-CommentBlocks' preflight already
             # refuses for the append-via-Add-CommentBlocks path elsewhere in
             # this suite; persist-phase-ledger-core.ps1's own append-branch
-            # preflight (persist-phase-ledger-core.ps1:528-532) must refuse
-            # it the same way before ever queuing it into $toAppend.
+            # preflight (delegated to the shared
+            # Test-PPLPhaseContainmentCandidate helper) must refuse it the
+            # same way before ever queuing it into $toAppend.
             $findingKey = 'plan-stress-test:878:DUNCLOSED'
             $targetBlock = New-LedgerBlockText -FindingSuffix 'DUNCLOSED'
             $unclosedBlock = ($targetBlock -split "`n" | Where-Object { $_ -ne '<!-- /phase-containment-878 -->' }) -join "`n"
@@ -694,30 +698,39 @@ Describe 'Invoke-PersistPhaseLedger' {
         }
     }
 
-    Context 'Source-introspection consolidation guard (issue #886 plan slice s3, EXPECTED RED until s4): both the append branch and the replace branch must reference one shared preflight helper' {
-        It 'references Test-PPLPhaseContainmentCandidate by name from within both the append-branch and the replace-branch line spans, anchored by their F1-fix comments, excluding the helper''s own function definition line' {
+    Context 'Source-introspection consolidation guard (issue #886 plan slice s3/s4): both the append branch and the replace branch must reference one shared preflight helper' {
+        It 'references Test-PPLPhaseContainmentCandidate via a real call site within both the append-branch and the replace-branch line spans, anchored by their F1-fix comments, excluding the helper''s own function definition line and comment-only mentions of its name' {
             <#
-            EXPECTED RED right now (s3, authored before s4). s4 is the
-            next plan step and has not run yet -- it is the step that
-            introduces the shared Test-PPLPhaseContainmentCandidate helper
-            and rewires both branches below to call it. Until s4 lands,
-            neither branch references this name anywhere, so this test
-            fails -- that failure is the correct, expected TDD RED state
-            for this step, not a bug to be worked around here. This is
-            deliberately NOT a whole-file substring/count (that would pass
-            the moment the helper is defined ANYWHERE in the file, even if
-            neither branch actually calls it) and NOT a Mock/Should-Invoke
-            (Pester cannot intercept script:-qualified calls) -- it is a
-            source-introspection check that each branch's own line span
-            contains a real call-site reference to the helper.
+            Regression/consolidation guard: GREEN since s4 (originally
+            authored RED-first in s3, before the shared
+            Test-PPLPhaseContainmentCandidate helper existed). s4 extracted
+            the append- and replace-branch preflight duplication in
+            persist-phase-ledger-core.ps1's Set-PPLPhaseContainmentBlocksOnComment
+            into that one shared helper and rewired both branches to call
+            it; this test pins that both branches keep doing so on every
+            future change, rather than reimplementing the preflight inline
+            again. This is deliberately NOT a whole-file substring/count
+            (that would pass the moment the helper is defined ANYWHERE in
+            the file, even if neither branch actually calls it) and NOT a
+            Mock/Should-Invoke (Pester cannot intercept script:-qualified
+            calls) -- it is a source-introspection check that each branch's
+            own line span contains a real call-site reference to the
+            helper, not merely a comment mentioning its name (M1 fix, issue
+            #886 judge-sustained review -- see the filter below; a mutation
+            test proved the prior name-only match stayed green even after
+            deleting both real call sites, because each branch's own
+            explanatory comment also mentions the helper by name).
             #>
             $sourceLines = Get-Content -LiteralPath $script:CoreLibPath
 
             # Anchors: the F1-fix explanatory comment that already opens
-            # each branch today (persist-phase-ledger-core.ps1:520 for
-            # append, :557 for replace). Located by content, not a hardcoded
-            # line number, so this test does not silently stop checking
-            # anything if s4 shifts surrounding line numbers.
+            # each branch today (persist-phase-ledger-core.ps1's append
+            # branch "F1 fix (issue #878 review): append candidates now get
+            # the SAME" comment, and its replace branch "F1 fix (issue #878
+            # CE Gate review): a same-finding_key replacement" comment).
+            # Located by content, not a hardcoded line number, so this test
+            # does not silently stop checking anything as the surrounding
+            # file shifts.
             $appendAnchor = $sourceLines | Select-String -Pattern 'F1 fix \(issue #878 review\): append candidates now get the SAME' | Select-Object -First 1
             $appendAnchor | Should -Not -BeNullOrEmpty -Because 'the append-branch F1-fix comment anchor must exist to bound its line span'
 
@@ -744,8 +757,24 @@ Describe 'Invoke-PersistPhaseLedger' {
             $appendSpanFiltered = $appendSpan | Where-Object $isNotHelperDefinitionLine
             $replaceSpanFiltered = $replaceSpan | Where-Object $isNotHelperDefinitionLine
 
-            $appendReferencesHelper = @($appendSpanFiltered | Where-Object { $_ -match 'Test-PPLPhaseContainmentCandidate' }).Count -gt 0
-            $replaceReferencesHelper = @($replaceSpanFiltered | Where-Object { $_ -match 'Test-PPLPhaseContainmentCandidate' }).Count -gt 0
+            # M1 fix (issue #886 judge-sustained review): the prior filter
+            # only excluded the helper's own function-definition line, so a
+            # comment-only mention of the helper's name elsewhere in either
+            # span (e.g. "...delegate that identical preflight to the
+            # shared Test-PPLPhaseContainmentCandidate helper instead of
+            # each reimplementing it inline") satisfied the assertion just
+            # as well as a real call -- a mutation test proved deleting BOTH
+            # real call sites at persist-phase-ledger-core.ps1's append and
+            # replace branches still left this guard green. Require BOTH:
+            # (1) the line is not a comment line, and (2) the match has the
+            # real call shape (`Test-PPLPhaseContainmentCandidate -Block`,
+            # the exact parameter-binding syntax both live call sites use)
+            # rather than a bare name match, so a prose mention of the
+            # helper's name can never satisfy either span's assertion.
+            $isNotCommentLine = { $_ -notmatch '^\s*#' }
+            $isRealCallSite = { $_ -match 'Test-PPLPhaseContainmentCandidate\s+-Block\b' }
+            $appendReferencesHelper = @($appendSpanFiltered | Where-Object $isNotCommentLine | Where-Object $isRealCallSite).Count -gt 0
+            $replaceReferencesHelper = @($replaceSpanFiltered | Where-Object $isNotCommentLine | Where-Object $isRealCallSite).Count -gt 0
 
             $appendReferencesHelper | Should -Be $true -Because 'the append branch must delegate its preflight to the shared Test-PPLPhaseContainmentCandidate helper (s4 consolidation), not reimplement it inline'
             $replaceReferencesHelper | Should -Be $true -Because 'the replace branch must delegate its preflight to the shared Test-PPLPhaseContainmentCandidate helper (s4 consolidation), not reimplement it inline'
