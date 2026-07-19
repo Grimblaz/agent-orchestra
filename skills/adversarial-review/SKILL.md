@@ -107,6 +107,7 @@ Check:
 - Integration wiring for new components
 - Data integration for newly introduced fields, constants, and maps
 - Domain-alignment mismatches across validators, parsers, and converters — identify peers via field-name grep, plan consultation for aliases, and call-chain tracing
+- Trace the sibling write-path guarantee parity: both write paths to the persisted target — the branch body plus every downstream helper the branch routes through — must be verified by name to carry every guarantee the sibling's path has (write-time preflight, schema validation, existence checks, post-write verification); a guarantee living only in a sibling's downstream call chain still counts as that sibling's guarantee
 
 ### 2. Security
 
@@ -116,7 +117,7 @@ Check:
 
 - Secrets, credentials, and logging of sensitive data
 - Input validation and authorization boundaries
-- Full-record overwrite risks that can drop security-sensitive fields
+- Full-record overwrite risks that can drop security-sensitive fields (when the risk spans a sibling write path, cross-reference the sibling write-path guarantee parity check in § Code Prosecution Workflow → 1. Architecture)
 
 ### 3. Performance
 
