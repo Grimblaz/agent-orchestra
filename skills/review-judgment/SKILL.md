@@ -59,6 +59,8 @@ Before sustaining a finding:
 
 When the cited evidence does not support the claim, sustain the defense and explain the mismatch clearly.
 
+**POST-FIX-SCOPED**: when this verification pass follows post-fix targeted prosecution with mutation-tested verification, judgment coverage extends to every branch the fix commit modified, per the canonical post-fix scope constraint in `skills/validation-methodology/references/review-reconciliation.md`. This note does not apply to a non-post-fix (main-review) judgment pass.
+
 ## Scoring Model
 
 Severity maps to points as follows:
