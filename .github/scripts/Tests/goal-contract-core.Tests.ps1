@@ -215,10 +215,12 @@ d: [*c,*c,*c,*c,*c,*c,*c,*c,*c]
 
         It 'throws a loud InvalidOperationException when the powershell-yaml module is unavailable' {
             script:Assert-GCFunctionExists -Name 'ConvertFrom-GCContractBlock'
+            Mock Import-Module { }
             Mock Import-Module -ParameterFilter { $Name -eq 'powershell-yaml' } -MockWith { throw 'simulated: powershell-yaml module not found' }
 
             { ConvertFrom-GCContractBlock -Payload "schema_version: 1`nissue: 872" -RepoRoot $script:RepoRoot } |
                 Should -Throw -ExceptionType ([System.InvalidOperationException]) -Because 'frame-validate plan mode is manual-only, so a missing local module must fail loudly, never silently'
+            Should -Invoke Import-Module -Times 1 -ParameterFilter { $Name -eq 'powershell-yaml' }
         }
 
         It 'requires -RepoRoot' {

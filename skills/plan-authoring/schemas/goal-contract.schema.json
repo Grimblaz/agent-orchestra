@@ -1,0 +1,146 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "goal-contract",
+  "description": "Schema for the goal-contract plan-seat variant block (issue #872, design decision 872-D2). This is the single authority for every enum and required-field set in the contract; no consumer (goal-contract-core.ps1, frame-validate-core.ps1, orchestra-spine.ps1, plan-authoring/SKILL.md) re-encodes these values.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "issue",
+    "contract_hash",
+    "targets",
+    "invariants",
+    "evidence_obligations",
+    "general_experience_standard",
+    "halt_conditions",
+    "budget"
+  ],
+  "properties": {
+    "schema_version": {
+      "description": "The accepted schema_version set. Callers read this enum rather than hard-coding accepted versions.",
+      "enum": [1]
+    },
+    "issue": {
+      "type": "integer",
+      "description": "The GitHub issue number this contract belongs to."
+    },
+    "contract_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "64-hex sha256 digest per 872-D3. Required so a draft (literal 64-zero placeholder) is structurally distinguishable from an unset field, and an approved contract is distinguishable from a draft only by the digest no longer being the placeholder."
+    },
+    "targets": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Verification targets. minItems: 1 -- a zero-target contract checks nothing, and both AC-coverage directions would pass vacuously on it.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "ac_ref", "category", "check", "expected", "source"],
+        "properties": {
+          "id": { "type": "string" },
+          "ac_ref": { "type": "string" },
+          "category": {
+            "description": "The five-value Verification-Evidence category enum (872-D2).",
+            "enum": [
+              "structure-presence",
+              "text-presence",
+              "downstream-consumer",
+              "numeric-or-structural",
+              "named-standard"
+            ]
+          },
+          "check": {
+            "type": "string",
+            "description": "The command-per-target check invocation."
+          },
+          "expected": {
+            "type": "string",
+            "description": "One-line expected result."
+          },
+          "falsifier": {
+            "type": "string",
+            "description": "Optional in schema (872-D4): what a vacuous satisfaction of this check would look like and why this check is not it. Plan-authoring makes this conditionally mandatory for targets flagged by a letter-vs-intent stress-test finding; the schema itself stays permissive."
+          },
+          "source": {
+            "type": ["string", "null"],
+            "description": "Reserved provenance field, e.g. bdd:S3. null when not yet populated."
+          }
+        }
+      }
+    },
+    "invariants": {
+      "type": "array",
+      "description": "Floor: both named literals below are required; repo-specific entries may be appended.",
+      "items": { "type": "string" },
+      "allOf": [
+        { "contains": { "const": "full-pester-suite-no-new-failures" } },
+        { "contains": { "const": "test-diff-integrity" } }
+      ]
+    },
+    "evidence_obligations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["checkpoint_commits", "run_log", "experience_obligations", "required_markers"],
+      "properties": {
+        "checkpoint_commits": { "type": "string" },
+        "run_log": { "type": "string" },
+        "experience_obligations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["scenario", "surface"],
+            "properties": {
+              "scenario": { "type": "string" },
+              "surface": {
+                "enum": ["browser", "cli", "api", "canvas"]
+              }
+            }
+          }
+        },
+        "required_markers": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "general_experience_standard": {
+      "type": "string",
+      "description": "Canonical clause and four guardrails, verbatim from #848 D8."
+    },
+    "halt_conditions": {
+      "type": "array",
+      "description": "Exactly the five halt-condition literals, each exactly once. Expressed via items-enum + minItems/maxItems/uniqueItems rather than a single const array so the order is not load-bearing.",
+      "minItems": 5,
+      "maxItems": 5,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "unachievable-target",
+          "invariant-conflict",
+          "budget-exhausted",
+          "gate-input-needed",
+          "chain-stage-failure"
+        ]
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tokens", "wall_clock", "chain_sub_ceiling", "non_convergence"],
+      "properties": {
+        "tokens": {
+          "type": ["integer", "string"],
+          "description": "Token ceiling, or an advisory string per #871 finding."
+        },
+        "wall_clock": { "type": "string" },
+        "chain_sub_ceiling": {
+          "type": "integer",
+          "description": "Bounds the post-loop chain."
+        },
+        "non_convergence": { "type": "string" }
+      }
+    }
+  }
+}
