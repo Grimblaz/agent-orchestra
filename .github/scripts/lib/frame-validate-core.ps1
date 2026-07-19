@@ -7,6 +7,7 @@
 $script:FVLibDir = Split-Path -Parent $PSCommandPath
 . (Join-Path -Path $script:FVLibDir -ChildPath 'frame-shared-discovery.ps1')
 . (Join-Path -Path $script:FVLibDir -ChildPath 'frame-spine-core.ps1')
+. (Join-Path -Path $script:FVLibDir -ChildPath 'goal-contract-core.ps1')
 
 function New-FVCheckResult {
     param(
@@ -418,6 +419,83 @@ function Test-FVMigrationTypePlan {
     return ($PlanBody -imatch 'migration-type|exhaustive repo scan')
 }
 
+function Invoke-FVGoalContractPlanValidate {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$CommentBody,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$ContractPayload,
+        [Parameter(Mandatory)][string]$RepoRoot
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ContractPayload)) {
+        return (New-FVAggregateResult -Results @((New-FVCheckResult -Name 'PlanStructuralCoverage' -Passed $false -Detail 'The <!-- goal-contract --> block is empty; no payload was found between the marker and its terminator.')))
+    }
+
+    $converted = ConvertFrom-GCContractBlock -Payload $ContractPayload -RepoRoot $RepoRoot
+    if (@($converted.Violations).Count -gt 0) {
+        return (New-FVAggregateResult -Results @((New-FVCheckResult -Name 'PlanStructuralCoverage' -Passed $false -Detail "goal-contract schema violation(s): $($converted.Violations -join '; ')")))
+    }
+
+    $contract = $converted.Contract
+    $structuralViolations = [System.Collections.Generic.List[string]]::new()
+    $coverageGaps = [System.Collections.Generic.List[string]]::new()
+
+    # Conditional issue: cross-check -- compared only when a plan-issue-{ID}
+    # marker is present in the comment body; skipped otherwise (872-D5).
+    $issueMarkerMatch = [regex]::Match($CommentBody, '<!--\s*plan-issue-(?<id>\d+)\s*-->')
+    if ($issueMarkerMatch.Success) {
+        $markerIssue = [int]$issueMarkerMatch.Groups['id'].Value
+        $contractIssue = 0
+        if ([int]::TryParse([string]$contract.issue, [ref]$contractIssue) -and $contractIssue -ne $markerIssue) {
+            $structuralViolations.Add("contract issue: $contractIssue does not match the plan-issue-$markerIssue marker.") | Out-Null
+        }
+    }
+
+    # AC-coverage, forward direction: every target ac_ref must appear in the
+    # plan ## Acceptance Criteria section. A missing section entirely
+    # produces one clear failure rather than one violation per target.
+    $acIds = @(Get-FVPlanAcceptanceCriterionId -CommentBody $CommentBody)
+    $acIdSet = [System.Collections.Generic.HashSet[string]]::new([string[]]$acIds, [System.StringComparer]::Ordinal)
+    $targetAcRefs = @($contract.targets | ForEach-Object { [string]$_.ac_ref })
+    $hasAcSection = ($CommentBody -match '(?m)^##\s+Acceptance Criteria\s*$')
+
+    if (-not $hasAcSection) {
+        $structuralViolations.Add("Plan is missing a ## Acceptance Criteria section; cannot verify ac_ref membership for $($targetAcRefs.Count) target(s).") | Out-Null
+    }
+    else {
+        foreach ($acRef in @($targetAcRefs | Select-Object -Unique)) {
+            if (-not $acIdSet.Contains($acRef)) {
+                $structuralViolations.Add("target ac_ref '$acRef' has no matching ## Acceptance Criteria entry.") | Out-Null
+            }
+        }
+    }
+
+    # AC-coverage, reverse direction: warn-only, mirrors the spine path.
+    $targetAcRefSet = [System.Collections.Generic.HashSet[string]]::new([string[]]$targetAcRefs, [System.StringComparer]::Ordinal)
+    foreach ($acId in $acIds) {
+        if (-not $targetAcRefSet.Contains($acId)) {
+            $coverageGaps.Add("coverage-gap: acceptance criterion $acId has no contract target ac_ref coverage.") | Out-Null
+        }
+    }
+
+    $results = [System.Collections.Generic.List[PSCustomObject]]::new()
+    if ($structuralViolations.Count -eq 0) {
+        $results.Add((New-FVCheckResult -Name 'PlanStructuralCoverage' -Passed $true -Detail '')) | Out-Null
+    }
+    else {
+        $results.Add((New-FVCheckResult -Name 'PlanStructuralCoverage' -Passed $false -Detail "$($structuralViolations.Count) structural violation(s): $($structuralViolations -join '; ')")) | Out-Null
+    }
+
+    if ($coverageGaps.Count -eq 0) {
+        $results.Add((New-FVCheckResult -Name 'PlanCoverageGap' -Passed $true -Detail '')) | Out-Null
+    }
+    else {
+        $results.Add((New-FVCheckResult -Name 'PlanCoverageGap' -Passed $true -Detail "$($coverageGaps.Count) warn-only coverage gap(s): $($coverageGaps -join '; ')")) | Out-Null
+    }
+
+    return (New-FVAggregateResult -Results $results.ToArray())
+}
+
 function Invoke-FVPlanValidate {
     [CmdletBinding()]
     param(
@@ -426,8 +504,34 @@ function Invoke-FVPlanValidate {
     )
 
     $commentBody = Get-FVPlanCommentText -CommentFile $CommentFile -CommentText $CommentText
+
+    # 872-D5: variant detection is hoisted ABOVE the frame-spine null-check
+    # below (which otherwise short-circuits straight into spine validation
+    # and can never see a both-blocks plan). Detection is frontmatter-
+    # anchored (Test-GCVariantFrontmatter), never a body-wide line match, so
+    # a plan that merely quotes the literal in prose is not misclassified.
+    $isGoalContractVariant = Test-GCVariantFrontmatter -CommentBody $commentBody
     $spineBlock = Get-FSCSpineBlock -CommentBody $commentBody
+    $contractPayload = Get-GCContractBlock -CommentBody $commentBody
+
+    if ($isGoalContractVariant) {
+        if ($null -ne $spineBlock) {
+            return (New-FVAggregateResult -Results @((New-FVCheckResult -Name 'PlanStructuralCoverage' -Passed $false -Detail 'Ambiguous plan: declares plan-variant: goal-contract frontmatter and also carries a frame-spine block; a plan must use exactly one mechanism.')))
+        }
+
+        if ($null -eq $contractPayload) {
+            return (New-FVAggregateResult -Results @((New-FVCheckResult -Name 'PlanStructuralCoverage' -Passed $false -Detail 'Plan declares plan-variant: goal-contract frontmatter but no <!-- goal-contract --> contract block was found (or more than one was found).')))
+        }
+
+        $repoRoot = Resolve-FVRootPath -RootPath $null
+        return (Invoke-FVGoalContractPlanValidate -CommentBody $commentBody -ContractPayload $contractPayload -RepoRoot $repoRoot)
+    }
+
     if ($null -eq $spineBlock) {
+        if ($null -ne $contractPayload) {
+            return (New-FVAggregateResult -Results @((New-FVCheckResult -Name 'PlanStructuralCoverage' -Passed $false -Detail 'Plan carries a <!-- goal-contract --> contract block but is missing plan-variant: goal-contract frontmatter.')))
+        }
+
         if (Test-FVPlanSpineOmittedPlanTooSmall -CommentBody $commentBody) {
             $legacyResults = [System.Collections.Generic.List[PSCustomObject]]::new()
             $legacyResults.Add((New-FVCheckResult -Name 'PlanStructuralCoverage' -Passed $true -Detail 'spine-omitted: plan-too-small')) | Out-Null
