@@ -273,6 +273,111 @@ exit `$exitCode
                 TimedOut             = -not $finished
             }
         }
+
+        # --- 872-D5 goal-contract variant fixtures (frame-slice s3) ---
+        # A minimal schema-valid <!-- goal-contract --> block (872-D2 field
+        # set), reused across the goal-contract orchestra-spine tests below.
+        # frame-slice s3 covers reader behavior only; hash correctness is
+        # #873's concern (872-D3), so a literal 64-zero placeholder is used.
+        $script:NewGCContractBlockLines = {
+            param([string]$AcRef = 'AC2', [string]$IssueField = '872')
+
+            return @(
+                '<!-- goal-contract'
+                'schema_version: 1'
+                "issue: $IssueField"
+                "contract_hash: `"$('0' * 64)`""
+                'targets:'
+                '  - id: T1'
+                "    ac_ref: $AcRef"
+                '    category: structure-presence'
+                '    check: "pwsh -NoProfile -File .github/scripts/example-check.ps1"'
+                '    expected: "exit 0; example check passes"'
+                '    source: null'
+                'invariants:'
+                '  - full-pester-suite-no-new-failures'
+                '  - test-diff-integrity'
+                'evidence_obligations:'
+                '  checkpoint_commits: per-target-green'
+                '  run_log: "deviation entries + experience observations per checkpoint"'
+                '  experience_obligations:'
+                '    - scenario: S2'
+                '      surface: cli'
+                '  required_markers: [pipeline-metrics-credits, goal-run-class]'
+                'general_experience_standard: "Canonical clause and four guardrails, verbatim from #848 D8."'
+                'halt_conditions: [unachievable-target, invariant-conflict, budget-exhausted, gate-input-needed, chain-stage-failure]'
+                'budget:'
+                '  tokens: 100000'
+                '  wall_clock: 4h'
+                '  chain_sub_ceiling: 2'
+                '  non_convergence: halt-report'
+                '-->'
+            )
+        }
+
+        # Builds a plan comment body in the REAL persisted-comment shape: the
+        # plan-issue and phase-containment-ledger-ref markers precede the ---
+        # frontmatter fence (Issue-Planner.agent.md:132,
+        # plan-authoring/SKILL.md:373), so the fence is never line 1 -- a
+        # fixture without those markers cannot detect a strict-line-1
+        # anchoring defect.
+        $script:NewGCPlanCommentBody = {
+            param(
+                [int]$IssueNumber = 872,
+                [switch]$OmitVariantFrontmatter,
+                [switch]$IncludePlanTooSmall,
+                [switch]$IncludeSpineAndSlice,
+                [string[]]$ContractBlockLines = $null,
+                [string[]]$ExtraProseLines = @()
+            )
+
+            $lines = [System.Collections.Generic.List[string]]::new()
+            $lines.Add("<!-- plan-issue-$IssueNumber -->") | Out-Null
+            $lines.Add('<!-- phase-containment-ledger-ref: 5016023361 -->') | Out-Null
+            $lines.Add('') | Out-Null
+            $lines.Add('---') | Out-Null
+            $lines.Add('status: pending') | Out-Null
+            $lines.Add("issue_id: $IssueNumber") | Out-Null
+            if (-not $OmitVariantFrontmatter) {
+                $lines.Add('plan-variant: goal-contract') | Out-Null
+            }
+            if ($IncludePlanTooSmall) {
+                $lines.Add('spine-omitted: plan-too-small') | Out-Null
+            }
+            $lines.Add('---') | Out-Null
+            $lines.Add('') | Out-Null
+            $lines.Add("## Plan: Goal-contract fixture for issue $IssueNumber") | Out-Null
+            $lines.Add('Fixture body for /orchestra:spine RED tests over the 872-D5 state matrix.') | Out-Null
+            $lines.Add('') | Out-Null
+            $lines.Add('## Acceptance Criteria') | Out-Null
+            $lines.Add('- **AC2** frame-validate accepts a goal-contract plan and still rejects a bare spine-less plan.') | Out-Null
+            $lines.Add('') | Out-Null
+
+            if ($IncludeSpineAndSlice) {
+                $lines.Add('<!-- frame-spine') | Out-Null
+                $lines.Add($script:RepresentativeSpine) | Out-Null
+                $lines.Add('-->') | Out-Null
+                $lines.Add('') | Out-Null
+            }
+
+            foreach ($prose in $ExtraProseLines) { $lines.Add($prose) | Out-Null }
+
+            if ($null -ne $ContractBlockLines) {
+                foreach ($contractLine in $ContractBlockLines) { $lines.Add($contractLine) | Out-Null }
+            }
+
+            return [string]($lines.ToArray() -join "`n")
+        }
+
+        $script:NewGCCommentsJson = {
+            param([Parameter(Mandatory)][string]$Body, [int]$CommentId = 2001)
+
+            return (@{
+                    comments = @(
+                        @{ id = $CommentId; updatedAt = '2026-07-19T15:00:00Z'; body = $Body }
+                    )
+                } | ConvertTo-Json -Depth 12)
+        }
     }
 
     It 'extracts the latest plan comment spine and renders no slices or prose plan' {
@@ -413,5 +518,63 @@ exit `$exitCode
 
         $archContent = Get-Content -Path $script:AgentBodyArchPath -Raw -ErrorAction Stop
         $archContent | Should -Match '(?m)^\|\s*`commands/orchestra-spine\.md`\s*\|\s*`inherit`\s*\|\s*`inherit`\s*\|[^\r\n]*D4:\s*routine inspection' -Because 'agent-body-architecture.md routing table must register the command as inherited D4 routine inspection'
+    }
+
+    Context '872-D5 goal-contract variant reader behavior (issue #872, frame-slice s3)' {
+
+        It 'renders the goal-contract variant message instead of the legacy-plan-shape fall-through for a goal-contract plan' {
+            . $script:ScriptPath
+            $contractLines = & $script:NewGCContractBlockLines -AcRef 'AC2'
+            $body = & $script:NewGCPlanCommentBody -ContractBlockLines $contractLines
+            $commentsJson = & $script:NewGCCommentsJson -Body $body
+
+            $rendered = Invoke-OrchestraSpineRender -IssueNumber 872 -CommentsJson $commentsJson
+
+            [string]$rendered | Should -Match '(?i)goal-contract' -Because 'a goal-contract plan must render the variant-aware message (872-D7 item 1)'
+            [string]$rendered | Should -Not -Match 'legacy-plan-shape' -Because 'the variant message replaces the misleading legacy-plan-shape fall-through'
+        }
+
+        It 'still renders the frame spine for a plan whose prose merely quotes the plan-variant: goal-contract literal (false-positive guard, C6 for this reader too)' {
+            . $script:ScriptPath
+            $body = & $script:NewGCPlanCommentBody -OmitVariantFrontmatter -IncludeSpineAndSlice -ContractBlockLines $null -ExtraProseLines @(
+                'Authoring note: some plans declare'
+                'plan-variant: goal-contract'
+                'at the start of a prose line for illustration purposes only.'
+                ''
+            )
+            $commentsJson = & $script:NewGCCommentsJson -Body $body
+
+            $rendered = Invoke-OrchestraSpineRender -IssueNumber 872 -CommentsJson $commentsJson
+
+            [string]$rendered | Should -Match 'implement-test' -Because 'a body-wide quoted literal outside real frontmatter must not suppress the normal spine table'
+            [string]$rendered | Should -Not -Match '(?i)goal-contract' -Because 'the quoted literal must not route this spine plan to the variant message'
+        }
+
+        It 'resolves the plan-too-small x goal-contract-variant cross identically to frame-validate by rendering the variant message' {
+            . $script:ScriptPath
+            $contractLines = & $script:NewGCContractBlockLines -AcRef 'AC2'
+            $body = & $script:NewGCPlanCommentBody -IncludePlanTooSmall -ContractBlockLines $contractLines
+            $commentsJson = & $script:NewGCCommentsJson -Body $body
+
+            $rendered = Invoke-OrchestraSpineRender -IssueNumber 872 -CommentsJson $commentsJson
+
+            [string]$rendered | Should -Match '(?i)goal-contract' -Because 'the variant branch must win over the legacy plan-too-small escape, identically to frame-validate'
+            [string]$rendered | Should -Not -Match 'plan has no spine' -Because 'a variant-declared plan must not fall through to the plan-too-small fallback message'
+        }
+
+        It 'Invoke-FSCSpineLookupCli returns missing-spine for a goal-contract-only body (872-D7 item 2 backstop, no code change expected)' {
+            . $script:ScriptPath
+            Get-Command Invoke-FSCSpineLookupCli -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty -Because 'frame-spine-core.ps1 is dot-sourced transitively by orchestra-spine.ps1'
+
+            $contractLines = & $script:NewGCContractBlockLines -AcRef 'AC2'
+            $body = & $script:NewGCPlanCommentBody -ContractBlockLines $contractLines
+            $bodyPath = Join-Path $TestDrive 'goal-contract-only-body.txt'
+            Set-Content -Path $bodyPath -Value $body -Encoding UTF8 -NoNewline
+
+            $result = Invoke-FSCSpineLookupCli -CommentBodyPath $bodyPath -Format Text -GeneratedAt '2026-07-19T15:00:00Z' -StepId 's1'
+
+            $result.ExitCode | Should -Be 1
+            ($result.Lines -join "`n") | Should -Match 'status:\s*missing-spine' -Because 'a goal-contract-only body has no frame-spine block, and 872-D7 settles this as requiring no code change to the lookup backstop'
+        }
     }
 }
