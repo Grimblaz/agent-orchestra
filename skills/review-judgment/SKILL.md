@@ -135,7 +135,7 @@ Keep the Markdown score summary and the `judge-rulings` block together in the sa
 
 ### Phase-containment emission
 
-In the same PR comment as the `<!-- judge-rulings ... -->` block, emit one `<!-- phase-containment-{PR} -->` block per sustained finding (`judge_ruling: sustained`):
+In the same PR comment as the `<!-- judge-rulings ... -->` block, emit one `<!-- phase-containment-{PR} -->` block per sustained finding (`judge_ruling: sustained`). The two block families are different shapes and are not interchangeable: `judge-rulings` (above) stays **bare** — one unclosed `<!-- judge-rulings ... -->` comment — while `phase-containment` is always **paired** — a self-closed `<!-- phase-containment-{PR} -->` open tag followed by plain-text YAML fields and a separate `<!-- /phase-containment-{PR} -->` close tag, because the close tag powers `Get-PhaseContainmentBlock`'s pair-matching malformation detection (issue #772 D6). **Scope boundary**: this section and its Observer variant below document the block *shape* only — routing a given finding's emission to the shared `Add-JudgeRulingsBlock`/`Get-PhaseContainmentBlock` helper machinery is deferred to AC6, not covered here.
 
 - `finding_key`: `code-review:{stable_finding_key}`
 - `introduced_phase`: set by explicit agent judgment — no default; reason which phase originated this defect
@@ -145,6 +145,23 @@ In the same PR comment as the `<!-- judge-rulings ... -->` block, emit one `<!--
 - `severity`, `systemic_fix_type`, `category`: carry forward from the finding
 - `apparatus_meta: false` unless a stated criterion justifies `true`; when `apparatus_meta: true`, the entry is audited
 - `appended_at`: stamp the current UTC instant in the strict `yyyy-MM-ddTHH:mm:ssZ` form (863 M1 fix) — this block is hand-authored directly into the PR comment (no script primitive writes it on this surface), so the judge/agent authoring the block is responsible for stamping this field itself
+
+A fully literal canonical example, for a sustained code-review finding on PR 879:
+
+```markdown
+<!-- phase-containment-879 -->
+finding_key: code-review:gh-1234
+introduced_phase: implementation
+catchable_phase: implementation
+caught_stage: code-review
+escape_distance: 0
+severity: high
+systemic_fix_type: instruction
+category: security
+apparatus_meta: false
+appended_at: 2026-07-18T22:20:00Z
+<!-- /phase-containment-879 -->
+```
 
 #### Observer emission variant (post-review-observer)
 
@@ -156,6 +173,23 @@ When a sustained finding's `reviewer_source` resolves to a real external identit
 - `caught_stage: post-review-observer`
 - `escape_distance`: recomputed as `4 - ordinal(catchable_phase)` (post-review-observer projection = 4; same phase ordinals as above)
 - `introduced_phase`, `catchable_phase`, `severity`, `systemic_fix_type`, `category`, `apparatus_meta`: same setter rule and carry-forward as the code-review block above
+
+A fully literal canonical example, for a sustained post-review-observer finding on PR 879 — same paired shape as the code-review block above, distinguished by the `post-review-observer:` `finding_key` prefix, `caught_stage`, and its own `escape_distance` projection:
+
+```markdown
+<!-- phase-containment-879 -->
+finding_key: post-review-observer:gh-5678
+introduced_phase: implementation
+catchable_phase: implementation
+caught_stage: post-review-observer
+escape_distance: 1
+severity: medium
+systemic_fix_type: skill
+category: architecture
+apparatus_meta: false
+appended_at: 2026-07-18T22:20:00Z
+<!-- /phase-containment-879 -->
+```
 
 **Novel-gating is a trinary, not a two-way rule (M25)**:
 

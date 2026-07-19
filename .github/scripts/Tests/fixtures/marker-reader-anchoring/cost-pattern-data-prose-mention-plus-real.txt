@@ -1,0 +1,17 @@
+Heads up — the walker posts a marker shaped like `<!-- cost-pattern-data ... -->`
+mid-sentence like this one, and no presence-gate should ever treat that inline
+mention as the real marker.
+
+<!-- cost-pattern-data
+version: 1
+coverage: claude-only-with-copilot-fallback-warning
+install_status: ok
+session_completeness: complete
+generated_at: 2026-07-18T06:16:17Z
+pr: 879
+totals:
+  cost_estimate_usd: 12.3456
+anomaly_flags: []
+-->
+
+Trailer text after the block, untouched by any splice.

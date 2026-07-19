@@ -1,0 +1,21 @@
+Heads up: the parser looks for a block shaped like `<!-- frame-spine ... -->` and reads until the matching closer, so don't paste a raw one into a code review comment unless you mean it.
+
+<!-- frame-spine
+spine_schema_version: 2
+generated_at: 2026-07-18T22:20:00Z
+coverage: complete
+slice_comment_id: 5013460780
+ports:
+  implement-docs: [s1, s3#cycle:2, s7#cycle:3#terminal]
+  implement-test: [s2, s4#cycle:2#terminal]
+  implement-code: [s5, s6#cycle:2#terminal]
+  review: [s8#terminal]
+  ce-gate-cli: [s9#terminal]
+slices:
+  s1:
+    execution_mode: serial
+    rc: exhaustive marker-reader inventory committed as a tracked artifact
+    ac_refs: [AC4]
+    depends_on: []
+    cycle: 1
+-->

@@ -1,0 +1,20 @@
+Heads up — the writer posts a marker shaped like `<!-- design-phase-complete-878 -->`
+mid-sentence like this one, and no presence-gate should ever treat that inline
+mention as the real marker.
+
+<!-- design-phase-complete-878 -->
+
+Technical design complete — decisions documented. Ready for planning.
+
+```yaml
+finding_dispositions:
+  schema_version: 1
+  passes_run: [1]
+  entries:
+    - finding_id: M1
+      pass: 1
+      disposition: incorporate
+      classification: routine
+```
+
+Trailer text after the block, untouched by any splice.

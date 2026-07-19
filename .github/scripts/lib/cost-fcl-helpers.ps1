@@ -92,7 +92,7 @@ function script:Resolve-FCLLinkedIssueNumber {
         $patterns = @(
             '(?im)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|ref(?:s|erences)?|issue)\s+(?:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#(?<issue>\d+)\b',
             '(?im)^\s*issue_id\s*:\s*(?<issue>\d+)\s*$',
-            '(?im)<!--\s*(?:plan|design)-issue-(?<issue>\d+)\s*-->'
+            '(?im)^\s*<!--\s*(?:plan|design)-issue-(?<issue>\d+)\s*-->'
         )
 
         foreach ($pattern in $patterns) {

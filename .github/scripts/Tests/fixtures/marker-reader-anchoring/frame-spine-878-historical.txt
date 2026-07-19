@@ -1,0 +1,67 @@
+<!-- frame-spine
+spine_schema_version: 2
+generated_at: 2026-07-18T22:20:00Z
+coverage: complete
+slice_comment_id: 5013460780
+ports:
+  implement-docs: [s1, s3#cycle:2, s7#cycle:3#terminal]
+  implement-test: [s2, s4#cycle:2#terminal]
+  implement-code: [s5, s6#cycle:2#terminal]
+  review: [s8#terminal]
+  ce-gate-cli: [s9#terminal]
+slices:
+  s1:
+    execution_mode: serial
+    rc: exhaustive marker-reader inventory committed as a tracked artifact
+    ac_refs: [AC4]
+    depends_on: []
+    cycle: 1
+  s2:
+    execution_mode: serial
+    rc: doc-example contract test authored red with a minimum-count floor
+    ac_refs: [AC1]
+    depends_on: []
+    cycle: 1
+  s3:
+    execution_mode: serial
+    rc: template and three canonical examples fixed to paired shape, test green
+    ac_refs: [AC1]
+    depends_on: [s2]
+    cycle: 2
+  s4:
+    execution_mode: serial
+    rc: helper Pester suite authored red incl. body-survival and per-primitive failure contracts
+    ac_refs: [AC2]
+    depends_on: []
+    cycle: 2
+  s5:
+    execution_mode: serial
+    rc: helper plus net-new glue implemented, suite green
+    ac_refs: [AC2]
+    depends_on: [s4]
+    cycle: 1
+  s6:
+    execution_mode: serial
+    rc: per-pattern anchoring applied across the committed inventory with per-family fixtures
+    ac_refs: [AC4]
+    depends_on: [s1]
+    cycle: 2
+  s7:
+    execution_mode: serial
+    rc: burst prose, shared writer rule, architecture-rules exception, follow-up issue
+    ac_refs: [AC3, AC5, AC6]
+    depends_on: [s5]
+    cycle: 3
+  s8:
+    execution_mode: serial
+    rc: adversarial review pipeline over the changeset
+    ac_refs: [AC1, AC2, AC3, AC4, AC5]
+    depends_on: [s7]
+    cycle: 1
+  s9:
+    execution_mode: serial
+    rc: CE Gate live exercise of S1-S4
+    ac_refs: [AC1, AC2, AC3, AC4, AC5]
+    depends_on: [s8]
+    cycle: 1
+-->

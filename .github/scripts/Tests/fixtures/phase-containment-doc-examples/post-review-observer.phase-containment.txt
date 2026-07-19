@@ -1,0 +1,12 @@
+<!-- phase-containment-879 -->
+finding_key: post-review-observer:gh-5678
+introduced_phase: implementation
+catchable_phase: implementation
+caught_stage: post-review-observer
+escape_distance: 1
+severity: medium
+systemic_fix_type: skill
+category: architecture
+apparatus_meta: false
+appended_at: 2026-07-18T22:20:00Z
+<!-- /phase-containment-879 -->

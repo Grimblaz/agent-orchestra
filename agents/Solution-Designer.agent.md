@@ -180,7 +180,25 @@ A `Documents/Design/` file is **not** created during design — Doc-Keeper creat
 
 ### Phase-containment emission (design-challenge)
 
-After writing the `<!-- design-phase-complete-{ISSUE_NUMBER} -->` completion marker, emit one `<!-- phase-containment-{ID} -->` block per sustained design-challenge finding. Append these blocks to the same `design-phase-complete-{ISSUE_NUMBER}` comment (see `skills/design-exploration/SKILL.md` § Dispositions → Phase-containment emission for the full field contract). Each block is validated against `skills/calibration-pipeline/schemas/phase-containment.schema.json`.
+After writing the `<!-- design-phase-complete-{ISSUE_NUMBER} -->` completion marker, persist one `<!-- phase-containment-{ID} -->` block per sustained design-challenge finding by invoking `skills/session-memory-contract/scripts/persist-phase-ledger.ps1` with `-Mode design` — never by hand-authoring the blocks onto the comment (see `skills/design-exploration/SKILL.md` § Dispositions → Phase-containment emission for the full field contract). The helper is the ONLY documented path for this write. Design-mode appends directly onto the caller-supplied `-DesignCommentId` (the existing `<!-- design-phase-complete-{ID} -->` comment): no search, no sibling, no pointer. Each block is validated against `skills/calibration-pipeline/schemas/phase-containment.schema.json` before passing it to `-PhaseContainmentBlocks`.
+
+Repo-relative (hub-repo contributors):
+
+```powershell
+pwsh skills/session-memory-contract/scripts/persist-phase-ledger.ps1 `
+    -Owner {owner} -Repo {repo} -Mode design -DesignCommentId {DESIGN_COMMENT_ID} `
+    -JudgeRulingsContent $placeholderContent -PhaseContainmentBlocks @($block1, $block2)
+```
+
+Plugin-root-absolute (consumer installs — mirror the dual-form pattern at `skills/session-startup/SKILL.md` Step 3):
+
+```powershell
+pwsh {plugin-root}/skills/session-memory-contract/scripts/persist-phase-ledger.ps1 `
+    -Owner {owner} -Repo {repo} -Mode design -DesignCommentId {DESIGN_COMMENT_ID} `
+    -JudgeRulingsContent $placeholderContent -PhaseContainmentBlocks @($block1, $block2)
+```
+
+`-JudgeRulingsContent` is Mandatory on the helper for both modes, but under `-Mode design` the value is accepted and then deliberately discarded — design-challenge review is prosecution-only with no judge stage, so there is no legitimate `judge_ruling:` data for the design surface, and the live `<!-- design-phase-complete-{ID} -->` comment never carries a `judge-rulings` block. Pass any non-empty string (e.g. a short literal placeholder); its content is never written. When there are zero sustained findings, omit `-PhaseContainmentBlocks` (defaults to an empty array). On failure, the helper exits non-zero, names the failing step, and propagates the underlying primitive's `Reason`.
 
 ## Boundaries
 

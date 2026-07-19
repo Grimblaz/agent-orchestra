@@ -1,0 +1,14 @@
+<!-- frame-slice
+step_id: s1
+commit-index: 1
+provides: [implement-docs]
+adapter: skills/documentation-finalization/adapters/implement-docs-adapter.md
+migration-scan: true
+depends-on: []
+ac-refs: [AC4]
+requirement-contract: |
+  Exhaustive marker-reader inventory across BOTH .github/scripts/** and skills/**/scripts/**, committed as a tracked artifact (not .tmp/, which is gitignored). Five classification classes: block-selector, presence-gate, count-validator, splice-writer, comment-selector (wildcard/substring matchers Part C's regex anchoring cannot reach). Record pattern text, top-level alternation presence, end-anchor presence, and for presence-gates their polarity.
+  Polarity rule (load-bearing): never narrow a gate whose true branch is the fail-loud path. phase-containment-emission-check-core.ps1:800 is excluded from anchoring for exactly this reason - its docstring at :679-682 states that without the fallback the render is a false clean. Conversion difficulty must never drive classification.
+  Structurally unanchorable readers (Get-PhaseContainmentBlock uses ordinal IndexOf, phase-containment-core.ps1:225-226) are recorded with disposition structurally-unanchorable, degrades to warn.
+  Non-goals: no source edits; no review-judgment PR-surface emission work.
+-->

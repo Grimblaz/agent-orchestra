@@ -30,10 +30,10 @@ function script:Get-CostPatternDataFromComment {
         Extracts the YAML content from a <!-- cost-pattern-data ... --> block.
     #>
     param([string]$Body)
-    if ($Body -notmatch '<!--\s*cost-pattern-data') {
+    if ($Body -notmatch '(?m)^\s*<!--\s*cost-pattern-data') {
         return $null
     }
-    if ($Body -match '<!--\s*cost-pattern-data\s*\r?\n([\s\S]*?)\r?\n?-->') {
+    if ($Body -match '(?m)^\s*<!--\s*cost-pattern-data\s*\r?\n([\s\S]*?)\r?\n?-->') {
         return $Matches[1]
     }
     return $null
@@ -723,7 +723,7 @@ function Get-CostRollingHistory {
                             foreach ($comment in $prCommentNodes) {
                                 if ($null -eq $comment) { continue }
                                 $body = [string]$comment['body']
-                                if ($body -match '<!--\s*cost-pattern-data') {
+                                if ($body -match '(?m)^\s*<!--\s*cost-pattern-data') {
                                     $commentBodies.Add($body)
                                 }
                             }
@@ -782,7 +782,7 @@ function Get-CostRollingHistory {
                     foreach ($comment in $prComments) {
                         if ($null -eq $comment) { continue }
                         $body = [string]$comment['body']
-                        if ($body -match '<!--\s*cost-pattern-data') {
+                        if ($body -match '(?m)^\s*<!--\s*cost-pattern-data') {
                             $commentBodies.Add($body)
                         }
                     }

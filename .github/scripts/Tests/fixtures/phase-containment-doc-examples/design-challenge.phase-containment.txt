@@ -1,0 +1,11 @@
+<!-- phase-containment-878 -->
+finding_key: design-challenge:878:design-phase-complete-878:M1
+introduced_phase: design
+catchable_phase: design
+caught_stage: design-challenge
+escape_distance: 0
+severity: medium
+systemic_fix_type: instruction
+category: pattern
+apparatus_meta: false
+<!-- /phase-containment-878 -->

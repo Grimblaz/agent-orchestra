@@ -9,6 +9,7 @@ Describe 'Find-OrUpsertComment' {
     BeforeEach {
         # Reset mock state per test
         $script:lastGhArgs = $null
+        $script:lastListArgs = $null
         $script:lastPostArgs = $null
         $script:lastPatchArgs = $null
         $script:ghCallCount = 0
@@ -23,6 +24,7 @@ Describe 'Find-OrUpsertComment' {
             $script:lastGhArgs = $Args
             $joined = $Args -join ' '
             if ($joined -match 'issue view \d+ --json comments') {
+                $script:lastListArgs = $Args
                 if ($script:simulateFailure -eq 'list') {
                     $global:LASTEXITCODE = 1
                     return ''
@@ -158,6 +160,41 @@ Describe 'Find-OrUpsertComment' {
             )
             $url = Find-OrUpsertComment -Type pr -Number 123 -Marker '<!-- frame-credit-ledger-123 -->' -Body 'new'
             $script:lastPatchArgs | Should -Not -BeNullOrEmpty
+        }
+    }
+
+    Context 'Explicit Owner/Repo (P4 regression - #887 post-fix)' {
+        It 'threads the caller-supplied -Owner/-Repo through to every gh call, not "/"' {
+            # Root cause under test: the pre-fix code used lowercase $owner/$repo
+            # locals for the derived-from-git-remote fallback. PowerShell
+            # variable names are case-insensitive, so $owner IS $Owner -- the
+            # fallback-reset line `$owner = $null` nulled the caller-supplied
+            # -Owner parameter itself, and every gh call below ended up
+            # targeting "-R \"/\"" regardless of what was passed in.
+            $script:mockComments = @(
+                @{ id = 999; body = "<!-- explicit-owner-test -->`nold body" }
+            )
+            $url = Find-OrUpsertComment -Type pr -Number 123 -Marker '<!-- explicit-owner-test -->' -Body 'new body' -Owner 'ExplicitOwner' -Repo 'explicit-repo'
+
+            $url | Should -Not -BeNullOrEmpty
+            $script:lastListArgs | Should -Not -BeNullOrEmpty
+            ($script:lastListArgs -join ' ') | Should -Match 'issue view 123 --json comments -R ExplicitOwner/explicit-repo' `
+                -Because 'the list call must be explicitly repo-targeted with the caller-supplied owner/repo, not derived/nulled'
+
+            $script:lastPatchArgs | Should -Not -BeNullOrEmpty
+            ($script:lastPatchArgs -join ' ') | Should -Match 'repos/ExplicitOwner/explicit-repo/issues/comments/999' `
+                -Because 'the PATCH path must embed the caller-supplied owner/repo, not "/" (nulled owner/repo)'
+            ($script:lastPatchArgs -join ' ') | Should -Not -Match 'repos//issues'
+        }
+
+        It 'threads explicit -Owner/-Repo through the POST (zero-match) path' {
+            $script:mockComments = @()
+            $url = Find-OrUpsertComment -Type pr -Number 456 -Marker '<!-- explicit-owner-post-test -->' -Body 'hello' -Owner 'ExplicitOwner' -Repo 'explicit-repo'
+
+            $url | Should -Not -BeNullOrEmpty
+            $script:lastPostArgs | Should -Not -BeNullOrEmpty
+            ($script:lastPostArgs -join ' ') | Should -Match '-R ExplicitOwner/explicit-repo' `
+                -Because 'the POST call must be explicitly repo-targeted with the caller-supplied owner/repo, not "/"'
         }
     }
 

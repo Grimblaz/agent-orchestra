@@ -98,7 +98,7 @@ function Get-FCLOriginContext {
     if (-not [string]::IsNullOrWhiteSpace($PrBody)) {
         $bodyPatterns = @(
             '(?im)^\s*issue_id\s*:\s*(?<issue>\d+)\s*$',
-            '(?im)<!--\s*(?:plan|design)-issue-(?<issue>\d+)\s*-->'
+            '(?im)^\s*<!--\s*(?:plan|design)-issue-(?<issue>\d+)\s*-->'
         )
 
         foreach ($pattern in $bodyPatterns) {

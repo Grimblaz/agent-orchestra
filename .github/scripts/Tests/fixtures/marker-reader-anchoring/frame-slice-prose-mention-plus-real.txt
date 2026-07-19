@@ -1,0 +1,13 @@
+Reminder: each addressable step lives in its own block shaped like `<!-- frame-slice ... -->` inside the sibling comment, not the plan comment body.
+
+<!-- frame-slice
+step_id: s1
+commit-index: 1
+provides: [implement-docs]
+adapter: skills/documentation-finalization/adapters/implement-docs-adapter.md
+migration-scan: true
+depends-on: []
+ac-refs: [AC4]
+requirement-contract: |
+  Exhaustive marker-reader inventory across BOTH .github/scripts/** and skills/**/scripts/**, committed as a tracked artifact (not .tmp/, which is gitignored).
+-->

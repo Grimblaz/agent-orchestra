@@ -205,7 +205,7 @@ Before posting the design completion marker, follow `agents/Solution-Designer.ag
 
 ### Phase-containment emission
 
-After the disposition summary is finalized and after posting the `design-phase-complete` marker, emit one `<!-- phase-containment-{ID} -->` block per sustained (non-dismissed) design-challenge finding by appending to the same `<!-- design-phase-complete-{ID} -->` issue comment (or editing it). This emission is anchored on **convergence-sustained** findings specifically — the same set that entered the classification gate in § Dispositions above; findings filtered by convergence do not receive a phase-containment block:
+After the disposition summary is finalized and after posting the `design-phase-complete` marker, persist one `<!-- phase-containment-{ID} -->` block per sustained (non-dismissed) design-challenge finding by invoking `skills/session-memory-contract/scripts/persist-phase-ledger.ps1` with `-Mode design -DesignCommentId {the design-phase-complete comment's numeric id}` — never by hand-appending or hand-editing the comment directly. This is the ONLY documented path for this write; the helper appends the blocks onto the same `<!-- design-phase-complete-{ID} -->` issue comment on your behalf, with no search, no sibling, and no pointer (design-mode has none of the plan-surface's sibling/pointer machinery). This emission is anchored on **convergence-sustained** findings specifically — the same set that entered the classification gate in § Dispositions above; findings filtered by convergence do not receive a phase-containment block:
 
 - `finding_key`: `design-challenge:{issue}:{marker}:{finding_id}`
 - `introduced_phase`: set by explicit agent judgment — no default; reason which phase originated this defect
@@ -215,9 +215,43 @@ After the disposition summary is finalized and after posting the `design-phase-c
 - `severity`, `systemic_fix_type`, `category`: carry forward from the finding
 - `apparatus_meta: false` unless a stated criterion justifies `true`
 
-**Setter rule**: `catchable_phase` and `introduced_phase` must each be set by explicit agent judgment with no default — the agent must reason about which phase was the earliest in which this specific defect was catchable, and which phase introduced it. Validate each block against `skills/calibration-pipeline/schemas/phase-containment.schema.json`.
+Unlike the plan-surface `judge-rulings` block (bare — a single unclosed `<!-- judge-rulings ... -->` comment; `design-challenge` is prosecution-only and does not emit one), `phase-containment` blocks are always **paired**: a self-closed `<!-- phase-containment-{ID} -->` open tag followed by plain-text YAML fields and a separate `<!-- /phase-containment-{ID} -->` close tag. The close tag is what powers `Get-PhaseContainmentBlock`'s pair-matching malformation detection (issue #772 D6). A fully literal canonical example, for a sustained design-challenge finding on issue 878:
 
-**Emission check (hub maintainers only)**: after posting the `design-phase-complete` marker comment, run `pwsh ./.github/scripts/phase-containment-emission-check.ps1 -Issue {N}` and treat its output as advisory — warn-only, never blocking. The repo-relative script path does not resolve from a consumer repo's CWD, so this nudge applies only when working in the Agent Orchestra hub repo itself; see the script header for the full contract.
+```markdown
+<!-- phase-containment-878 -->
+finding_key: design-challenge:878:design-phase-complete-878:M1
+introduced_phase: design
+catchable_phase: design
+caught_stage: design-challenge
+escape_distance: 0
+severity: medium
+systemic_fix_type: instruction
+category: pattern
+apparatus_meta: false
+<!-- /phase-containment-878 -->
+```
+
+**Setter rule**: `catchable_phase` and `introduced_phase` must each be set by explicit agent judgment with no default — the agent must reason about which phase was the earliest in which this specific defect was catchable, and which phase introduced it. Validate each block against `skills/calibration-pipeline/schemas/phase-containment.schema.json` before passing it to `-PhaseContainmentBlocks`. The `appended_at` field is never authored by hand — the helper stamps it itself at actual write time.
+
+Repo-relative (hub-repo contributors):
+
+```powershell
+pwsh skills/session-memory-contract/scripts/persist-phase-ledger.ps1 `
+    -Owner {owner} -Repo {repo} -Mode design -DesignCommentId {DESIGN_COMMENT_ID} `
+    -JudgeRulingsContent $placeholderContent -PhaseContainmentBlocks @($block1, $block2)
+```
+
+Plugin-root-absolute (consumer installs — mirror the dual-form pattern at `skills/session-startup/SKILL.md` Step 3):
+
+```powershell
+pwsh {plugin-root}/skills/session-memory-contract/scripts/persist-phase-ledger.ps1 `
+    -Owner {owner} -Repo {repo} -Mode design -DesignCommentId {DESIGN_COMMENT_ID} `
+    -JudgeRulingsContent $placeholderContent -PhaseContainmentBlocks @($block1, $block2)
+```
+
+`-JudgeRulingsContent` is Mandatory on the helper for both `-Mode plan` and `-Mode design`, but under `-Mode design` the value is accepted and then deliberately discarded — design-challenge review is prosecution-only with no judge stage (Stage 3 above: "Non-blocking — prosecution only (no defense or judge)"), so there is no legitimate `judge_ruling:` data for the design surface, and the live `<!-- design-phase-complete-{ID} -->` comment never carries a `judge-rulings` block. Pass any non-empty string as a placeholder (e.g. a short literal) — the parameter exists purely so callers never have to branch on `-Mode` to decide whether to supply it; its content is never written on this path. When there are zero sustained findings, omit `-PhaseContainmentBlocks` (it defaults to an empty array). On failure, the helper exits non-zero, names the failing step, and propagates the underlying primitive's `Reason`.
+
+**Emission check (hub maintainers only)**: after the helper posts the blocks onto the `design-phase-complete` marker comment, run `pwsh ./.github/scripts/phase-containment-emission-check.ps1 -Issue {N}` and treat its output as advisory — warn-only, never blocking. The repo-relative script path does not resolve from a consumer repo's CWD, so this nudge applies only when working in the Agent Orchestra hub repo itself; see the script header for the full contract.
 
 ## Related Guidance
 

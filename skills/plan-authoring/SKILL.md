@@ -201,9 +201,28 @@ Update the `Plan Stress-Test` summary block with the judge's final ruling and ma
 
 **Ledger sibling required (863-D4).** `phase-containment` blocks and the plan-surface `judge-rulings` block co-move together to a `<!-- phase-containment-ledger-{ID} -->` sibling comment — a separate comment on the same issue, never the `<!-- plan-issue-{ID} -->` comment. Co-locating both families in the sibling keeps Fix A's co-location gate (`emission-check-core.ps1`) satisfied unchanged, which is why they cannot be split further from each other; see `### Judge-rulings machine block (811-D1, co-moved by 863-D4)` below for the shared rationale.
 
-At first persist, create the sibling comment — its body opens with the identity marker `<!-- phase-containment-ledger-{ID} -->` — and record its comment id back onto the plan comment as a standalone `<!-- phase-containment-ledger-ref: {comment_id} -->` marker (863-D11), placed immediately after the `<!-- plan-issue-{ID} -->` marker at the top of the plan comment body. On re-persist, reuse the existing sibling (found via its identity marker or the plan comment's existing pointer) rather than creating a second one.
+**`skills/session-memory-contract/scripts/persist-phase-ledger.ps1` is the ONLY documented path for this write.** Invoke it with `-Mode plan` after Post-Judge Reconciliation is complete and the `Plan Stress-Test` summary is updated. Never hand-author the sibling comment, the pointer, or the blocks directly — the helper owns all of it in one call:
 
-After Post-Judge Reconciliation is complete and the `Plan Stress-Test` summary is updated, emit one `<!-- phase-containment-{ID} -->` block per sustained (judge-ruling: sustained) plan-stress-test finding. Append these blocks onto the `<!-- phase-containment-ledger-{ID} -->` sibling comment (never onto the plan comment):
+- At first persist, it creates the sibling comment — its body opens with the identity marker `<!-- phase-containment-ledger-{ID} -->` — and records its comment id back onto the plan comment as a standalone `<!-- phase-containment-ledger-ref: {comment_id} -->` marker (863-D11), placed immediately after the `<!-- plan-issue-{ID} -->` marker at the top of the plan comment body. On re-persist, it reuses the existing sibling (found via its identity marker or the plan comment's existing pointer) rather than creating a second one.
+- It writes the `judge-rulings` block first, then the `phase-containment` blocks, onto the sibling (plan-mode ordering, writer rule 4 below) — one `<!-- phase-containment-{ID} -->` block per sustained (judge-ruling: sustained) plan-stress-test finding, passed via `-PhaseContainmentBlocks`.
+
+Repo-relative (hub-repo contributors):
+
+```powershell
+pwsh skills/session-memory-contract/scripts/persist-phase-ledger.ps1 `
+    -Owner {owner} -Repo {repo} -Mode plan -IssueNumber {ISSUE_NUMBER} `
+    -JudgeRulingsContent $judgeRulingsBlockText -PhaseContainmentBlocks @($block1, $block2)
+```
+
+Plugin-root-absolute (consumer installs — mirror the dual-form pattern at `skills/session-startup/SKILL.md` Step 3):
+
+```powershell
+pwsh {plugin-root}/skills/session-memory-contract/scripts/persist-phase-ledger.ps1 `
+    -Owner {owner} -Repo {repo} -Mode plan -IssueNumber {ISSUE_NUMBER} `
+    -JudgeRulingsContent $judgeRulingsBlockText -PhaseContainmentBlocks @($block1, $block2)
+```
+
+Each `<!-- phase-containment-{ID} -->` block passed to `-PhaseContainmentBlocks` carries:
 
 - `finding_key`: `plan-stress-test:{issue}:{marker}:{finding_id}`
 - `introduced_phase`: set by explicit agent judgment — no default; reason which phase originated this defect
@@ -212,15 +231,19 @@ After Post-Judge Reconciliation is complete and the `Plan Stress-Test` summary i
 - `escape_distance`: recomputed as `2 - ordinal(catchable_phase)` (plan-stress-test projection = 2; phase ordinals: experience=0, design=1, plan=2, implementation=3)
 - `severity`, `systemic_fix_type`, `category`: carry forward from the finding
 - `apparatus_meta: false` unless a stated criterion justifies `true`
-- `appended_at`: stamp the current UTC instant in the strict `yyyy-MM-ddTHH:mm:ssZ` form (863 M1 fix) whenever hand-authoring this block directly (a script primitive such as `Add-CommentBlocks` stamps it automatically at actual write time and should not be double-stamped by the authoring agent)
+- `appended_at`: the helper stamps this field itself at actual write time — do not pre-stamp it in the block text you pass to `-PhaseContainmentBlocks`; a pre-stamped value would be a second, stale stamp sitting beside the helper's own.
 
-**Setter rule**: `catchable_phase` and `introduced_phase` must each be set by explicit agent judgment with no default — the agent must reason about which phase was the earliest in which this specific defect was catchable. Validate each block against `skills/calibration-pipeline/schemas/phase-containment.schema.json`.
+**Setter rule**: `catchable_phase` and `introduced_phase` must each be set by explicit agent judgment with no default — the agent must reason about which phase was the earliest in which this specific defect was catchable. Validate each block against `skills/calibration-pipeline/schemas/phase-containment.schema.json` before passing it to the helper.
 
-**Emission check (hub maintainers only)**: after posting the blocks onto the `phase-containment-ledger-{ID}` sibling, run `pwsh ./.github/scripts/phase-containment-emission-check.ps1 -Issue {N}` and treat its output as advisory — warn-only, never blocking. The check resolves by issue number and fetches every comment on the issue regardless of which comment carries the blocks, so this invocation is unchanged by the split. The repo-relative script path does not resolve from a consumer repo's CWD, so this nudge applies only when working in the Agent Orchestra hub repo itself; see the script header for the full contract.
+When the merged stress-test produced zero sustained findings, omit `-PhaseContainmentBlocks` (it defaults to an empty array) but still invoke the helper with `-JudgeRulingsContent` set to the zero-findings placeholder entry (writer rule 7 below) — a legal, first-class invocation that never calls `Add-CommentBlocks`.
+
+On failure, the helper exits non-zero, names the failing step, and propagates the underlying primitive's `Reason` — surface that message to the maintainer rather than retrying blind or falling back to a hand-authored write.
+
+**Emission check (hub maintainers only)**: after the helper posts the blocks onto the `phase-containment-ledger-{ID}` sibling, run `pwsh ./.github/scripts/phase-containment-emission-check.ps1 -Issue {N}` and treat its output as advisory — warn-only, never blocking. The check resolves by issue number and fetches every comment on the issue regardless of which comment carries the blocks, so this invocation is unchanged by the split. The repo-relative script path does not resolve from a consumer repo's CWD, so this nudge applies only when working in the Agent Orchestra hub repo itself; see the script header for the full contract.
 
 ### Judge-rulings machine block (811-D1, co-moved by 863-D4)
 
-At Post-Judge Reconciliation, in addition to the phase-containment blocks above, append a machine-readable `<!-- judge-rulings` block at the END of the `<!-- phase-containment-ledger-{ID} -->` sibling comment — not the plan comment. This block exists because prose bullets alone are not reachable by `phase-containment-emission-check.ps1`'s plan-stress-test surface; the machine block is what makes the emission check's `sustained=N` count honest instead of a false `clean -- sustained=0 blocks=0`.
+At Post-Judge Reconciliation, in addition to the phase-containment blocks above, append a machine-readable `<!-- judge-rulings` block in the `<!-- phase-containment-ledger-{ID} -->` sibling comment — not the plan comment. This block exists because prose bullets alone are not reachable by `phase-containment-emission-check.ps1`'s plan-stress-test surface; the machine block is what makes the emission check's `sustained=N` count honest instead of a false `clean -- sustained=0 blocks=0`. `persist-phase-ledger.ps1` writes this block first, before any phase-containment blocks (plan-mode ordering, writer rule 3 below); on re-persist, `Add-CommentBlocks` appends new phase-containment blocks after whatever the sibling already carries, so this head is not necessarily the last content in the comment body — see writer rule 4 below.
 
 **Why the sibling, not the plan comment (863-D4/863-D5).** This block used to sit at the end of the plan comment specifically because that was "the same read where humans keep the prose `**Plan Stress-Test**` bullets" — that proximity to the prose was the original justification, and 863-D4 reverses it. The prose bullets and heading stay on the plan comment (see rule 8 below); the reason the machine block moves is not about proximity to prose at all — it is Fix A's co-location gate (`emission-check-core.ps1:2404-2420`, #782 M4): condition 1 requires the judge-rulings head and the `phase-containment` blocks it authorizes to share one comment body, which is what closes the judge-authored-but-wrong-surface (scaffold-re-sweep) forgery vector. Co-moving both families into the same `phase-containment-ledger-{ID}` sibling satisfies that condition unchanged, without touching the gate itself — a re-base of the gate onto authorship was considered and rejected (863-D5) as orthogonal and a net security regression. Leaving the head on the plan comment while the blocks moved to the sibling — or the reverse — would silently break condition 1 and reopen the forgery vector; co-location, not prose adjacency, is why they travel together.
 
@@ -239,7 +262,7 @@ Writer rules, in order:
 2. **Binary projection — exactly two lowercase values.** The reader's `judge_ruling` vocabulary is a closed two-value enum: `sustained` and `defense-sustained` (`.github/scripts/lib/phase-containment-emission-check-core.ps1`, `Get-JudgeRulingsSustainedCountInternal`, citing `skills/review-judgment/SKILL.md:156`). Project every finding's actual post-judge disposition onto exactly one of these two literal, lowercase values: a disposition that requires a `<!-- phase-containment-{ID} -->` block (prose "sustained") → `judge_ruling: sustained`. Every other disposition — `partial`, `defense-sustained`, `judge-rejected`, `judge-rejected/user-confirmed`, not-judge-ruled, or any future disposition value not yet invented — → `judge_ruling: defense-sustained`. Do not invent additional enum values for this field; the projection is intentionally binary so the machine-sustained set is always exactly equal to the set of findings that receive a phase-containment block.
 3. **Atomic single write.** Write the entire block — head, every entry, and the closing `-->` — as one edit. Never stage the head first and append entries later; never leave the block half-written between tool calls.
 4. **Replace-own-block on re-persist, never append a second block — scoped to the sibling.** If the plan is re-persisted (a plan revision after the first persist), replace the prior judge-rulings block on the `phase-containment-ledger-{ID}` sibling with the new one rather than appending a second block after it. The reader fails loud (`could-not-verify`) whenever two or more judge-rulings heads exist in one body (811-D1 owner decision: latest-wins was rejected), so a stale duplicate left in place would poison the emission check on every subsequent run. Replace only the judge-rulings block portion of the sibling comment — never perform a body-replacing upsert of the whole comment (that path is reserved for `Add-CommentBlocks`/`Find-OrUpsertComment` callers that are not this block). The plan comment itself is never touched by this rule; post-split it does not carry this block at all.
-5. **Render marker literals inertly in prose.** Markdown code-span backticks do NOT neutralize the reader's raw-text head-detection regex — a complete marker like `` `<!-- judge-rulings pr=5 -->` `` still matches even inside backticks, since the regex scans raw text and backticks are not stripped before matching. If the plan's human-readable "Plan Stress-Test" narrative ever needs to mention the marker convention itself (for example, explaining that the plan carries a machine block), use the codebase's existing inert-rendering convention instead: `Format-InertMarkerLabel` (`.github/scripts/phase-containment-emission-check.ps1`) strips the `<!--`/`-->` HTML-comment delimiters before backtick-wrapping (e.g. rendering `` `judge-rulings pr=5` `` instead of `` `<!-- judge-rulings pr=5 -->` ``), which genuinely breaks the regex match because the delimiters the pattern anchors on are no longer present in the text at all. This same inert-render discipline extends to every scalar marker/literal issue #863 introduced — `frame-slices-generated-at`, `phase-containment-ledger-ref`, `sibling-unstamped`, and `duplicate-slice-id` — since a bare backtick-wrapped mention of any of these in prose is just as live to their respective readers' raw-text scans as a judge-rulings mention is to this one.
+5. **Render marker literals inertly in prose.** See `skills/session-memory-contract/references/handoff-markers.md` § Writing about markers safely for the full hazard, the affected marker families, the `Format-InertMarkerLabel` remedy, and a worked example. The rule was first written here for the plan-surface `judge-rulings` block, but it applies to every raw-text-scanned marker family in this repo — not only `judge-rulings` — so the canonical statement now lives in the shared reference rather than being duplicated per skill.
 6. **Keep any in-block comment short and vocabulary-free.** If a short explanatory comment is placed inside the judge-rulings block (for example, noting the projection rule), it must be a single line under roughly 100 characters and must not contain the words `judge_ruling`, `disposition`, `verdict`, or `finding_key` — these are the exact vocabulary tokens the reader's parser keys on (`Test-EmissionMarkerPresent`'s vocab gate and `Get-JudgeRulingsSustainedCountInternal`'s `$keyAnchor` scan), and a comment containing one could itself be miscounted as a real entry or push the first real entry outside the reader's 400-character lookahead window.
 7. **Zero-findings placeholder — pinned shape, never omit the block.** When a plan's merged stress-test produces zero findings, still emit the block (never skip it) with exactly one placeholder entry:
 
@@ -395,15 +418,23 @@ ac-refs: [AC#]
 -->
 ```
 
-The phase-containment blocks (`### Phase-containment emission` above) and the machine-readable `judge-rulings` block (`### Judge-rulings machine block (811-D1, co-moved by 863-D4)` above) are posted into the `<!-- phase-containment-ledger-{ID} -->` sibling comment, co-located together (863-D4):
+The phase-containment blocks (`### Phase-containment emission` above) and the machine-readable `judge-rulings` block (`### Judge-rulings machine block (811-D1, co-moved by 863-D4)` above) are posted into the `<!-- phase-containment-ledger-{ID} -->` sibling comment, co-located together (863-D4). The two block families are intentionally different shapes and are not interchangeable: `judge-rulings` stays **bare** — a single unclosed `<!-- judge-rulings ... -->` comment, per rule 3 above — while `phase-containment` is **paired** — a self-closed `<!-- phase-containment-{ID} -->` open tag followed by plain-text YAML fields and a separate `<!-- /phase-containment-{ID} -->` close tag — because the close tag is what powers `Get-PhaseContainmentBlock`'s pair-matching malformation detection (issue #772 D6: an open tag with no matching close tag is skipped as an unclosed, malformed block rather than silently absorbing whatever text follows it). A fully literal worked example, with `{ID}`, `{issue}`, `{marker}`, and `{finding_id}` left as the only placeholders:
 
 ```markdown
 <!-- phase-containment-ledger-{ID} -->
 
-<!-- phase-containment-{ID}
+<!-- phase-containment-{ID} -->
 finding_key: plan-stress-test:{issue}:{marker}:{finding_id}
-...
--->
+introduced_phase: design
+catchable_phase: plan
+caught_stage: plan-stress-test
+escape_distance: 0
+severity: medium
+systemic_fix_type: instruction
+category: pattern
+apparatus_meta: false
+appended_at: 2026-07-18T22:20:00Z
+<!-- /phase-containment-{ID} -->
 
 <!-- judge-rulings
 - finding_id: {finding_id}

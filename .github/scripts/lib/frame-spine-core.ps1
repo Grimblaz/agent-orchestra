@@ -54,7 +54,17 @@ function script:Get-FSCCommentBlockPayloads {
     if ([string]::IsNullOrEmpty($normalized)) { return @() }
 
     $escapedBlockName = [regex]::Escape($BlockName)
-    $pattern = '<!--\s*' + $escapedBlockName + '\s*-->\s*\n(?<payload>.*?)\n\s*-->|<!--\s*' + $escapedBlockName + '(?:\s*\n|\s+)(?<payload>.*?)\n?\s*-->'
+    # Issue #878 s6: anchor every alternation branch via grouping, not just
+    # the first one -- `(?m)^[ \t]*(?:A|B)`, never `(?m)^[ \t]*A|B` (the
+    # latter only anchors branch A, leaving branch B free to match a
+    # mid-line prose mention). `[ \t]*`, not `\s*`: `\s` crosses newlines
+    # and can shift Match.Index onto a preceding blank line, corrupting
+    # every downstream consumer that relies on the match's own start
+    # position. The inline `(?m)` supplies the Multiline `^` behavior;
+    # RegexOptions.Singleline below is unrelated (it makes `.` match
+    # newlines for the payload capture) and is passed separately since
+    # [regex]::Matches takes options as a parameter, not an inline flag.
+    $pattern = '(?m)^[ \t]*(?:<!--\s*' + $escapedBlockName + '\s*-->\s*\n(?<payload>.*?)\n\s*-->|<!--\s*' + $escapedBlockName + '(?:\s*\n|\s+)(?<payload>.*?)\n?\s*-->)'
     $regexMatches = [regex]::Matches($normalized, $pattern, [System.Text.RegularExpressions.RegexOptions]::Singleline)
     $payloads = [System.Collections.Generic.List[string]]::new()
 

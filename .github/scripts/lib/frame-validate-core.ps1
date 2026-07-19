@@ -225,7 +225,13 @@ function Get-FVPlanSliceBlock {
     $normalized = ConvertTo-FVNormalizedText -Text $CommentBody
     if ([string]::IsNullOrEmpty($normalized)) { return @() }
 
-    $pattern = '<!--\s*frame-slice\s*-->\s*\n(?<payload>.*?)\n\s*-->|<!--\s*frame-slice(?:\s*\n|\s+)(?<payload>.*?)\n?\s*-->'
+    # Issue #878 s6: sibling of frame-spine-core.ps1's Get-FSCCommentBlockPayloads
+    # (same top-level-alternation shape, 'frame-slice' hard-coded here rather
+    # than parameterized). Same fix: anchor every branch via grouping with
+    # `(?m)^[ \t]*(?:A|B)`, not `(?m)^[ \t]*A|B`; `[ \t]*` (not `\s*`) so the
+    # anchor cannot cross a newline and shift Match.Index onto a preceding
+    # blank line.
+    $pattern = '(?m)^[ \t]*(?:<!--\s*frame-slice\s*-->\s*\n(?<payload>.*?)\n\s*-->|<!--\s*frame-slice(?:\s*\n|\s+)(?<payload>.*?)\n?\s*-->)'
     $regexMatches = [regex]::Matches($normalized, $pattern, [System.Text.RegularExpressions.RegexOptions]::Singleline)
     $blocks = [System.Collections.Generic.List[string]]::new()
 

@@ -155,7 +155,24 @@ function Read-FindingDispositionIds {
         }
 
         foreach ($body in $allBodies) {
-            if ($body -notmatch '<!--\s*design-phase-complete') { continue }
+            # Anchored (issue #878 s6): polarity-investigated, NOT excluded like
+            # phase-containment-emission-check-core.ps1:800's plan-issue+heading
+            # fallback. Trace of the $false (no-match) branch: -notmatch=true ->
+            # continue/skip -> this body's finding_dispositions entries never
+            # enter $recordedIds -> downstream (:296) `$id -notin $allRecordedIds`
+            # flips true for an id that WAS actually recorded -> a spurious
+            # 'no corresponding recorded decision' warn finding is emitted. That
+            # is a LOUD false-positive (visible, investigable), never a silent
+            # false-clean -- narrowing can only ever make $recordedIds an
+            # under-approximation (never over-match), so the failure direction
+            # is strictly "more findings surface," matching the same
+            # false->loud, safe-to-narrow polarity documented for
+            # adversarial-pipeline-atomic-{ID}'s :1280 fallback, the OPPOSITE
+            # of :800's false->quiet/false-clean danger. Empirically verified:
+            # every real design-phase-complete marker harvested from this repo
+            # (issues #489, #878) is posted at true column 0, line 1 of its
+            # own comment -- see Tests/fixtures/marker-reader-anchoring/.
+            if ($body -notmatch '(?m)^\s*<!--\s*design-phase-complete') { continue }
             $yamlMatch = [regex]::Match($body, '```yaml\s*([\s\S]*?)```')
             if (-not $yamlMatch.Success) { continue }
             try {

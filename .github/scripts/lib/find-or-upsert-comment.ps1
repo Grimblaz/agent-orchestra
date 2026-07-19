@@ -40,6 +40,20 @@
     The new body text to write. Replaces the existing body verbatim on the
     PATCH path; sent as the body of a new comment on the POST path.
 
+.PARAMETER Owner
+    Optional. Repository owner. When supplied together with -Repo, every
+    underlying `gh` call is explicitly repo-targeted via `-R "$Owner/$Repo"`
+    instead of relying on `gh`'s ambient-cwd repo resolution. F2 fix (issue
+    #878 review): every other gh-calling helper in this file's sibling
+    persist-phase-ledger-core.ps1 already threads explicit -Owner/-Repo, but
+    this function alone derived owner/repo from `git config --get
+    remote.origin.url` and issued every `gh` call with no `-R`, so a caller
+    whose cwd's git remote did not match its intended target repo would
+    silently create/patch a comment in the wrong repo.
+
+.PARAMETER Repo
+    Optional. Repository name. See -Owner.
+
 .OUTPUTS
     [string] The html_url of the upserted comment on success, or $null when
     any underlying gh call fails.
@@ -72,40 +86,68 @@ function Find-OrUpsertComment {
         [Parameter(Mandatory)][ValidateSet('pr', 'issue')][string]$Type,
         [Parameter(Mandatory)][int]$Number,
         [Parameter(Mandatory)][string]$Marker,
-        [Parameter(Mandatory)][string]$Body
+        [Parameter(Mandatory)][string]$Body,
+        [string]$Owner,
+        [string]$Repo
     )
 
-    # --- Derive owner/repo from the git remote (does not depend on gh). ---
-    $remoteUrl = $null
-    try {
-        $remoteUrl = (& git config --get remote.origin.url) 2>$null
-    }
-    catch {
-        $remoteUrl = $null
-    }
+    # F2 fix (issue #878 review): when the caller explicitly supplies both
+    # -Owner and -Repo, use them for every gh call below via -R "$owner/$repo"
+    # instead of deriving owner/repo from the ambient git remote. Existing
+    # callers that omit these params (frame-credit-ledger.ps1,
+    # phase-containment-emission-check.ps1) are unaffected -- $explicitRepo
+    # is $false for them and the git-remote-derived behavior below is
+    # unchanged.
+    $explicitRepo = ($Owner -and $Repo)
 
-    $owner = $null
-    $repo = $null
-    if ($remoteUrl -and ($remoteUrl -match '[:/]([^/:]+)/([^/]+?)(?:\.git)?\s*$')) {
-        $owner = $Matches[1]
-        $repo = $Matches[2]
+    # --- Derive owner/repo from the git remote (does not depend on gh),
+    #     unless the caller already supplied both explicitly above. ---
+    # NOTE: these locals are named $resolvedOwner/$resolvedRepo (not
+    # $owner/$repo) deliberately. PowerShell variable names are
+    # case-insensitive, so a local named $owner is the SAME variable as the
+    # -Owner parameter -- assigning $owner = $null here would null out the
+    # caller-supplied $Owner parameter itself (P4 fix, post-#878-review
+    # regression: this collision silently emptied both params on every call
+    # that passed them explicitly).
+    $resolvedOwner = $null
+    $resolvedRepo = $null
+    if ($explicitRepo) {
+        $resolvedOwner = $Owner
+        $resolvedRepo = $Repo
+    }
+    else {
+        $remoteUrl = $null
+        try {
+            $remoteUrl = (& git config --get remote.origin.url) 2>$null
+        }
+        catch {
+            $remoteUrl = $null
+        }
+
+        if ($remoteUrl -and ($remoteUrl -match '[:/]([^/:]+)/([^/]+?)(?:\.git)?\s*$')) {
+            $resolvedOwner = $Matches[1]
+            $resolvedRepo = $Matches[2]
+        }
     }
 
     # Optional: surface the repos/<owner>/<repo> probe so callers (and the
     # test mock) see the resolved coordinates. Result is informational only;
-    # we already have $owner/$repo from the git remote.
+    # we already have $owner/$repo from either the explicit params or the
+    # git remote.
     #
     # We deliberately do NOT mutate $global:LASTEXITCODE here. The probe's
     # exit code is irrelevant to the caller — only the list/post/patch calls
     # below need their exit codes inspected, and each one is checked
     # immediately after invocation (so a stale $LASTEXITCODE from this probe
     # cannot leak past those checks).
-    if ($owner -and $repo) {
-        $null = & gh api "repos/$owner/$repo" --jq '.full_name' 2>$null
+    if ($resolvedOwner -and $resolvedRepo) {
+        $null = & gh api "repos/$resolvedOwner/$resolvedRepo" --jq '.full_name' 2>$null
     }
 
     # --- 1. List comments on the issue/PR. ---
-    $listJson = & gh issue view $Number --json comments 2>$null
+    $listArgs = @('issue', 'view', $Number, '--json', 'comments')
+    if ($explicitRepo) { $listArgs += @('-R', "$resolvedOwner/$resolvedRepo") }
+    $listJson = & gh @listArgs 2>$null
     if ($LASTEXITCODE -ne 0) {
         [Console]::Error.WriteLine("Find-OrUpsertComment: gh issue view $Number failed (exit $LASTEXITCODE)")
         return $null
@@ -134,7 +176,9 @@ function Find-OrUpsertComment {
     if ($matchedComments.Count -eq 0) {
         # POST a new comment via the appropriate verb.
         $verb = if ($Type -eq 'pr') { 'pr' } else { 'issue' }
-        $postOutput = & gh $verb comment $Number --body $Body 2>$null
+        $postArgs = @($verb, 'comment', $Number, '--body', $Body)
+        if ($explicitRepo) { $postArgs += @('-R', "$resolvedOwner/$resolvedRepo") }
+        $postOutput = & gh @postArgs 2>$null
         if ($LASTEXITCODE -ne 0) {
             [Console]::Error.WriteLine("Find-OrUpsertComment: gh $verb comment failed (exit $LASTEXITCODE)")
             return $null
@@ -157,7 +201,9 @@ function Find-OrUpsertComment {
     if ($sorted.Count -eq 0) {
         [Console]::Error.WriteLine("Find-OrUpsertComment: matched comment(s) have no resolvable REST id; posting new comment.")
         $verb = if ($Type -eq 'pr') { 'pr' } else { 'issue' }
-        $postOutput = & gh $verb comment $Number --body $Body 2>$null
+        $postArgs = @($verb, 'comment', $Number, '--body', $Body)
+        if ($explicitRepo) { $postArgs += @('-R', "$resolvedOwner/$resolvedRepo") }
+        $postOutput = & gh @postArgs 2>$null
         if ($LASTEXITCODE -ne 0) {
             [Console]::Error.WriteLine("Find-OrUpsertComment: gh $verb comment failed (exit $LASTEXITCODE)")
             return $null
@@ -171,12 +217,12 @@ function Find-OrUpsertComment {
         [Console]::Error.WriteLine("Find-OrUpsertComment: multiple comments match marker '$Marker' (duplicates: $dupIds); patching earliest id $targetRestId")
     }
 
-    if (-not ($owner -and $repo)) {
+    if (-not ($resolvedOwner -and $resolvedRepo)) {
         [Console]::Error.WriteLine("Find-OrUpsertComment: unable to determine owner/repo from git remote; cannot PATCH comment.")
         return $null
     }
 
-    $patchPath = "repos/$owner/$repo/issues/comments/$targetRestId"
+    $patchPath = "repos/$resolvedOwner/$resolvedRepo/issues/comments/$targetRestId"
     # Fix Pass3-F1: pass body via JSON file on stdin instead of `-f "body=$Body"`.
     # The -f form packs the entire payload into a single argv element, which on
     # Windows hits the 32K CreateProcess argv limit for large cost-pattern
