@@ -1,0 +1,12 @@
+<!-- phase-containment-878 -->
+finding_key: plan-stress-test:878:plan-issue-878:M1
+introduced_phase: design
+catchable_phase: plan
+caught_stage: plan-stress-test
+escape_distance: 0
+severity: medium
+systemic_fix_type: instruction
+category: pattern
+apparatus_meta: false
+appended_at: 2026-07-18T22:20:00Z
+<!-- /phase-containment-878 -->

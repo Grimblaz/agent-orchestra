@@ -1,0 +1,12 @@
+<!-- phase-containment-879 -->
+finding_key: code-review:gh-1234
+introduced_phase: implementation
+catchable_phase: implementation
+caught_stage: code-review
+escape_distance: 0
+severity: high
+systemic_fix_type: instruction
+category: security
+apparatus_meta: false
+appended_at: 2026-07-18T22:20:00Z
+<!-- /phase-containment-879 -->
