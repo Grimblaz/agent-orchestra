@@ -2,6 +2,12 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.3.21] — 2026-07-18
+
+### Fixed
+
+- Single-owner Post-Judge Disposition Gate emission site + review-dispositions landing-gap governance metric for issue #869 (#880).
+
 ## [3.3.20] — 2026-07-17
 
 ### Added
