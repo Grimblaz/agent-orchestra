@@ -42,19 +42,19 @@
     see .github/scripts/lib/find-or-upsert-comment.ps1 and
     .github/scripts/lib/phase-containment-emission-check-core.ps1 for what
     IS shipped):
-      (a) Find-CommentIdByExactMarker -- a find-only selector matching the
+      (a) Find-PPLCommentIdByExactMarker -- a find-only selector matching the
           marker LINE-ANCHORED AND WHOLE, never Find-OrUpsertComment's -like
           substring match (which would select a prose mention of the
           marker).
-      (b) Get-CommentIdFromUrl -- extracts the numeric REST id from a plain
+      (b) Get-PPLCommentIdFromUrl -- extracts the numeric REST id from a plain
           html_url STRING (Get-RestCommentId only accepts a comment OBJECT
           with .url/.id properties and would silently yield $null for a bare
           string).
-      (c) Set-JudgeRulingsBlockOnComment's span-replace branch -- locates and
+      (c) Set-PPLJudgeRulingsBlockOnComment's span-replace branch -- locates and
           replaces the existing `<!-- judge-rulings ... -->` head+entries
           span in place on re-persist (Add-JudgeRulingsBlock is
           append-only by contract and must never be used for this).
-      (d) Get-CommentBodyById -- reads a comment's current body, feeding both
+      (d) Get-PPLCommentBodyById -- reads a comment's current body, feeding both
           the finding_key dedup decision and the span-replacement above;
           nothing in the shipped primitives returns a body for a known id.
 
@@ -74,7 +74,7 @@
 # dot-sources this file).
 # ---------------------------------------------------------------------------
 
-function script:Get-CommentIdFromUrl {
+function script:Get-PPLCommentIdFromUrl {
     <#
     .SYNOPSIS
         Net-new glue (b): extracts the numeric REST comment id from a plain
@@ -91,7 +91,7 @@ function script:Get-CommentIdFromUrl {
     return $null
 }
 
-function script:Get-CommentBodyById {
+function script:Get-PPLCommentBodyById {
     <#
     .SYNOPSIS
         Net-new glue (d): reads a comment's current body by numeric REST id.
@@ -122,7 +122,7 @@ function script:Get-CommentBodyById {
     }
 }
 
-function script:Set-CommentBodyDirect {
+function script:Set-PPLCommentBodyDirect {
     <#
     .SYNOPSIS
         Raw full-body PATCH for a known numeric comment id. Used only for
@@ -196,7 +196,7 @@ function script:Set-CommentBodyDirect {
     return [PSCustomObject]@{ Success = $true; Reason = $null }
 }
 
-function script:Find-CommentIdByExactMarker {
+function script:Find-PPLCommentIdByExactMarker {
     <#
     .SYNOPSIS
         Net-new glue (a): find-only comment selector. Lists comments on the
@@ -227,8 +227,8 @@ function script:Find-CommentIdByExactMarker {
     )
 
     # M15 fix (issue #878 judge-sustained review): pass -R explicitly, same
-    # as this file's sibling gh-calling functions (Get-CommentBodyById,
-    # Set-CommentBodyDirect) already do. Without it, this call's repo
+    # as this file's sibling gh-calling functions (Get-PPLCommentBodyById,
+    # Set-PPLCommentBodyDirect) already do. Without it, this call's repo
     # targeting is derived from cwd instead of the caller-supplied
     # -Owner/-Repo, so it can silently target the wrong repo when the
     # current working directory does not match.
@@ -263,7 +263,7 @@ function script:Find-CommentIdByExactMarker {
     return [PSCustomObject]@{ Id = $target.RestId; Body = [string]$target.Comment.body }
 }
 
-function script:Set-PointerLineAfterMarker {
+function script:Set-PPLPointerLineAfterMarker {
     <#
     .SYNOPSIS
         Inserts the `<!-- phase-containment-ledger-ref: {id} -->` pointer
@@ -301,7 +301,7 @@ function script:Set-PointerLineAfterMarker {
     $markerLineMatch = [regex]::Match($Body, "(?m)^\s*$([regex]::Escape($Marker))[ \t]*\r?`$")
     if (-not $markerLineMatch.Success) {
         # Defensive fallback (should be unreachable -- the caller already
-        # confirmed the marker's presence via Find-CommentIdByExactMarker).
+        # confirmed the marker's presence via Find-PPLCommentIdByExactMarker).
         return "$Marker`n`n<!-- phase-containment-ledger-ref: $SiblingId -->`n`n$Body"
     }
     $insertPos = $markerLineMatch.Index + $markerLineMatch.Length
@@ -310,7 +310,7 @@ function script:Set-PointerLineAfterMarker {
     return $before + "`n`n<!-- phase-containment-ledger-ref: $SiblingId -->`n`n" + $after
 }
 
-function script:Set-JudgeRulingsBlockOnComment {
+function script:Set-PPLJudgeRulingsBlockOnComment {
     <#
     .SYNOPSIS
         Net-new glue (c): writes the judge-rulings block onto a known
@@ -334,13 +334,13 @@ function script:Set-JudgeRulingsBlockOnComment {
         [Parameter(Mandatory)][string]$JudgeRulingsContent
     )
 
-    $currentBody = script:Get-CommentBodyById -Owner $Owner -Repo $Repo -CommentId $CommentId
+    $currentBody = script:Get-PPLCommentBodyById -Owner $Owner -Repo $Repo -CommentId $CommentId
     if ($null -eq $currentBody) {
         return [PSCustomObject]@{ Success = $false; Reason = "Could not read comment $CommentId body before writing the judge-rulings block"; Action = $null }
     }
 
     # M6 fix (issue #878 judge-sustained review): anchored to this file's own
-    # established idiom (Find-CommentIdByExactMarker's line-anchored,
+    # established idiom (Find-PPLCommentIdByExactMarker's line-anchored,
     # whole-line marker match above), matching the shape already used by
     # phase-containment-emission-check-core.ps1's $script:JudgeRulingsHeadPattern
     # (`(?m)^[ \t]*<!--\s*judge-rulings`) -- an unanchored match here could
@@ -348,8 +348,17 @@ function script:Set-JudgeRulingsBlockOnComment {
     # in the sibling body as the replace target instead of the real head.
     $headMatch = [regex]::Match($currentBody, '(?m)^[ \t]*<!--\s*judge-rulings.*?-->', [System.Text.RegularExpressions.RegexOptions]::Singleline)
     if ($headMatch.Success) {
+        # F4 fix (issue #878 review): the append path already refuses to
+        # write when $ExpectedMarker is missing from the fetched body (via
+        # Add-JudgeRulingsBlock's own guard) -- this replace branch used to
+        # have no equivalent check, so it would overwrite the first
+        # judge-rulings head it found even on a comment that never carried
+        # $ExpectedMarker (e.g. the wrong comment).
+        if (-not $currentBody.Contains($ExpectedMarker)) {
+            return [PSCustomObject]@{ Success = $false; Reason = "Comment does not contain expected marker '$ExpectedMarker' — refusing to replace judge-rulings block to avoid overwriting an unrelated comment"; Action = $null }
+        }
         $newBody = $currentBody.Substring(0, $headMatch.Index) + $JudgeRulingsContent + $currentBody.Substring($headMatch.Index + $headMatch.Length)
-        $replaceResult = script:Set-CommentBodyDirect -Owner $Owner -Repo $Repo -CommentId $CommentId -NewBody $newBody
+        $replaceResult = script:Set-PPLCommentBodyDirect -Owner $Owner -Repo $Repo -CommentId $CommentId -NewBody $newBody
         if (-not $replaceResult.Success) {
             return [PSCustomObject]@{ Success = $false; Reason = $replaceResult.Reason; Action = $null }
         }
@@ -363,7 +372,7 @@ function script:Set-JudgeRulingsBlockOnComment {
     return [PSCustomObject]@{ Success = $true; Reason = $null; Action = 'written' }
 }
 
-function script:Get-PhaseContainmentBlockId {
+function script:Get-PPLPhaseContainmentBlockId {
     <#
     .SYNOPSIS
         Extracts the `{ID}` token from a single candidate block's own
@@ -377,7 +386,7 @@ function script:Get-PhaseContainmentBlockId {
     return $null
 }
 
-function script:Find-PhaseContainmentBlockSpanByFindingKey {
+function script:Find-PPLPhaseContainmentBlockSpanByFindingKey {
     <#
     .SYNOPSIS
         Locates the full `<!-- phase-containment-{Id} --> ... <!--
@@ -403,7 +412,7 @@ function script:Find-PhaseContainmentBlockSpanByFindingKey {
     return $null
 }
 
-function script:Remove-PhaseContainmentAppendedAtLine {
+function script:Remove-PPLPhaseContainmentAppendedAtLine {
     <#
     .SYNOPSIS
         Strips any `appended_at: ...` line from a single phase-containment
@@ -423,16 +432,29 @@ function script:Remove-PhaseContainmentAppendedAtLine {
     return [regex]::Replace($BlockText, '(?m)^[ \t]*appended_at\s*:.*\r?\n?', '')
 }
 
-function script:Set-PhaseContainmentBlocksOnComment {
+function script:Set-PPLPhaseContainmentBlocksOnComment {
     <#
     .SYNOPSIS
         Writes the caller's phase-containment blocks onto a known comment
-        id, deduped by finding_key: a new key is appended (Add-CommentBlocks,
-        which never truncates existing content); an existing key with
-        DIFFERENT text is replaced in place (manual span-replace, never
-        Add-CommentBlocks); an existing key with byte-identical text (modulo
-        the appended_at stamp and surrounding whitespace -- M14 fix) is a
-        no-op for that block.
+        id, deduped by finding_key: a new key is appended, an existing key
+        with DIFFERENT text is replaced in place, and an existing key with
+        byte-identical text (modulo the appended_at stamp and surrounding
+        whitespace -- M14 fix) is a no-op for that block.
+    .DESCRIPTION
+        F1 fix (issue #878 review, gh-3610106812): every candidate block --
+        both replacement AND append candidates -- is now preflight-validated
+        (gated-parser well-formedness via Get-PhaseContainmentBlock, then
+        schema via Test-PhaseContainmentEntry) BEFORE any write is
+        committed, and the fully-merged result ($workingBody, with both
+        replace splices and append content folded in) is written via a
+        SINGLE Set-PPLCommentBodyDirect PATCH. Previously the replace path
+        alone was preflighted and its Set-PPLCommentBodyDirect write committed
+        immediately, while append candidates were validated only inside a
+        separate, later Add-CommentBlocks call -- so a validation failure or
+        transport failure on the append half left a replace that had already
+        landed, an unrecoverable partial-write state. Now either every
+        block in this call validates and the one PATCH lands, or nothing
+        writes and Success=$false names the failing block's finding_key.
     .OUTPUTS
         [PSCustomObject] with Success [bool], Reason [string], and Action
         [string] -- one of 'appended', 'replaced', 'appended+replaced', or
@@ -448,9 +470,19 @@ function script:Set-PhaseContainmentBlocksOnComment {
         [Parameter(Mandatory)][string[]]$Blocks
     )
 
-    $currentBody = script:Get-CommentBodyById -Owner $Owner -Repo $Repo -CommentId $CommentId
+    $currentBody = script:Get-PPLCommentBodyById -Owner $Owner -Repo $Repo -CommentId $CommentId
     if ($null -eq $currentBody) {
         return [PSCustomObject]@{ Success = $false; Reason = "Could not read comment $CommentId body before writing phase-containment blocks"; Action = $null }
+    }
+
+    # F1 fix (issue #878 review): this function used to rely entirely on
+    # Add-CommentBlocks' own ExpectedMarker guard for the append half of its
+    # work. Now that both halves fold into one Set-PPLCommentBodyDirect PATCH
+    # (Add-CommentBlocks is no longer called from this function at all),
+    # this guard is checked here directly, against the same $currentBody
+    # every subsequent preflight step below reasons about.
+    if (-not $currentBody.Contains($ExpectedMarker)) {
+        return [PSCustomObject]@{ Success = $false; Reason = "Expected marker '$ExpectedMarker' not found in comment $CommentId body; refusing to write phase-containment blocks"; Action = $null }
     }
 
     $toAppend = [System.Collections.Generic.List[string]]::new()
@@ -459,7 +491,7 @@ function script:Set-PhaseContainmentBlocksOnComment {
     # already queued for append EARLIER IN THIS SAME CALL. $workingBody
     # alone cannot detect this class -- it is mutated only on a REPLACE
     # below, never on an append (append content is not actually persisted
-    # until the single Add-CommentBlocks call after this loop). Without this
+    # until it is folded into $workingBody after this loop). Without this
     # set, two blocks sharing a not-yet-persisted finding_key in one
     # $Blocks array both fell into the $null -eq $existingSpan branch and
     # both got queued -- a real duplicate landing on the comment.
@@ -472,7 +504,7 @@ function script:Set-PhaseContainmentBlocksOnComment {
             return [PSCustomObject]@{ Success = $false; Reason = 'A PhaseContainmentBlocks entry is missing a finding_key field'; Action = $null }
         }
         $findingKey = $keyMatch.Groups[1].Value
-        $blockId = script:Get-PhaseContainmentBlockId -BlockText $block
+        $blockId = script:Get-PPLPhaseContainmentBlockId -BlockText $block
         if ($null -eq $blockId) {
             return [PSCustomObject]@{ Success = $false; Reason = 'A PhaseContainmentBlocks entry is missing a recognizable opening tag'; Action = $null }
         }
@@ -482,9 +514,29 @@ function script:Set-PhaseContainmentBlocksOnComment {
             continue
         }
 
-        $existingSpan = script:Find-PhaseContainmentBlockSpanByFindingKey -Body $workingBody -FindingKey $findingKey -Id $blockId
+        $existingSpan = script:Find-PPLPhaseContainmentBlockSpanByFindingKey -Body $workingBody -FindingKey $findingKey -Id $blockId
 
         if ($null -eq $existingSpan) {
+            # F1 fix (issue #878 review): append candidates now get the SAME
+            # write-time preflight the replace branch below already has --
+            # gated-parser well-formedness (Get-PhaseContainmentBlock,
+            # -SkippedCount tracked) then schema validation
+            # (Test-PhaseContainmentEntry) -- BEFORE being queued into
+            # $toAppend. Previously this candidate's validation happened
+            # only inside Add-CommentBlocks, in a separate call issued AFTER
+            # any replace write above had already committed.
+            $appendSkippedCount = 0
+            $appendGatedBlocks = Get-PhaseContainmentBlock -Text $block -Id $blockId -SkippedCount ([ref]$appendSkippedCount)
+            if ($appendSkippedCount -gt 0 -or $null -eq $appendGatedBlocks -or $appendGatedBlocks.Count -eq 0) {
+                return [PSCustomObject]@{ Success = $false; Reason = "Append candidate for finding_key '$findingKey' (phase-containment-$blockId) is unclosed or malformed ($appendSkippedCount skipped)"; Action = $null }
+            }
+            foreach ($rawAppendBlock in $appendGatedBlocks) {
+                $appendEntry = ConvertFrom-PhaseContainmentYaml -Yaml $rawAppendBlock
+                $appendValidation = Test-PhaseContainmentEntry -Entry $appendEntry
+                if (-not $appendValidation.IsValid) {
+                    return [PSCustomObject]@{ Success = $false; Reason = "Append candidate for finding_key '$findingKey' (phase-containment-$blockId) fails schema validation: $($appendValidation.Errors -join '; ')"; Action = $null }
+                }
+            }
             $toAppend.Add($block)
             [void]$appendedKeysThisCall.Add($findingKey)
             continue
@@ -496,8 +548,8 @@ function script:Set-PhaseContainmentBlocksOnComment {
         # $block never carries) and with surrounding whitespace trimmed, so
         # logically-unchanged content converges to a true no-op instead of
         # perpetually re-replacing itself on every re-persist.
-        $normalizedExisting = (script:Remove-PhaseContainmentAppendedAtLine -BlockText $existingSpan.Text).Trim()
-        $normalizedCandidate = (script:Remove-PhaseContainmentAppendedAtLine -BlockText $block).Trim()
+        $normalizedExisting = (script:Remove-PPLPhaseContainmentAppendedAtLine -BlockText $existingSpan.Text).Trim()
+        $normalizedCandidate = (script:Remove-PPLPhaseContainmentAppendedAtLine -BlockText $block).Trim()
         if ($normalizedExisting -eq $normalizedCandidate) {
             continue
         }
@@ -542,21 +594,27 @@ function script:Set-PhaseContainmentBlocksOnComment {
         $workingBody = $workingBody.Substring(0, $existingSpan.Index) + $replacementBlock + $workingBody.Substring($existingSpan.Index + $existingSpan.Length)
     }
 
+    # $didReplace reflects only the in-loop replace splices above (identical
+    # to the pre-F1 semantics) -- computed BEFORE append content is folded
+    # in below, so it stays a true signal of "a replace actually happened"
+    # rather than being trivially true whenever any append occurs too.
     $didAppend = ($toAppend.Count -gt 0)
     $didReplace = ($workingBody -ne $currentBody)
 
-    if ($didReplace) {
-        $replaceResult = script:Set-CommentBodyDirect -Owner $Owner -Repo $Repo -CommentId $CommentId -NewBody $workingBody
-        if (-not $replaceResult.Success) {
-            return [PSCustomObject]@{ Success = $false; Reason = $replaceResult.Reason; Action = $null }
-        }
+    # F1 fix (issue #878 review): fold append content into $workingBody here,
+    # in memory, stamped the same way Add-CommentBlocks stamps a freshly
+    # appended block (Add-AppendedAtStampToPhaseContainmentBlocks), instead
+    # of handing it to a second, separate Add-CommentBlocks call/PATCH after
+    # the replace write above already committed.
+    if ($didAppend) {
+        $stampedAppend = ($toAppend | ForEach-Object { Add-AppendedAtStampToPhaseContainmentBlocks -Text $_ -Timestamp $replaceStamp }) -join "`n`n"
+        $workingBody = $workingBody + "`n`n" + $stampedAppend
     }
 
-    if ($didAppend) {
-        $newContent = "`n`n" + ($toAppend -join "`n`n")
-        $appendResult = Add-CommentBlocks -Owner $Owner -Repo $Repo -CommentId $CommentId -ExpectedMarker $ExpectedMarker -NewContent $newContent
-        if (-not $appendResult.Success) {
-            return [PSCustomObject]@{ Success = $false; Reason = $appendResult.Reason; Action = $null }
+    if ($workingBody -ne $currentBody) {
+        $writeResult = script:Set-PPLCommentBodyDirect -Owner $Owner -Repo $Repo -CommentId $CommentId -NewBody $workingBody
+        if (-not $writeResult.Success) {
+            return [PSCustomObject]@{ Success = $false; Reason = $writeResult.Reason; Action = $null }
         }
     }
 
@@ -568,7 +626,7 @@ function script:Set-PhaseContainmentBlocksOnComment {
     return [PSCustomObject]@{ Success = $true; Reason = $null; Action = $action }
 }
 
-function script:New-PersistPhaseLedgerArtifactManifest {
+function script:New-PPLPersistPhaseLedgerArtifactManifest {
     <#
     .SYNOPSIS
         Default landed/not-landed artifact manifest (M12 fix, issue #878
@@ -594,7 +652,7 @@ function script:New-PersistPhaseLedgerArtifactManifest {
     }
 }
 
-function script:Invoke-PersistPhaseLedgerPlanMode {
+function script:Invoke-PPLPersistPhaseLedgerPlanMode {
     param(
         [Parameter(Mandatory)][string]$Owner,
         [Parameter(Mandatory)][string]$Repo,
@@ -605,16 +663,28 @@ function script:Invoke-PersistPhaseLedgerPlanMode {
 
     $planMarker = "<!-- plan-issue-$IssueNumber -->"
     $ledgerMarker = "<!-- phase-containment-ledger-$IssueNumber -->"
-    $artifacts = script:New-PersistPhaseLedgerArtifactManifest
+    $artifacts = script:New-PPLPersistPhaseLedgerArtifactManifest
 
-    $planComment = script:Find-CommentIdByExactMarker -Owner $Owner -Repo $Repo -IssueNumber $IssueNumber -Marker $planMarker
+    $planComment = script:Find-PPLCommentIdByExactMarker -Owner $Owner -Repo $Repo -IssueNumber $IssueNumber -Marker $planMarker
     if ($null -eq $planComment) {
         return [PSCustomObject]@{ Success = $false; Reason = "Plan comment carrying marker '$planMarker' not found (line-anchored, whole-line match) on issue $IssueNumber"; Artifacts = $artifacts }
     }
     $planCommentId = $planComment.Id
     $planBody = $planComment.Body
 
-    $pointerMatch = [regex]::Match($planBody, '<!--\s*phase-containment-ledger-ref:\s*(\d+)\s*-->')
+    # F3 fix (issue #878 review): anchored to a standalone line, matching
+    # this file's own established anchored-marker idiom (e.g.
+    # Set-PPLPointerLineAfterMarker's line-anchored match above, and
+    # Find-PPLCommentIdByExactMarker's whole-line marker match). The prior
+    # unanchored regex would match a prose mention of the pointer shape
+    # anywhere in the plan body and wrongly trust its captured id as the
+    # real sibling comment id. Outer whitespace is restricted to `[ \t]*`
+    # (never `\s*`, which also matches newlines) with an explicit `\r?`
+    # before the multiline `$` -- the same M2-fix precedent already applied
+    # to Set-PPLPointerLineAfterMarker's own line-anchored match in this file,
+    # so a CRLF-bodied comment cannot make this regex's greedy whitespace
+    # swallow past the line boundary.
+    $pointerMatch = [regex]::Match($planBody, '(?m)^[ \t]*<!--\s*phase-containment-ledger-ref:\s*(\d+)\s*-->[ \t]*\r?$')
     if ($pointerMatch.Success) {
         $siblingId = [long]$pointerMatch.Groups[1].Value
         $artifacts.Sibling = 'reused'
@@ -634,18 +704,25 @@ function script:Invoke-PersistPhaseLedgerPlanMode {
         # already used for the plan comment lookup above), and only fall
         # through to Find-OrUpsertComment's create-or-PATCH path when the
         # sibling genuinely does not exist yet.
-        $existingSibling = script:Find-CommentIdByExactMarker -Owner $Owner -Repo $Repo -IssueNumber $IssueNumber -Marker $ledgerMarker
+        $existingSibling = script:Find-PPLCommentIdByExactMarker -Owner $Owner -Repo $Repo -IssueNumber $IssueNumber -Marker $ledgerMarker
         if ($null -ne $existingSibling) {
             $siblingId = $existingSibling.Id
             $artifacts.Sibling = 'reused'
         }
         else {
-            $createdUrl = Find-OrUpsertComment -Type 'issue' -Number $IssueNumber -Marker $ledgerMarker -Body $ledgerMarker
+            # F2 fix (issue #878 review): thread -Owner/-Repo explicitly, same
+            # as this file's other gh-calling helpers (Get-PPLCommentBodyById,
+            # Set-PPLCommentBodyDirect, Find-PPLCommentIdByExactMarker) already do.
+            # Without them, Find-OrUpsertComment derived owner/repo from the
+            # ambient git remote instead of the caller-supplied -Owner/-Repo,
+            # so it could silently create the sibling comment in the wrong
+            # repo when cwd's remote did not match.
+            $createdUrl = Find-OrUpsertComment -Type 'issue' -Number $IssueNumber -Marker $ledgerMarker -Body $ledgerMarker -Owner $Owner -Repo $Repo
             if ($null -eq $createdUrl) {
                 $artifacts.Sibling = 'failed'
                 return [PSCustomObject]@{ Success = $false; Reason = 'Failed to create the phase-containment-ledger sibling comment (Find-OrUpsertComment returned $null)'; Artifacts = $artifacts }
             }
-            $siblingId = script:Get-CommentIdFromUrl -Url $createdUrl
+            $siblingId = script:Get-PPLCommentIdFromUrl -Url $createdUrl
             if ($null -eq $siblingId) {
                 $artifacts.Sibling = 'failed'
                 return [PSCustomObject]@{ Success = $false; Reason = "Could not extract a numeric comment id from the created sibling's url '$createdUrl'"; Artifacts = $artifacts }
@@ -657,8 +734,8 @@ function script:Invoke-PersistPhaseLedgerPlanMode {
         # created OR found pre-existing without a pointer -- both share the
         # exact same "plan comment currently has no pointer line" starting
         # condition.
-        $newPlanBody = script:Set-PointerLineAfterMarker -Body $planBody -Marker $planMarker -SiblingId $siblingId
-        $pointerResult = script:Set-CommentBodyDirect -Owner $Owner -Repo $Repo -CommentId $planCommentId -NewBody $newPlanBody
+        $newPlanBody = script:Set-PPLPointerLineAfterMarker -Body $planBody -Marker $planMarker -SiblingId $siblingId
+        $pointerResult = script:Set-PPLCommentBodyDirect -Owner $Owner -Repo $Repo -CommentId $planCommentId -NewBody $newPlanBody
         if (-not $pointerResult.Success) {
             $artifacts.Pointer = 'failed'
             return [PSCustomObject]@{ Success = $false; Reason = "Failed to insert the phase-containment-ledger-ref pointer into the plan comment: $($pointerResult.Reason)"; Artifacts = $artifacts }
@@ -667,7 +744,7 @@ function script:Invoke-PersistPhaseLedgerPlanMode {
     }
 
     # Plan-mode ordering: judge-rulings FIRST, then phase-containment blocks.
-    $judgeResult = script:Set-JudgeRulingsBlockOnComment -Owner $Owner -Repo $Repo -CommentId $siblingId -ExpectedMarker $ledgerMarker -JudgeRulingsContent $JudgeRulingsContent
+    $judgeResult = script:Set-PPLJudgeRulingsBlockOnComment -Owner $Owner -Repo $Repo -CommentId $siblingId -ExpectedMarker $ledgerMarker -JudgeRulingsContent $JudgeRulingsContent
     if (-not $judgeResult.Success) {
         $artifacts.JudgeRulings = 'failed'
         return [PSCustomObject]@{ Success = $false; Reason = $judgeResult.Reason; Artifacts = $artifacts }
@@ -675,7 +752,7 @@ function script:Invoke-PersistPhaseLedgerPlanMode {
     $artifacts.JudgeRulings = $judgeResult.Action
 
     if ($PhaseContainmentBlocks.Count -gt 0) {
-        $blockResult = script:Set-PhaseContainmentBlocksOnComment -Owner $Owner -Repo $Repo -CommentId $siblingId -ExpectedMarker $ledgerMarker -Blocks $PhaseContainmentBlocks
+        $blockResult = script:Set-PPLPhaseContainmentBlocksOnComment -Owner $Owner -Repo $Repo -CommentId $siblingId -ExpectedMarker $ledgerMarker -Blocks $PhaseContainmentBlocks
         if (-not $blockResult.Success) {
             $artifacts.PhaseContainmentBlocks = 'failed'
             return [PSCustomObject]@{ Success = $false; Reason = $blockResult.Reason; Artifacts = $artifacts }
@@ -689,7 +766,7 @@ function script:Invoke-PersistPhaseLedgerPlanMode {
     return [PSCustomObject]@{ Success = $true; Reason = $null; Artifacts = $artifacts }
 }
 
-function script:Invoke-PersistPhaseLedgerDesignMode {
+function script:Invoke-PPLPersistPhaseLedgerDesignMode {
     param(
         [Parameter(Mandatory)][string]$Owner,
         [Parameter(Mandatory)][string]$Repo,
@@ -702,9 +779,9 @@ function script:Invoke-PersistPhaseLedgerDesignMode {
     # Add-*'s .Contains() identity check per plan-authoring/SKILL.md's
     # design-phase-complete convention (agents/Solution-Designer.agent.md:99).
     $designMarker = '<!-- design-phase-complete-'
-    $artifacts = script:New-PersistPhaseLedgerArtifactManifest
+    $artifacts = script:New-PPLPersistPhaseLedgerArtifactManifest
 
-    # Deliberately no Set-JudgeRulingsBlockOnComment call here (and no
+    # Deliberately no Set-PPLJudgeRulingsBlockOnComment call here (and no
     # -JudgeRulingsContent parameter on this inner function at all -- see
     # Invoke-PersistPhaseLedger's own comment on why it still accepts and
     # discards the value at the public boundary). Design-challenge review
@@ -720,7 +797,7 @@ function script:Invoke-PersistPhaseLedgerDesignMode {
     # JudgeRulings stay 'not-attempted' in the returned manifest for this
     # entire mode -- none of those concepts apply on the design surface.
     if ($PhaseContainmentBlocks.Count -gt 0) {
-        $blockResult = script:Set-PhaseContainmentBlocksOnComment -Owner $Owner -Repo $Repo -CommentId $DesignCommentId -ExpectedMarker $designMarker -Blocks $PhaseContainmentBlocks
+        $blockResult = script:Set-PPLPhaseContainmentBlocksOnComment -Owner $Owner -Repo $Repo -CommentId $DesignCommentId -ExpectedMarker $designMarker -Blocks $PhaseContainmentBlocks
         if (-not $blockResult.Success) {
             $artifacts.PhaseContainmentBlocks = 'failed'
             return [PSCustomObject]@{ Success = $false; Reason = $blockResult.Reason; Artifacts = $artifacts }
@@ -777,7 +854,7 @@ function Invoke-PersistPhaseLedger {
         Artifacts (an ordered landed/not-landed manifest -- M12 fix, issue
         #878 judge-sustained review, AC2: Sibling, Pointer, JudgeRulings, and
         PhaseContainmentBlocks, each one of the values documented on
-        New-PersistPhaseLedgerArtifactManifest/the two mode functions'
+        New-PPLPersistPhaseLedgerArtifactManifest/the two mode functions'
         Set-*OnComment call sites -- present on every result, success or
         failure, so a caller can always tell what happened at each step, not
         just the name of the step that ultimately failed).
@@ -795,7 +872,7 @@ function Invoke-PersistPhaseLedger {
 
     if ($Mode -eq 'design') {
         if ($DesignCommentId -le 0) {
-            return [PSCustomObject]@{ Success = $false; Reason = 'Mode design requires a positive -DesignCommentId'; Artifacts = (script:New-PersistPhaseLedgerArtifactManifest) }
+            return [PSCustomObject]@{ Success = $false; Reason = 'Mode design requires a positive -DesignCommentId'; Artifacts = (script:New-PPLPersistPhaseLedgerArtifactManifest) }
         }
         # -JudgeRulingsContent is intentionally NOT forwarded to design mode.
         # It stays Mandatory on this public function (rather than becoming
@@ -805,13 +882,13 @@ function Invoke-PersistPhaseLedger {
         # helper today -- do not have to branch on -Mode just to decide
         # whether to supply it. Design-mode callers pass a value here and it
         # is silently discarded at this boundary; see
-        # Invoke-PersistPhaseLedgerDesignMode's own comment for why the
+        # Invoke-PPLPersistPhaseLedgerDesignMode's own comment for why the
         # design surface never writes a judge-rulings block.
-        return script:Invoke-PersistPhaseLedgerDesignMode -Owner $Owner -Repo $Repo -DesignCommentId $DesignCommentId -PhaseContainmentBlocks $PhaseContainmentBlocks
+        return script:Invoke-PPLPersistPhaseLedgerDesignMode -Owner $Owner -Repo $Repo -DesignCommentId $DesignCommentId -PhaseContainmentBlocks $PhaseContainmentBlocks
     }
 
     if ($IssueNumber -le 0) {
-        return [PSCustomObject]@{ Success = $false; Reason = 'Mode plan requires a positive -IssueNumber'; Artifacts = (script:New-PersistPhaseLedgerArtifactManifest) }
+        return [PSCustomObject]@{ Success = $false; Reason = 'Mode plan requires a positive -IssueNumber'; Artifacts = (script:New-PPLPersistPhaseLedgerArtifactManifest) }
     }
-    return script:Invoke-PersistPhaseLedgerPlanMode -Owner $Owner -Repo $Repo -IssueNumber $IssueNumber -JudgeRulingsContent $JudgeRulingsContent -PhaseContainmentBlocks $PhaseContainmentBlocks
+    return script:Invoke-PPLPersistPhaseLedgerPlanMode -Owner $Owner -Repo $Repo -IssueNumber $IssueNumber -JudgeRulingsContent $JudgeRulingsContent -PhaseContainmentBlocks $PhaseContainmentBlocks
 }

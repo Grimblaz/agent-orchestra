@@ -21,6 +21,30 @@
 Set-StrictMode -Version Latest
 
 # -------------------------------------------------------------------------
+# F5 fix (issue #878 review, gh-3610120295): shared regex templates for the
+# two anchored-marker presence patterns this file previously duplicated
+# inline at every call site -- the design-phase-complete-{id}/plan-issue-{id}
+# OR-pattern was byte-identical at two sites and differed only by local
+# variable name at a third, and the judge-rulings presence pattern was
+# byte-identical at three more sites. Hoisting both to one $script:-scoped
+# source here eliminates the drift risk at the source (a future edit to one
+# copy silently missing the others) rather than adding a separate
+# byte-identity drift-guard test -- once every site below references these
+# templates there is no second literal copy left to drift.
+# -------------------------------------------------------------------------
+
+# {0} is substituted with the numeric issue id via -f. Preserves the
+# existing anchored, whole-line-prefix matching behavior exactly: true when
+# EITHER the design-phase-complete-{id} OR plan-issue-{id} marker is present
+# anywhere in the joined comment-bodies text (the two prior separate -match
+# calls OR'd together are logically equivalent to one alternation).
+$script:DesignPhaseCompleteOrPlanIssuePresencePattern = '(?m)^\s*<!--\s*(?:design-phase-complete|plan-issue)-{0}\s*-->'
+
+# No substitution needed -- matches any judge-rulings block head, anchored
+# the same way every call site already anchored it inline.
+$script:JudgeRulingsPresencePattern = '(?m)^\s*<!--\s*judge-rulings'
+
+# -------------------------------------------------------------------------
 # Public helper: Test-PhaseContainmentCacheFresh
 # Exposed so tests can call it directly.
 # Two-sided freshness guard: reject if generated_at is in the future OR if age >= 1h.
@@ -708,8 +732,7 @@ function script:Get-SurfaceACorpusGraphQL {
 
                 # Check whether this issue has a design-phase-complete or plan-issue marker
                 $allBodiesText = $commentBodies -join "`n"
-                $hasMarker = ($allBodiesText -match "(?m)^\s*<!--\s*design-phase-complete-$issueNum\s*-->") -or
-                             ($allBodiesText -match "(?m)^\s*<!--\s*plan-issue-$issueNum\s*-->")
+                $hasMarker = $allBodiesText -match ($script:DesignPhaseCompleteOrPlanIssuePresencePattern -f $issueNum)
 
                 $pageInfo = $commentBlock['pageInfo']
                 $cursor   = if ([bool]$pageInfo['hasNextPage']) { [string]$pageInfo['endCursor'] } else { $null }
@@ -778,8 +801,7 @@ function script:Get-SurfaceACorpusGraphQL {
 
                         $huntPagesUsed++
                         $allBodiesText = $commentBodies -join "`n"
-                        $hasMarker = ($allBodiesText -match "(?m)^\s*<!--\s*design-phase-complete-$issueNum\s*-->") -or
-                                     ($allBodiesText -match "(?m)^\s*<!--\s*plan-issue-$issueNum\s*-->")
+                        $hasMarker = $allBodiesText -match ($script:DesignPhaseCompleteOrPlanIssuePresencePattern -f $issueNum)
                     }
 
                     if (-not $hasMarker) {
@@ -1050,7 +1072,7 @@ function script:Get-SurfaceBCorpusGraphQL {
 
                 # Check whether this PR has a judge-rulings block (marks review pipeline)
                 $allBodiesText = $commentBodies -join "`n"
-                $hasJudgeRulings = ($allBodiesText -match '(?m)^\s*<!--\s*judge-rulings')
+                $hasJudgeRulings = ($allBodiesText -match $script:JudgeRulingsPresencePattern)
 
                 $pageInfo = $commentBlock['pageInfo']
                 $cursor   = if ([bool]$pageInfo['hasNextPage']) { [string]$pageInfo['endCursor'] } else { $null }
@@ -1120,7 +1142,7 @@ function script:Get-SurfaceBCorpusGraphQL {
 
                         $huntPagesUsed++
                         $allBodiesText = $commentBodies -join "`n"
-                        $hasJudgeRulings = ($allBodiesText -match '(?m)^\s*<!--\s*judge-rulings')
+                        $hasJudgeRulings = ($allBodiesText -match $script:JudgeRulingsPresencePattern)
                     }
 
                     if (-not $hasJudgeRulings) {
@@ -1384,8 +1406,7 @@ function script:Get-PhaseContainmentCorpusRest {
                         # carrying a design-phase-complete-{N} or
                         # plan-issue-{N} marker.
                         $allBodiesText = $bodies -join "`n"
-                        $hasMarker = ($allBodiesText -match "(?m)^\s*<!--\s*design-phase-complete-$num\s*-->") -or
-                                     ($allBodiesText -match "(?m)^\s*<!--\s*plan-issue-$num\s*-->")
+                        $hasMarker = $allBodiesText -match ($script:DesignPhaseCompleteOrPlanIssuePresencePattern -f $num)
                         if (-not $hasMarker) { continue }
                         $tuples.Add(@{ Number = $num; Surface = 'issue'; Bodies = $bodies; CreatedAtValues = $createdAtValues; AuthorLogins = $authorLogins })
                     }
@@ -1472,7 +1493,7 @@ function script:Get-PhaseContainmentCorpusRest {
                         $createdAtValues = $commentCreatedAt.ToArray()
                         $authorLogins    = $commentAuthorLogins.ToArray()
                         # Only scan PRs that have judge-rulings
-                        if (-not (($bodies -join "`n") -match '(?m)^\s*<!--\s*judge-rulings')) { continue }
+                        if (-not (($bodies -join "`n") -match $script:JudgeRulingsPresencePattern)) { continue }
                         $tuples.Add(@{ Number = $num; Surface = 'pr'; Bodies = $bodies; CreatedAtValues = $createdAtValues; AuthorLogins = $authorLogins })
                     }
                     catch {

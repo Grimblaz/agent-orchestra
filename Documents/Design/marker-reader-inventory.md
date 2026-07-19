@@ -1,6 +1,6 @@
 # Marker-Reader Inventory (issue #878, s1)
 
-Exhaustive scan of raw-text HTML-comment-marker scanning sites across
+Scan (lower bound) of raw-text HTML-comment-marker scanning sites across
 `.github/scripts/**` and `skills/**/scripts/**`, produced for [issue #878](https://github.com/Grimblaz/agent-orchestra/issues/878) Part C
 (per-pattern regex anchoring). This file is the s1 deliverable; s6 consumes
 it to apply anchoring per family. **Non-goals of this document: no source
@@ -116,7 +116,7 @@ abbreviated), **Alternation**, **End-anchor**, **Polarity verdict**
 | `phase-containment-emission-check-core.ps1:747` | block-selector (head) | `'(?m)^finding_dispositions\s*:\s*$'` | none | `$` (multiline) | n/a | design-challenge branch of `Test-EmissionMarkerPresent`. Already line-anchored. |
 | `phase-containment-emission-check-core.ps1:751` | presence-gate (vocab) | `'(?m)^\s*(disposition\|finding_id\|schema_version)\s*:'` | grouped (3-way) | none | **true→fail-loud** (marker present → must parse or could-not-verify) | Vocab-gate window check, design-challenge branch. Anchor-eligible (not the :800/:93-94 fallback shape). |
 | `phase-containment-emission-check-core.ps1:2005` | presence-gate | `'\G<!--\s*judge-rulings\s+pr=\d+\s*-->'` | none | none (`\G` start-anchor only) | n/a (selection, not gate) | Attributed-form re-test at each vocab-gated candidate's own index via `\G`. **Do not swap `\s` for `^` here** — `\G` anchors to the candidate's own `.Index` inside `Body.Substring(...)`, and a line-start anchor would be redundant/wrong since the substring already starts mid-body. |
-| `phase-containment-emission-check-core.ps1:2231` | block-selector (head) | `'(?m)^finding_dispositions\s*:\s*$'` | none | `$` | n/a | `Get-DesignChallengeSustainedCountInternal`; byte-identical to `:747` — the meta-test's "four copies of `$keyAnchor`" precedent (see below) but this pair is the head pattern, not `$keyAnchor`. |
+| `phase-containment-emission-check-core.ps1:2231` | block-selector (head) | `'(?m)^finding_dispositions\s*:\s*$'` | none | `$` | n/a | `Get-DesignChallengeSustainedCountInternal`; byte-identical to `:747` — the meta-test's "six copies of `$keyAnchor`" precedent (see below) but this pair is the head pattern, not `$keyAnchor`. |
 | `phase-containment-emission-check-core.ps1:2599-2601` | presence-gate | `'(?m)^finding_dispositions\s*:\s*$'` (via `[regex]::IsMatch`) | none | `$` | n/a | Third occurrence of the identical design-challenge head literal, this time as a boolean `hasRealHead` check inside `Get-EmissionGap`'s per-body loop. |
 | `frame-credit-ledger-core.ps1:1178` | block-selector | `'(?ms)<!--\s*judge-rulings\s*\r?\n(?<body>.*?)\r?\n-->'` | none | requires `\r?\n-->` (structural close) | n/a | `ConvertFrom-JudgeRulingsComment` — the **PR-surface** reader (`- id:`/`points_awarded` shape), distinct from the plan-surface reader above. **No vocab gate** — unlike `Get-RealJudgeRulingsHeadMatches`, this is a bare first-match `[regex]::Match` with no defense against a prose mention of the marker convention preceding a real block. Flagged as a gap for s6 to weigh (anchoring alone does not add vocab-gating). |
 | `frame-credit-ledger-core.ps1:1201` | presence-gate / selector | `-match '<!--\s*judge-rulings'` | none | none | n/a (selection filter, `Select-Object -Last 1`) | Filters `$script:PrComments` down to the comment(s) carrying a judge-rulings head before feeding `ConvertFrom-JudgeRulingsComment`. Unanchored. |
@@ -343,19 +343,21 @@ anchoring a regex inside an already-selected body. Sites:
 ## `$keyAnchor` — an internal-field anchor idiom, not a marker family (context only)
 
 `phase-containment-emission-check-core.ps1` defines the fragment
-`$keyAnchor = '(?:^\s*(?:-\s+)?|[{,]\s*)'` independently at four sites
-(`:2146`, `:2253`, and duplicated inline in `phase-containment-cost-core.ps1:149`
-and `frame-credit-ledger-core.ps1`'s per-entry extractors) to recognize a
-real YAML key position (line-start, dash-list-item, or flow-mapping
-`{`/`,`) versus a prose mention. This is **not** itself a marker-family
-open/close pattern — it anchors *fields inside* an already-isolated region
-(`disposition:`, `judge_ruling:`, etc.), so it is out of this inventory's
-per-family marker-scan scope. Recorded here only because
-`phase-containment-emission-check-core.ps1`'s own comment at `:2141-2145`
-already asserts a drift-catching meta-test keeps its four copies
-byte-identical — the same discipline s6 should apply to the `plan-issue`/
-`design-issue` three-copy cluster and the `pipeline-metrics` cluster, which
-currently have **no** such drift guard.
+`(?:^\s*(?:-\s+)?|[{,]\s*)` independently at five sites (`:72`, `:1725`,
+`:2119`, `:2179`, `:2286`), and `phase-containment-cost-core.ps1` carries one
+more copy (`:160`) — six copies total across the two files. (`frame-credit-ledger-core.ps1`
+does not contain this fragment.) The pattern recognizes a real YAML key
+position (line-start, dash-list-item, or flow-mapping `{`/`,`) versus a
+prose mention. This is **not** itself a marker-family open/close pattern —
+it anchors *fields inside* an already-isolated region (`disposition:`,
+`judge_ruling:`, etc.), so it is out of this inventory's per-family
+marker-scan scope. Recorded here only because
+`phase-containment-emission-check-core.ps1`'s own drift-catching meta-test
+(`.github/scripts/Tests/phase-containment-emission-check-core.Tests.ps1`)
+already asserts all six copies stay byte-identical — the same discipline
+s6 should apply to the `plan-issue`/`design-issue` three-copy cluster and
+the `pipeline-metrics` cluster, which currently have **no** such drift
+guard.
 
 ## Counts by classification class
 

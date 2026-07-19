@@ -337,7 +337,7 @@ Describe 'design-phase-complete anchoring (gate-reconciliation-core.ps1:158)' -T
         # Isolate the decoy paragraph only (everything before the real marker
         # line) to prove the presence-gate itself rejects the mid-line mention.
         $full = & $script:ReadFixture -Name 'design-phase-complete-prose-mention-plus-real.txt'
-        $decoyOnly = $full.Substring(0, $full.IndexOf('<!-- design-phase-complete-878 -->'))
+        $decoyOnly = $full.Substring(0, $full.LastIndexOf('<!-- design-phase-complete-878 -->'))
 
         $result = Read-FindingDispositionIds -Issue 878 -Repo 'owner/repo' -Gh 'gh' -InMem @($decoyOnly)
 
@@ -429,7 +429,7 @@ Describe 'judge-rulings / design-phase-complete / plan-issue inline presence-gat
 
     It 'the anchored judge-rulings presence-gate rejects a decoy-only mid-line mention' {
         $full = & $script:ReadFixture -Name 'judge-rulings-prose-mention-plus-real.txt'
-        $decoyOnly = $full.Substring(0, $full.IndexOf('<!-- judge-rulings'))
+        $decoyOnly = $full.Substring(0, $full.LastIndexOf('<!-- judge-rulings'))
         ($decoyOnly -match '(?m)^\s*<!--\s*judge-rulings') | Should -BeFalse
     }
 
@@ -446,7 +446,7 @@ Describe 'judge-rulings / design-phase-complete / plan-issue inline presence-gat
 
     It 'the anchored design-phase-complete-{N}/plan-issue-{N} OR-gate rejects decoy-only mid-line mentions' {
         $full = & $script:ReadFixture -Name 'plan-issue-prose-mention-plus-real.txt'
-        $decoyOnly = $full.Substring(0, $full.IndexOf('<!-- plan-issue-878 -->'))
+        $decoyOnly = $full.Substring(0, $full.LastIndexOf('<!-- plan-issue-878 -->'))
 
         (($decoyOnly -match '(?m)^\s*<!--\s*design-phase-complete-878\s*-->') -or
          ($decoyOnly -match '(?m)^\s*<!--\s*plan-issue-878\s*-->')) | Should -BeFalse
@@ -488,7 +488,7 @@ Describe 'cost-pattern-data anchoring (cost-rolling-history.ps1:33,36,726,785; c
         ($real -match '(?m)^\s*<!--\s*cost-pattern-data') | Should -BeTrue
 
         $full = & $script:ReadFixture -Name 'cost-pattern-data-prose-mention-plus-real.txt'
-        $decoyOnly = $full.Substring(0, $full.IndexOf('<!-- cost-pattern-data'))
+        $decoyOnly = $full.Substring(0, $full.LastIndexOf('<!-- cost-pattern-data'))
         ($decoyOnly -match '(?m)^\s*<!--\s*cost-pattern-data') | Should -BeFalse
     }
 

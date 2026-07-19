@@ -124,7 +124,7 @@ Describe 'Invoke-PersistPhaseLedger' {
             $script:ghCallLog.Add($joined)
 
             # LIST: gh issue view <N> --json comments [-R <owner>/<repo>]
-            # M15 fix (issue #878 judge-sustained review): Find-CommentIdByExactMarker
+            # M15 fix (issue #878 judge-sustained review): Find-PPLCommentIdByExactMarker
             # now passes -R explicitly, so this mock must match with or
             # without the trailing -R argument.
             if ($joined -match '^issue view \d+ --json comments(\s|$)') {
@@ -270,7 +270,7 @@ Describe 'Invoke-PersistPhaseLedger' {
 
         It 'reuses a pre-existing ledger sibling and preserves its content when the plan comment''s pointer line is missing (M1 guard: pointer-absent path must not wipe the sibling)' {
             # This is the scenario the M1 guard (persist-phase-ledger-core.ps1,
-            # Invoke-PersistPhaseLedgerPlanMode's $existingSibling check) exists
+            # Invoke-PPLPersistPhaseLedgerPlanMode's $existingSibling check) exists
             # to protect, and the ONE that the sibling It block above does not
             # reach: here the plan comment carries NO
             # phase-containment-ledger-ref pointer, yet the ledger sibling
