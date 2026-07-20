@@ -87,7 +87,7 @@ Load `skills/frame-credit-emission/SKILL.md` for the deferred-emission terminal-
 
 **Draft-scan step (warn-only)**: Before updating the issue, write the drafted design prose to a scratch file under `.tmp/` (the repo's gitignored scratch directory — see `.gitignore:3,19-20`), then run `pwsh skills/naming-register-policy/scripts/newcomer-audit.ps1 -Path <scratch-file>` against it. Treat any findings as advisory only — the detector never blocks. Proceed to post regardless of findings; consider expanding or rephrasing flagged terms first.
 
-Update the GitHub issue body with full design details per `skills/design-exploration/SKILL.md` (decisions, acceptance criteria, testing scope, rejected alternatives).
+Update the GitHub issue body with full design details per `skills/design-exploration/SKILL.md` (decisions, acceptance criteria, testing scope, rejected alternatives, **Grounding Evidence** block including any escalation notes when applicable — see `skills/design-exploration/SKILL.md` § Additionally persist to the durable design body).
 
 ### Pre-post YAML integrity check
 
@@ -169,6 +169,7 @@ Retain the comment text returned by the post call so Code-Conductor harvest can 
 Hard-stop: never conclude without durable artifacts.
 
 - [ ] **GitHub issue updated** with full design details, decisions, and acceptance criteria.
+- [ ] **Grounding Evidence** block (with escalation notes when applicable) persisted in the issue body at the placement anchor defined in `skills/design-exploration/SKILL.md`.
 - [ ] **Rejected alternatives documented** with brief rationale.
 - [ ] **Completion comment posted** with the `<!-- design-phase-complete-{ISSUE_NUMBER} -->` marker.
 - [ ] **Credit-input marker** `<!-- credit-input-design-{ISSUE_NUMBER} -->` posted immediately after.
