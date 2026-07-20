@@ -2,6 +2,12 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.4.3] — 2026-07-20
+
+### Fixed
+
+Grounding Evidence block now persists to the design body's durable text (issue #866): the /design Grounding Discipline previously wrote its evidence table only to the ephemeral session, so the downstream Issue-Planner standards check could never find it (measured 1 of 7 designs persisted it). Adds a canonical sentinel-plus-heading shape, an escalation-note rule for could-not-ground-escalate rows, a body-size compact gate, persist-time re-grounding, and a Completion Gate checklist item. Also ships a corpus-check diagnostic script (AC7) for on-demand persistence measurement.
+
 ## [3.4.2] — 2026-07-20
 
 ### Added
