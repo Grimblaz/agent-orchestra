@@ -445,6 +445,57 @@ budget:
 
             $result | Should -BeNullOrEmpty
         }
+
+        It 'resolves the remote from the SUPPLIED -RepoRoot, not process CWD, and honors -GitCliPath (R7)' {
+            script:Assert-GCVFunctionExists -Name 'Get-GCPinnedCommentBody'
+            $repoA = Join-Path $TestDrive 'r7-repo-a'
+            $repoB = Join-Path $TestDrive 'r7-repo-b'
+            New-Item -ItemType Directory -Path $repoA -Force | Out-Null
+            New-Item -ItemType Directory -Path $repoB -Force | Out-Null
+            & git -C $repoA init -q -b main . 2>&1 | Out-Null
+            & git -C $repoA remote add origin 'https://github.com/owner-a/repo-a.git' 2>&1 | Out-Null
+            & git -C $repoB init -q -b main . 2>&1 | Out-Null
+            & git -C $repoB remote add origin 'https://github.com/owner-b/repo-b.git' 2>&1 | Out-Null
+
+            $mockGhPath = Join-Path $TestDrive 'gh-r7-remote.ps1'
+            $commentsJson = "[$(script:New-CommentJson -Body '<!-- plan-issue-873 --> no block' -Id 1)]"
+            script:New-MockGh -Path $mockGhPath -CommentsJsonArray $commentsJson
+
+            Push-Location $repoA
+            try {
+                $null = Get-GCPinnedCommentBody -Issue 873 -Marker '<!-- plan-issue-873 -->' -RepoRoot $repoB -GhCliPath $mockGhPath -WarningAction SilentlyContinue
+            } finally {
+                Pop-Location
+            }
+
+            $recordedArgs = Get-Content -LiteralPath "$mockGhPath.args" -Raw
+            $recordedArgs | Should -Match 'owner-b/repo-b' -Because 'the remote must resolve from -RepoRoot (repoB), not the process CWD (repoA)'
+            $recordedArgs | Should -Not -Match 'owner-a/repo-a'
+        }
+
+        It 'honors a -GitCliPath override for the remote-resolution call, never the hardcoded literal git (R7)' {
+            script:Assert-GCVFunctionExists -Name 'Get-GCPinnedCommentBody'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'r7-gitclipath-repo')
+            & git -C $repo remote add origin 'https://github.com/owner-c/repo-c.git' 2>&1 | Out-Null
+
+            $mockGitPath = Join-Path $TestDrive 'r7-git-forward.ps1'
+            @'
+param()
+$args -join ' ' | Out-File -FilePath ($PSCommandPath + '.calls') -Encoding UTF8 -Append
+& git @args
+exit $LASTEXITCODE
+'@ | Set-Content -LiteralPath $mockGitPath -Encoding UTF8
+
+            $mockGhPath = Join-Path $TestDrive 'gh-r7-gitclipath.ps1'
+            $commentsJson = "[$(script:New-CommentJson -Body '<!-- plan-issue-873 --> no block' -Id 1)]"
+            script:New-MockGh -Path $mockGhPath -CommentsJsonArray $commentsJson
+
+            $null = Get-GCPinnedCommentBody -Issue 873 -Marker '<!-- plan-issue-873 -->' -RepoRoot $repo -GitCliPath $mockGitPath -GhCliPath $mockGhPath -WarningAction SilentlyContinue
+
+            (Test-Path -LiteralPath "$mockGitPath.calls") | Should -Be $true -Because 'the remote-resolution call must go through the supplied -GitCliPath, never a hardcoded literal git binary'
+            $recordedGitArgs = Get-Content -LiteralPath "$mockGitPath.calls" -Raw
+            $recordedGitArgs | Should -Match 'config --get remote.origin.url'
+        }
     }
 
     Context 'Resolve-GCVerdictDisposition -- exit-code precedence lattice' {
@@ -658,6 +709,35 @@ budget:
             $verdict.Reason | Should -Match 'infra-error' -Because 'the infra/harness-error disposition must carry a distinct Reason tag from a future target-level review-required disposition'
             $verdict.Verdict | Should -Not -Be 'fail' -Because 'an environment defect (missing module) must never be reported as the run failing'
         }
+
+        It 'routes an intake-refusal return through New-GCVerdictReport, so it carries the SAME 6-field shape (incl. Flags) every other verdict path produces (R1)' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GoalContractValidate'
+            $mockGhPath = Join-Path $TestDrive 'gh-r1-field-shape.ps1'
+            $commentsJson = "[$(script:New-CommentJson -Body 'unrelated' -Id 1)]"
+            script:New-MockGh -Path $mockGhPath -CommentsJsonArray $commentsJson
+
+            $verdict = Invoke-GoalContractValidate -Issue 873 -RepoRoot $script:RepoRoot -Repo 'example-owner/example-repo' -GhCliPath $mockGhPath -WarningAction SilentlyContinue
+
+            $json = $verdict | ConvertTo-Json -Depth 10 -Compress
+            $parsed = $json | ConvertFrom-Json
+            $fieldNames = @($parsed.PSObject.Properties.Name | Sort-Object)
+            $fieldNames | Should -Be @('ExitCode', 'Flags', 'Reason', 'Refusals', 'Targets', 'Verdict') -Because 'every intake-refusal return must go through New-GCVerdictReport, the single exit point, so it carries the identical field-locked shape (incl. Flags) every other path produces'
+        }
+
+        It 'inert-renders (fence-wraps) refusal text on the intake-refusal path, same as every other verdict path (R1)' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GoalContractValidate'
+            $mockGhPath = Join-Path $TestDrive 'gh-r1-inert-render.ps1'
+            $body = "<!-- plan-issue-873 -->`n<!-- goal-contract`nschema_version: 99`nissue: 873`n-->"
+            $commentsJson = "[$(script:New-CommentJson -Body $body -Id 1)]"
+            script:New-MockGh -Path $mockGhPath -CommentsJsonArray $commentsJson
+
+            $verdict = Invoke-GoalContractValidate -Issue 873 -RepoRoot $script:RepoRoot -Repo 'example-owner/example-repo' -GhCliPath $mockGhPath -WarningAction SilentlyContinue
+
+            $verdict.Verdict | Should -Be 'refused'
+            @($verdict.Refusals).Count | Should -BeGreaterThan 0
+            $verdict.Refusals[0] | Should -Match '^`{3,}' -Because 'the intake-refusal path must route through New-GCVerdictReport (which fence-wraps every refusal string via Format-GCInertRender), never return the raw unwrapped disposition text -- this proves New-GCVerdictReport is the single exit point, not bypassed on this path'
+            ($verdict.Refusals -join ' ') | Should -Match 'contract-schema-violation'
+        }
     }
 
     Context 'Test-GCTreeClean -- cleanliness assertion primitive (s2, AC1)' {
@@ -691,6 +771,19 @@ budget:
             $result = Test-GCTreeClean -Path $repo
 
             $result.IsClean | Should -Be $false
+        }
+
+        It 'fails CLOSED (IsClean = $false), never open, when the git invocation itself fails (R3)' {
+            script:Assert-GCVFunctionExists -Name 'Test-GCTreeClean'
+            # An invalid/nonexistent path makes `git -C <path> status` fail
+            # with a non-zero exit and empty stdout -- the exact shape that
+            # previously read as IsClean=$true (a false "clean" report).
+            $badPath = Join-Path $TestDrive 'r3-does-not-exist-path'
+
+            $result = Test-GCTreeClean -Path $badPath -WarningAction SilentlyContinue
+
+            $result.IsClean | Should -Be $false -Because 'a failed git invocation (corrupted index, stale lock, invalid path) must never be silently read as clean'
+            @($result.Porcelain).Count | Should -BeGreaterThan 0
         }
     }
 
@@ -821,6 +914,38 @@ budget:
             $result.OrphanedPath | Should -Be $created.Path
 
             script:Remove-GCTestWorktree -RepoRoot $repo -WorktreePath $created.Path
+        }
+
+        It 'never lets native git worktree add/remove/prune stdout chatter pollute a structurally-consumed return value (R18)' {
+            script:Assert-GCVFunctionExists -Name 'New-GCDisposableWorktree'
+            script:Assert-GCVFunctionExists -Name 'Remove-GCDisposableWorktree'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'r18-stdout-chatter-repo')
+            $mockGitPath = Join-Path $TestDrive 'r18-git-chatter.ps1'
+            # A smart forwarding mock that ALSO writes chatter to stdout
+            # (never stderr) before forwarding worktree add/remove/prune to
+            # the real git binary -- simulating a future git version or
+            # platform difference that emits progress text to stdout.
+            @'
+param()
+$argsJoined = $args -join ' '
+if ($argsJoined -match 'worktree (add|remove|prune)') {
+    Write-Output 'chatter: some progress message on stdout'
+}
+& git @args
+exit $LASTEXITCODE
+'@ | Set-Content -LiteralPath $mockGitPath -Encoding UTF8
+
+            $createResult = New-GCDisposableWorktree -RepoRoot $repo -GitCliPath $mockGitPath
+            try {
+                $createResult.Success | Should -Be $true -Because 'stdout chatter on worktree add must never be mistaken for a failure signal'
+                $createResult.Success.GetType().Name | Should -Be 'Boolean' -Because 'Success must remain a scalar bool, never an array polluted by leaked native-command stdout'
+
+                $removeResult = Remove-GCDisposableWorktree -RepoRoot $repo -WorktreePath $createResult.Path -GitCliPath $mockGitPath
+                $removeResult.Removed | Should -Be $true
+                $removeResult.Removed.GetType().Name | Should -Be 'Boolean' -Because 'Removed must remain a scalar bool, never an array polluted by leaked stdout chatter from worktree remove/prune'
+            } finally {
+                script:Remove-GCTestWorktree -RepoRoot $repo -WorktreePath $createResult.Path
+            }
         }
     }
 
@@ -959,6 +1084,19 @@ budget:
         It 'returns $null for an unparseable compound value (advisory-only degrade, never a guess)' {
             script:Assert-GCVFunctionExists -Name 'ConvertTo-GCWallClockSeconds'
             ConvertTo-GCWallClockSeconds -Value '1h30m' | Should -BeNullOrEmpty
+        }
+
+        It 'degrades to $null instead of throwing an Int32-overflow for an oversized value (R21)' {
+            script:Assert-GCVFunctionExists -Name 'ConvertTo-GCWallClockSeconds'
+            { ConvertTo-GCWallClockSeconds -Value '99999999999h' } | Should -Not -Throw -Because 'a bare [int] cast Int32-overflows on this magnitude, reachable via the untrusted budget.wall_clock contract field'
+            ConvertTo-GCWallClockSeconds -Value '99999999999h' | Should -BeNullOrEmpty
+        }
+
+        It 'degrades to $null instead of throwing when an in-range magnitude''s h-scaled result would itself Int32-overflow (R21)' {
+            script:Assert-GCVFunctionExists -Name 'ConvertTo-GCWallClockSeconds'
+            # 999999999 fits in Int32 on its own, but *3600 overflows Int32.
+            { ConvertTo-GCWallClockSeconds -Value '999999999h' } | Should -Not -Throw
+            ConvertTo-GCWallClockSeconds -Value '999999999h' | Should -BeNullOrEmpty
         }
     }
 
@@ -1178,6 +1316,22 @@ Start-Sleep -Seconds 30
             $malformed = [pscustomobject]@{ SomethingElse = 'x' }
 
             Test-GCSuiteGatePass -Result $malformed | Should -Be $false
+        }
+
+        It 'fails closed (never throws) for a PRESENT-but-$null ExitCode/TotalFailed -- the false-GREEN a bare [int] cast previously produced (R10)' {
+            script:Assert-GCVFunctionExists -Name 'Test-GCSuiteGatePass'
+            $result = [pscustomobject]@{ ExitCode = $null; TotalFailed = $null; TotalPassed = 250 }
+
+            { Test-GCSuiteGatePass -Result $result } | Should -Not -Throw
+            Test-GCSuiteGatePass -Result $result | Should -Be $false -Because 'a bare [int] cast silently coerces $null to 0, which previously false-GREENed this exact shape'
+        }
+
+        It 'fails closed (never throws) for a non-numeric ExitCode, which previously threw instead of failing closed (R10)' {
+            script:Assert-GCVFunctionExists -Name 'Test-GCSuiteGatePass'
+            $result = [pscustomobject]@{ ExitCode = 'not-a-number'; TotalFailed = 0; TotalPassed = 250 }
+
+            { Test-GCSuiteGatePass -Result $result } | Should -Not -Throw -Because 'this function''s documented contract is "never throws, fails closed to $false"'
+            Test-GCSuiteGatePass -Result $result | Should -Be $false
         }
     }
 
@@ -1441,6 +1595,19 @@ Describe 'Foo' { It 'x' { 1 | Should -Be 2 } }
             $result.Flagged | Should -Be $false
             @($result.DeletedFiles).Count | Should -Be 0
         }
+
+        It 'fails CLOSED toward MORE review (Flagged = $true), never "nothing changed", when the git diff invocation fails (R4)' {
+            script:Assert-GCVFunctionExists -Name 'Test-GCTestFileDeletion'
+            # An invalid SHA makes the underlying `git diff` fail with a
+            # non-zero exit and empty stdout -- the exact shape that
+            # previously read as Flagged=$false ("nothing changed").
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'r4-deletion-git-error-repo')
+
+            $result = Test-GCTestFileDeletion -WorktreePath $repo -BaseSha 'not-a-real-sha' -RunSha 'also-not-a-real-sha' -AllowlistPathspecs @('.') -WarningAction SilentlyContinue
+
+            $result.Flagged | Should -Be $true -Because 'this is an advisory mandatory-review flag, never a hard gate -- erring toward MORE review-flagging on a git failure is the safe direction'
+            @($result.DeletedFiles).Count | Should -BeGreaterThan 0
+        }
     }
 
     Context 'Get-GCShouldCommandCount -- AST-aware Should-command counting (s5, AC1)' {
@@ -1626,6 +1793,41 @@ $script:CoreFile = Join-Path $PSScriptRoot '../lib/bar-core.ps1'
 
             @($result).Count | Should -Be 0
         }
+
+        It 'includes a lib file referenced via an UNQUOTED bareword dot-source (no quotes at all) (R13)' {
+            script:Assert-GCVFunctionExists -Name 'Get-GCHelperLibSet'
+            $root = Join-Path $TestDrive 'r13-unquoted-repo'
+            script:Write-GCFile -RepoPath $root -RelativePath '.github/scripts/lib/qux-core.ps1' -Content 'function Get-Qux { }'
+            script:Write-GCFile -RepoPath $root -RelativePath '.github/scripts/Tests/qux.Tests.ps1' -Content @'
+. $PSScriptRoot/../lib/qux-core.ps1
+'@
+
+            $result = Get-GCHelperLibSet -RepoRoot $root
+
+            $result | Should -Contain '.github/scripts/lib/qux-core.ps1' -Because 'an unquoted dot-source matches neither the quoted-literal branch nor the bare-variable-only indirection branch, and was previously silently missed'
+        }
+
+        It 'computes the set from the MERGE-BASE commit, not the run''s own live worktree state (R8)' {
+            script:Assert-GCVFunctionExists -Name 'Get-GCHelperLibSet'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'r8-mergebase-repo')
+            script:Write-GCFile -RepoPath $repo -RelativePath '.github/scripts/lib/evade-core.ps1' -Content 'function Get-Evade { 1 }'
+            script:Write-GCFile -RepoPath $repo -RelativePath '.github/scripts/Tests/evade.Tests.ps1' -Content @'
+. (Join-Path $PSScriptRoot '../lib/evade-core.ps1')
+'@
+            $baseSha = script:New-GCCommit -RepoPath $repo -Message 'base: helper referenced'
+
+            # Adversarial run: de-reference the helper (drop the dot-source
+            # line) from the live worktree state, simulating an attempt to
+            # shrink the helper-lib allowlist before gutting the helper.
+            script:Write-GCFile -RepoPath $repo -RelativePath '.github/scripts/Tests/evade.Tests.ps1' -Content "# no longer dot-sourced here`n"
+            $null = script:New-GCCommit -RepoPath $repo -Message 'run: de-reference helper'
+
+            $liveResult = Get-GCHelperLibSet -RepoRoot $repo
+            $liveResult | Should -Not -Contain '.github/scripts/lib/evade-core.ps1' -Because 'the live worktree no longer references the helper -- this is exactly the evasion window R8 closes'
+
+            $baseResult = Get-GCHelperLibSet -RepoRoot $repo -BaseSha $baseSha
+            $baseResult | Should -Contain '.github/scripts/lib/evade-core.ps1' -Because 'the merge-base commit still referenced the helper, so it must stay in the allowlist regardless of what the run under audit did to shrink it'
+        }
     }
 
     Context 'Test-GCFixtureOrHelperModification -- fixture/helper mandatory-review flag (s5, AC1/AC2)' {
@@ -1669,6 +1871,16 @@ $script:CoreFile = Join-Path $PSScriptRoot '../lib/bar-core.ps1'
             $result = Test-GCFixtureOrHelperModification -WorktreePath $repo -BaseSha $baseSha -RunSha $runSha -HelperLibPaths @()
 
             $result.Flagged | Should -Be $false
+        }
+
+        It 'fails CLOSED toward MORE review (Flagged = $true), never "nothing changed", when the git diff invocation fails (R4)' {
+            script:Assert-GCVFunctionExists -Name 'Test-GCFixtureOrHelperModification'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'r4-fixture-git-error-repo')
+
+            $result = Test-GCFixtureOrHelperModification -WorktreePath $repo -BaseSha 'not-a-real-sha' -RunSha 'also-not-a-real-sha' -HelperLibPaths @() -WarningAction SilentlyContinue
+
+            $result.Flagged | Should -Be $true -Because 'this is an advisory mandatory-review flag, never a hard gate -- erring toward MORE review-flagging on a git failure is the safe direction'
+            @($result.ChangedFiles).Count | Should -BeGreaterThan 0
         }
     }
 
@@ -1774,6 +1986,67 @@ Describe 'Foo' { It 'x' { 1 | Should -Be 1 } }
             $result.Refused | Should -Be $false
             @($result.Flags).Count | Should -Be 0
         }
+
+        It 'flags a diff-integrity-git-error mandatory-review flag, never a silently-empty changed-file list, when the changed-test-files diff invocation fails (R4)' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCDiffIntegrityPhase'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'r4-diffintegrity-git-error-repo')
+            script:Write-GCFile -RepoPath $repo -RelativePath 'x.txt' -Content "x`n"
+            $mainTip = script:New-GCCommit -RepoPath $repo -Message 'base state'
+            & git -C $repo checkout -q -b feature 2>&1 | Out-Null
+            script:Write-GCFile -RepoPath $repo -RelativePath 'x.txt' -Content "changed`n"
+            $runSha = script:New-GCCommit -RepoPath $repo -Message 'run state'
+
+            $mockGitPath = Join-Path $TestDrive 'r4-git-diff-fail.ps1'
+            # Targets ONLY the raw changed-test-files diff this phase issues
+            # directly (no --diff-filter, pathspec exactly
+            # .github/scripts/Tests) -- never Test-GCTestFileDeletion's own
+            # --diff-filter=DR call or Test-GCFixtureOrHelperModification's
+            # fixtures/helper-pathspec call, both of which forward through
+            # to the real git binary untouched.
+            @'
+param()
+$argsJoined = $args -join ' '
+if ($argsJoined -match 'diff --name-only' -and $argsJoined -notmatch 'diff-filter' -and $argsJoined -match '-- \.github/scripts/Tests$') {
+    exit 128
+}
+& git @args
+exit $LASTEXITCODE
+'@ | Set-Content -LiteralPath $mockGitPath -Encoding UTF8
+
+            $result = Invoke-GCDiffIntegrityPhase -WorktreePath $repo -RunSha $runSha -RepoRoot $repo -DefaultRef 'main' -GitCliPath $mockGitPath -WarningAction SilentlyContinue
+
+            $result.Refused | Should -Be $false
+            $kinds = @($result.Flags | ForEach-Object { $_.Kind })
+            $kinds | Should -Contain 'diff-integrity-git-error' -Because 'a failed changed-test-files diff must never silently collapse to an empty list (which would make assertion-weakening detection quietly skip every file in this range) -- it must be surfaced as its own mandatory-review flag'
+        }
+
+        It 'grounds the helper-lib allowlist in the MERGE-BASE commit, so a run that de-references then guts a helper cannot evade test-file-deletion detection (R8)' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCDiffIntegrityPhase'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'r8-phase-evasion-repo')
+            script:Write-GCFile -RepoPath $repo -RelativePath '.github/scripts/lib/evade-core.ps1' -Content 'function Get-Evade { 1 }'
+            script:Write-GCFile -RepoPath $repo -RelativePath '.github/scripts/Tests/evade.Tests.ps1' -Content @'
+. (Join-Path $PSScriptRoot '../lib/evade-core.ps1')
+Describe 'Evade' { It 'x' { 1 | Should -Be 1 } }
+'@
+            $mainTip = script:New-GCCommit -RepoPath $repo -Message 'base: helper referenced'
+            & git -C $repo checkout -q -b feature 2>&1 | Out-Null
+
+            # Adversarial run: de-reference the helper (drop the dot-source
+            # line, Should-count unchanged) then DELETE the now-unreferenced
+            # helper outright -- a live-worktree-computed allowlist would no
+            # longer include it (silently dropped once de-referenced),
+            # letting the deletion evade Test-GCTestFileDeletion entirely.
+            script:Write-GCFile -RepoPath $repo -RelativePath '.github/scripts/Tests/evade.Tests.ps1' -Content "Describe 'Evade' { It 'x' { 1 | Should -Be 1 } }`n"
+            script:Remove-GCFile -RepoPath $repo -RelativePath '.github/scripts/lib/evade-core.ps1'
+            $runSha = script:New-GCCommit -RepoPath $repo -Message 'run: de-reference then delete the helper'
+
+            $result = Invoke-GCDiffIntegrityPhase -WorktreePath $repo -RunSha $runSha -RepoRoot $repo -DefaultRef 'main'
+
+            $result.Refused | Should -Be $false
+            $deletionFlag = $result.Flags | Where-Object { $_.Kind -eq 'test-file-deletion' }
+            $deletionFlag | Should -Not -BeNullOrEmpty -Because 'the merge-base commit still referenced the helper, so it must stay in the deletion detector''s allowlist regardless of what the run under audit did to shrink it'
+            $deletionFlag.Files | Should -Contain '.github/scripts/lib/evade-core.ps1'
+        }
     }
 
     Context 'Format-GCInertRender -- backtick-safe inert-render (s6, Part B / U7 HIGH fix)' {
@@ -1835,6 +2108,20 @@ Describe 'Foo' { It 'x' { 1 | Should -Be 1 } }
             $rendered = Format-GCInertRender -Content $content
             $rendered | Should -Match ([regex]::Escape($content))
         }
+
+        It 'strips nested/overlapping HTML-comment delimiters to a fixed point instead of reconstructing a live marker (R2 HIGH, live-reproduced)' {
+            script:Assert-GCVFunctionExists -Name 'Format-GCInertRender'
+            # A single non-looping strip pass is reconstructable: removing
+            # the inner "<!--" substring from this exact nested shape
+            # concatenates the outer fragments into a live "<!-- plan-issue-9
+            # -->" marker. Looping the strip to a fixed point must leave NO
+            # "<!--"/"-->" substring anywhere in the rendered output.
+            $decoy = '<!<!---- plan-issue-9 ---->>'
+            $rendered = Format-GCInertRender -Content $decoy
+
+            $rendered | Should -Not -Match '<!--' -Because 'a single non-looping strip pass reconstructs this exact nested shape into a live marker'
+            $rendered | Should -Not -Match '-->'
+        }
     }
 
     Context 'New-GCVerdictReport -- field-locked verdict shape (s6, Part C / #874 predicate interface)' {
@@ -1865,13 +2152,25 @@ Describe 'Foo' { It 'x' { 1 | Should -Be 1 } }
             $json = $report | ConvertTo-Json -Depth 10 -Compress
             $parsed = $json | ConvertFrom-Json
             $targetFieldNames = @($parsed.Targets[0].PSObject.Properties.Name | Sort-Object)
-            $targetFieldNames | Should -Be @('AcRef', 'AdvisoryFlags', 'ExitCode', 'Expected', 'Falsifier', 'Id', 'Outcome', 'Reason', 'StdErrExcerpt', 'StdOutExcerpt', 'TimedOut') -Because 'a future field rename must break this test loudly -- #874 consumes this exact per-target shape'
+            $targetFieldNames | Should -Be @('AcRef', 'AdvisoryFlags', 'ExitCode', 'Expected', 'Falsifier', 'Id', 'Outcome', 'Reason', 'StdErrExcerpt', 'StdErrTruncated', 'StdOutExcerpt', 'StdOutTruncated', 'TimedOut') -Because 'a future field rename must break this test loudly -- #874 consumes this exact per-target shape (R20 adds StdOutTruncated/StdErrTruncated so a reader never has to infer truncation from ambiguous excerpt text alone)'
 
             # The injection attempt survives verbatim inside the fence, but
             # the marker delimiters are stripped and no live <!-- ... -->
             # comment reaches the JSON.
             $parsed.Targets[0].Falsifier | Should -Not -Match '<!--'
             $parsed.Targets[0].Falsifier | Should -Match 'marker-injection attempt'
+        }
+
+        It 'surfaces StdOutTruncated/StdErrTruncated explicitly on the report, distinct from the excerpt text itself (R20)' {
+            script:Assert-GCVFunctionExists -Name 'New-GCVerdictReport'
+            $disposition = Resolve-GCVerdictDisposition -Targets @(
+                [pscustomobject]@{ Id = 'T1'; Outcome = 'pass'; ExitCode = 0; TimedOut = $false; Reason = $null; AdvisoryFlags = @(); StdOut = 'ok'; StdErr = ''; StdOutTruncated = $true; StdErrTruncated = $false }
+            )
+
+            $report = New-GCVerdictReport -Disposition $disposition -ContractTargets @() -Flags @()
+
+            $report.Targets[0].StdOutTruncated | Should -Be $true
+            $report.Targets[0].StdErrTruncated | Should -Be $false
         }
 
         It 'pins the exact per-flag field names' {
@@ -1886,6 +2185,33 @@ Describe 'Foo' { It 'x' { 1 | Should -Be 1 } }
             $flagFieldNames = @($parsed.Flags[0].PSObject.Properties.Name | Sort-Object)
             $flagFieldNames | Should -Be @('Detail', 'Kind')
             $parsed.Flags[0].Detail | Should -Match 'custom-invariant'
+        }
+
+        It 'inert-renders each Files entry (git-diff-derived, attacker-influenceable filenames) before joining into Detail (R6)' {
+            script:Assert-GCVFunctionExists -Name 'New-GCVerdictReport'
+            $disposition = Resolve-GCVerdictDisposition -HasReviewRequired -ReviewReason 'review-required: mandatory-review flags present (see Flags)'
+            $flags = @([pscustomobject]@{ Kind = 'test-file-deletion'; Files = @('<!-- plan-issue-9 -->normal-file.Tests.ps1') })
+
+            $report = New-GCVerdictReport -Disposition $disposition -ContractTargets @() -Flags $flags
+
+            $report.Flags[0].Detail | Should -Not -Match '<!--' -Because 'a git-diff-derived filename is content from the audited run''s own tree and must be inert-rendered before being echoed, same as every other field in this function'
+            $report.Flags[0].Detail | Should -Match 'normal-file.Tests.ps1'
+        }
+
+        It 'formats assertion-weakening Files entries (pscustomobject, not plain strings) into readable path+count text instead of an empty string (R14)' {
+            script:Assert-GCVFunctionExists -Name 'New-GCVerdictReport'
+            $disposition = Resolve-GCVerdictDisposition -HasReviewRequired -ReviewReason 'review-required: mandatory-review flags present (see Flags)'
+            $flags = @([pscustomobject]@{
+                    Kind  = 'assertion-weakening'
+                    Files = @([pscustomobject]@{ Path = '.github/scripts/Tests/foo.Tests.ps1'; BaseCount = 3; RunCount = 1 })
+                })
+
+            $report = New-GCVerdictReport -Disposition $disposition -ContractTargets @() -Flags $flags
+
+            $report.Flags[0].Detail | Should -Not -BeNullOrEmpty -Because 'a bare -join on a pscustomobject renders an empty string (ToString() returns ""), silently losing all path/count information'
+            $report.Flags[0].Detail | Should -Match '\.github/scripts/Tests/foo\.Tests\.ps1'
+            $report.Flags[0].Detail | Should -Match '3'
+            $report.Flags[0].Detail | Should -Match '1'
         }
 
         It 'documents the exit-3 loop contract: pass-review-required must never be treated as a plain pass by a harness loop' {
@@ -2114,6 +2440,85 @@ Describe 'Foo' { It 'x' { 1 | Should -Be 1 } }
 
             $verdict.Verdict | Should -Be 'fail' -Because "verdict=$($verdict.Verdict) refusals=$($verdict.Refusals -join '; ')"
             $verdict.ExitCode | Should -Be 1
+        }
+
+        It 'fixture 8 (R5): folds mandatory-review flags collected before a diff-integrity refusal into the refused verdict too, never dropping them silently' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GoalContractValidate'
+            $repo = script:New-GCFixtureRepo -Path (Join-Path $TestDrive 'r5-diffintegrity-refusal-repo')
+            # No divergence: HEAD stays on main -> merge-base(main, HEAD) ==
+            # HEAD == the run sha -> the diff-integrity phase refuses
+            # no-run-diff (mirrors AC2 fixture 6). A target check that
+            # sleeps past a deliberately tiny budget.wall_clock produces a
+            # target-checks-budget-exceeded mandatory-review flag from the
+            # SAME session, collected from the checks phase BEFORE that
+            # refusal fires.
+            $draftPayload = @"
+schema_version: 1
+issue: 873
+contract_hash: "$($script:PlaceholderHash)"
+targets:
+  - id: T1
+    ac_ref: AC1
+    category: structure-presence
+    check: "Start-Sleep -Milliseconds 1500; exit 0"
+    expected: "exit 0"
+    falsifier: "A vacuous pass would look like the check never actually running."
+    source: null
+invariants:
+  - full-pester-suite-no-new-failures
+  - test-diff-integrity
+evidence_obligations:
+  checkpoint_commits: per-target-green
+  run_log: deviation entries + experience observations per checkpoint
+  experience_obligations:
+    - scenario: S2
+      surface: cli
+  required_markers: [pipeline-metrics-credits, goal-run-class]
+general_experience_standard: |
+  Canonical clause and four guardrails, verbatim from #848 D8.
+halt_conditions: [unachievable-target, invariant-conflict, budget-exhausted, gate-input-needed, chain-stage-failure]
+budget:
+  tokens: 100000
+  wall_clock: "1s"
+  chain_sub_ceiling: 2
+  non_convergence: halt-report
+"@
+            $realHash = Get-GCContractHash -Payload $draftPayload
+            $approvedPayload = $draftPayload -replace [regex]::Escape($script:PlaceholderHash), $realHash
+
+            $mockGhPath = Join-Path $TestDrive 'gh-r5-diffintegrity-refusal.ps1'
+            script:New-GCMockGhForContract -MockGhPath $mockGhPath -ContractPayload $approvedPayload
+
+            $verdict = Invoke-GoalContractValidate -Issue 873 -RepoRoot $repo -Repo 'example-owner/example-repo' -GhCliPath $mockGhPath -DiffDefaultRef 'main' -MinTestCount 1 -WarningAction SilentlyContinue
+
+            $verdict.Verdict | Should -Be 'refused' -Because "verdict=$($verdict.Verdict) reason=$($verdict.Reason) refusals=$($verdict.Refusals -join '; ')"
+            ($verdict.Refusals -join ' ') | Should -Match 'no-run-diff'
+            $flagKinds = @($verdict.Flags | ForEach-Object { $_.Kind })
+            $flagKinds | Should -Contain 'target-checks-budget-exceeded' -Because 'a mandatory-review signal collected from the checks phase before the diff-integrity refusal fired must not be silently dropped just because the eventual disposition is a refusal'
+        }
+
+        It 'fixture 9 (R9): maps a previously-uncaught infra exception (a bad -PwshCliPath) to exit-3 infra-error, never an uncaught crash' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GoalContractValidate'
+            $repo = script:New-GCFixtureRepo -Path (Join-Path $TestDrive 'r9-infra-exception-repo')
+            & git -C $repo checkout -q -b run-branch 2>&1 | Out-Null
+            [System.IO.File]::WriteAllText((Join-Path $repo 'run-marker.txt'), "run change`n", [System.Text.UTF8Encoding]::new($false))
+            & git -C $repo add -A 2>&1 | Out-Null
+            & git -C $repo commit -q -m 'run state' 2>&1 | Out-Null
+
+            $mockGhPath = Join-Path $TestDrive 'gh-r9-infra-exception.ps1'
+            $payload = script:New-GCApprovedContractBody
+            script:New-GCMockGhForContract -MockGhPath $mockGhPath -ContractPayload $payload
+
+            $bogusPwshPath = Join-Path $TestDrive 'r9-does-not-exist-pwsh.exe'
+
+            $script:r9Verdict = $null
+            {
+                $script:r9Verdict = Invoke-GoalContractValidate -Issue 873 -RepoRoot $repo -Repo 'example-owner/example-repo' -GhCliPath $mockGhPath -PwshCliPath $bogusPwshPath -DiffDefaultRef 'main' -MinTestCount 1 -WarningAction SilentlyContinue
+            } | Should -Not -Throw -Because 'an infra exception from a bad -PwshCliPath must be caught and mapped to a disposition, never crash the caller (the wrapper script has no top-level try/catch)'
+
+            $script:r9Verdict.Verdict | Should -Be 'pass-review-required'
+            $script:r9Verdict.ExitCode | Should -Be 3
+            $script:r9Verdict.Reason | Should -Match 'infra-error'
         }
     }
 

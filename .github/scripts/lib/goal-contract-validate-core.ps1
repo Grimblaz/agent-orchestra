@@ -64,9 +64,13 @@
 
       Invoke-GoalContractValidate -Issue <int> -RepoRoot <string>
                                    [-Marker <string>] [-Repo <string>]
-                                   [-GhCliPath <string>]
-        Public entry point (Invoke-* per architecture-rules.md:15). At s1
-        this function implements ONLY the contract-intake gate sequence:
+                                   [-GhCliPath <string>] [-GitCliPath <string>]
+                                   [-PwshCliPath <string>] [-DiffDefaultRef <string>]
+        Public entry point (Invoke-* per architecture-rules.md:15), and the
+        module's sole terminal verdict-producing entry point (R16: this
+        section describes the actual shipped, fully-wired s1-s6 behavior --
+        it previously described the retired s1-only intake-gate-stops-here
+        shape). The full sequence:
 
           1. Get-GCPinnedCommentBody (plan-issue-pinned, paginated,
              byte-safe read). $null -> refused: contract-comment-unresolvable.
@@ -98,16 +102,34 @@
              contract-hash-mismatch, for a draft contract).
           6. Test-GCContractHash (#872 parser) false -> refused:
              contract-hash-mismatch.
+          7. With every intake gate passed, this function creates a
+             detached disposable worktree (Invoke-GCWorktreeSession), runs
+             the full suite (Invoke-GCSuitePhase, the s4 green floor), runs
+             every targets[] check (Invoke-GCTargetChecks, s3), then the
+             test-diff-integrity phase (Invoke-GCDiffIntegrityPhase, s5) --
+             in that fixed order, inside the SAME disposable worktree, torn
+             down in a `finally` regardless of outcome. Any otherwise-
+             uncaught exception anywhere in this sequence (R9: a bad
+             -PwshCliPath/-GitCliPath, an unresolvable downstream value,
+             etc.) is caught and mapped to the same infra-error
+             pass-review-required disposition as step 3's throw, never left
+             to crash the process with an undifferentiated exit 1.
+          8. The worktree session's and diff-integrity phase's own results
+             are folded into Resolve-GCVerdictDisposition (suite/target
+             failure -> fail; any mandatory-review flag with no failure ->
+             pass-review-required; otherwise pass) and assembled into the
+             final verdict via New-GCVerdictReport -- the SINGLE exit point
+             for every return path in this function (including every
+             intake refusal above), so every returned verdict carries the
+             identical field-locked shape and every untrusted-contract- or
+             tree-derived field is inert-rendered before it is ever echoed
+             (U7).
 
-        When every intake gate passes, s1 has nothing further to check --
-        the worktree, target-check, suite, and diff-integrity invariants
-        that would turn this into a real fail/pass verdict do not exist
-        until s2-s6. Invoke-GoalContractValidate therefore returns a
-        provisional 'pass' (ExitCode 0, Targets empty) reflecting only the
-        gates this slice implements; s2-s6 extend this same function's body
-        to fold worktree/target/suite/diff-integrity signals into the same
-        Resolve-GCVerdictDisposition call before the verdict becomes the
-        real terminal disposition #874 will consume.
+        Invoke-GoalContractValidate therefore returns a REAL terminal
+        verdict (Targets and Flags populated from the actual worktree run,
+        never a provisional/placeholder shape) on every call -- the
+        #874 predicate/loop contract consumes this verdict's ExitCode
+        directly.
 
       Test-GCTreeClean -Path <string> [-GitCliPath <string>]
         Cleanliness-assertion primitive: runs `git -C <Path> status
@@ -427,13 +449,29 @@ function Get-GCPinnedCommentBody {
     param(
         [Parameter(Mandatory)][int]$Issue,
         [Parameter(Mandatory)][string]$Marker,
+        # R7: the remote-resolution fallback below reads from THIS path, not
+        # the process CWD -- a blank/absent value falls back to the process
+        # CWD (pre-R7 behavior), which only matters for callers that never
+        # supply one.
+        [Parameter(Mandatory = $false)][AllowNull()][AllowEmptyString()][string]$RepoRoot,
         [Parameter(Mandatory = $false)][string]$Repo,
-        [Parameter(Mandatory = $false)][string]$GhCliPath = 'gh'
+        [Parameter(Mandatory = $false)][string]$GhCliPath = 'gh',
+        [Parameter(Mandatory = $false)][string]$GitCliPath = 'git'
     )
 
     if ([string]::IsNullOrWhiteSpace($Repo)) {
         try {
-            $remoteUrl = & git config --get remote.origin.url 2>$null
+            # R7: resolve against -RepoRoot (falling back to the process CWD
+            # only when no RepoRoot was supplied) and honor -GitCliPath --
+            # the wrapper's own docstring already claims resolution is from
+            # -RepoRoot; this was previously false as implemented (bare
+            # `git config`, hardcoded literal `git`, ignoring any
+            # -GitCliPath override threaded in from Invoke-GoalContractValidate).
+            if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
+                $remoteUrl = & $GitCliPath config --get remote.origin.url 2>$null
+            } else {
+                $remoteUrl = & $GitCliPath -C $RepoRoot config --get remote.origin.url 2>$null
+            }
             if ($remoteUrl -and $remoteUrl -match '[:/]([^/:]+)/([^/]+?)(?:\.git)?\s*$') {
                 $Repo = "$($Matches[1])/$($Matches[2])"
             }
@@ -609,16 +647,24 @@ function Invoke-GoalContractValidate {
     }
 
     # 1. Plan-issue-pinned, paginated, byte-safe read.
-    $body = Get-GCPinnedCommentBody -Issue $Issue -Marker $Marker -Repo $Repo -GhCliPath $GhCliPath
+    $body = Get-GCPinnedCommentBody -Issue $Issue -Marker $Marker -RepoRoot $RepoRoot -Repo $Repo -GhCliPath $GhCliPath -GitCliPath $GitCliPath
     if ($null -eq $body) {
-        return Resolve-GCVerdictDisposition -IsRefused -RefusalReasons @('refused: contract-comment-unresolvable')
+        # R1: every intake-refusal return is routed through
+        # New-GCVerdictReport -- the single exit point -- so it always
+        # carries the same 6-field shape (incl. Flags) every other path
+        # produces, AND so refusal-reason text (some of which echoes
+        # untrusted contract-derived content, e.g. the schema-violation
+        # refusal below) is always inert-rendered before it is ever echoed.
+        $disposition = Resolve-GCVerdictDisposition -IsRefused -RefusalReasons @('refused: contract-comment-unresolvable')
+        return New-GCVerdictReport -Disposition $disposition -ContractTargets @() -Flags @()
     }
 
     # 2. Block extraction (#872 parser). $null folds three honest,
     #    lib-undifferentiated causes into one fail-closed refusal.
     $payload = Get-GCContractBlock -CommentBody $body
     if ($null -eq $payload) {
-        return Resolve-GCVerdictDisposition -IsRefused -RefusalReasons @('refused: contract-block-unresolvable (absent, ambiguous, or truncated — see contract comment)')
+        $disposition = Resolve-GCVerdictDisposition -IsRefused -RefusalReasons @('refused: contract-block-unresolvable (absent, ambiguous, or truncated — see contract comment)')
+        return New-GCVerdictReport -Disposition $disposition -ContractTargets @() -Flags @()
     }
 
     # 3. Schema parse/validate (#872 parser). The ONE loud throw (missing
@@ -628,12 +674,14 @@ function Invoke-GoalContractValidate {
     try {
         $parseResult = ConvertFrom-GCContractBlock -Payload $payload -RepoRoot $RepoRoot
     } catch {
-        return Resolve-GCVerdictDisposition -HasReviewRequired -ReviewReason "infra-error: $($_.Exception.Message)"
+        $disposition = Resolve-GCVerdictDisposition -HasReviewRequired -ReviewReason "infra-error: $($_.Exception.Message)"
+        return New-GCVerdictReport -Disposition $disposition -ContractTargets @() -Flags @()
     }
 
     if ($parseResult.Violations -and @($parseResult.Violations).Count -gt 0) {
         $reasons = @(@($parseResult.Violations) | ForEach-Object { "refused: contract-schema-violation: $_" })
-        return Resolve-GCVerdictDisposition -IsRefused -RefusalReasons $reasons
+        $disposition = Resolve-GCVerdictDisposition -IsRefused -RefusalReasons $reasons
+        return New-GCVerdictReport -Disposition $disposition -ContractTargets @() -Flags @()
     }
 
     $contractHashField = $parseResult.Contract.contract_hash
@@ -641,12 +689,14 @@ function Invoke-GoalContractValidate {
     # 4. Placeholder refusal MUST precede the real hash comparison (ordering
     #    is load-bearing): a draft contract's digest is never checked.
     if ($contractHashField -eq $script:GCVPlaceholderHash) {
-        return Resolve-GCVerdictDisposition -IsRefused -RefusalReasons @('refused: contract-not-approved')
+        $disposition = Resolve-GCVerdictDisposition -IsRefused -RefusalReasons @('refused: contract-not-approved')
+        return New-GCVerdictReport -Disposition $disposition -ContractTargets @() -Flags @()
     }
 
     # 5. Approved-contract integrity check (#872 parser).
     if (-not (Test-GCContractHash -Payload $payload -Expected $contractHashField)) {
-        return Resolve-GCVerdictDisposition -IsRefused -RefusalReasons @('refused: contract-hash-mismatch')
+        $disposition = Resolve-GCVerdictDisposition -IsRefused -RefusalReasons @('refused: contract-hash-mismatch')
+        return New-GCVerdictReport -Disposition $disposition -ContractTargets @() -Flags @()
     }
 
     # Intake gates all passed. s6: fold the worktree/target/suite/
@@ -662,24 +712,30 @@ function Invoke-GoalContractValidate {
         $budgetWallClock = [string]$parseResult.Contract.budget.wall_clock
     }
 
-    # Resolved independently of the worktree so the -DiffIntegrityPhase
-    # closure below has a RunSha to compare against; New-GCDisposableWorktree
-    # (inside Invoke-GCWorktreeSession) resolves and pins the identical HEAD
-    # sha for the worktree it creates, so this is the same commit. A dirty
-    # invoking tree is refused by the session itself before any phase runs,
-    # so an unusable value here is harmless (never reached downstream).
-    $runShaRaw = & $GitCliPath -C $RepoRoot rev-parse HEAD 2>$null
-    $runSha = script:ConvertTo-GCFirstLineTrimmed -Raw $runShaRaw
-
-    # Deliberately NOT .GetNewClosure()'d: a plain scriptblock literal
-    # already retains live access to this function's local variables via its
-    # lexical defining scope, AND (unlike a GetNewClosure()'d scriptblock,
-    # which isolates command resolution into its own private scope) still
-    # resolves sibling dot-sourced functions (Invoke-GCSuitePhase etc.)
-    # normally when invoked from Invoke-GCWorktreeSession. GetNewClosure()
-    # here would break that function resolution in exactly this
-    # cross-function invocation shape (reproduced under Pester's nested
-    # BeforeAll/It scriptblock execution model).
+    # NOTE ON SCRIPTBLOCK VARIABLE RESOLUTION (R19, doc-fix only -- no
+    # runtime behavior change): these are plain scriptblock literals, not
+    # .GetNewClosure()'d. They do NOT capture this function's locals via
+    # lexical closure -- a plain PowerShell scriptblock resolves variables
+    # via DYNAMIC scoping through the call stack AT INVOCATION TIME, not via
+    # the block's own lexical defining location (independently verified: a
+    # scriptblock invoked from a callee resolves a colliding variable name
+    # to the CALLING scope's value, not the defining scope's value). This
+    # works here ONLY because Invoke-GCWorktreeSession always invokes these
+    # blocks from a call chain rooted at THIS function (Invoke-
+    # GoalContractValidate is still an ancestor frame when each block runs),
+    # so $contractTargets/$budgetWallClock/$invariantsList/$MinTestCount/
+    # $PwshCliPath/$DiffDefaultRef/$GitCliPath all resolve up that live call
+    # stack -- a fragile invariant, not a closure guarantee. Do NOT
+    # introduce a same-named local variable in an intermediate caller (it
+    # would shadow the intended value), and do NOT move this invocation into
+    # a job/runspace (a different scoping model entirely) without
+    # re-verifying variable resolution. A GetNewClosure()'d scriptblock would
+    # instead isolate command resolution into its own private scope, which
+    # breaks resolving sibling dot-sourced functions (Invoke-GCSuitePhase
+    # etc.) normally when invoked from Invoke-GCWorktreeSession -- reproduced
+    # under Pester's nested BeforeAll/It scriptblock execution model -- so
+    # GetNewClosure() is deliberately avoided here, not merely omitted by
+    # oversight.
     $suitePhase = {
         param($path)
         Invoke-GCSuitePhase -WorktreePath $path -MinTestCount $MinTestCount -PwshCliPath $PwshCliPath
@@ -692,59 +748,100 @@ function Invoke-GoalContractValidate {
 
     $diffIntegrityPhase = {
         param($path)
-        Invoke-GCDiffIntegrityPhase -WorktreePath $path -RunSha $runSha -RepoRoot $path -Invariants $invariantsList -DefaultRef $DiffDefaultRef -GitCliPath $GitCliPath
+        # R11: RunSha is derived from the WORKTREE'S OWN resolved HEAD,
+        # captured fresh at the moment this phase actually runs -- never a
+        # pre-worktree `rev-parse HEAD` resolved on $RepoRoot before
+        # New-GCDisposableWorktree ever ran. The prior two-call shape (one
+        # resolve here, a second independent resolve inside
+        # New-GCDisposableWorktree) left a narrow window where a commit
+        # landing on the invoking branch between the two calls could audit a
+        # different sha than the worktree actually checked out. Resolving
+        # HEAD against the worktree path itself is the single source of
+        # truth for "the commit that was actually validated": nothing in the
+        # suite/checks phases commits inside the disposable worktree, so its
+        # HEAD never moves after New-GCDisposableWorktree's own checkout.
+        $worktreeHeadShaRaw = & $GitCliPath -C $path rev-parse HEAD 2>$null
+        $worktreeRunSha = script:ConvertTo-GCFirstLineTrimmed -Raw $worktreeHeadShaRaw
+        Invoke-GCDiffIntegrityPhase -WorktreePath $path -RunSha $worktreeRunSha -RepoRoot $path -Invariants $invariantsList -DefaultRef $DiffDefaultRef -GitCliPath $GitCliPath
     }
 
-    $session = Invoke-GCWorktreeSession -RepoRoot $RepoRoot -SuitePhase $suitePhase -ChecksPhase $checksPhase -DiffIntegrityPhase $diffIntegrityPhase -GitCliPath $GitCliPath
+    # R9: everything from worktree creation through the final disposition is
+    # wrapped in try/catch -- widening infra-error handling beyond the
+    # single missing-powershell-yaml catch above (step 3). Every other
+    # infra-level exception (a bad -PwshCliPath/-GitCliPath causing
+    # Process.Start() or a git invocation to throw, an unexpected re-thrown
+    # session-phase error, an unresolvable downstream value) previously
+    # escaped uncaught, and since the wrapper script has no top-level
+    # try/catch, `pwsh -File` would crash with exit code 1 -- which the
+    # documented #874 predicate/loop contract reads as "target failed,
+    # retry," not "environment broken, stop." Nothing inside this block ever
+    # represents a genuine fail/pass/review-required disposition via a
+    # thrown exception (those are always returned as a normal value, never
+    # thrown), so mapping every throw here to the SAME infra-error
+    # pass-review-required disposition can never mask a real target/suite
+    # fail's exit code.
+    try {
+        $session = Invoke-GCWorktreeSession -RepoRoot $RepoRoot -SuitePhase $suitePhase -ChecksPhase $checksPhase -DiffIntegrityPhase $diffIntegrityPhase -GitCliPath $GitCliPath
 
-    if ($session.Refused) {
-        $disposition = Resolve-GCVerdictDisposition -IsRefused -RefusalReasons @($session.RefusalReason)
+        if ($session.Refused) {
+            $disposition = Resolve-GCVerdictDisposition -IsRefused -RefusalReasons @($session.RefusalReason)
+            return New-GCVerdictReport -Disposition $disposition -ContractTargets $contractTargets -Flags @()
+        }
+
+        # s5's own refusal (e.g. refused: no-run-diff, refused:
+        # default-ref-unresolvable) means the validator could not complete
+        # the audit at all -- the same "declines to render a judgment"
+        # semantics as the intake refusals above, so it takes the same
+        # top-of-lattice precedence (AC2 fixture 6: merge-base==run-sha
+        # refuses no-run-diff).
+        $diffResult = $session.DiffIntegrityResult
+        if ($diffResult -and $diffResult.Refused) {
+            $disposition = Resolve-GCVerdictDisposition -IsRefused -RefusalReasons @($diffResult.RefusalReason)
+            # R5: mandatory-review flags already collected from the
+            # suite+checks phases (e.g. an orphan-worktree/dirt/budget
+            # signal) must not be silently dropped just because the
+            # diff-integrity phase itself refused -- fold them in here too,
+            # same as the non-refused path below.
+            $preRefusalFlags = script:Get-GCMandatoryReviewFlags -DiffResult $diffResult -Session $session
+            return New-GCVerdictReport -Disposition $disposition -ContractTargets $contractTargets -Flags @($preRefusalFlags)
+        }
+
+        $targetResults = @()
+        if ($session.ChecksResult) {
+            $targetResults = @($session.ChecksResult.Targets)
+        }
+
+        # Mandatory-review flags collected regardless of the eventual fail/pass
+        # disposition, so a worktree teardown orphan or check-induced dirt is
+        # ALWAYS surfaced in the verdict's Flags -- never a separate outcome
+        # (Part A).
+        $flags = script:Get-GCMandatoryReviewFlags -DiffResult $diffResult -Session $session
+
+        # Suite failure -> overall fail (s4 green floor). Any target failure ->
+        # overall fail (s3). Both precede review-required in the lattice.
+        $suitePassed = Test-GCSuiteGatePass -Result $session.SuiteResult
+        $anyTargetFailed = (@($targetResults | Where-Object { $_.Outcome -eq 'fail' })).Count -gt 0
+        $hasFailure = (-not $suitePassed) -or $anyTargetFailed
+
+        if ($hasFailure) {
+            $disposition = Resolve-GCVerdictDisposition -HasFailure -Targets $targetResults
+            return New-GCVerdictReport -Disposition $disposition -ContractTargets $contractTargets -Flags @($flags)
+        }
+
+        # No suite/target failure: any diff-integrity flag alone (incl. an
+        # unrecognized-invariant literal) or any worktree/budget flag ->
+        # pass-review-required. No flags at all -> pass.
+        if (@($flags).Count -gt 0) {
+            $disposition = Resolve-GCVerdictDisposition -HasReviewRequired -ReviewReason 'review-required: mandatory-review flags present (see Flags)' -Targets $targetResults
+            return New-GCVerdictReport -Disposition $disposition -ContractTargets $contractTargets -Flags @($flags)
+        }
+
+        $disposition = Resolve-GCVerdictDisposition -Targets $targetResults
+        return New-GCVerdictReport -Disposition $disposition -ContractTargets $contractTargets -Flags @()
+    } catch {
+        $disposition = Resolve-GCVerdictDisposition -HasReviewRequired -ReviewReason "infra-error: $($_.Exception.Message)"
         return New-GCVerdictReport -Disposition $disposition -ContractTargets $contractTargets -Flags @()
     }
-
-    # s5's own refusal (e.g. refused: no-run-diff, refused:
-    # default-ref-unresolvable) means the validator could not complete the
-    # audit at all -- the same "declines to render a judgment" semantics as
-    # the intake refusals above, so it takes the same top-of-lattice
-    # precedence (AC2 fixture 6: merge-base==run-sha refuses no-run-diff).
-    $diffResult = $session.DiffIntegrityResult
-    if ($diffResult -and $diffResult.Refused) {
-        $disposition = Resolve-GCVerdictDisposition -IsRefused -RefusalReasons @($diffResult.RefusalReason)
-        return New-GCVerdictReport -Disposition $disposition -ContractTargets $contractTargets -Flags @()
-    }
-
-    $targetResults = @()
-    if ($session.ChecksResult) {
-        $targetResults = @($session.ChecksResult.Targets)
-    }
-
-    # Mandatory-review flags collected regardless of the eventual fail/pass
-    # disposition, so a worktree teardown orphan or check-induced dirt is
-    # ALWAYS surfaced in the verdict's Flags -- never a separate outcome
-    # (Part A).
-    $flags = script:Get-GCMandatoryReviewFlags -DiffResult $diffResult -Session $session
-
-    # Suite failure -> overall fail (s4 green floor). Any target failure ->
-    # overall fail (s3). Both precede review-required in the lattice.
-    $suitePassed = Test-GCSuiteGatePass -Result $session.SuiteResult
-    $anyTargetFailed = (@($targetResults | Where-Object { $_.Outcome -eq 'fail' })).Count -gt 0
-    $hasFailure = (-not $suitePassed) -or $anyTargetFailed
-
-    if ($hasFailure) {
-        $disposition = Resolve-GCVerdictDisposition -HasFailure -Targets $targetResults
-        return New-GCVerdictReport -Disposition $disposition -ContractTargets $contractTargets -Flags @($flags)
-    }
-
-    # No suite/target failure: any diff-integrity flag alone (incl. an
-    # unrecognized-invariant literal) or any worktree/budget flag ->
-    # pass-review-required. No flags at all -> pass.
-    if (@($flags).Count -gt 0) {
-        $disposition = Resolve-GCVerdictDisposition -HasReviewRequired -ReviewReason 'review-required: mandatory-review flags present (see Flags)' -Targets $targetResults
-        return New-GCVerdictReport -Disposition $disposition -ContractTargets $contractTargets -Flags @($flags)
-    }
-
-    $disposition = Resolve-GCVerdictDisposition -Targets $targetResults
-    return New-GCVerdictReport -Disposition $disposition -ContractTargets $contractTargets -Flags @()
 }
 
 # -----------------------------------------------------------------------------
@@ -767,6 +864,20 @@ function Test-GCTreeClean {
     )
 
     $porcelain = & $GitCliPath -C $Path status --porcelain 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        # R3 (HIGH, live-reproduced): fail CLOSED, never open. A failed git
+        # invocation (corrupted index, stale lock file, invalid path, etc.)
+        # previously produced empty stdout, which read as IsClean=$true -- a
+        # false "clean" report. This primitive backs the AC2 pre-worktree
+        # dirty-tree refusal AND, more seriously, the post-checks-phase
+        # tamper-detection cleanliness assertion that runs right after
+        # untrusted targets[].check commands executed -- a silent false
+        # "clean" there would hide real tamper.
+        return [pscustomobject]@{
+            IsClean   = $false
+            Porcelain = @("git status --porcelain failed (exit $LASTEXITCODE) at '$Path'; treating as NOT clean (fail-closed)")
+        }
+    }
     $lines = @($porcelain | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 
     return [pscustomobject]@{
@@ -785,11 +896,20 @@ function script:Invoke-GCWorktreeRemoveAttempt {
         [Parameter(Mandatory)][string]$WorktreePath
     )
 
-    & $GitCliPath -C $RepoRoot worktree remove --force $WorktreePath 2>$null
+    # R18: stdout is discarded via Out-Null (not just stderr via 2>$null) --
+    # this function's return value is structurally consumed by callers
+    # (Remove-GCDisposableWorktree derives its Removed bool from it), and an
+    # un-redirected native-command stdout becomes part of THIS function's
+    # own unclaimed pipeline output, silently prepending onto the eventual
+    # `return $removeSucceeded` value. This works today only because git
+    # emits progress messages to stderr, not stdout -- a future git version
+    # or platform difference emitting to stdout could otherwise silently
+    # pollute the return value's truthiness.
+    & $GitCliPath -C $RepoRoot worktree remove --force $WorktreePath 2>$null | Out-Null
     $removeSucceeded = ($LASTEXITCODE -eq 0)
     # Prune runs regardless of the remove outcome (best-effort admin-file
     # reconciliation); its own exit code is not load-bearing for Removed.
-    & $GitCliPath -C $RepoRoot worktree prune 2>$null
+    & $GitCliPath -C $RepoRoot worktree prune 2>$null | Out-Null
     return $removeSucceeded
 }
 
@@ -832,7 +952,10 @@ function New-GCDisposableWorktree {
     # its own directory name instead of our unique, outside-the-repo path.
     # Detached is mandatory: a branch checkout hard-fails if that branch is
     # already checked out elsewhere (U4/F9).
-    & $GitCliPath -C $RepoRoot worktree add --detach $worktreePath $headSha 2>$null
+    # R18: see script:Invoke-GCWorktreeRemoveAttempt's identical stdout-
+    # discipline note above -- this function's return value is also
+    # structurally consumed by callers.
+    & $GitCliPath -C $RepoRoot worktree add --detach $worktreePath $headSha 2>$null | Out-Null
     if ($LASTEXITCODE -ne 0) {
         return [pscustomobject]@{
             Success       = $false
@@ -1007,12 +1130,30 @@ function ConvertTo-GCWallClockSeconds {
     # budget.wall_clock value degrades to "no ceiling applied" rather than a
     # guessed interpretation of an ambiguous contract field.
     if ($Value -match '^\s*(\d+)\s*([hHmMsS])?\s*$') {
-        $magnitude = [int]$Matches[1]
-        switch ($Matches[2]) {
-            { $_ -in @('h', 'H') } { return $magnitude * 3600 }
-            { $_ -in @('m', 'M') } { return $magnitude * 60 }
-            default { return $magnitude }
+        # R21: a bare [int] cast on the digit run (and, separately, on the
+        # h/m-multiplied result) Int32-overflows and THROWS for a large
+        # value like "99999999999h" -- reachable via the untrusted
+        # budget.wall_clock contract field, and an uncaught throw here would
+        # ride R9's now-caught infra-error path to a review-required
+        # disposition instead of the documented "degrade to $null, no
+        # ceiling applied" contract for an unparseable/out-of-range value.
+        # [long]::TryParse never throws on an oversized digit run, and the
+        # explicit Int32 bounds check after multiplication catches an
+        # in-range magnitude whose h/m-scaled result would itself overflow.
+        $magnitude = [long]0
+        if (-not [long]::TryParse($Matches[1], [ref]$magnitude)) {
+            return $null
         }
+        $seconds = [long]0
+        switch ($Matches[2]) {
+            { $_ -in @('h', 'H') } { $seconds = $magnitude * 3600 }
+            { $_ -in @('m', 'M') } { $seconds = $magnitude * 60 }
+            default { $seconds = $magnitude }
+        }
+        if ($seconds -gt [int]::MaxValue -or $seconds -lt [int]::MinValue) {
+            return $null
+        }
+        return [int]$seconds
     }
 
     return $null
@@ -1319,11 +1460,35 @@ function Test-GCSuiteGatePass {
         return $false
     }
 
-    $exitCode = [int]$Result.ExitCode
-    $totalFailed = [int]$Result.TotalFailed
+    # R10: the documented contract is "never throws, fails closed to
+    # $false" for a $null/missing ExitCode/TotalFailed -- but a
+    # PRESENT-but-$null ExitCode/TotalFailed previously passed the
+    # property-existence check above and then got silently [int]-cast to 0
+    # (live-reproduced: {ExitCode=$null;TotalFailed=$null;TotalPassed=250}
+    # returned $true, a false-GREEN from the gate itself), while a
+    # non-numeric ExitCode threw instead of failing closed. Explicit
+    # null-then-TryParse checks close both gaps before any [int] cast runs.
+    $exitCodeRaw = $Result.ExitCode
+    $totalFailedRaw = $Result.TotalFailed
+    if ($null -eq $exitCodeRaw -or $null -eq $totalFailedRaw) {
+        return $false
+    }
+
+    $exitCode = 0
+    $totalFailed = 0
+    if (-not [int]::TryParse([string]$exitCodeRaw, [ref]$exitCode)) {
+        return $false
+    }
+    if (-not [int]::TryParse([string]$totalFailedRaw, [ref]$totalFailed)) {
+        return $false
+    }
+
     $totalPassed = 0
     if ($Result.PSObject.Properties.Match('TotalPassed').Count -gt 0) {
-        $totalPassed = [int]$Result.TotalPassed
+        $totalPassedRaw = $Result.TotalPassed
+        if ($null -ne $totalPassedRaw) {
+            [void][int]::TryParse([string]$totalPassedRaw, [ref]$totalPassed)
+        }
     }
 
     # The three-part gate (U1 CRITICAL fix): ExitCode==0 AND TotalFailed==0
@@ -1559,6 +1724,18 @@ function Test-GCTestFileDeletion {
     # pair as a single R status, which --diff-filter=D does not match.
     $diffArgs = @('-C', $WorktreePath, 'diff', '--name-only', '--diff-filter=DR', '--no-renames', $BaseSha, $RunSha, '--') + @($AllowlistPathspecs)
     $rawOutput = & $GitCliPath @diffArgs 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        # R4: fail CLOSED toward MORE review, never toward "nothing changed"
+        # -- this signal is an advisory mandatory-review flag, never a hard
+        # gate, so erring toward more review-flagging on a git-diff failure
+        # is the safe direction (mirrors R3's fail-closed discipline for
+        # Test-GCTreeClean, reapplied here since this detector suppressed
+        # stderr with no $LASTEXITCODE check).
+        return [pscustomobject]@{
+            Flagged      = $true
+            DeletedFiles = @("git diff failed (exit $LASTEXITCODE) while checking for deleted test files between $BaseSha and $RunSha; unable to verify -- flagging for review")
+        }
+    }
     $deletedFiles = @(@($rawOutput) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.Trim() })
 
     return [pscustomobject]@{
@@ -1650,12 +1827,118 @@ function Test-GCAssertionWeakening {
     }
 }
 
+# Private: detects `.github/scripts/lib/*.ps1` dot-source references within
+# one Tests file's already-line-split content, against a known set of real
+# lib filenames. Shared by Get-GCHelperLibSet's live-worktree read AND its
+# R8 merge-base-commit read below, so the detection logic (quoted-literal,
+# one-hop $script: variable indirection, and R13's unquoted-bareword shape)
+# lives in exactly one place.
+function script:Get-GCDotSourcedLibNamesInLines {
+    param(
+        # AllowEmptyString is required ALONGSIDE AllowEmptyCollection: a
+        # Mandatory [string[]] parameter validates each ELEMENT for
+        # null/empty too (a real PowerShell gotcha), and a file split on
+        # newlines routinely produces empty-string elements (e.g. a
+        # trailing newline, or a blank line in the source).
+        [Parameter(Mandatory)][AllowEmptyCollection()][AllowEmptyString()][string[]]$Lines,
+        [Parameter(Mandatory)][AllowEmptyCollection()][AllowEmptyString()][string[]]$LibFileNames
+    )
+
+    $dq = [char]34
+    $literalPattern = "['$dq]([^'$dq]*\.ps1)['$dq]"
+    $found = [System.Collections.Generic.HashSet[string]]::new()
+    $indirectVars = [System.Collections.Generic.List[string]]::new()
+
+    # RC item 5, pass 1: direct dot-source lines -- e.g. `. (Join-Path $x
+    # 'lib/name.ps1')`, `. (Join-Path $x '..' 'lib' 'name.ps1')`. A quoted
+    # literal ending .ps1 whose BASENAME names a real lib file is taken
+    # directly (grounded by real existence, not path-shape guessing).
+    foreach ($line in $Lines) {
+        if ($line -match '^\s*\.\s+(.+)$') {
+            $rest = $Matches[1]
+            $literalMatches = [regex]::Matches($rest, $literalPattern)
+            if ($literalMatches.Count -gt 0) {
+                foreach ($mm in $literalMatches) {
+                    $leaf = Split-Path -Leaf $mm.Groups[1].Value
+                    if ($LibFileNames -contains $leaf) { [void]$found.Add($leaf) }
+                }
+            } elseif ($rest -match '^\$(?:script:)?([A-Za-z0-9_]+)\s*$') {
+                # RC item 5, pass-2 candidate: `. $script:CoreFile`-style
+                # indirection -- the dot-source line names a bare variable,
+                # not a literal.
+                $indirectVars.Add($Matches[1])
+            } elseif ($rest -match '(\S+\.ps1)\s*$') {
+                # R13: an UNQUOTED bareword dot-source (no quotes at all),
+                # e.g. `. $PSScriptRoot\lib\foo.ps1` -- matched neither the
+                # quoted-literal branch above nor the bare-variable-only
+                # indirection branch, and was previously silently missed.
+                $leaf = Split-Path -Leaf $Matches[1]
+                if ($LibFileNames -contains $leaf) { [void]$found.Add($leaf) }
+            }
+        }
+    }
+
+    # Pass 2: resolve each indirection variable against its OWN assignment
+    # line(s) in the same file (e.g. `$script:LibFile = Join-Path
+    # $script:RepoRoot '.github/scripts/lib/name.ps1'`).
+    foreach ($varName in @($indirectVars | Select-Object -Unique)) {
+        $assignPattern = '\$(?:script:)?' + [regex]::Escape($varName) + '\s*=\s*(.+)$'
+        foreach ($line in $Lines) {
+            if ($line -match $assignPattern) {
+                $assignRhs = $Matches[1]
+                $literalMatches = [regex]::Matches($assignRhs, $literalPattern)
+                foreach ($mm in $literalMatches) {
+                    $leaf = Split-Path -Leaf $mm.Groups[1].Value
+                    if ($LibFileNames -contains $leaf) { [void]$found.Add($leaf) }
+                }
+            }
+        }
+    }
+
+    return @($found)
+}
+
 function Get-GCHelperLibSet {
     [CmdletBinding()]
     [OutputType([string[]])]
     param(
-        [Parameter(Mandatory)][string]$RepoRoot
+        [Parameter(Mandatory)][string]$RepoRoot,
+        # R8: when supplied, the set is computed from THIS commit (intended:
+        # the diff-integrity phase's own merge-base) via `git ls-tree`/`git
+        # show`, never the run's OWN live worktree state. Without this, an
+        # adversarial run could de-reference a helper's dot-source line
+        # (Should-count unchanged, file not deleted -- undetected by the
+        # other two detectors), then gut the now-unreferenced helper,
+        # evading detection since it would silently drop out of a
+        # live-computed allowlist. A blank/absent -BaseSha keeps the pre-R8
+        # live-worktree-read behavior (relied on by this function's own
+        # standalone unit tests, which write uncommitted fixture files with
+        # no git repo at all).
+        [Parameter(Mandatory = $false)][AllowNull()][AllowEmptyString()][string]$BaseSha,
+        [Parameter(Mandatory = $false)][string]$GitCliPath = 'git'
     )
+
+    if (-not [string]::IsNullOrWhiteSpace($BaseSha)) {
+        $libListRaw = & $GitCliPath -C $RepoRoot ls-tree -r --name-only $BaseSha -- '.github/scripts/lib' 2>$null
+        if ($LASTEXITCODE -ne 0) { return @() }
+        $libFileNames = @(@($libListRaw) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_.Trim() -match '\.ps1$' } | ForEach-Object { Split-Path -Leaf $_.Trim() })
+        if ($libFileNames.Count -eq 0) { return @() }
+
+        $testsListRaw = & $GitCliPath -C $RepoRoot ls-tree -r --name-only $BaseSha -- '.github/scripts/Tests' 2>$null
+        if ($LASTEXITCODE -ne 0) { return @() }
+        $testsFilePaths = @(@($testsListRaw) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_.Trim() -match '\.Tests\.ps1$' } | ForEach-Object { $_.Trim() })
+
+        $found = [System.Collections.Generic.HashSet[string]]::new()
+        foreach ($tfPath in $testsFilePaths) {
+            $rawContent = & $GitCliPath -C $RepoRoot show "${BaseSha}:${tfPath}" 2>$null
+            if ($LASTEXITCODE -ne 0) { continue }
+            foreach ($leaf in (script:Get-GCDotSourcedLibNamesInLines -Lines @($rawContent) -LibFileNames $libFileNames)) {
+                [void]$found.Add($leaf)
+            }
+        }
+
+        return @($found | Sort-Object | ForEach-Object { ".github/scripts/lib/$_" })
+    }
 
     $libDir = Join-Path $RepoRoot '.github/scripts/lib'
     $testsDir = Join-Path $RepoRoot '.github/scripts/Tests'
@@ -1672,53 +1955,12 @@ function Get-GCHelperLibSet {
     $testsFiles = Get-ChildItem -LiteralPath $testsDir -Filter '*.Tests.ps1' -Recurse -ErrorAction SilentlyContinue
     $found = [System.Collections.Generic.HashSet[string]]::new()
 
-    $dq = [char]34
-    $literalPattern = "['$dq]([^'$dq]*\.ps1)['$dq]"
-
     foreach ($tf in $testsFiles) {
         $content = Get-Content -LiteralPath $tf.FullName -Raw -ErrorAction SilentlyContinue
         if ([string]::IsNullOrEmpty($content)) { continue }
         $lines = $content -split "`n"
-        $indirectVars = [System.Collections.Generic.List[string]]::new()
-
-        # RC item 5, pass 1: direct dot-source lines -- e.g. `. (Join-Path $x
-        # 'lib/name.ps1')`, `. (Join-Path $x '..' 'lib' 'name.ps1')`. A
-        # quoted literal ending .ps1 whose BASENAME names a real lib file is
-        # taken directly (grounded by real existence, not path-shape
-        # guessing).
-        foreach ($line in $lines) {
-            if ($line -match '^\s*\.\s+(.+)$') {
-                $rest = $Matches[1]
-                $literalMatches = [regex]::Matches($rest, $literalPattern)
-                if ($literalMatches.Count -gt 0) {
-                    foreach ($mm in $literalMatches) {
-                        $leaf = Split-Path -Leaf $mm.Groups[1].Value
-                        if ($libFileNames -contains $leaf) { [void]$found.Add($leaf) }
-                    }
-                } elseif ($rest -match '^\$(?:script:)?([A-Za-z0-9_]+)\s*$') {
-                    # RC item 5, pass-2 candidate: `. $script:CoreFile`-style
-                    # indirection -- the dot-source line names a bare
-                    # variable, not a literal.
-                    $indirectVars.Add($Matches[1])
-                }
-            }
-        }
-
-        # Pass 2: resolve each indirection variable against its OWN
-        # assignment line(s) in the same file (e.g. `$script:LibFile =
-        # Join-Path $script:RepoRoot '.github/scripts/lib/name.ps1'`).
-        foreach ($varName in @($indirectVars | Select-Object -Unique)) {
-            $assignPattern = '\$(?:script:)?' + [regex]::Escape($varName) + '\s*=\s*(.+)$'
-            foreach ($line in $lines) {
-                if ($line -match $assignPattern) {
-                    $assignRhs = $Matches[1]
-                    $literalMatches = [regex]::Matches($assignRhs, $literalPattern)
-                    foreach ($mm in $literalMatches) {
-                        $leaf = Split-Path -Leaf $mm.Groups[1].Value
-                        if ($libFileNames -contains $leaf) { [void]$found.Add($leaf) }
-                    }
-                }
-            }
+        foreach ($leaf in (script:Get-GCDotSourcedLibNamesInLines -Lines $lines -LibFileNames $libFileNames)) {
+            [void]$found.Add($leaf)
         }
     }
 
@@ -1741,6 +1983,16 @@ function Test-GCFixtureOrHelperModification {
     $pathspecs = @('.github/scripts/Tests/fixtures') + @($HelperLibPaths)
     $diffArgs = @('-C', $WorktreePath, 'diff', '--name-only', $BaseSha, $RunSha, '--') + $pathspecs
     $rawOutput = & $GitCliPath @diffArgs 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        # R4: same fail-CLOSED-toward-more-review discipline as
+        # Test-GCTestFileDeletion above -- an advisory flag, never a hard
+        # gate, so a git-diff failure must never silently read as "nothing
+        # changed".
+        return [pscustomobject]@{
+            Flagged      = $true
+            ChangedFiles = @("git diff failed (exit $LASTEXITCODE) while checking fixtures/helper files between $BaseSha and $RunSha; unable to verify -- flagging for review")
+        }
+    }
     $changedFiles = @(@($rawOutput) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.Trim() })
 
     return [pscustomobject]@{
@@ -1792,8 +2044,13 @@ function Invoke-GCDiffIntegrityPhase {
 
     # RC item 5 grounds the helper-lib half of the allowlist BEFORE the
     # deletion detector runs, so a deleted helper lib is caught by the same
-    # allowlist the deletion detector uses (RC item 6).
-    $helperLibPaths = Get-GCHelperLibSet -RepoRoot $RepoRoot
+    # allowlist the deletion detector uses (RC item 6). R8: sourced from the
+    # MERGE-BASE commit ($base.MergeBaseSha), never the run's own live
+    # worktree state -- otherwise an adversarial run could de-reference a
+    # helper's dot-source line, then gut the now-unreferenced helper,
+    # evading detection since it would silently drop out of a
+    # live-computed allowlist.
+    $helperLibPaths = Get-GCHelperLibSet -RepoRoot $RepoRoot -BaseSha $base.MergeBaseSha -GitCliPath $GitCliPath
 
     $deletion = Test-GCTestFileDeletion -WorktreePath $WorktreePath -BaseSha $base.MergeBaseSha -RunSha $RunSha -AllowlistPathspecs (@('.github/scripts/Tests') + $helperLibPaths) -GitCliPath $GitCliPath
     if ($deletion.Flagged) {
@@ -1801,7 +2058,18 @@ function Invoke-GCDiffIntegrityPhase {
     }
 
     $changedTestFilesRaw = & $GitCliPath -C $WorktreePath diff --name-only $base.MergeBaseSha $RunSha -- '.github/scripts/Tests' 2>$null
-    $changedTestFiles = @(@($changedTestFilesRaw) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_.Trim() -match '\.Tests\.ps1$' } | ForEach-Object { $_.Trim() })
+    if ($LASTEXITCODE -ne 0) {
+        # R4: same fail-CLOSED-toward-more-review discipline as the other
+        # s5 detectors -- a git-diff failure here must never silently
+        # collapse to an empty changed-file list (which would make
+        # assertion-weakening detection quietly skip every file in this
+        # range). Surfaced as its own mandatory-review flag since this diff
+        # feeds a detector rather than being one itself.
+        $flags.Add([pscustomobject]@{ Kind = 'diff-integrity-git-error'; Detail = "git diff --name-only failed (exit $LASTEXITCODE) while computing changed test files between $($base.MergeBaseSha) and $RunSha; assertion-weakening detection could not run for this range -- flagging for review" })
+        $changedTestFiles = @()
+    } else {
+        $changedTestFiles = @(@($changedTestFilesRaw) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_.Trim() -match '\.Tests\.ps1$' } | ForEach-Object { $_.Trim() })
+    }
     $weakening = Test-GCAssertionWeakening -WorktreePath $WorktreePath -BaseSha $base.MergeBaseSha -RunSha $RunSha -ChangedTestFilePaths $changedTestFiles -GitCliPath $GitCliPath
     if ($weakening.Flagged) {
         $flags.Add([pscustomobject]@{ Kind = 'assertion-weakening'; Files = $weakening.Files; HeuristicNote = $weakening.HeuristicNote })
@@ -1855,7 +2123,20 @@ function Format-GCInertRender {
     # phase-containment-emission-check.ps1:148-152's Format-InertMarkerLabel)
     # so this content can never be re-parsed as a live marker by a later
     # comment-scanning sweep.
-    $stripped = $Content -replace '<!--', '' -replace '-->', ''
+    #
+    # R2 (HIGH, live-reproduced): a SINGLE non-looping pass is
+    # reconstructable -- an input like "<!<!---- plan-issue-9 ---->>"
+    # survives one pass and reassembles into a live "<!-- plan-issue-9 -->"
+    # marker, because removing the inner substring concatenates the outer
+    # fragments into the exact token being stripped. Looping both replaces
+    # to a fixed point (repeat until a pass makes no further change) closes
+    # this: any nested/overlapping delimiter shape eventually stabilizes to
+    # content with no "<!--"/"-->" substring left to reassemble.
+    $stripped = $Content
+    do {
+        $previous = $stripped
+        $stripped = $stripped -replace '<!--', '' -replace '-->', ''
+    } while ($stripped -ne $previous)
 
     # Standard Markdown "longer fence" escaping technique: find the longest
     # run of consecutive backticks anywhere in the content, then wrap in a
@@ -1971,17 +2252,27 @@ function New-GCVerdictReport {
         }
 
         $reportTargets.Add([pscustomobject]@{
-                Id              = Format-GCInertRender -Content $tId
-                AcRef           = $acRef
-                Outcome         = $t.Outcome
-                ExitCode        = $t.ExitCode
-                TimedOut        = $t.TimedOut
-                Reason          = $t.Reason
-                Expected        = $expected
-                Falsifier       = $falsifier
-                AdvisoryFlags   = @($t.AdvisoryFlags)
-                StdOutExcerpt   = Format-GCInertRender -Content (script:Get-GCExcerpt -Content $t.StdOut)
-                StdErrExcerpt   = Format-GCInertRender -Content (script:Get-GCExcerpt -Content $t.StdErr)
+                Id               = Format-GCInertRender -Content $tId
+                AcRef            = $acRef
+                Outcome          = $t.Outcome
+                ExitCode         = $t.ExitCode
+                TimedOut         = $t.TimedOut
+                Reason           = $t.Reason
+                Expected         = $expected
+                Falsifier        = $falsifier
+                AdvisoryFlags    = @($t.AdvisoryFlags)
+                StdOutExcerpt    = Format-GCInertRender -Content (script:Get-GCExcerpt -Content $t.StdOut)
+                StdErrExcerpt    = Format-GCInertRender -Content (script:Get-GCExcerpt -Content $t.StdErr)
+                # R20: check output that happens to CONTAIN the genuine
+                # truncation-marker text (e.g. a check that itself prints
+                # "...[output truncated: cap reached]...") is indistinguishable
+                # in the rendered excerpt from a real truncation. The
+                # authoritative boolean is always correct even when the
+                # inline marker text is ambiguous, so it is surfaced
+                # explicitly here rather than leaving a reader to infer
+                # truncation from the excerpt text alone.
+                StdOutTruncated  = [bool]$t.StdOutTruncated
+                StdErrTruncated  = [bool]$t.StdErrTruncated
             }) | Out-Null
     }
 
@@ -1991,9 +2282,31 @@ function New-GCVerdictReport {
         if ([string]$f.Kind -eq 'unrecognized-invariant') {
             $detail = Format-GCInertRender -Content ([string]$f.Literal)
         } elseif ($f.PSObject.Properties.Match('Files').Count -gt 0) {
-            $detail = ((@($f.Files)) -join ', ')
+            # R6: each Files entry is inert-rendered before joining --
+            # filenames are git-diff-derived content from the audited run's
+            # own tree (attacker-influenceable), and were previously joined
+            # raw with no Format-GCInertRender pass, unlike every sibling
+            # field in this function.
+            #
+            # R14: an assertion-weakening flag's Files entries are
+            # [pscustomobject]@{Path;BaseCount;RunCount} objects, not plain
+            # strings (unlike the other two file-bearing flag types) -- a
+            # bare -join ', ' renders these as an EMPTY STRING (a
+            # pscustomobject's .ToString() returns '', not a field dump),
+            # silently losing all path/count information. Format each
+            # non-string entry into a readable string first.
+            $fileStrings = @(@($f.Files) | ForEach-Object {
+                    if ($_ -is [string]) {
+                        $_
+                    } elseif ($null -ne $_ -and $_.PSObject.Properties.Match('Path').Count -gt 0) {
+                        "$($_.Path) (was $($_.BaseCount), now $($_.RunCount))"
+                    } else {
+                        [string]$_
+                    }
+                })
+            $detail = ((@($fileStrings) | ForEach-Object { Format-GCInertRender -Content $_ }) -join ', ')
         } elseif ($f.PSObject.Properties.Match('Detail').Count -gt 0) {
-            $detail = [string]$f.Detail
+            $detail = Format-GCInertRender -Content ([string]$f.Detail)
         }
         $reportFlags.Add([pscustomobject]@{
                 Kind   = [string]$f.Kind
