@@ -432,6 +432,56 @@ function script:Remove-PPLPhaseContainmentAppendedAtLine {
     return [regex]::Replace($BlockText, '(?m)^[ \t]*appended_at\s*:.*\r?\n?', '')
 }
 
+function script:Test-PPLPhaseContainmentCandidate {
+    <#
+    .SYNOPSIS
+        Shared write-time preflight for a single phase-containment candidate
+        block (issue #886 plan slice s4 consolidation): validates that the
+        raw block text is well-formed (gated-parser, -SkippedCount tracked)
+        and that its parsed entry passes schema validation. Replaces the
+        identical preflight logic previously duplicated in
+        Set-PPLPhaseContainmentBlocksOnComment's append and replace branches
+        (both introduced by #887 F1, issue #878 review).
+    .DESCRIPTION
+        OUTPUT-STREAM DISCIPLINE (F2, issue #886 review): every intermediate
+        expression below is assigned or [void]-suppressed, and the pass path
+        ends with an explicit `return $null` -- an uncaptured expression
+        inside this helper would leak into the function's output stream,
+        turning `return $null` into a non-null one-or-more-element array and
+        flipping BOTH call sites' `if ($null -ne $r) { return $r }` guard to
+        falsely refuse every candidate.
+    .PARAMETER Kind
+        'Append' or 'Replacement' (not 'Replace') -- the exact word used
+        verbatim in the Reason string, preserving the pre-existing
+        "Append candidate for finding_key '...'" / "Replacement candidate
+        for finding_key '...'" wording byte-for-byte.
+    .OUTPUTS
+        $null on pass, or [PSCustomObject] with Success=$false, Reason
+        [string], and Action=$null on fail (same shape as this file's other
+        Set-*OnComment failure returns).
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Block,
+        [Parameter(Mandatory)][string]$BlockId,
+        [Parameter(Mandatory)][string]$FindingKey,
+        [Parameter(Mandatory)][ValidateSet('Append', 'Replacement')][string]$Kind
+    )
+
+    $skippedCount = 0
+    $gatedBlocks = Get-PhaseContainmentBlock -Text $Block -Id $BlockId -SkippedCount ([ref]$skippedCount)
+    if ($skippedCount -gt 0 -or $null -eq $gatedBlocks -or $gatedBlocks.Count -eq 0) {
+        return [PSCustomObject]@{ Success = $false; Reason = "$Kind candidate for finding_key '$FindingKey' (phase-containment-$BlockId) is unclosed or malformed ($skippedCount skipped)"; Action = $null }
+    }
+    foreach ($rawBlock in $gatedBlocks) {
+        $entry = ConvertFrom-PhaseContainmentYaml -Yaml $rawBlock
+        $validation = Test-PhaseContainmentEntry -Entry $entry
+        if (-not $validation.IsValid) {
+            return [PSCustomObject]@{ Success = $false; Reason = "$Kind candidate for finding_key '$FindingKey' (phase-containment-$BlockId) fails schema validation: $($validation.Errors -join '; ')"; Action = $null }
+        }
+    }
+    return $null
+}
+
 function script:Set-PPLPhaseContainmentBlocksOnComment {
     <#
     .SYNOPSIS
@@ -525,18 +575,12 @@ function script:Set-PPLPhaseContainmentBlocksOnComment {
             # $toAppend. Previously this candidate's validation happened
             # only inside Add-CommentBlocks, in a separate call issued AFTER
             # any replace write above had already committed.
-            $appendSkippedCount = 0
-            $appendGatedBlocks = Get-PhaseContainmentBlock -Text $block -Id $blockId -SkippedCount ([ref]$appendSkippedCount)
-            if ($appendSkippedCount -gt 0 -or $null -eq $appendGatedBlocks -or $appendGatedBlocks.Count -eq 0) {
-                return [PSCustomObject]@{ Success = $false; Reason = "Append candidate for finding_key '$findingKey' (phase-containment-$blockId) is unclosed or malformed ($appendSkippedCount skipped)"; Action = $null }
-            }
-            foreach ($rawAppendBlock in $appendGatedBlocks) {
-                $appendEntry = ConvertFrom-PhaseContainmentYaml -Yaml $rawAppendBlock
-                $appendValidation = Test-PhaseContainmentEntry -Entry $appendEntry
-                if (-not $appendValidation.IsValid) {
-                    return [PSCustomObject]@{ Success = $false; Reason = "Append candidate for finding_key '$findingKey' (phase-containment-$blockId) fails schema validation: $($appendValidation.Errors -join '; ')"; Action = $null }
-                }
-            }
+            # s4 consolidation (issue #886): both this branch and the replace
+            # branch below now delegate that identical preflight to the
+            # shared Test-PPLPhaseContainmentCandidate helper instead of each
+            # reimplementing it inline.
+            $appendCandidateFailure = script:Test-PPLPhaseContainmentCandidate -Block $block -BlockId $blockId -FindingKey $findingKey -Kind 'Append'
+            if ($null -ne $appendCandidateFailure) { return $appendCandidateFailure }
             $toAppend.Add($block)
             [void]$appendedKeysThisCall.Add($findingKey)
             continue
@@ -570,18 +614,11 @@ function script:Set-PPLPhaseContainmentBlocksOnComment {
         #   - a parsed block fails Test-PhaseContainmentEntry's schema rules.
         # Fail loud with the same shape the append path uses: Success=$false
         # and a Reason naming the finding_key and the specific failure.
-        $replaceSkippedCount = 0
-        $replaceGatedBlocks = Get-PhaseContainmentBlock -Text $block -Id $blockId -SkippedCount ([ref]$replaceSkippedCount)
-        if ($replaceSkippedCount -gt 0 -or $null -eq $replaceGatedBlocks -or $replaceGatedBlocks.Count -eq 0) {
-            return [PSCustomObject]@{ Success = $false; Reason = "Replacement candidate for finding_key '$findingKey' (phase-containment-$blockId) is unclosed or malformed ($replaceSkippedCount skipped)"; Action = $null }
-        }
-        foreach ($rawReplaceBlock in $replaceGatedBlocks) {
-            $replaceEntry = ConvertFrom-PhaseContainmentYaml -Yaml $rawReplaceBlock
-            $replaceValidation = Test-PhaseContainmentEntry -Entry $replaceEntry
-            if (-not $replaceValidation.IsValid) {
-                return [PSCustomObject]@{ Success = $false; Reason = "Replacement candidate for finding_key '$findingKey' (phase-containment-$blockId) fails schema validation: $($replaceValidation.Errors -join '; ')"; Action = $null }
-            }
-        }
+        # s4 consolidation (issue #886): delegates to the shared
+        # Test-PPLPhaseContainmentCandidate helper (same one the append
+        # branch above calls) instead of reimplementing this preflight.
+        $replaceCandidateFailure = script:Test-PPLPhaseContainmentCandidate -Block $block -BlockId $blockId -FindingKey $findingKey -Kind 'Replacement'
+        if ($null -ne $replaceCandidateFailure) { return $replaceCandidateFailure }
 
         # M5 fix: stamp appended_at into the replacement content the same
         # way Add-CommentBlocks stamps a freshly-appended block (reusing its

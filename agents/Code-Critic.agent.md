@@ -222,7 +222,7 @@ Core responsibilities:
 
 - Perform the final review for architecture, security, performance, and maintainability
 - Verify acceptance criteria and design intent, not just test outcomes
-- Restrict post-fix targeted prosecution to fix-introduced regressions and direct side effects, unless an explicit acceptance criterion requires surfacing the surrounding issue
+- Restrict post-fix targeted prosecution to fix-introduced regressions and direct side effects, unless an explicit acceptance criterion requires surfacing the surrounding issue; coverage extends to every branch the fix commit modified — see the canonical post-fix scope constraint in `skills/validation-methodology/references/review-reconciliation.md` (do not re-derive)
 
 The calling agent or judge still decides how to act on the findings; Code-Critic's job is to emit evidence-backed prosecution or defense output.
 

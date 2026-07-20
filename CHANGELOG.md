@@ -2,6 +2,12 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.4.1] — 2026-07-19
+
+### Changed
+
+- Sibling write-path guarantee-parity check in the adversarial-review Architecture checklist, cross-referenced from Security. Post-fix verification scope widened across prosecution and judge to cover every branch a fix commit modifies. Consolidated the append/replace phase-containment preflight into one shared helper. (#886)
+
 ## [3.4.0] — 2026-07-19
 
 ### Added
