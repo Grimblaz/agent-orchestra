@@ -228,6 +228,48 @@
         ceiling this feeds is advisory-only, so an unparseable value must
         degrade to "no ceiling", never a guessed interpretation.
 
+      Test-GCSuiteGatePass -Result <object>
+        Pure green-floor gate predicate (frame-slice s4, AC1; the U1
+        CRITICAL fix). Returns $true only when ALL THREE hold:
+        `$Result.ExitCode -eq 0`, `$Result.TotalFailed -eq 0`, and
+        `($Result.TotalPassed + $Result.TotalFailed) -gt 0` (the ran-guard).
+        Isolated as its own function -- decoupled from the
+        Invoke-PesterSharded call itself -- so every false-GREEN shape
+        (TestsPath-not-found, zero-discovered, MinTestCount-floor) is
+        directly unit-testable against a hand-constructed mock result
+        object, without a real Pester sub-run per test case. Never throws:
+        a $null $Result, or one missing ExitCode/TotalFailed, fails closed
+        to $false.
+
+      Invoke-GCSuitePhase -WorktreePath <string> [-TimeoutSeconds <int> = 1800]
+                           [-MinTestCount <int> = 200] [-PwshCliPath <string> = 'pwsh']
+        Runs the full suite inside the worktree via Invoke-PesterSharded
+        with an EXPLICIT `-TestsPath <WorktreePath>/.github/scripts/Tests`
+        -- never the $PSScriptRoot-relative default this function otherwise
+        falls back to (U4). Runner-copy policy: dot-sources
+        `<WorktreePath>/.github/scripts/lib/pester-sharded-core.ps1` -- the
+        copy that lives INSIDE THE WORKTREE -- inside a CHILD pwsh process
+        (never the copy in the invoking repo, and never in-process), because
+        Invoke-PesterSharded is a plain function call with no killable
+        process handle of its own; shelling out to a child process gives
+        this function a real System.Diagnostics.Process handle around the
+        ENTIRE suite run, killable with the same preemptive tree-kill
+        discipline the s3 function Invoke-GCTargetCheck uses
+        (`Kill($true)`, `taskkill /T /F` fallback) (U2/U3). A timeout, a
+        missing runner-lib copy in the worktree, or a missing/unparseable
+        result file after a non-timeout exit ALL map to the identical
+        fail-closed shape (`ExitCode=1, TotalFailed=0, TimedOut` as
+        applicable) -- Test-GCSuiteGatePass rejects this on ExitCode even
+        though TotalFailed reads 0, closing the exact false-GREEN gap this
+        slice exists to fix. Standalone at s4, like s3: not yet threaded
+        into the `-SuitePhase` seam on Invoke-GCWorktreeSession or the
+        control flow inside Invoke-GoalContractValidate; a later slice
+        wires it in and folds the verdict from Test-GCSuiteGatePass into
+        Resolve-GCVerdictDisposition alongside the s1/s3/s5 signals. NO
+        FLAKE-QUENCH (U5, judge-sustained HIGH, dropped from the plan
+        entirely): this function contains no retry-the-suite-on-failure
+        logic of any kind -- any failure, flaky or not, is `fail`.
+
 .NOTES
     Trust framing (M7, inherited from goal-contract-core.ps1's own .NOTES):
     every field this validator reads ultimately comes from an untrusted,
@@ -240,6 +282,20 @@
     via pwsh without sanitizing or interpreting its content beyond that; the
     trust model is edit-coherence (already settled), not this function's
     concern to re-litigate.
+
+    Soundness boundary + runner-version invariant (s4, U14 -- documentation
+    only, not runtime logic): the green floor Test-GCSuiteGatePass enforces
+    is only satisfiable where the target suite is genuinely all-green AT THE
+    RUNNER VERSION IN USE. This validator has no independent
+    production-behavior signal beyond (a) the existing Pester suite already
+    in the target repo (this section) and (b) the `targets[].check`
+    commands the contract itself defines (s3) -- a production regression
+    touched by NEITHER of those is
+    structurally invisible to this gate; the validator does not and cannot
+    detect it. A validator run assumes it executes under a runner version
+    where the target suite is expected to be green; it does not itself
+    verify pwsh/Pester-version compatibility between the invoking
+    environment and the worktree under audit.
 #>
 
 # Sibling-lib dot-source, mirroring the repo convention (e.g.
@@ -917,5 +973,205 @@ function Invoke-GCTargetChecks {
         TotalElapsedMs         = $stopwatch.ElapsedMilliseconds
         BudgetWallClockSeconds = $budgetSeconds
         BudgetExceeded         = $budgetExceeded
+    }
+}
+
+# -----------------------------------------------------------------------------
+# s4: suite invariant -- the green floor (frame-slice s4, AC1/AC3). THE FIX
+# THIS SLICE EXISTS FOR (U1, CRITICAL, stress-test-sustained): Invoke-PesterSharded
+# (pester-sharded-core.ps1:84) returns `ExitCode=1, TotalFailed=0` in THREE
+# distinct situations -- TestsPath not found (:100-103), zero .Tests.ps1
+# files discovered (:109-112), and the MinTestCount floor (default 200) not
+# met (:397-400, which sets ExitCode but does NOT increment TotalFailed).
+# Gating the green floor on `TotalFailed -eq 0` alone reports a suite that
+# never ran as PASS -- exactly the false-GREEN defect this validator exists
+# to prevent, reintroduced at this consumer. Test-GCSuiteGatePass is the
+# fix, isolated as its own pure function so every shape is directly
+# unit-testable against a hand-constructed mock result object, without a
+# real Pester sub-run per test case.
+#
+# NO FLAKE-QUENCH (U5, judge-sustained HIGH, dropped from this plan
+# entirely): any suite failure -- flaky or not -- is `fail`. The
+# `Compare-RunResults` reuse seam this would have needed is not a reusable
+# suppression primitive: it is `script:`-scoped inside
+# pester-sharded-core.ps1 (:416) and detects determinism FLIPS between two
+# -DeterminismCheck runs, not a suppressor, and `FailedFiles` folds in
+# crash/missing-result entries that a retry-to-green would silently quench
+# as "flaky". This section contains NO retry-the-suite-on-failure logic.
+# -----------------------------------------------------------------------------
+
+function Test-GCSuiteGatePass {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory = $false)][AllowNull()][object]$Result
+    )
+
+    if ($null -eq $Result) {
+        return $false
+    }
+
+    $hasExitCode = $Result.PSObject.Properties.Match('ExitCode').Count -gt 0
+    $hasTotalFailed = $Result.PSObject.Properties.Match('TotalFailed').Count -gt 0
+    if (-not $hasExitCode -or -not $hasTotalFailed) {
+        return $false
+    }
+
+    $exitCode = [int]$Result.ExitCode
+    $totalFailed = [int]$Result.TotalFailed
+    $totalPassed = 0
+    if ($Result.PSObject.Properties.Match('TotalPassed').Count -gt 0) {
+        $totalPassed = [int]$Result.TotalPassed
+    }
+
+    # The three-part gate (U1 CRITICAL fix): ExitCode==0 AND TotalFailed==0
+    # AND (Passed+Failed)>0 -- NEVER TotalFailed alone. ExitCode alone
+    # already rejects the TestsPath-not-found, zero-discovered, and
+    # MinTestCount-floor shapes (all three set ExitCode=1); the ran-guard
+    # (clause 3) is an independent defensive floor against a hypothetical
+    # ExitCode=0-but-nothing-ran shape.
+    return ($exitCode -eq 0) -and ($totalFailed -eq 0) -and (($totalPassed + $totalFailed) -gt 0)
+}
+
+# Private: the single fail-closed result shape this section ever returns for
+# a non-green outcome that did not come from a real, parsed Invoke-PesterSharded
+# result (timeout, missing runner-lib copy, missing/unparseable result file).
+# Centralized so every fail-closed exit path in Invoke-GCSuitePhase produces
+# the identical shape Test-GCSuiteGatePass rejects on ExitCode.
+function script:New-GCFailClosedSuiteResult {
+    param([switch]$TimedOut)
+    [pscustomobject]@{
+        ExitCode     = 1
+        TotalPassed  = 0
+        TotalFailed  = 0
+        WallClockMs  = $null
+        MissingFiles = @()
+        FailedFiles  = @()
+        TimedOut     = [bool]$TimedOut
+    }
+}
+
+function Invoke-GCSuitePhase {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$WorktreePath,
+        [Parameter(Mandatory = $false)][int]$TimeoutSeconds = 1800,
+        [Parameter(Mandatory = $false)][int]$MinTestCount = 200,
+        [Parameter(Mandatory = $false)][string]$PwshCliPath = 'pwsh'
+    )
+
+    $libPath = Join-Path $WorktreePath '.github/scripts/lib/pester-sharded-core.ps1'
+    $testsPath = Join-Path $WorktreePath '.github/scripts/Tests'
+
+    # Fail-closed BEFORE spawning anything: an absent runner copy in the
+    # worktree must never be silently treated as "nothing to run, so pass".
+    if (-not (Test-Path -LiteralPath $libPath -PathType Leaf)) {
+        Write-Warning "Invoke-GCSuitePhase: worktree runner lib not found at '$libPath'."
+        return script:New-GCFailClosedSuiteResult
+    }
+
+    $tempDir = Join-Path ([IO.Path]::GetTempPath()) "goal-validate-suite-$([Guid]::NewGuid().ToString('N'))"
+    New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+    $resultFile = Join-Path $tempDir 'suite-result.json'
+    $launchFile = Join-Path $tempDir 'suite-launcher.ps1'
+
+    # RC item 1: shell out to a CHILD pwsh process that dot-sources the
+    # copy of pester-sharded-core.ps1 living INSIDE THE WORKTREE and calls
+    # Invoke-PesterSharded with an EXPLICIT -TestsPath -- never the copy in
+    # the invoking repo, never the $PSScriptRoot-relative default this
+    # function otherwise falls back to. Single-quote literals in a
+    # here-string are safe (mirroring the Get-ShardLauncherScript pattern
+    # already used by pester-sharded-core.ps1); paths are embedded via
+    # @"..."@ substitution with '' escaping for embedded single quotes.
+    $launcherContent = @"
+#Requires -Version 7.0
+try {
+    . '$($libPath -replace "'", "''")'
+    `$r = Invoke-PesterSharded -TestsPath '$($testsPath -replace "'", "''")' -MinTestCount $MinTestCount
+    `$out = [ordered]@{
+        ExitCode     = `$r.ExitCode
+        TotalPassed  = `$r.TotalPassed
+        TotalFailed  = `$r.TotalFailed
+        WallClockMs  = `$r.WallClockMs
+        MissingFiles = @(`$r.MissingFiles)
+        FailedFiles  = @(`$r.FailedFiles)
+    }
+    `$out | ConvertTo-Json -Compress -Depth 5 | Set-Content -LiteralPath '$($resultFile -replace "'", "''")' -Encoding UTF8
+    exit ([int]`$r.ExitCode)
+} catch {
+    Write-Error `$_
+    exit 2
+}
+"@
+    [IO.File]::WriteAllText($launchFile, $launcherContent, [Text.UTF8Encoding]::new($false))
+
+    $psi = [Diagnostics.ProcessStartInfo]::new()
+    $psi.FileName = $PwshCliPath
+    foreach ($arg in @('-NoProfile', '-NoLogo', '-NonInteractive', '-File', $launchFile)) {
+        $psi.ArgumentList.Add($arg)
+    }
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+
+    $proc = [Diagnostics.Process]::new()
+    $proc.StartInfo = $psi
+    $timedOut = $false
+
+    try {
+        $proc.Start() | Out-Null
+        $exited = $proc.WaitForExit([Math]::Max(0, $TimeoutSeconds) * 1000)
+
+        if (-not $exited) {
+            $timedOut = $true
+            # RC item 3: PREEMPTIVE TREE-KILL around the ENTIRE suite run --
+            # the same discipline the s3 function Invoke-GCTargetCheck uses
+            # (U2/U3): System.Diagnostics.Process + Kill($true), never
+            # Stop-Job/Wait-Job, with a taskkill /T /F fallback.
+            try {
+                $proc.Kill($true)
+            } catch {
+                if ($IsWindows) {
+                    try { & taskkill /PID $proc.Id /T /F 2>$null | Out-Null } catch { }
+                }
+            }
+            $null = $proc.WaitForExit(10000)
+        } else {
+            $proc.WaitForExit()
+        }
+    } finally {
+        $proc.Dispose()
+    }
+
+    if ($timedOut) {
+        Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+        # RC item 3: a suite-phase timeout ALWAYS maps to fail.
+        return script:New-GCFailClosedSuiteResult -TimedOut
+    }
+
+    $resultObj = $null
+    if (Test-Path -LiteralPath $resultFile) {
+        try {
+            $resultObj = Get-Content -LiteralPath $resultFile -Raw | ConvertFrom-Json
+        } catch {
+            $resultObj = $null
+        }
+    }
+    Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+
+    if ($null -eq $resultObj) {
+        # Child exited without a parseable result file (e.g. crashed before
+        # writing it) -- fail-closed, never a silent pass.
+        return script:New-GCFailClosedSuiteResult
+    }
+
+    return [pscustomobject]@{
+        ExitCode     = [int]$resultObj.ExitCode
+        TotalPassed  = [int]$resultObj.TotalPassed
+        TotalFailed  = [int]$resultObj.TotalFailed
+        WallClockMs  = $resultObj.WallClockMs
+        MissingFiles = @($resultObj.MissingFiles)
+        FailedFiles  = @($resultObj.FailedFiles)
+        TimedOut     = $false
     }
 }

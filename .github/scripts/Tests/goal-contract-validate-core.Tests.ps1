@@ -49,6 +49,24 @@
     one of its exported functions) is absent, not a syntax error in this
     test file. Each behavioral It therefore guards on function existence via
     script:Assert-GCVFunctionExists before invoking anything.
+
+    Frame-slice s4 adds:
+
+      Test-GCSuiteGatePass -Result <object>
+        Pure green-floor gate predicate (the U1 CRITICAL fix): ExitCode==0
+        AND TotalFailed==0 AND (Passed+Failed)>0 -- NEVER TotalFailed alone.
+        Tested directly against hand-constructed mock result objects
+        (green, one-real-red, and all three false-GREEN shapes:
+        TestsPath-not-found, zero-discovered, MinTestCount-floor).
+
+      Invoke-GCSuitePhase -WorktreePath <string> [-TimeoutSeconds <int>]
+                           [-MinTestCount <int>] [-PwshCliPath <string>]
+        Runs the suite via a child pwsh process that dot-sources the
+        WORKTREE'S OWN pester-sharded-core.ps1 copy with an EXPLICIT
+        -TestsPath, tree-killed on a wall-clock timeout. Tested against a
+        stub Invoke-PesterSharded planted inside a fake worktree directory
+        (never the real 200+ file suite) to keep these tests fast while
+        still exercising the real child-process + tree-kill mechanics.
 #>
 
 Describe 'goal-contract-validate-core.ps1' -Tag 'unit' {
@@ -922,6 +940,189 @@ Start-Sleep -Seconds 30
 
             $session.BudgetExceeded | Should -Be $true
             $session.Targets[0].Outcome | Should -Be 'pass' -Because 'the budget ceiling is advisory-only and must never override a target''s own execution outcome'
+        }
+    }
+
+    Context 'Test-GCSuiteGatePass -- green-floor gate (s4, AC1, U1 CRITICAL fix)' {
+
+        It 'passes a genuinely green result (ExitCode 0, TotalFailed 0, tests ran)' {
+            script:Assert-GCVFunctionExists -Name 'Test-GCSuiteGatePass'
+            $result = [pscustomobject]@{ ExitCode = 0; TotalPassed = 4420; TotalFailed = 0 }
+
+            Test-GCSuiteGatePass -Result $result | Should -Be $true
+        }
+
+        It 'fails a genuinely red result (one real failure)' {
+            script:Assert-GCVFunctionExists -Name 'Test-GCSuiteGatePass'
+            $result = [pscustomobject]@{ ExitCode = 1; TotalPassed = 4419; TotalFailed = 1 }
+
+            Test-GCSuiteGatePass -Result $result | Should -Be $false
+        }
+
+        It 'fails the TestsPath-not-found false-GREEN shape (ExitCode=1, TotalFailed=0, TotalPassed=0) -- U1 CRITICAL' {
+            script:Assert-GCVFunctionExists -Name 'Test-GCSuiteGatePass'
+            # Mirrors pester-sharded-core.ps1:100-103's exact early-return shape.
+            $result = [pscustomobject]@{ ExitCode = 1; TotalPassed = 0; TotalFailed = 0; Results = @() }
+
+            Test-GCSuiteGatePass -Result $result | Should -Be $false -Because 'gating on TotalFailed alone would green-light a suite that never ran because TestsPath did not exist (U1 CRITICAL)'
+        }
+
+        It 'fails the zero-discovered false-GREEN shape (identical field values, different cause -- the lib does not distinguish them observably)' {
+            script:Assert-GCVFunctionExists -Name 'Test-GCSuiteGatePass'
+            # pester-sharded-core.ps1:109-112 returns the identical field
+            # shape as the TestsPath-not-found case above -- one gate test
+            # covers both per the RC's own "otherwise one test suffices".
+            $result = [pscustomobject]@{ ExitCode = 1; TotalPassed = 0; TotalFailed = 0; Results = @() }
+
+            Test-GCSuiteGatePass -Result $result | Should -Be $false -Because 'gating on TotalFailed alone would green-light a suite where zero .Tests.ps1 files were discovered (U1 CRITICAL)'
+        }
+
+        It 'fails the MinTestCount-floor false-GREEN shape (ExitCode=1, TotalFailed=0, TotalPassed below the floor)' {
+            script:Assert-GCVFunctionExists -Name 'Test-GCSuiteGatePass'
+            # pester-sharded-core.ps1:397-400: MinTestCount not met sets
+            # ExitCode=1 but does NOT increment TotalFailed. Unlike the two
+            # shapes above, Passed+Failed IS > 0 here -- the ran-guard alone
+            # would NOT catch this shape; ExitCode is what catches it.
+            $result = [pscustomobject]@{ ExitCode = 1; TotalPassed = 12; TotalFailed = 0; Results = @() }
+
+            Test-GCSuiteGatePass -Result $result | Should -Be $false -Because 'MinTestCount<200 sets ExitCode=1 without incrementing TotalFailed (U1 CRITICAL)'
+        }
+
+        It 'fails when ExitCode is 0 but no tests ran at all (defensive ran-guard clause, independent of ExitCode)' {
+            script:Assert-GCVFunctionExists -Name 'Test-GCSuiteGatePass'
+            $result = [pscustomobject]@{ ExitCode = 0; TotalPassed = 0; TotalFailed = 0 }
+
+            Test-GCSuiteGatePass -Result $result | Should -Be $false -Because 'the ran-guard is an independent defensive floor, not merely redundant with ExitCode'
+        }
+
+        It 'fails closed (never throws, never defaults to pass) for a $null result' {
+            script:Assert-GCVFunctionExists -Name 'Test-GCSuiteGatePass'
+
+            Test-GCSuiteGatePass -Result $null | Should -Be $false
+        }
+
+        It 'fails closed for a result object missing ExitCode or TotalFailed entirely' {
+            script:Assert-GCVFunctionExists -Name 'Test-GCSuiteGatePass'
+            $malformed = [pscustomobject]@{ SomethingElse = 'x' }
+
+            Test-GCSuiteGatePass -Result $malformed | Should -Be $false
+        }
+    }
+
+    Context 'Invoke-GCSuitePhase -- explicit -TestsPath + suite-phase wall-clock timeout (s4, AC1/AC3)' {
+
+        BeforeAll {
+            # A fake "worktree" carrying its own stub pester-sharded-core.ps1
+            # copy, so these tests exercise the real child-pwsh-process +
+            # tree-kill mechanics without running the real 200+ file suite.
+            function script:New-GCStubWorktree {
+                param([Parameter(Mandatory)][string]$Path)
+                New-Item -ItemType Directory -Path (Join-Path $Path '.github/scripts/lib') -Force | Out-Null
+                New-Item -ItemType Directory -Path (Join-Path $Path '.github/scripts/Tests') -Force | Out-Null
+                return $Path
+            }
+        }
+
+        It 'calls Invoke-PesterSharded with the EXPLICIT worktree-derived -TestsPath, never a default' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCSuitePhase'
+            $worktree = script:New-GCStubWorktree -Path (Join-Path $TestDrive 'explicit-testspath-worktree')
+            $stubLib = Join-Path $worktree '.github/scripts/lib/pester-sharded-core.ps1'
+            $captureFile = Join-Path $worktree 'captured-testspath.txt'
+            $captureFileEscaped = $captureFile -replace "'", "''"
+            @"
+function Invoke-PesterSharded {
+    param([string]`$TestsPath, [int]`$MinTestCount = 200)
+    Set-Content -LiteralPath '$captureFileEscaped' -Value `$TestsPath -NoNewline -Encoding UTF8
+    return [pscustomobject]@{ ExitCode = 0; TotalPassed = 5; TotalFailed = 0; WallClockMs = 10; MissingFiles = @(); FailedFiles = @() }
+}
+"@ | Set-Content -LiteralPath $stubLib -Encoding UTF8
+
+            $result = Invoke-GCSuitePhase -WorktreePath $worktree -TimeoutSeconds 15
+
+            $result.ExitCode | Should -Be 0
+            (Test-Path -LiteralPath $captureFile) | Should -Be $true -Because 'the stub must have been invoked at all'
+            $capturedTestsPath = (Get-Content -LiteralPath $captureFile -Raw).Trim()
+            $expectedTestsPath = Join-Path $worktree '.github/scripts/Tests'
+            $capturedTestsPath | Should -Be $expectedTestsPath -Because 'the -TestsPath must be explicit and worktree-derived, never the function''s own $PSScriptRoot-relative default'
+        }
+
+        It 'passes through a genuinely green stub result end-to-end (ExitCode/TotalPassed/TotalFailed marshalled correctly)' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCSuitePhase'
+            $worktree = script:New-GCStubWorktree -Path (Join-Path $TestDrive 'green-worktree')
+            $stubLib = Join-Path $worktree '.github/scripts/lib/pester-sharded-core.ps1'
+            @'
+function Invoke-PesterSharded {
+    param([string]$TestsPath, [int]$MinTestCount = 200)
+    return [pscustomobject]@{ ExitCode = 0; TotalPassed = 250; TotalFailed = 0; WallClockMs = 4200; MissingFiles = @(); FailedFiles = @() }
+}
+'@ | Set-Content -LiteralPath $stubLib -Encoding UTF8
+
+            $result = Invoke-GCSuitePhase -WorktreePath $worktree -TimeoutSeconds 15
+
+            $result.ExitCode | Should -Be 0
+            $result.TotalPassed | Should -Be 250
+            $result.TotalFailed | Should -Be 0
+            $result.TimedOut | Should -Be $false
+            Test-GCSuiteGatePass -Result $result | Should -Be $true
+        }
+
+        It 'passes through a genuinely red stub result end-to-end and fails the gate' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCSuitePhase'
+            $worktree = script:New-GCStubWorktree -Path (Join-Path $TestDrive 'red-worktree')
+            $stubLib = Join-Path $worktree '.github/scripts/lib/pester-sharded-core.ps1'
+            @'
+function Invoke-PesterSharded {
+    param([string]$TestsPath, [int]$MinTestCount = 200)
+    return [pscustomobject]@{ ExitCode = 1; TotalPassed = 248; TotalFailed = 2; WallClockMs = 4200; MissingFiles = @(); FailedFiles = @('some.Tests.ps1') }
+}
+'@ | Set-Content -LiteralPath $stubLib -Encoding UTF8
+
+            $result = Invoke-GCSuitePhase -WorktreePath $worktree -TimeoutSeconds 15
+
+            $result.ExitCode | Should -Be 1
+            $result.TotalFailed | Should -Be 2
+            Test-GCSuiteGatePass -Result $result | Should -Be $false
+        }
+
+        It 'preemptively tree-kills a hung suite phase on timeout and returns a fail-shaped result -- never waits out the hang' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCSuitePhase'
+            $worktree = script:New-GCStubWorktree -Path (Join-Path $TestDrive 'timeout-worktree')
+            $stubLib = Join-Path $worktree '.github/scripts/lib/pester-sharded-core.ps1'
+            # A stub that sleeps far longer than the test-scale timeout below.
+            # If this function dot-sourced the REAL repo's pester-sharded-core.ps1
+            # instead of this worktree's own stub, it would return the
+            # TestsPath-not-found shape almost instantly rather than hanging
+            # for 30s -- so this test doubles as proof the WORKTREE'S OWN
+            # copy is what actually ran.
+            @'
+function Invoke-PesterSharded {
+    param([string]$TestsPath, [int]$MinTestCount = 200)
+    Start-Sleep -Seconds 30
+    return [pscustomobject]@{ ExitCode = 0; TotalPassed = 5; TotalFailed = 0; WallClockMs = 30000; MissingFiles = @(); FailedFiles = @() }
+}
+'@ | Set-Content -LiteralPath $stubLib -Encoding UTF8
+
+            $sw = [System.Diagnostics.Stopwatch]::StartNew()
+            $result = Invoke-GCSuitePhase -WorktreePath $worktree -TimeoutSeconds 2
+            $sw.Stop()
+
+            $result.ExitCode | Should -Be 1 -Because 'a suite-phase timeout must map to fail, never a silent pass'
+            $result.TotalFailed | Should -Be 0 -Because 'the fail-closed timeout shape mirrors the exact false-GREEN field values Test-GCSuiteGatePass must reject on ExitCode'
+            $result.TimedOut | Should -Be $true
+            Test-GCSuiteGatePass -Result $result | Should -Be $false -Because 'the timeout result must fail the gate even though TotalFailed reads 0'
+            $sw.Elapsed.TotalSeconds | Should -BeLessThan 20 -Because 'the tree-kill must happen promptly after the 2s timeout, not wait out the 30s hang'
+        }
+
+        It 'fails closed when the worktree has no runner-lib copy at all, without spawning a process' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCSuitePhase'
+            $worktree = Join-Path $TestDrive 'no-lib-worktree'
+            New-Item -ItemType Directory -Path $worktree -Force | Out-Null
+
+            $result = Invoke-GCSuitePhase -WorktreePath $worktree -TimeoutSeconds 5 -WarningAction SilentlyContinue
+
+            $result.ExitCode | Should -Be 1
+            $result.TotalFailed | Should -Be 0
+            Test-GCSuiteGatePass -Result $result | Should -Be $false
         }
     }
 }
