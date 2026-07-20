@@ -304,10 +304,13 @@ inline at its fix site in `goal-contract-core.ps1`.
 - **#873** owns run-time `contract_hash` verification (recomputing the digest
   at harness invocation and halting on mismatch) and executing the contract's
   `targets[].check` commands. It reuses `Get-GCContractHash` and
-  `Get-GCContractBlock` rather than re-deriving either.
+  `Get-GCContractBlock` rather than re-deriving either. Shipped — see
+  [goal-contract-validator.md](goal-contract-validator.md) for that
+  component's own design decisions, shipped shape, and known limitations.
 - **#874+** owns the goal-run harness itself: launching a goal run, reading
-  `halt_conditions` and `budget` to bound it, and writing the
-  `goal-halt-report` marker this issue only registered the head for.
+  `halt_conditions` and `budget` to bound it, invoking #873's validator to
+  judge a completion claim, and writing the `goal-halt-report` marker this
+  issue only registered the head for.
 
 ## Related Sources
 
@@ -324,6 +327,9 @@ inline at its fix site in `goal-contract-core.ps1`.
 - [Documents/Design/goal-loop-platform-spike.md](goal-loop-platform-spike.md)
   — issue #871's platform-capability spike; a distinct, narrower topic than
   this document (probes the `/goal` platform, not the plan-seat artifact)
+- [Documents/Design/goal-contract-validator.md](goal-contract-validator.md)
+  — issue #873's run-time validator, the consuming component that verifies a
+  goal run's completion claim against this artifact's contract
 - [Documents/Design/session-memory-contract.md](session-memory-contract.md)
   — the marker-survival vocabulary this document's markers are registered
   against
