@@ -126,6 +126,67 @@ Write-Output '$escaped'
 exit $ExitCode
 "@ | Set-Content -LiteralPath $Path -Encoding UTF8
         }
+
+        # --- s2 fixtures: real temp git repos (never the invoking repo) ---
+        # Self-configures LOCAL (non-global) git identity on each fixture
+        # repo, mirroring newcomer-audit-wrapper.Tests.ps1's real-git-e2e
+        # fixture (:262-263) -- no GIT_CONFIG_GLOBAL, no Get-RealGitFiles
+        # registration, so this file can stay in the parallel shard; local
+        # `git config` never touches the operator's global/system identity.
+        function script:New-GCTestRepo {
+            param([Parameter(Mandatory)][string]$Path)
+            New-Item -ItemType Directory -Path $Path -Force | Out-Null
+            & git -C $Path init -q -b main . 2>&1 | Out-Null
+            & git -C $Path config user.email 'goal-validate-s2@example.com' 2>&1 | Out-Null
+            & git -C $Path config user.name 'goal-validate-s2' 2>&1 | Out-Null
+            $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+            [System.IO.File]::WriteAllText((Join-Path $Path 'seed.txt'), "seed`n", $utf8NoBom)
+            & git -C $Path add -A 2>&1 | Out-Null
+            & git -C $Path commit -q -m 'seed' 2>&1 | Out-Null
+            return $Path
+        }
+
+        # A smart forwarding mock: passes every git invocation through to the
+        # REAL git binary except `worktree remove`, which fails for the first
+        # $FailCount calls (persistent-failure test uses a $FailCount that
+        # exceeds Remove-GCDisposableWorktree's one retry; retry-then-succeed
+        # tests use $FailCount = 1). This exercises the orphan-record and
+        # retry paths WITHOUT ever holding a real OS-level file lock.
+        function script:New-MockGitTeardownFailure {
+            param(
+                [Parameter(Mandatory)][string]$Path,
+                [Parameter(Mandatory)][string]$CounterFile,
+                [Parameter(Mandatory)][int]$FailCount
+            )
+            @"
+param()
+`$argsJoined = `$args -join ' '
+if (`$argsJoined -match 'worktree remove') {
+    `$count = 0
+    if (Test-Path -LiteralPath '$CounterFile') { `$count = [int](Get-Content -LiteralPath '$CounterFile' -Raw) }
+    `$count++
+    Set-Content -LiteralPath '$CounterFile' -Value `$count -NoNewline
+    if (`$count -le $FailCount) {
+        exit 1
+    }
+}
+& git @args
+exit `$LASTEXITCODE
+"@ | Set-Content -LiteralPath $Path -Encoding UTF8
+        }
+
+        # Manual cleanup for worktrees this file creates outside TestDrive
+        # (Pester only auto-cleans TestDrive itself). Best-effort: a leaked
+        # worktree from a persistent-teardown-failure test is EXPECTED and
+        # cleaned here rather than by the function under test.
+        function script:Remove-GCTestWorktree {
+            param([Parameter(Mandatory)][string]$RepoRoot, [Parameter(Mandatory)][string]$WorktreePath)
+            & git -C $RepoRoot worktree remove --force $WorktreePath 2>&1 | Out-Null
+            & git -C $RepoRoot worktree prune 2>&1 | Out-Null
+            if (Test-Path -LiteralPath $WorktreePath) {
+                Remove-Item -LiteralPath $WorktreePath -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
     }
 
     Context 'Get-GCPinnedCommentBody -- marker-pinned, paginated, byte-safe read' {
@@ -406,6 +467,275 @@ exit $ExitCode
             $verdict.ExitCode | Should -Be 3
             $verdict.Reason | Should -Match 'infra-error' -Because 'the infra/harness-error disposition must carry a distinct Reason tag from a future target-level review-required disposition'
             $verdict.Verdict | Should -Not -Be 'fail' -Because 'an environment defect (missing module) must never be reported as the run failing'
+        }
+    }
+
+    Context 'Test-GCTreeClean -- cleanliness assertion primitive (s2, AC1)' {
+
+        It 'reports IsClean = $true for a freshly committed repo with no changes' {
+            script:Assert-GCVFunctionExists -Name 'Test-GCTreeClean'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'clean-repo')
+
+            $result = Test-GCTreeClean -Path $repo
+
+            $result.IsClean | Should -Be $true
+            @($result.Porcelain).Count | Should -Be 0
+        }
+
+        It 'reports IsClean = $false when a tracked file is modified without committing' {
+            script:Assert-GCVFunctionExists -Name 'Test-GCTreeClean'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'dirty-repo')
+            [System.IO.File]::WriteAllText((Join-Path $repo 'seed.txt'), "modified`n", [System.Text.UTF8Encoding]::new($false))
+
+            $result = Test-GCTreeClean -Path $repo
+
+            $result.IsClean | Should -Be $false
+            @($result.Porcelain).Count | Should -BeGreaterThan 0
+        }
+
+        It 'reports IsClean = $false for an untracked file (porcelain default includes untracked)' {
+            script:Assert-GCVFunctionExists -Name 'Test-GCTreeClean'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'untracked-repo')
+            [System.IO.File]::WriteAllText((Join-Path $repo 'new-file.txt'), "new`n", [System.Text.UTF8Encoding]::new($false))
+
+            $result = Test-GCTreeClean -Path $repo
+
+            $result.IsClean | Should -Be $false
+        }
+    }
+
+    Context 'New-GCDisposableWorktree -- detached creation (s2, AC1/AC2)' {
+
+        It 'refuses uncommitted-changes BEFORE creating any worktree when the invoking tree is dirty' {
+            script:Assert-GCVFunctionExists -Name 'New-GCDisposableWorktree'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'refuse-dirty-repo')
+            [System.IO.File]::WriteAllText((Join-Path $repo 'seed.txt'), "modified`n", [System.Text.UTF8Encoding]::new($false))
+
+            $result = New-GCDisposableWorktree -RepoRoot $repo -WarningAction SilentlyContinue
+
+            $result.Success | Should -Be $false
+            $result.RefusalReason | Should -Be 'refused: uncommitted-changes'
+            $result.Path | Should -BeNullOrEmpty
+
+            $worktreeList = & git -C $repo worktree list
+            @($worktreeList).Count | Should -Be 1 -Because 'no worktree may be created when the invoking tree is dirty'
+        }
+
+        It 'creates a DETACHED worktree at a unique path outside the repo tree, pinned to the resolved HEAD sha' {
+            script:Assert-GCVFunctionExists -Name 'New-GCDisposableWorktree'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'create-repo')
+            $expectedSha = (& git -C $repo rev-parse HEAD).Trim()
+
+            $result = New-GCDisposableWorktree -RepoRoot $repo
+
+            try {
+                $result.Success | Should -Be $true
+                $result.RefusalReason | Should -BeNullOrEmpty
+                $result.HeadSha | Should -Be $expectedSha
+                $result.Path | Should -Not -BeNullOrEmpty
+                $result.Path.StartsWith($repo) | Should -Be $false -Because 'the worktree path must live outside the repo tree'
+                (Test-Path -LiteralPath $result.Path -PathType Container) | Should -Be $true
+
+                # Detached: a checked-out branch has a symbolic HEAD ref; a
+                # detached checkout does not (git exits non-zero on
+                # `symbolic-ref -q HEAD` for a detached HEAD).
+                & git -C $result.Path symbolic-ref -q HEAD 2>&1 | Out-Null
+                $LASTEXITCODE | Should -Not -Be 0 -Because 'worktree add --detach must never produce a branch checkout'
+
+                $actualWorktreeSha = (& git -C $result.Path rev-parse HEAD).Trim()
+                $actualWorktreeSha | Should -Be $expectedSha
+            } finally {
+                script:Remove-GCTestWorktree -RepoRoot $repo -WorktreePath $result.Path
+            }
+        }
+
+        It 'generates a unique path on every call -- collision is structurally impossible' {
+            script:Assert-GCVFunctionExists -Name 'New-GCDisposableWorktree'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'unique-repo')
+
+            $first = New-GCDisposableWorktree -RepoRoot $repo
+            try {
+                $second = New-GCDisposableWorktree -RepoRoot $repo
+                try {
+                    $first.Success | Should -Be $true
+                    $second.Success | Should -Be $true
+                    $first.Path | Should -Not -Be $second.Path
+                    $first.Path | Should -Match 'goal-validate-[0-9a-f]{32}$'
+                    $second.Path | Should -Match 'goal-validate-[0-9a-f]{32}$'
+                } finally {
+                    script:Remove-GCTestWorktree -RepoRoot $repo -WorktreePath $second.Path
+                }
+            } finally {
+                script:Remove-GCTestWorktree -RepoRoot $repo -WorktreePath $first.Path
+            }
+        }
+    }
+
+    Context 'Remove-GCDisposableWorktree -- force-remove + prune + bounded retry + orphan record (s2, AC1)' {
+
+        It 'removes a real worktree cleanly on the first attempt' {
+            script:Assert-GCVFunctionExists -Name 'Remove-GCDisposableWorktree'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'remove-clean-repo')
+            $created = New-GCDisposableWorktree -RepoRoot $repo
+
+            $result = Remove-GCDisposableWorktree -RepoRoot $repo -WorktreePath $created.Path
+
+            $result.Removed | Should -Be $true
+            $result.OrphanedPath | Should -BeNullOrEmpty
+            (Test-Path -LiteralPath $created.Path) | Should -Be $false
+            $worktreeList = & git -C $repo worktree list
+            @($worktreeList).Count | Should -Be 1 -Because 'only the main worktree should remain after a clean removal'
+        }
+
+        It 'retries once after a failed first removal attempt, then succeeds (never throws)' {
+            script:Assert-GCVFunctionExists -Name 'Remove-GCDisposableWorktree'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'remove-retry-repo')
+            $created = New-GCDisposableWorktree -RepoRoot $repo
+            $mockGitPath = Join-Path $TestDrive 'mock-git-retry-succeeds.ps1'
+            $counterFile = Join-Path $TestDrive 'mock-git-retry-succeeds.counter'
+            # FailCount = 1: the first removal attempt fails, the one bounded
+            # retry succeeds.
+            script:New-MockGitTeardownFailure -Path $mockGitPath -CounterFile $counterFile -FailCount 1
+
+            # Called directly (not wrapped in { } | Should -Not -Throw): an
+            # uncaught exception here fails the It block on its own, and a
+            # direct call lets $result cross back out of this scope, which a
+            # scriptblock invocation would not guarantee.
+            try {
+                $result = Remove-GCDisposableWorktree -RepoRoot $repo -WorktreePath $created.Path -GitCliPath $mockGitPath -RetryDelayMs 10 -WarningAction SilentlyContinue
+            } finally {
+                script:Remove-GCTestWorktree -RepoRoot $repo -WorktreePath $created.Path
+            }
+
+            $result.Removed | Should -Be $true -Because 'the one bounded retry must succeed since the mock only fails the first attempt'
+            $result.OrphanedPath | Should -BeNullOrEmpty
+            $counterValue = [int](Get-Content -LiteralPath $counterFile -Raw)
+            $counterValue | Should -Be 2 -Because 'exactly two removal attempts (the original + one retry) must occur'
+        }
+
+        It 'never throws and records the orphaned path on persistent removal failure' {
+            script:Assert-GCVFunctionExists -Name 'Remove-GCDisposableWorktree'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'remove-persistent-fail-repo')
+            $created = New-GCDisposableWorktree -RepoRoot $repo
+            $mockGitPath = Join-Path $TestDrive 'mock-git-persistent-fail.ps1'
+            $counterFile = Join-Path $TestDrive 'mock-git-persistent-fail.counter'
+            # FailCount = 2 covers both the first attempt and the one retry --
+            # removal never succeeds within this function's bounded retry.
+            script:New-MockGitTeardownFailure -Path $mockGitPath -CounterFile $counterFile -FailCount 2
+
+            # An uncaught exception here fails the It block on its own; a
+            # successful assignment IS the "never throws" proof.
+            $result = Remove-GCDisposableWorktree -RepoRoot $repo -WorktreePath $created.Path -GitCliPath $mockGitPath -RetryDelayMs 10 -WarningAction SilentlyContinue
+
+            $result.Removed | Should -Be $false
+            $result.OrphanedPath | Should -Be $created.Path
+
+            script:Remove-GCTestWorktree -RepoRoot $repo -WorktreePath $created.Path
+        }
+    }
+
+    Context 'Invoke-GCWorktreeSession -- fixed run-order + cleanliness + teardown wiring (s2, AC1)' {
+
+        It 'runs the suite phase before the checks phase (fixed order)' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCWorktreeSession'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'order-repo')
+            $order = [System.Collections.Generic.List[string]]::new()
+            $suitePhase = { param($path) $order.Add('suite') }.GetNewClosure()
+            $checksPhase = { param($path) $order.Add('checks') }.GetNewClosure()
+
+            $session = Invoke-GCWorktreeSession -RepoRoot $repo -SuitePhase $suitePhase -ChecksPhase $checksPhase
+
+            $session.Refused | Should -Be $false
+            @($order) | Should -Be @('suite', 'checks')
+        }
+
+        It 'passes the worktree path to each phase scriptblock' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCWorktreeSession'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'phase-arg-repo')
+            $seenPaths = [System.Collections.Generic.List[string]]::new()
+            $suitePhase = { param($path) $seenPaths.Add($path) }.GetNewClosure()
+
+            $session = Invoke-GCWorktreeSession -RepoRoot $repo -SuitePhase $suitePhase
+
+            $seenPaths[0] | Should -Be $session.WorktreePath
+        }
+
+        It 'asserts cleanliness after the suite phase and surfaces check-induced dirt after the checks phase' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCWorktreeSession'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'dirt-repo')
+            $suitePhase = {
+                param($path)
+                [System.IO.File]::WriteAllText((Join-Path $path 'suite-dirt.txt'), "dirt`n", [System.Text.UTF8Encoding]::new($false))
+            }
+
+            $session = Invoke-GCWorktreeSession -RepoRoot $repo -SuitePhase $suitePhase
+
+            $session.SuiteCleanliness.IsClean | Should -Be $false -Because 'suite-phase dirt must be visible in the surfaced cleanliness assertion (mandatory-review flag territory for s3/s4)'
+            $session.ChecksCleanliness.IsClean | Should -Be $false -Because 'no checks phase ran to clean it up; the assertion still reflects the tree honestly'
+        }
+
+        It 'reports clean SuiteCleanliness and ChecksCleanliness when neither phase produces dirt' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCWorktreeSession'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'no-dirt-repo')
+
+            $session = Invoke-GCWorktreeSession -RepoRoot $repo -SuitePhase { param($path) } -ChecksPhase { param($path) }
+
+            $session.SuiteCleanliness.IsClean | Should -Be $true
+            $session.ChecksCleanliness.IsClean | Should -Be $true
+        }
+
+        It 'refuses uncommitted-changes before any worktree or phase runs when the invoking tree is dirty' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCWorktreeSession'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'session-refuse-dirty-repo')
+            [System.IO.File]::WriteAllText((Join-Path $repo 'seed.txt'), "modified`n", [System.Text.UTF8Encoding]::new($false))
+            $script:phaseCalled = $false
+            $suitePhase = { param($path) $script:phaseCalled = $true }
+
+            $session = Invoke-GCWorktreeSession -RepoRoot $repo -SuitePhase $suitePhase -WarningAction SilentlyContinue
+
+            $session.Refused | Should -Be $true
+            $session.RefusalReason | Should -Be 'refused: uncommitted-changes'
+            $session.WorktreePath | Should -BeNullOrEmpty
+            $script:phaseCalled | Should -Be $false -Because 'no phase may run when the invoking tree is dirty'
+        }
+
+        It 'tears down the worktree via finally even when a phase scriptblock throws, and re-throws to the caller' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCWorktreeSession'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'throw-repo')
+            $script:capturedPath = $null
+            $suitePhase = {
+                param($path)
+                $script:capturedPath = $path
+                throw 'simulated suite-phase failure'
+            }
+
+            { Invoke-GCWorktreeSession -RepoRoot $repo -SuitePhase $suitePhase } | Should -Throw '*simulated suite-phase failure*'
+
+            $script:capturedPath | Should -Not -BeNullOrEmpty
+            (Test-Path -LiteralPath $script:capturedPath) | Should -Be $false -Because 'teardown in finally must still remove the worktree even though the phase threw'
+            $worktreeList = & git -C $repo worktree list
+            @($worktreeList).Count | Should -Be 1
+        }
+
+        It 'never throws and surfaces OrphanedPath when teardown persistently fails after a clean session' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCWorktreeSession'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'session-orphan-repo')
+            $mockGitPath = Join-Path $TestDrive 'mock-git-session-orphan.ps1'
+            $counterFile = Join-Path $TestDrive 'mock-git-session-orphan.counter'
+            # FailCount = 2 covers the first teardown attempt and the retry;
+            # every OTHER git subcommand this session issues (status,
+            # rev-parse, worktree add, worktree prune) forwards to the real
+            # git binary untouched.
+            script:New-MockGitTeardownFailure -Path $mockGitPath -CounterFile $counterFile -FailCount 2
+
+            # An uncaught exception here fails the It block on its own; a
+            # successful assignment IS the "never throws" proof.
+            $session = Invoke-GCWorktreeSession -RepoRoot $repo -GitCliPath $mockGitPath -RetryDelayMs 10 -WarningAction SilentlyContinue
+
+            $session.Refused | Should -Be $false
+            $session.OrphanedPath | Should -Be $session.WorktreePath
+
+            script:Remove-GCTestWorktree -RepoRoot $repo -WorktreePath $session.WorktreePath
         }
     }
 }

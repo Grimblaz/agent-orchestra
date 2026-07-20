@@ -109,6 +109,60 @@
         Resolve-GCVerdictDisposition call before the verdict becomes the
         real terminal disposition #874 will consume.
 
+      Test-GCTreeClean -Path <string> [-GitCliPath <string>]
+        Cleanliness-assertion primitive: runs `git -C <Path> status
+        --porcelain` and returns whether the tree at that path is clean.
+        Reused for two distinct callers: New-GCDisposableWorktree's
+        pre-worktree dirty-invoking-tree refusal (AC2), and
+        Invoke-GCWorktreeSession's post-phase assertion inside the
+        worktree. Dirt discovered after the suite phase or after the checks
+        phase is a mandatory-review flag by contract -- this function only
+        provides the primitive; s3/s4 interpret the boolean into a verdict
+        signal once those phase bodies exist.
+
+      New-GCDisposableWorktree -RepoRoot <string> [-GitCliPath <string>]
+        Creates a detached, disposable `git worktree` checkout of the
+        invoking repo's own HEAD at a GUID-suffixed unique path under
+        [IO.Path]::GetTempPath() (mirroring pester-sharded-core.ps1:163-164),
+        outside the repo tree. Refuses a dirty invoking tree FIRST (AC2,
+        `refused: uncommitted-changes`), before any worktree is created.
+        Resolves HEAD to an explicit SHA via `rev-parse HEAD` and passes
+        that SHA (never the symbolic `HEAD` ref) to `git worktree add
+        --detach <path> <sha>` -- full command form, <path> BEFORE the
+        commit-ish (U25). Detached is mandatory: a branch checkout would
+        hard-fail if that branch is already checked out elsewhere (U4/F9).
+        Net-new: no production `git worktree add` precedent existed before
+        this slice.
+
+      Remove-GCDisposableWorktree -RepoRoot <string> -WorktreePath <string>
+                                   [-GitCliPath <string>] [-RetryDelayMs <int>]
+        Teardown primitive: `git worktree remove --force <path>` followed
+        by `git worktree prune`, with one bounded retry after a short delay
+        if the first removal attempt fails. On persistent failure (e.g. a
+        Windows handle lock held by an orphaned check descendant, U2) this
+        function NEVER throws -- it returns `Removed = $false` with
+        `OrphanedPath` set to the un-removed path, so the caller can surface
+        it in the eventual verdict (s6) instead of losing it as a warning.
+
+      Invoke-GCWorktreeSession -RepoRoot <string> [-SuitePhase <scriptblock>]
+                                [-ChecksPhase <scriptblock>]
+                                [-GitCliPath <string>] [-RetryDelayMs <int>]
+        Wires New-GCDisposableWorktree, the fixed suite-then-checks
+        execution order, the cleanliness assertion after each phase, and
+        Remove-GCDisposableWorktree teardown (in a `finally`, so it always
+        runs) into one composable session. s2 does not implement the
+        suite-runner or check-runner bodies -- those are s3 (checks) and s4
+        (suite) -- so `-SuitePhase`/`-ChecksPhase` are optional scriptblock
+        seams invoked with the worktree path as their only argument; s3/s4
+        plug their real bodies into these parameters rather than this
+        function inventing suite/check semantics it isn't scoped to own
+        yet. A dirty invoking tree short-circuits before any worktree or
+        phase runs (`Refused = $true`, `RefusalReason = 'refused:
+        uncommitted-changes'`). If a phase scriptblock throws, the `finally`
+        still tears down the worktree before the exception propagates to
+        the caller -- this function does not swallow phase errors, only
+        guarantees teardown alongside them.
+
 .NOTES
     Trust framing (M7, inherited from goal-contract-core.ps1's own .NOTES):
     every field this validator reads ultimately comes from an untrusted,
@@ -317,4 +371,217 @@ function Invoke-GoalContractValidate {
     # fail/pass verdict do not exist until s2-s6, so this is a provisional
     # pass reflecting only the gates this slice implements.
     return Resolve-GCVerdictDisposition
+}
+
+# -----------------------------------------------------------------------------
+# s2: detached disposable-worktree execution environment (frame-slice s2,
+# AC1/AC2). These functions are net-new (no production `git worktree add`
+# precedent) and are not yet threaded into Invoke-GoalContractValidate's
+# control flow above -- that function still implements only the s1
+# contract-intake gates. s3 (target-check execution) and s4 (suite green
+# floor) plug their bodies into Invoke-GCWorktreeSession's -ChecksPhase and
+# -SuitePhase seams; a later slice folds the resulting session object into
+# Resolve-GCVerdictDisposition alongside the intake gates.
+# -----------------------------------------------------------------------------
+
+function Test-GCTreeClean {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory = $false)][string]$GitCliPath = 'git'
+    )
+
+    $porcelain = & $GitCliPath -C $Path status --porcelain 2>$null
+    $lines = @($porcelain | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+
+    return [pscustomobject]@{
+        IsClean   = ($lines.Count -eq 0)
+        Porcelain = $lines
+    }
+}
+
+# Private: one removal attempt (`worktree remove --force` + `worktree
+# prune`). Isolated so Remove-GCDisposableWorktree's bounded retry can call
+# it twice without duplicating the git invocation shape.
+function script:Invoke-GCWorktreeRemoveAttempt {
+    param(
+        [Parameter(Mandatory)][string]$GitCliPath,
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][string]$WorktreePath
+    )
+
+    & $GitCliPath -C $RepoRoot worktree remove --force $WorktreePath 2>$null
+    $removeSucceeded = ($LASTEXITCODE -eq 0)
+    # Prune runs regardless of the remove outcome (best-effort admin-file
+    # reconciliation); its own exit code is not load-bearing for Removed.
+    & $GitCliPath -C $RepoRoot worktree prune 2>$null
+    return $removeSucceeded
+}
+
+function New-GCDisposableWorktree {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory = $false)][string]$GitCliPath = 'git'
+    )
+
+    # AC2: refuse a dirty invoking tree FIRST -- before any worktree exists.
+    $cleanliness = Test-GCTreeClean -Path $RepoRoot -GitCliPath $GitCliPath
+    if (-not $cleanliness.IsClean) {
+        return [pscustomobject]@{
+            Success       = $false
+            RefusalReason = 'refused: uncommitted-changes'
+            Path          = $null
+            HeadSha       = $null
+        }
+    }
+
+    $headShaRaw = & $GitCliPath -C $RepoRoot rev-parse HEAD 2>$null
+    $headSha = [string](@($headShaRaw) | Select-Object -First 1)
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($headSha)) {
+        return [pscustomobject]@{
+            Success       = $false
+            RefusalReason = 'refused: head-sha-unresolvable'
+            Path          = $null
+            HeadSha       = $null
+        }
+    }
+    $headSha = $headSha.Trim()
+
+    # GUID-suffixed unique path outside the repo tree -- collision is
+    # structurally impossible, mirroring pester-sharded-core.ps1:163-164.
+    $worktreePath = Join-Path ([IO.Path]::GetTempPath()) "goal-validate-$([Guid]::NewGuid().ToString('N'))"
+
+    # Full command form, <path> BEFORE the commit-ish (U25) -- the
+    # compressed "--detach <sha>" shorthand omits the path and lets git pick
+    # its own directory name instead of our unique, outside-the-repo path.
+    # Detached is mandatory: a branch checkout hard-fails if that branch is
+    # already checked out elsewhere (U4/F9).
+    & $GitCliPath -C $RepoRoot worktree add --detach $worktreePath $headSha 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        return [pscustomobject]@{
+            Success       = $false
+            RefusalReason = 'refused: worktree-create-failed'
+            Path          = $null
+            HeadSha       = $headSha
+        }
+    }
+
+    return [pscustomobject]@{
+        Success       = $true
+        RefusalReason = $null
+        Path          = $worktreePath
+        HeadSha       = $headSha
+    }
+}
+
+function Remove-GCDisposableWorktree {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][string]$WorktreePath,
+        [Parameter(Mandatory = $false)][string]$GitCliPath = 'git',
+        [Parameter(Mandatory = $false)][int]$RetryDelayMs = 1000
+    )
+
+    $removed = $false
+    try {
+        $removed = script:Invoke-GCWorktreeRemoveAttempt -GitCliPath $GitCliPath -RepoRoot $RepoRoot -WorktreePath $WorktreePath
+    } catch {
+        $removed = $false
+    }
+
+    if (-not $removed) {
+        # One bounded retry after a short delay (the persistent-failure
+        # scenario this guards is a Windows handle lock held by an orphaned
+        # check descendant -- worth one brief re-check before giving up).
+        Start-Sleep -Milliseconds $RetryDelayMs
+        try {
+            $removed = script:Invoke-GCWorktreeRemoveAttempt -GitCliPath $GitCliPath -RepoRoot $RepoRoot -WorktreePath $WorktreePath
+        } catch {
+            $removed = $false
+        }
+    }
+
+    if ($removed) {
+        return [pscustomobject]@{ Removed = $true; OrphanedPath = $null }
+    }
+
+    # Persistent failure: NEVER throw to the caller (U2). Record the
+    # orphaned path so it surfaces in the eventual verdict (s6 wires this
+    # in) instead of becoming a warning that gets silently lost.
+    Write-Warning "Remove-GCDisposableWorktree: '$WorktreePath' could not be removed after one retry; recording as orphaned."
+    return [pscustomobject]@{ Removed = $false; OrphanedPath = $WorktreePath }
+}
+
+function Invoke-GCWorktreeSession {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory = $false)][scriptblock]$SuitePhase,
+        [Parameter(Mandatory = $false)][scriptblock]$ChecksPhase,
+        [Parameter(Mandatory = $false)][string]$GitCliPath = 'git',
+        [Parameter(Mandatory = $false)][int]$RetryDelayMs = 1000
+    )
+
+    $worktree = New-GCDisposableWorktree -RepoRoot $RepoRoot -GitCliPath $GitCliPath
+    if (-not $worktree.Success) {
+        return [pscustomobject]@{
+            Refused           = $true
+            RefusalReason     = $worktree.RefusalReason
+            WorktreePath      = $null
+            HeadSha           = $null
+            SuiteResult       = $null
+            ChecksResult      = $null
+            SuiteCleanliness  = $null
+            ChecksCleanliness = $null
+            OrphanedPath      = $null
+        }
+    }
+
+    $suiteResult = $null
+    $checksResult = $null
+    $suiteCleanliness = $null
+    $checksCleanliness = $null
+    $orphanedPath = $null
+
+    try {
+        # Fixed order (s2 RC): suite first, against the pristine checkout,
+        # THEN target checks. s2 wires only the order and the
+        # cleanliness-assertion contract; the suite-runner and check-runner
+        # bodies don't exist until s4/s3 supply -SuitePhase/-ChecksPhase.
+        if ($SuitePhase) {
+            $suiteResult = & $SuitePhase $worktree.Path
+        }
+        $suiteCleanliness = Test-GCTreeClean -Path $worktree.Path -GitCliPath $GitCliPath
+
+        if ($ChecksPhase) {
+            $checksResult = & $ChecksPhase $worktree.Path
+        }
+        $checksCleanliness = Test-GCTreeClean -Path $worktree.Path -GitCliPath $GitCliPath
+    }
+    finally {
+        # Always runs, including when a phase scriptblock throws: teardown
+        # is guaranteed alongside the exception, not instead of it.
+        $teardown = Remove-GCDisposableWorktree -RepoRoot $RepoRoot -WorktreePath $worktree.Path -GitCliPath $GitCliPath -RetryDelayMs $RetryDelayMs
+        if (-not $teardown.Removed) {
+            $orphanedPath = $teardown.OrphanedPath
+        }
+    }
+
+    return [pscustomobject]@{
+        Refused           = $false
+        RefusalReason     = $null
+        WorktreePath      = $worktree.Path
+        HeadSha           = $worktree.HeadSha
+        SuiteResult       = $suiteResult
+        ChecksResult      = $checksResult
+        SuiteCleanliness  = $suiteCleanliness
+        ChecksCleanliness = $checksCleanliness
+        OrphanedPath      = $orphanedPath
+    }
 }
