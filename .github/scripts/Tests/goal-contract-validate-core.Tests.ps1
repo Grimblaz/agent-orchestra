@@ -481,6 +481,8 @@ exit `$LASTEXITCODE
 
             $verdict = Invoke-GoalContractValidate -Issue 873 -RepoRoot $script:RepoRoot -Repo 'example-owner/example-repo' -GhCliPath $mockGhPath -WarningAction SilentlyContinue
 
+            Should -Invoke Import-Module -ParameterFilter { $Name -eq 'powershell-yaml' } -Times 1
+
             $verdict.Verdict | Should -Be 'pass-review-required'
             $verdict.ExitCode | Should -Be 3
             $verdict.Reason | Should -Match 'infra-error' -Because 'the infra/harness-error disposition must carry a distinct Reason tag from a future target-level review-required disposition'
