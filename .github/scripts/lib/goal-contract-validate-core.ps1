@@ -406,6 +406,21 @@
 # this literal value.
 $script:GCVPlaceholderHash = '0' * 64
 
+# Private: the repeated "take the first output line, trim it" idiom used
+# everywhere this file reads a single-value `git` invocation (rev-parse HEAD,
+# rev-parse <ref>, merge-base). Centralized so the four call sites below
+# (Invoke-GoalContractValidate's RunSha, New-GCDisposableWorktree's HeadSha,
+# and Resolve-GCDiffBase's DefaultSha/MergeBaseSha) share one idiom instead of
+# repeating the `([string](@($raw) | Select-Object -First 1)).Trim()` shape.
+# Each call site still owns its own $LASTEXITCODE / blank check -- this
+# helper only does the extraction, never the refusal decision.
+function script:ConvertTo-GCFirstLineTrimmed {
+    param(
+        [Parameter(Mandatory = $false)][AllowNull()]$Raw
+    )
+    return ([string](@($Raw) | Select-Object -First 1)).Trim()
+}
+
 function Get-GCPinnedCommentBody {
     [CmdletBinding()]
     [OutputType([string])]
@@ -531,6 +546,41 @@ function Resolve-GCVerdictDisposition {
     }
 }
 
+# Private: assembles the mandatory-review Flags list (worktree-dirt,
+# teardown-orphan, and budget signals) from a completed Invoke-GCWorktreeSession
+# result and its diff-integrity result, alongside the diff-integrity phase's
+# own Flags. Isolated from Invoke-GoalContractValidate's body below so that
+# function stays focused on the refused/fail/review-required/pass sequence
+# rather than flag bookkeeping; a $null -DiffResult or -Session degrades
+# gracefully (no flags from that source), never throws.
+function script:Get-GCMandatoryReviewFlags {
+    param(
+        [Parameter(Mandatory = $false)][AllowNull()][object]$DiffResult,
+        [Parameter(Mandatory = $false)][AllowNull()][object]$Session
+    )
+
+    $flags = [System.Collections.Generic.List[object]]::new()
+    if ($DiffResult) {
+        foreach ($flag in @($DiffResult.Flags)) {
+            $flags.Add($flag) | Out-Null
+        }
+    }
+    if ($Session -and $Session.ChecksResult -and $Session.ChecksResult.BudgetExceeded) {
+        $flags.Add([pscustomobject]@{ Kind = 'target-checks-budget-exceeded'; Detail = "budget.wall_clock=$($Session.ChecksResult.BudgetWallClockSeconds)s" }) | Out-Null
+    }
+    if ($Session -and $Session.OrphanedPath) {
+        $flags.Add([pscustomobject]@{ Kind = 'worktree-teardown-orphaned'; Detail = $Session.OrphanedPath }) | Out-Null
+    }
+    if ($Session -and $Session.SuiteCleanliness -and -not $Session.SuiteCleanliness.IsClean) {
+        $flags.Add([pscustomobject]@{ Kind = 'worktree-dirt-after-suite-phase'; Detail = $null }) | Out-Null
+    }
+    if ($Session -and $Session.ChecksCleanliness -and -not $Session.ChecksCleanliness.IsClean) {
+        $flags.Add([pscustomobject]@{ Kind = 'worktree-dirt-after-checks-phase'; Detail = $null }) | Out-Null
+    }
+
+    return @($flags)
+}
+
 function Invoke-GoalContractValidate {
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -619,7 +669,7 @@ function Invoke-GoalContractValidate {
     # invoking tree is refused by the session itself before any phase runs,
     # so an unusable value here is harmless (never reached downstream).
     $runShaRaw = & $GitCliPath -C $RepoRoot rev-parse HEAD 2>$null
-    $runSha = ([string](@($runShaRaw) | Select-Object -First 1)).Trim()
+    $runSha = script:ConvertTo-GCFirstLineTrimmed -Raw $runShaRaw
 
     # Deliberately NOT .GetNewClosure()'d: a plain scriptblock literal
     # already retains live access to this function's local variables via its
@@ -672,24 +722,7 @@ function Invoke-GoalContractValidate {
     # disposition, so a worktree teardown orphan or check-induced dirt is
     # ALWAYS surfaced in the verdict's Flags -- never a separate outcome
     # (Part A).
-    $flags = [System.Collections.Generic.List[object]]::new()
-    if ($diffResult) {
-        foreach ($flag in @($diffResult.Flags)) {
-            $flags.Add($flag) | Out-Null
-        }
-    }
-    if ($session.ChecksResult -and $session.ChecksResult.BudgetExceeded) {
-        $flags.Add([pscustomobject]@{ Kind = 'target-checks-budget-exceeded'; Detail = "budget.wall_clock=$($session.ChecksResult.BudgetWallClockSeconds)s" }) | Out-Null
-    }
-    if ($session.OrphanedPath) {
-        $flags.Add([pscustomobject]@{ Kind = 'worktree-teardown-orphaned'; Detail = $session.OrphanedPath }) | Out-Null
-    }
-    if ($session.SuiteCleanliness -and -not $session.SuiteCleanliness.IsClean) {
-        $flags.Add([pscustomobject]@{ Kind = 'worktree-dirt-after-suite-phase'; Detail = $null }) | Out-Null
-    }
-    if ($session.ChecksCleanliness -and -not $session.ChecksCleanliness.IsClean) {
-        $flags.Add([pscustomobject]@{ Kind = 'worktree-dirt-after-checks-phase'; Detail = $null }) | Out-Null
-    }
+    $flags = script:Get-GCMandatoryReviewFlags -DiffResult $diffResult -Session $session
 
     # Suite failure -> overall fail (s4 green floor). Any target failure ->
     # overall fail (s3). Both precede review-required in the lattice.
@@ -780,7 +813,7 @@ function New-GCDisposableWorktree {
     }
 
     $headShaRaw = & $GitCliPath -C $RepoRoot rev-parse HEAD 2>$null
-    $headSha = [string](@($headShaRaw) | Select-Object -First 1)
+    $headSha = script:ConvertTo-GCFirstLineTrimmed -Raw $headShaRaw
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($headSha)) {
         return [pscustomobject]@{
             Success       = $false
@@ -789,7 +822,6 @@ function New-GCDisposableWorktree {
             HeadSha       = $null
         }
     }
-    $headSha = $headSha.Trim()
 
     # GUID-suffixed unique path outside the repo tree -- collision is
     # structurally impossible, mirroring pester-sharded-core.ps1:163-164.
@@ -986,6 +1018,109 @@ function ConvertTo-GCWallClockSeconds {
     return $null
 }
 
+# Private: shared preemptive-tree-kill process runner (RC item 2/3, U2/U3
+# discipline). Both Invoke-GCTargetCheck (below, s3) and Invoke-GCSuitePhase
+# (s4) need the identical start/redirect/timeout/kill/cleanup mechanics --
+# only WHAT they do with the redirected output differs (Invoke-GCTargetCheck
+# captures it into a byte-capped buffer for the report; Invoke-GCSuitePhase
+# discards it, since its real result travels via a separate result file).
+# This function owns the mechanics; callers own their own
+# -StdOutAction/-StdErrAction (and -MessageData, when the action needs shared
+# state) exactly as the pre-extraction call sites did. NEVER
+# Stop-Job/Wait-Job (U2: does not kill descendant OS processes, orphaning
+# grandchildren that hold worktree handles and break teardown):
+# System.Diagnostics.Process + Kill($true) (the pwsh 7 / .NET Core 3+
+# tree-kill overload), with a taskkill /PID <pid> /T /F fallback if
+# Kill($true) itself throws on Windows.
+function script:Invoke-GCTreeKillableProcess {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$FileName,
+        [Parameter(Mandatory)][string[]]$ArgumentList,
+        [Parameter(Mandatory = $false)][string]$WorkingDirectory,
+        [Parameter(Mandatory)][int]$TimeoutSeconds,
+        [Parameter(Mandatory = $false)][scriptblock]$StdOutAction = { },
+        [Parameter(Mandatory = $false)][scriptblock]$StdErrAction = { },
+        [Parameter(Mandatory = $false)][AllowNull()][object]$MessageData
+    )
+
+    $psi = [System.Diagnostics.ProcessStartInfo]::new()
+    $psi.FileName = $FileName
+    foreach ($arg in $ArgumentList) {
+        $psi.ArgumentList.Add($arg)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($WorkingDirectory)) {
+        $psi.WorkingDirectory = $WorkingDirectory
+    }
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.CreateNoWindow = $true
+
+    $proc = [System.Diagnostics.Process]::new()
+    $proc.StartInfo = $psi
+
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    $timedOut = $false
+    $exitCode = $null
+
+    $sourceIdOut = "GCVProcOut_$([guid]::NewGuid().ToString('N'))"
+    $sourceIdErr = "GCVProcErr_$([guid]::NewGuid().ToString('N'))"
+
+    try {
+        Register-ObjectEvent -InputObject $proc -EventName OutputDataReceived -SourceIdentifier $sourceIdOut -MessageData $MessageData -Action $StdOutAction | Out-Null
+        Register-ObjectEvent -InputObject $proc -EventName ErrorDataReceived -SourceIdentifier $sourceIdErr -MessageData $MessageData -Action $StdErrAction | Out-Null
+
+        $proc.Start() | Out-Null
+        $proc.BeginOutputReadLine()
+        $proc.BeginErrorReadLine()
+
+        $exited = $proc.WaitForExit([Math]::Max(0, $TimeoutSeconds) * 1000)
+
+        if (-not $exited) {
+            $timedOut = $true
+            try {
+                $proc.Kill($true)
+            } catch {
+                if ($IsWindows) {
+                    try { & taskkill /PID $proc.Id /T /F 2>$null | Out-Null } catch { }
+                }
+            }
+            $null = $proc.WaitForExit(10000)
+        } else {
+            # Ensure the async output/error event pump fully drains before
+            # the caller reads any captured buffers (the documented .NET
+            # pattern for redirected + event-based process output: call the
+            # parameterless WaitForExit() after the timed overload returns
+            # $true).
+            $proc.WaitForExit()
+        }
+
+        # Marshal the exit code explicitly from the Process object's own
+        # ExitCode property -- never from a job's State, which can report
+        # Completed even when the underlying check failed.
+        try {
+            $exitCode = $proc.ExitCode
+        } catch {
+            $exitCode = $null
+        }
+    } finally {
+        Unregister-Event -SourceIdentifier $sourceIdOut -ErrorAction SilentlyContinue
+        Unregister-Event -SourceIdentifier $sourceIdErr -ErrorAction SilentlyContinue
+        Remove-Job -Name $sourceIdOut -Force -ErrorAction SilentlyContinue
+        Remove-Job -Name $sourceIdErr -Force -ErrorAction SilentlyContinue
+        $proc.Dispose()
+    }
+    $stopwatch.Stop()
+
+    return [pscustomobject]@{
+        ExitCode  = $exitCode
+        TimedOut  = $timedOut
+        ElapsedMs = $stopwatch.ElapsedMilliseconds
+    }
+}
+
 function Invoke-GCTargetCheck {
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -1032,17 +1167,6 @@ function Invoke-GCTargetCheck {
         }
     }
 
-    $psi = [System.Diagnostics.ProcessStartInfo]::new()
-    $psi.FileName = $PwshCliPath
-    foreach ($arg in @('-NoProfile', '-NoLogo', '-NonInteractive', '-Command', $check)) {
-        $psi.ArgumentList.Add($arg)
-    }
-    $psi.WorkingDirectory = $WorktreePath
-    $psi.UseShellExecute = $false
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $psi.CreateNoWindow = $true
-
     # Stream-bounded capture (RC item 7 / U20): a synchronized hashtable so
     # the async OutputDataReceived/ErrorDataReceived event actions (which run
     # disconnected from this function's lexical scope) can safely mutate
@@ -1086,90 +1210,35 @@ function Invoke-GCTargetCheck {
         $state.StdErrBytes += $bytes
     }
 
-    $sourceIdOut = "GCVOut_$([guid]::NewGuid().ToString('N'))"
-    $sourceIdErr = "GCVErr_$([guid]::NewGuid().ToString('N'))"
-    $proc = [System.Diagnostics.Process]::new()
-    $proc.StartInfo = $psi
-
-    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-    $timedOut = $false
-    $exitCode = $null
-
-    try {
-        Register-ObjectEvent -InputObject $proc -EventName OutputDataReceived -SourceIdentifier $sourceIdOut -MessageData $outState -Action $stdOutAction | Out-Null
-        Register-ObjectEvent -InputObject $proc -EventName ErrorDataReceived -SourceIdentifier $sourceIdErr -MessageData $outState -Action $stdErrAction | Out-Null
-
-        $proc.Start() | Out-Null
-        $proc.BeginOutputReadLine()
-        $proc.BeginErrorReadLine()
-
-        $exited = $proc.WaitForExit([Math]::Max(0, $TimeoutSeconds) * 1000)
-
-        if (-not $exited) {
-            $timedOut = $true
-            # PREEMPTIVE TREE-KILL (RC item 2): System.Diagnostics.Process +
-            # Kill($true) (pwsh 7 / .NET Core 3+ tree-kill overload) -- NOT
-            # Stop-Job/Wait-Job, which does not kill descendant OS processes
-            # (U2: orphaned grandchildren hold worktree handles and break
-            # teardown). taskkill /T /F is a Windows fallback if Kill($true)
-            # itself throws.
-            try {
-                $proc.Kill($true)
-            } catch {
-                if ($IsWindows) {
-                    try { & taskkill /PID $proc.Id /T /F 2>$null | Out-Null } catch { }
-                }
-            }
-            $null = $proc.WaitForExit(10000)
-        } else {
-            # Ensure the async output/error event pump fully drains before
-            # this function reads the captured buffers (the documented .NET
-            # pattern for redirected + event-based process output: call the
-            # parameterless WaitForExit() after the timed overload returns
-            # $true).
-            $proc.WaitForExit()
-        }
-
-        # RC item 3: marshal the exit code explicitly from the Process
-        # object's own ExitCode property -- never from a job's State, which
-        # can report Completed even when the underlying check failed.
-        try {
-            $exitCode = $proc.ExitCode
-        } catch {
-            $exitCode = $null
-        }
-    } finally {
-        Unregister-Event -SourceIdentifier $sourceIdOut -ErrorAction SilentlyContinue
-        Unregister-Event -SourceIdentifier $sourceIdErr -ErrorAction SilentlyContinue
-        Remove-Job -Name $sourceIdOut -Force -ErrorAction SilentlyContinue
-        Remove-Job -Name $sourceIdErr -Force -ErrorAction SilentlyContinue
-        $proc.Dispose()
-    }
-    $stopwatch.Stop()
+    # RC items 2/3 (PREEMPTIVE TREE-KILL) and RC item 3 (explicit ExitCode
+    # marshalling) both live in the shared script:Invoke-GCTreeKillableProcess
+    # helper -- see that function's own doc comment for the discipline this
+    # relies on (U2/U3).
+    $procResult = script:Invoke-GCTreeKillableProcess -FileName $PwshCliPath -ArgumentList @('-NoProfile', '-NoLogo', '-NonInteractive', '-Command', $check) -WorkingDirectory $WorktreePath -TimeoutSeconds $TimeoutSeconds -StdOutAction $stdOutAction -StdErrAction $stdErrAction -MessageData $outState
 
     # RC item 4: timeout ALWAYS maps to fail -- never refused, never
     # review-required.
     $outcome = 'pass'
     $reason = $null
-    if ($timedOut) {
+    if ($procResult.TimedOut) {
         $outcome = 'fail'
         $reason = "timeout: check exceeded ${TimeoutSeconds}s and was tree-killed"
-    } elseif ($exitCode -ne 0) {
+    } elseif ($procResult.ExitCode -ne 0) {
         $outcome = 'fail'
     }
 
     return [pscustomobject]@{
         Id              = $targetId
         Outcome         = $outcome
-        ExitCode        = $exitCode
-        TimedOut        = $timedOut
+        ExitCode        = $procResult.ExitCode
+        TimedOut        = $procResult.TimedOut
         Reason          = $reason
         AdvisoryFlags   = @($advisoryFlags)
         StdOut          = $outState.StdOut.ToString()
         StdErr          = $outState.StdErr.ToString()
         StdOutTruncated = $outState.StdOutTruncated
         StdErrTruncated = $outState.StdErrTruncated
-        ElapsedMs       = $stopwatch.ElapsedMilliseconds
+        ElapsedMs       = $procResult.ElapsedMs
     }
 }
 
@@ -1339,69 +1408,24 @@ try {
 "@
     [IO.File]::WriteAllText($launchFile, $launcherContent, [Text.UTF8Encoding]::new($false))
 
-    $psi = [Diagnostics.ProcessStartInfo]::new()
-    $psi.FileName = $PwshCliPath
-    foreach ($arg in @('-NoProfile', '-NoLogo', '-NonInteractive', '-File', $launchFile)) {
-        $psi.ArgumentList.Add($arg)
-    }
-    $psi.UseShellExecute = $false
-    $psi.CreateNoWindow = $true
-    # Redirected and drained asynchronously (discarded, not captured): the
-    # child pwsh process running the full sharded suite otherwise INHERITS
-    # this process's own console handles, so its host/warning/verbosity
-    # chatter would leak straight into whatever invoked
-    # Invoke-GoalContractValidate -- corrupting the wrapper script's
-    # documented stdout-is-parseable-JSON contract (Part D) once this phase
-    # is actually wired into the real pipeline (s6). The real result is
-    # already communicated via $resultFile below, never via these streams,
-    # so draining without capturing is sufficient; leaving them
-    # un-redirected risked both the console leak AND an eventual pipe-buffer
-    # deadlock on a verbose run.
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
+    # Redirected and drained asynchronously (discarded, not captured, via the
+    # shared helper's default no-op -StdOutAction/-StdErrAction): the child
+    # pwsh process running the full sharded suite otherwise INHERITS this
+    # process's own console handles, so its host/warning/verbosity chatter
+    # would leak straight into whatever invoked Invoke-GoalContractValidate
+    # -- corrupting the wrapper script's documented stdout-is-parseable-JSON
+    # contract (Part D) once this phase is actually wired into the real
+    # pipeline (s6). The real result is already communicated via
+    # $resultFile below, never via these streams, so draining without
+    # capturing is sufficient; leaving them un-redirected risked both the
+    # console leak AND an eventual pipe-buffer deadlock on a verbose run.
+    #
+    # RC item 3: PREEMPTIVE TREE-KILL around the ENTIRE suite run -- the
+    # same discipline the s3 function Invoke-GCTargetCheck uses (U2/U3),
+    # both via the shared script:Invoke-GCTreeKillableProcess helper.
+    $procResult = script:Invoke-GCTreeKillableProcess -FileName $PwshCliPath -ArgumentList @('-NoProfile', '-NoLogo', '-NonInteractive', '-File', $launchFile) -TimeoutSeconds $TimeoutSeconds
 
-    $proc = [Diagnostics.Process]::new()
-    $proc.StartInfo = $psi
-    $timedOut = $false
-    $sourceIdOut = "GCVSuiteOut_$([guid]::NewGuid().ToString('N'))"
-    $sourceIdErr = "GCVSuiteErr_$([guid]::NewGuid().ToString('N'))"
-
-    try {
-        Register-ObjectEvent -InputObject $proc -EventName OutputDataReceived -SourceIdentifier $sourceIdOut -Action { } | Out-Null
-        Register-ObjectEvent -InputObject $proc -EventName ErrorDataReceived -SourceIdentifier $sourceIdErr -Action { } | Out-Null
-
-        $proc.Start() | Out-Null
-        $proc.BeginOutputReadLine()
-        $proc.BeginErrorReadLine()
-
-        $exited = $proc.WaitForExit([Math]::Max(0, $TimeoutSeconds) * 1000)
-
-        if (-not $exited) {
-            $timedOut = $true
-            # RC item 3: PREEMPTIVE TREE-KILL around the ENTIRE suite run --
-            # the same discipline the s3 function Invoke-GCTargetCheck uses
-            # (U2/U3): System.Diagnostics.Process + Kill($true), never
-            # Stop-Job/Wait-Job, with a taskkill /T /F fallback.
-            try {
-                $proc.Kill($true)
-            } catch {
-                if ($IsWindows) {
-                    try { & taskkill /PID $proc.Id /T /F 2>$null | Out-Null } catch { }
-                }
-            }
-            $null = $proc.WaitForExit(10000)
-        } else {
-            $proc.WaitForExit()
-        }
-    } finally {
-        Unregister-Event -SourceIdentifier $sourceIdOut -ErrorAction SilentlyContinue
-        Unregister-Event -SourceIdentifier $sourceIdErr -ErrorAction SilentlyContinue
-        Remove-Job -Name $sourceIdOut -Force -ErrorAction SilentlyContinue
-        Remove-Job -Name $sourceIdErr -Force -ErrorAction SilentlyContinue
-        $proc.Dispose()
-    }
-
-    if ($timedOut) {
+    if ($procResult.TimedOut) {
         Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
         # RC item 3: a suite-phase timeout ALWAYS maps to fail.
         return script:New-GCFailClosedSuiteResult -TimedOut
@@ -1476,7 +1500,7 @@ function Resolve-GCDiffBase {
             MergeBaseSha  = $null
         }
     }
-    $defaultSha = ([string](@($defaultShaRaw) | Select-Object -First 1)).Trim()
+    $defaultSha = script:ConvertTo-GCFirstLineTrimmed -Raw $defaultShaRaw
 
     # Explicit SHA arguments in a PINNED working directory (-C $WorktreePath)
     # -- never symbolic HEAD, which could resolve to whatever branch the
@@ -1491,7 +1515,7 @@ function Resolve-GCDiffBase {
             MergeBaseSha  = $null
         }
     }
-    $mergeBaseSha = ([string](@($mergeBaseRaw) | Select-Object -First 1)).Trim()
+    $mergeBaseSha = script:ConvertTo-GCFirstLineTrimmed -Raw $mergeBaseRaw
 
     # RC item 2: merge-base == run-sha means there is no run diff to audit.
     # The message states only the OBSERVED condition, not a guessed cause --
