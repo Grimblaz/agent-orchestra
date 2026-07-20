@@ -248,6 +248,126 @@ if (`$argsJoined -match '(^| )fetch( |`$)') {
 exit `$LASTEXITCODE
 "@ | Set-Content -LiteralPath $Path -Encoding UTF8
         }
+
+        # --- s6 fixtures: end-to-end AC2 integration + wrapper smoke tests.
+        # Same real-temp-git-repo, local-(non-global)-identity convention as
+        # the s2/s5 fixtures above (no GIT_CONFIG_GLOBAL, no Get-RealGitFiles
+        # registration -- this file stays safe in the parallel shard per the
+        # rationale already established at :148-153).
+
+        # A full disposable-worktree-ready fixture repo: local git identity,
+        # the REAL pester-sharded-core.ps1 copied in (Invoke-GCSuitePhase's
+        # fail-closed runner-lib-presence check requires this file to exist
+        # inside whatever tree gets validated), and a tiny two-file Pester
+        # suite (three total tests) that clears a low -MinTestCount floor
+        # (Part E) fast. -IncludeFailingTest plants a genuinely failing test
+        # for the synthetic-red fixture (item 7).
+        function script:New-GCFixtureRepo {
+            param(
+                [Parameter(Mandatory)][string]$Path,
+                [Parameter(Mandatory = $false)][switch]$IncludeFailingTest
+            )
+            New-Item -ItemType Directory -Path $Path -Force | Out-Null
+            & git -C $Path init -q -b main . 2>&1 | Out-Null
+            & git -C $Path config user.email 'goal-validate-s6@example.com' 2>&1 | Out-Null
+            & git -C $Path config user.name 'goal-validate-s6' 2>&1 | Out-Null
+
+            $realLib = Join-Path $script:RepoRoot '.github/scripts/lib/pester-sharded-core.ps1'
+            $fixtureLibDir = Join-Path $Path '.github/scripts/lib'
+            New-Item -ItemType Directory -Path $fixtureLibDir -Force | Out-Null
+            Copy-Item -LiteralPath $realLib -Destination (Join-Path $fixtureLibDir 'pester-sharded-core.ps1') -Force
+
+            # ConvertFrom-GCContractBlock (the #872 parser this validator
+            # reuses, 872-D6) validates the parsed contract against this
+            # schema file resolved relative to -RepoRoot -- it must exist
+            # inside the fixture repo too, or every fixture refuses at
+            # intake with "Schema file not found" regardless of what this
+            # test is actually trying to exercise.
+            $realSchema = Join-Path $script:RepoRoot 'skills/plan-authoring/schemas/goal-contract.schema.json'
+            $fixtureSchemaDir = Join-Path $Path 'skills/plan-authoring/schemas'
+            New-Item -ItemType Directory -Path $fixtureSchemaDir -Force | Out-Null
+            Copy-Item -LiteralPath $realSchema -Destination (Join-Path $fixtureSchemaDir 'goal-contract.schema.json') -Force
+
+            $testsDir = Join-Path $Path '.github/scripts/Tests'
+            New-Item -ItemType Directory -Path $testsDir -Force | Out-Null
+            $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+            [System.IO.File]::WriteAllText((Join-Path $testsDir 'sample1.Tests.ps1'), "Describe 'Fixture' { It 'passes one' { 1 | Should -Be 1; 2 | Should -Be 2 } }`n", $utf8NoBom)
+            [System.IO.File]::WriteAllText((Join-Path $testsDir 'sample2.Tests.ps1'), "Describe 'Fixture' { It 'passes two' { 3 | Should -Be 3 } }`n", $utf8NoBom)
+            if ($IncludeFailingTest) {
+                [System.IO.File]::WriteAllText((Join-Path $testsDir 'redcase.Tests.ps1'), "Describe 'Fixture' { It 'fails on purpose' { 1 | Should -Be 2 } }`n", $utf8NoBom)
+            }
+
+            & git -C $Path add -A 2>&1 | Out-Null
+            & git -C $Path commit -q -m 'base' 2>&1 | Out-Null
+            return $Path
+        }
+
+        # Two-pass hash construction (mirrors New-WellFormedContractPayload
+        # above): a single real target whose `check` is a trivial always-
+        # succeeds pwsh command (no example-check.ps1 dependency), so Part F
+        # fixtures never need a real target-check script on disk.
+        function script:New-GCContractPayloadForHash {
+            param(
+                [Parameter(Mandatory)][string]$Hash,
+                [Parameter(Mandatory = $false)][string]$CheckCommand = 'exit 0',
+                [Parameter(Mandatory = $false)][string[]]$ExtraInvariants = @()
+            )
+            $invariantsBlock = ((@('full-pester-suite-no-new-failures', 'test-diff-integrity') + @($ExtraInvariants)) | ForEach-Object { "  - $_" }) -join "`n"
+            @"
+schema_version: 1
+issue: 873
+contract_hash: "$Hash"
+targets:
+  - id: T1
+    ac_ref: AC1
+    category: structure-presence
+    check: "$CheckCommand"
+    expected: "exit 0"
+    falsifier: "A vacuous pass would look like the check never actually running."
+    source: null
+invariants:
+$invariantsBlock
+evidence_obligations:
+  checkpoint_commits: per-target-green
+  run_log: deviation entries + experience observations per checkpoint
+  experience_obligations:
+    - scenario: S2
+      surface: cli
+  required_markers: [pipeline-metrics-credits, goal-run-class]
+general_experience_standard: |
+  Canonical clause and four guardrails, verbatim from #848 D8.
+halt_conditions: [unachievable-target, invariant-conflict, budget-exhausted, gate-input-needed, chain-stage-failure]
+budget:
+  tokens: 100000
+  wall_clock: "4h"
+  chain_sub_ceiling: 2
+  non_convergence: halt-report
+"@
+        }
+
+        function script:New-GCApprovedContractBody {
+            param(
+                [Parameter(Mandatory = $false)][string]$CheckCommand = 'exit 0',
+                [Parameter(Mandatory = $false)][string[]]$ExtraInvariants = @()
+            )
+            $draft = script:New-GCContractPayloadForHash -Hash $script:PlaceholderHash -CheckCommand $CheckCommand -ExtraInvariants $ExtraInvariants
+            $realHash = Get-GCContractHash -Payload $draft
+            return (script:New-GCContractPayloadForHash -Hash $realHash -CheckCommand $CheckCommand -ExtraInvariants $ExtraInvariants)
+        }
+
+        function script:New-GCPlanCommentBody {
+            param([Parameter(Mandatory)][string]$ContractPayload)
+            return "<!-- plan-issue-873 -->`n<!-- goal-contract`n$ContractPayload`n-->"
+        }
+
+        # Wires a mocked `gh` returning the given approved-contract body onto
+        # issue 873 at $Repo, in one call.
+        function script:New-GCMockGhForContract {
+            param([Parameter(Mandatory)][string]$MockGhPath, [Parameter(Mandatory)][string]$ContractPayload)
+            $body = script:New-GCPlanCommentBody -ContractPayload $ContractPayload
+            $commentsJson = "[$(script:New-CommentJson -Body $body -Id 1)]"
+            script:New-MockGh -Path $MockGhPath -CommentsJsonArray $commentsJson
+        }
     }
 
     Context 'Get-GCPinnedCommentBody -- marker-pinned, paginated, byte-safe read' {
@@ -488,28 +608,35 @@ exit `$LASTEXITCODE
             ($verdict.Refusals -join ' ') | Should -Match 'contract-hash-mismatch'
         }
 
-        It 'passes intake when the contract_hash matches the canonicalized payload digest (s1 provisional pass; no target/suite checks yet)' {
+        It 'passes intake and reaches Get-GCContractHash validation when the contract_hash matches the canonicalized payload digest' {
+            # This test previously stopped at s1's provisional pass (no
+            # worktree/suite/checks/diff-integrity existed yet). Now that s6
+            # wires the full pipeline into Invoke-GoalContractValidate's
+            # body, the intake-gate contract this test is actually
+            # responsible for (hash validation reaches Get-GCContractHash
+            # and is not refused) is verified against a real disposable
+            # -worktree-capable fixture repo instead of the invoking repo --
+            # the full end-to-end pass/fail/review-required disposition
+            # space is the dedicated 's6 -- AC2 integration fixtures'
+            # Context below (Part F), not this intake-focused case.
             script:Assert-GCVFunctionExists -Name 'Invoke-GoalContractValidate'
             script:Assert-GCVFunctionExists -Name 'Get-GCContractHash'
             $mockGhPath = Join-Path $TestDrive 'gh-real-hash.ps1'
+            $fixtureRepo = script:New-GCFixtureRepo -Path (Join-Path $TestDrive 'intake-hash-ok-repo')
 
-            # Two-pass construction: hash the payload with the placeholder in
-            # place (Get-GCContractHash elides the contract_hash line itself,
-            # so the digest is identical either way), then substitute the
-            # real digest in.
-            $draftPayload = script:New-WellFormedContractPayload -ContractHash $script:PlaceholderHash
-            $realHash = Get-GCContractHash -Payload $draftPayload
-            $approvedPayload = script:New-WellFormedContractPayload -ContractHash $realHash
-            $body = "<!-- plan-issue-873 -->`n<!-- goal-contract`n$approvedPayload`n-->"
-            $commentsJson = "[$(script:New-CommentJson -Body $body -Id 1)]"
-            script:New-MockGh -Path $mockGhPath -CommentsJsonArray $commentsJson
+            $approvedPayload = script:New-GCApprovedContractBody
+            script:New-GCMockGhForContract -MockGhPath $mockGhPath -ContractPayload $approvedPayload
 
-            $verdict = Invoke-GoalContractValidate -Issue 873 -RepoRoot $script:RepoRoot -Repo 'example-owner/example-repo' -GhCliPath $mockGhPath -WarningAction SilentlyContinue
+            $verdict = Invoke-GoalContractValidate -Issue 873 -RepoRoot $fixtureRepo -Repo 'example-owner/example-repo' -GhCliPath $mockGhPath -DiffDefaultRef 'main' -MinTestCount 1 -WarningAction SilentlyContinue
 
-            $verdict.Verdict | Should -Be 'pass'
-            $verdict.ExitCode | Should -Be 0
-            $verdict.Refusals | Should -BeNullOrEmpty
-            @($verdict.Targets).Count | Should -Be 0
+            # The hash gate passed (never refused as contract-hash-mismatch
+            # or contract-not-approved); at HEAD == main (no run commit yet)
+            # the diff-integrity phase itself refuses no-run-diff, which
+            # this test intentionally treats as proof the hash gate was
+            # cleared, not as an assertion about the eventual disposition.
+            $refusalsJoined = ($verdict.Refusals -join ' ')
+            $refusalsJoined | Should -Not -Match 'contract-hash-mismatch'
+            $refusalsJoined | Should -Not -Match 'contract-not-approved'
         }
 
         It 'maps the missing-powershell-yaml infra throw to a distinct pass-review-required disposition, never exit-1 fail' {
@@ -1646,6 +1773,407 @@ Describe 'Foo' { It 'x' { 1 | Should -Be 1 } }
 
             $result.Refused | Should -Be $false
             @($result.Flags).Count | Should -Be 0
+        }
+    }
+
+    Context 'Format-GCInertRender -- backtick-safe inert-render (s6, Part B / U7 HIGH fix)' {
+
+        It 'strips HTML-comment open/close delimiters so the rendered content can never be reparsed as a live marker' {
+            script:Assert-GCVFunctionExists -Name 'Format-GCInertRender'
+            $rendered = Format-GCInertRender -Content "<!-- goal-contract`nissue: 999`n-->"
+            $rendered | Should -Not -Match '<!--'
+            $rendered | Should -Not -Match '-->'
+        }
+
+        It 'wraps plain content (no backticks) in a minimum 3-backtick fence' {
+            script:Assert-GCVFunctionExists -Name 'Format-GCInertRender'
+            $rendered = Format-GCInertRender -Content 'plain text, no backticks'
+            $fence = '`' * 3
+            $rendered | Should -Be "$fence`nplain text, no backticks`n$fence"
+        }
+
+        It 'is backtick-safe: a decoy containing a triple-backtick fence cannot break out of the rendered fence' {
+            script:Assert-GCVFunctionExists -Name 'Format-GCInertRender'
+            $tripleBacktick = '`' * 3
+            $decoy = 'legit text ' + $tripleBacktick + 'malicious injected markdown after a fake close' + $tripleBacktick + ' more text'
+            $rendered = Format-GCInertRender -Content $decoy
+
+            # Extract the opening fence (the run of backticks starting the
+            # rendered string) and verify it is STRICTLY LONGER than every
+            # backtick run inside the original decoy content -- the
+            # CommonMark rule that makes early-closing structurally
+            # impossible.
+            $openFenceMatch = [regex]::Match($rendered, '^`+')
+            $openFenceLength = $openFenceMatch.Value.Length
+            $longestContentRun = 0
+            foreach ($m in [regex]::Matches($decoy, '`+')) {
+                if ($m.Value.Length -gt $longestContentRun) { $longestContentRun = $m.Value.Length }
+            }
+            $openFenceLength | Should -BeGreaterThan $longestContentRun -Because 'a fence no longer than the content''s own longest backtick run could be closed early by that run, breaking out of the code block'
+            $openFenceLength | Should -BeGreaterOrEqual 3
+        }
+
+        It 'is backtick-safe against a single embedded backtick (the exact defect in the single-backtick Format-InertMarkerLabel it replaces)' {
+            script:Assert-GCVFunctionExists -Name 'Format-GCInertRender'
+            $decoy = 'a check that contains a ' + '`' + ' single backtick'
+            $rendered = Format-GCInertRender -Content $decoy
+
+            $openFenceMatch = [regex]::Match($rendered, '^`+')
+            $openFenceMatch.Value.Length | Should -BeGreaterThan 1 -Because 'phase-containment-emission-check.ps1:148-152''s single-backtick wrap breaks out on exactly this content shape'
+        }
+
+        It 'never throws for $null content (PowerShell coerces a $null-bound [string] parameter to empty string, so this renders the empty-content fence, not $null)' {
+            script:Assert-GCVFunctionExists -Name 'Format-GCInertRender'
+            { Format-GCInertRender -Content $null } | Should -Not -Throw
+            $fence = '`' * 3
+            Format-GCInertRender -Content $null | Should -Be "$fence`n`n$fence"
+        }
+
+        It 'preserves the content verbatim inside the fence -- only the fence-breaking risk is neutralized' {
+            script:Assert-GCVFunctionExists -Name 'Format-GCInertRender'
+            $content = "multi-line`ncontent with " + ('`' * 2) + ' two backticks'
+            $rendered = Format-GCInertRender -Content $content
+            $rendered | Should -Match ([regex]::Escape($content))
+        }
+    }
+
+    Context 'New-GCVerdictReport -- field-locked verdict shape (s6, Part C / #874 predicate interface)' {
+
+        It 'pins the exact top-level JSON field names of the verdict object' {
+            script:Assert-GCVFunctionExists -Name 'New-GCVerdictReport'
+            $disposition = Resolve-GCVerdictDisposition
+            $report = New-GCVerdictReport -Disposition $disposition -ContractTargets @() -Flags @()
+
+            $json = $report | ConvertTo-Json -Depth 10 -Compress
+            $parsed = $json | ConvertFrom-Json
+
+            $fieldNames = @($parsed.PSObject.Properties.Name | Sort-Object)
+            $fieldNames | Should -Be @('ExitCode', 'Flags', 'Reason', 'Refusals', 'Targets', 'Verdict') -Because 'a future field rename must break this test loudly -- #874 consumes this exact shape'
+        }
+
+        It 'pins the exact per-target field names, including a marker-injection-attempt fixture with backticks in the field' {
+            script:Assert-GCVFunctionExists -Name 'New-GCVerdictReport'
+            $disposition = Resolve-GCVerdictDisposition -Targets @(
+                [pscustomobject]@{ Id = 'T1'; Outcome = 'pass'; ExitCode = 0; TimedOut = $false; Reason = $null; AdvisoryFlags = @(); StdOut = 'ok'; StdErr = '' }
+            )
+            $contractTargets = @(
+                [pscustomobject]@{ id = 'T1'; ac_ref = 'AC1'; expected = 'exit 0'; falsifier = 'a `` fake close ``` marker-injection attempt <!-- goal-contract --> embedded in the falsifier text' }
+            )
+
+            $report = New-GCVerdictReport -Disposition $disposition -ContractTargets $contractTargets -Flags @()
+
+            $json = $report | ConvertTo-Json -Depth 10 -Compress
+            $parsed = $json | ConvertFrom-Json
+            $targetFieldNames = @($parsed.Targets[0].PSObject.Properties.Name | Sort-Object)
+            $targetFieldNames | Should -Be @('AcRef', 'AdvisoryFlags', 'ExitCode', 'Expected', 'Falsifier', 'Id', 'Outcome', 'Reason', 'StdErrExcerpt', 'StdOutExcerpt', 'TimedOut') -Because 'a future field rename must break this test loudly -- #874 consumes this exact per-target shape'
+
+            # The injection attempt survives verbatim inside the fence, but
+            # the marker delimiters are stripped and no live <!-- ... -->
+            # comment reaches the JSON.
+            $parsed.Targets[0].Falsifier | Should -Not -Match '<!--'
+            $parsed.Targets[0].Falsifier | Should -Match 'marker-injection attempt'
+        }
+
+        It 'pins the exact per-flag field names' {
+            script:Assert-GCVFunctionExists -Name 'New-GCVerdictReport'
+            $disposition = Resolve-GCVerdictDisposition -HasReviewRequired -ReviewReason 'review-required: mandatory-review flags present (see Flags)'
+            $flags = @([pscustomobject]@{ Kind = 'unrecognized-invariant'; Literal = 'custom-invariant' })
+
+            $report = New-GCVerdictReport -Disposition $disposition -ContractTargets @() -Flags $flags
+
+            $json = $report | ConvertTo-Json -Depth 10 -Compress
+            $parsed = $json | ConvertFrom-Json
+            $flagFieldNames = @($parsed.Flags[0].PSObject.Properties.Name | Sort-Object)
+            $flagFieldNames | Should -Be @('Detail', 'Kind')
+            $parsed.Flags[0].Detail | Should -Match 'custom-invariant'
+        }
+
+        It 'documents the exit-3 loop contract: pass-review-required must never be treated as a plain pass by a harness loop' {
+            script:Assert-GCVFunctionExists -Name 'New-GCVerdictReport'
+            $disposition = Resolve-GCVerdictDisposition -HasReviewRequired -ReviewReason 'review-required: mandatory-review flags present (see Flags)'
+            $report = New-GCVerdictReport -Disposition $disposition -ContractTargets @() -Flags @()
+
+            $report.Verdict | Should -Be 'pass-review-required'
+            $report.ExitCode | Should -Be 3
+            $report.ExitCode | Should -Not -Be 0 -Because 'exit 3 is environmentally-accepted-but-human-review-mandatory, never a plain pass a harness loop can auto-continue on'
+        }
+    }
+
+    Context 'Invoke-GCWorktreeSession -- DiffIntegrityPhase seam (s6, extends s2)' {
+
+        It 'runs the diff-integrity phase AFTER the checks phase, still before teardown' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCWorktreeSession'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'diffphase-order-repo')
+            $order = [System.Collections.Generic.List[string]]::new()
+            # A List (reference type) captured by .GetNewClosure() can still
+            # be MUTATED from inside the closure and observed afterward here
+            # -- unlike a $script:-scoped scalar assignment, which
+            # .GetNewClosure() redirects into the closure's own private
+            # pseudo-script-scope and is therefore invisible outside it.
+            $existedDuringDiffPhase = [System.Collections.Generic.List[bool]]::new()
+            $suitePhase = { param($path) $order.Add('suite') }.GetNewClosure()
+            $checksPhase = { param($path) $order.Add('checks') }.GetNewClosure()
+            $diffPhase = {
+                param($path)
+                $order.Add('diff-integrity')
+                $existedDuringDiffPhase.Add((Test-Path -LiteralPath $path))
+            }.GetNewClosure()
+
+            $session = Invoke-GCWorktreeSession -RepoRoot $repo -SuitePhase $suitePhase -ChecksPhase $checksPhase -DiffIntegrityPhase $diffPhase
+
+            $session.Refused | Should -Be $false
+            @($order) | Should -Be @('suite', 'checks', 'diff-integrity')
+            $existedDuringDiffPhase[0] | Should -Be $true -Because 'the worktree must still exist while the diff-integrity phase runs'
+        }
+
+        It 'passes the worktree path to the diff-integrity phase scriptblock' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCWorktreeSession'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'diffphase-arg-repo')
+            $script:seenDiffPath = $null
+            $diffPhase = { param($path) $script:seenDiffPath = $path }
+
+            $session = Invoke-GCWorktreeSession -RepoRoot $repo -DiffIntegrityPhase $diffPhase
+
+            $script:seenDiffPath | Should -Be $session.WorktreePath
+        }
+
+        It 'surfaces the diff-integrity phase result on DiffIntegrityResult' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCWorktreeSession'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'diffphase-result-repo')
+            $diffPhase = { param($path) [pscustomobject]@{ Refused = $false; Flags = @('marker') } }
+
+            $session = Invoke-GCWorktreeSession -RepoRoot $repo -DiffIntegrityPhase $diffPhase
+
+            $session.DiffIntegrityResult.Flags | Should -Be @('marker')
+        }
+
+        It 'still tears down the worktree via finally when the diff-integrity phase throws' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCWorktreeSession'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'diffphase-throw-repo')
+            $script:capturedDiffPath = $null
+            $diffPhase = {
+                param($path)
+                $script:capturedDiffPath = $path
+                throw 'simulated diff-integrity-phase failure'
+            }
+
+            { Invoke-GCWorktreeSession -RepoRoot $repo -DiffIntegrityPhase $diffPhase } | Should -Throw '*simulated diff-integrity-phase failure*'
+
+            $script:capturedDiffPath | Should -Not -BeNullOrEmpty
+            (Test-Path -LiteralPath $script:capturedDiffPath) | Should -Be $false -Because 'teardown in finally must still remove the worktree even though the diff-integrity phase threw'
+        }
+
+        It 'never invokes the diff-integrity phase when the invoking tree is dirty' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCWorktreeSession'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'diffphase-dirty-repo')
+            [System.IO.File]::WriteAllText((Join-Path $repo 'seed.txt'), "modified`n", [System.Text.UTF8Encoding]::new($false))
+            $script:diffPhaseCalled = $false
+            $diffPhase = { param($path) $script:diffPhaseCalled = $true }
+
+            $session = Invoke-GCWorktreeSession -RepoRoot $repo -DiffIntegrityPhase $diffPhase -WarningAction SilentlyContinue
+
+            $session.Refused | Should -Be $true
+            $script:diffPhaseCalled | Should -Be $false
+        }
+    }
+
+    Context 'Invoke-GoalContractValidate -- s6 AC2 integration fixtures (real disposable-worktree end-to-end)' -Tag 'integration' {
+
+        It 'fixture 1: a passing contract (valid targets, valid checks, clean suite) validates pass end-to-end' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GoalContractValidate'
+            $repo = script:New-GCFixtureRepo -Path (Join-Path $TestDrive 'ac2-passing-repo')
+            & git -C $repo checkout -q -b run-branch 2>&1 | Out-Null
+            [System.IO.File]::WriteAllText((Join-Path $repo 'run-marker.txt'), "run change`n", [System.Text.UTF8Encoding]::new($false))
+            & git -C $repo add -A 2>&1 | Out-Null
+            & git -C $repo commit -q -m 'run state: unrelated harmless change' 2>&1 | Out-Null
+
+            $mockGhPath = Join-Path $TestDrive 'gh-ac2-passing.ps1'
+            $payload = script:New-GCApprovedContractBody
+            script:New-GCMockGhForContract -MockGhPath $mockGhPath -ContractPayload $payload
+
+            $verdict = Invoke-GoalContractValidate -Issue 873 -RepoRoot $repo -Repo 'example-owner/example-repo' -GhCliPath $mockGhPath -DiffDefaultRef 'main' -MinTestCount 1 -WarningAction SilentlyContinue
+
+            $flagKinds = ($verdict.Flags | ForEach-Object { $_.Kind }) -join ', '
+            $verdict.Verdict | Should -Be 'pass' -Because "verdict=$($verdict.Verdict) reason=$($verdict.Reason) refusals=$($verdict.Refusals -join '; ') flags=$flagKinds"
+            $verdict.ExitCode | Should -Be 0
+            @($verdict.Targets).Count | Should -Be 1
+            $verdict.Targets[0].Outcome | Should -Be 'pass'
+            @($verdict.Flags).Count | Should -Be 0
+        }
+
+        It 'fixture 2: an assertion-count regression flags pass-review-required (never fail -- flags never block)' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GoalContractValidate'
+            $repo = script:New-GCFixtureRepo -Path (Join-Path $TestDrive 'ac2-assertion-regress-repo')
+            & git -C $repo checkout -q -b run-branch 2>&1 | Out-Null
+            # sample1.Tests.ps1 has 2 Should calls at base; the run state
+            # weakens it to 1 (both versions still pass green).
+            [System.IO.File]::WriteAllText((Join-Path $repo '.github/scripts/Tests/sample1.Tests.ps1'), "Describe 'Fixture' { It 'passes one' { 1 | Should -Be 1 } }`n", [System.Text.UTF8Encoding]::new($false))
+            & git -C $repo add -A 2>&1 | Out-Null
+            & git -C $repo commit -q -m 'run state: weaken assertion count' 2>&1 | Out-Null
+
+            $mockGhPath = Join-Path $TestDrive 'gh-ac2-assertion-regress.ps1'
+            $payload = script:New-GCApprovedContractBody
+            script:New-GCMockGhForContract -MockGhPath $mockGhPath -ContractPayload $payload
+
+            $verdict = Invoke-GoalContractValidate -Issue 873 -RepoRoot $repo -Repo 'example-owner/example-repo' -GhCliPath $mockGhPath -DiffDefaultRef 'main' -MinTestCount 1 -WarningAction SilentlyContinue
+
+            $flagKinds = ($verdict.Flags | ForEach-Object { $_.Kind }) -join ', '
+            $verdict.Verdict | Should -Be 'pass-review-required' -Because "verdict=$($verdict.Verdict) refusals=$($verdict.Refusals -join '; ') flags=$flagKinds"
+            $verdict.ExitCode | Should -Be 3
+            $flagKinds | Should -Match 'assertion-weakening'
+        }
+
+        It 'fixture 3: a fixture-file weakening flags pass-review-required' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GoalContractValidate'
+            $repo = script:New-GCFixtureRepo -Path (Join-Path $TestDrive 'ac2-fixture-weaken-repo')
+            $fixturesDir = Join-Path $repo '.github/scripts/Tests/fixtures'
+            New-Item -ItemType Directory -Path $fixturesDir -Force | Out-Null
+            [System.IO.File]::WriteAllText((Join-Path $fixturesDir 'sample.json'), '{"strict":true}', [System.Text.UTF8Encoding]::new($false))
+            & git -C $repo add -A 2>&1 | Out-Null
+            & git -C $repo commit -q -m 'base: add fixture file' 2>&1 | Out-Null
+
+            & git -C $repo checkout -q -b run-branch 2>&1 | Out-Null
+            [System.IO.File]::WriteAllText((Join-Path $fixturesDir 'sample.json'), '{"strict":false}', [System.Text.UTF8Encoding]::new($false))
+            & git -C $repo add -A 2>&1 | Out-Null
+            & git -C $repo commit -q -m 'run state: weaken fixture' 2>&1 | Out-Null
+
+            $mockGhPath = Join-Path $TestDrive 'gh-ac2-fixture-weaken.ps1'
+            $payload = script:New-GCApprovedContractBody
+            script:New-GCMockGhForContract -MockGhPath $mockGhPath -ContractPayload $payload
+
+            $verdict = Invoke-GoalContractValidate -Issue 873 -RepoRoot $repo -Repo 'example-owner/example-repo' -GhCliPath $mockGhPath -DiffDefaultRef 'main' -MinTestCount 1 -WarningAction SilentlyContinue
+
+            $flagKinds = ($verdict.Flags | ForEach-Object { $_.Kind }) -join ', '
+            $verdict.Verdict | Should -Be 'pass-review-required' -Because "verdict=$($verdict.Verdict) refusals=$($verdict.Refusals -join '; ') flags=$flagKinds"
+            $verdict.ExitCode | Should -Be 3
+            $flagKinds | Should -Match 'fixture-or-helper-modification'
+        }
+
+        It 'fixture 4: uncommitted-only state refuses (refused: uncommitted-changes)' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GoalContractValidate'
+            $repo = script:New-GCFixtureRepo -Path (Join-Path $TestDrive 'ac2-uncommitted-repo')
+            [System.IO.File]::WriteAllText((Join-Path $repo 'dirty.txt'), "uncommitted`n", [System.Text.UTF8Encoding]::new($false))
+
+            $mockGhPath = Join-Path $TestDrive 'gh-ac2-uncommitted.ps1'
+            $payload = script:New-GCApprovedContractBody
+            script:New-GCMockGhForContract -MockGhPath $mockGhPath -ContractPayload $payload
+
+            $verdict = Invoke-GoalContractValidate -Issue 873 -RepoRoot $repo -Repo 'example-owner/example-repo' -GhCliPath $mockGhPath -DiffDefaultRef 'main' -MinTestCount 1 -WarningAction SilentlyContinue
+
+            $verdict.Verdict | Should -Be 'refused'
+            $verdict.ExitCode | Should -Be 2
+            ($verdict.Refusals -join ' ') | Should -Match 'uncommitted-changes'
+        }
+
+        It 'fixture 5: a hash-mismatched contract refuses (refused: contract-hash-mismatch)' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GoalContractValidate'
+            $repo = script:New-GCFixtureRepo -Path (Join-Path $TestDrive 'ac2-hash-mismatch-repo')
+
+            $mockGhPath = Join-Path $TestDrive 'gh-ac2-hash-mismatch.ps1'
+            $wrongHash = ('b' * 63) + 'c'
+            $payload = script:New-GCContractPayloadForHash -Hash $wrongHash
+            script:New-GCMockGhForContract -MockGhPath $mockGhPath -ContractPayload $payload
+
+            $verdict = Invoke-GoalContractValidate -Issue 873 -RepoRoot $repo -Repo 'example-owner/example-repo' -GhCliPath $mockGhPath -DiffDefaultRef 'main' -MinTestCount 1 -WarningAction SilentlyContinue
+
+            $verdict.Verdict | Should -Be 'refused'
+            $verdict.ExitCode | Should -Be 2
+            ($verdict.Refusals -join ' ') | Should -Match 'contract-hash-mismatch'
+        }
+
+        It 'fixture 6: merge-base == run-sha refuses (refused: no-run-diff)' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GoalContractValidate'
+            $repo = script:New-GCFixtureRepo -Path (Join-Path $TestDrive 'ac2-mergebase-eq-runsha-repo')
+            # No divergence: HEAD stays on 'main' with no further commits, so
+            # merge-base('main', HEAD) == HEAD == the run sha.
+
+            $mockGhPath = Join-Path $TestDrive 'gh-ac2-no-run-diff.ps1'
+            $payload = script:New-GCApprovedContractBody
+            script:New-GCMockGhForContract -MockGhPath $mockGhPath -ContractPayload $payload
+
+            $verdict = Invoke-GoalContractValidate -Issue 873 -RepoRoot $repo -Repo 'example-owner/example-repo' -GhCliPath $mockGhPath -DiffDefaultRef 'main' -MinTestCount 1 -WarningAction SilentlyContinue
+
+            $verdict.Verdict | Should -Be 'refused'
+            $verdict.ExitCode | Should -Be 2
+            ($verdict.Refusals -join ' ') | Should -Match 'no-run-diff'
+        }
+
+        It 'fixture 7 (synthetic-red): a genuinely failing suite test fails under the green floor end-to-end' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GoalContractValidate'
+            $repo = script:New-GCFixtureRepo -Path (Join-Path $TestDrive 'ac2-synthetic-red-repo')
+            & git -C $repo checkout -q -b run-branch 2>&1 | Out-Null
+            [System.IO.File]::WriteAllText((Join-Path $repo '.github/scripts/Tests/redcase.Tests.ps1'), "Describe 'Fixture' { It 'fails on purpose' { 1 | Should -Be 2 } }`n", [System.Text.UTF8Encoding]::new($false))
+            & git -C $repo add -A 2>&1 | Out-Null
+            & git -C $repo commit -q -m 'run state: introduce a genuine red' 2>&1 | Out-Null
+
+            $mockGhPath = Join-Path $TestDrive 'gh-ac2-synthetic-red.ps1'
+            $payload = script:New-GCApprovedContractBody
+            script:New-GCMockGhForContract -MockGhPath $mockGhPath -ContractPayload $payload
+
+            $verdict = Invoke-GoalContractValidate -Issue 873 -RepoRoot $repo -Repo 'example-owner/example-repo' -GhCliPath $mockGhPath -DiffDefaultRef 'main' -MinTestCount 1 -WarningAction SilentlyContinue
+
+            $verdict.Verdict | Should -Be 'fail' -Because "verdict=$($verdict.Verdict) refusals=$($verdict.Refusals -join '; ')"
+            $verdict.ExitCode | Should -Be 1
+        }
+    }
+
+    Context 'goal-contract-validate.ps1 -- thin wrapper smoke test (s6, Part D)' -Tag 'integration' {
+
+        BeforeAll {
+            $script:WrapperFile = Join-Path $script:RepoRoot '.github/scripts/goal-contract-validate.ps1'
+        }
+
+        It 'the wrapper script file exists' {
+            (Test-Path -LiteralPath $script:WrapperFile -PathType Leaf) | Should -Be $true
+        }
+
+        It 'does not declare a -MinTestCount parameter on its public CLI surface (Part E)' {
+            $wrapperAst = [System.Management.Automation.Language.Parser]::ParseFile($script:WrapperFile, [ref]$null, [ref]$null)
+            $paramNames = @($wrapperAst.ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath })
+            $paramNames | Should -Not -Contain 'MinTestCount' -Because 'MinTestCount is reachable only from Invoke-GoalContractValidate directly (fixture/test harness), never from this production CLI surface'
+        }
+
+        It 'invoked end-to-end against one simple fixture, exits on a valid verdict code and emits parseable JSON on stdout' {
+            $repo = script:New-GCFixtureRepo -Path (Join-Path $TestDrive 'wrapper-smoke-repo')
+            & git -C $repo checkout -q -b run-branch 2>&1 | Out-Null
+            [System.IO.File]::WriteAllText((Join-Path $repo 'run-marker.txt'), "run change`n", [System.Text.UTF8Encoding]::new($false))
+            & git -C $repo add -A 2>&1 | Out-Null
+            & git -C $repo commit -q -m 'run state' 2>&1 | Out-Null
+
+            $mockGhPath = Join-Path $TestDrive 'gh-wrapper-smoke.ps1'
+            $payload = script:New-GCApprovedContractBody
+            script:New-GCMockGhForContract -MockGhPath $mockGhPath -ContractPayload $payload
+
+            # This smoke test intentionally does NOT override -MinTestCount
+            # (the wrapper's public CLI surface has no such parameter, Part
+            # E) -- the fixture's tiny two-test suite is therefore expected
+            # to trip the real 200-test floor and come back 'fail', which is
+            # itself proof the production entry point cannot bypass the s4
+            # green floor. The dedicated AC2 fixtures above (against
+            # Invoke-GoalContractValidate directly, with -MinTestCount
+            # overridden) already cover the full pass/fail/refused/review-
+            # required disposition space; this test only proves the
+            # wrapper's own entry-guard + JSON-emission plumbing.
+            $output = & pwsh -NoProfile -NoLogo -NonInteractive -File $script:WrapperFile -Issue 873 -RepoRoot $repo -Repo 'example-owner/example-repo' -GhCliPath $mockGhPath 2>&1
+            $exitCode = $LASTEXITCODE
+
+            $exitCode | Should -BeIn @(0, 1, 2, 3) -Because 'the wrapper must always exit on ONE of the four verdict codes, never crash'
+            # ConvertTo-Json emits multi-line output (one array element per
+            # captured stdout line via 2>&1), so the whole array must be
+            # joined back into one string before parsing -- a single line
+            # (e.g. the opening '{') is not valid JSON on its own.
+            $fullOutput = ($output -join "`n")
+            $fullOutput | Should -Match '^\s*\{' -Because "the wrapper must emit the verdict as JSON on stdout (raw output: $fullOutput)"
+            # Deliberately not wrapped in `{ ... } | Should -Not -Throw`: that
+            # pattern invokes the scriptblock in a child scope, so a variable
+            # assignment inside it never propagates back out here (the same
+            # PowerShell scoping pitfall as .GetNewClosure() above, different
+            # mechanism). If ConvertFrom-Json throws, Pester reports the
+            # uncaught exception as the test failure directly, which is
+            # already the clearest possible signal.
+            $parsedVerdict = $fullOutput | ConvertFrom-Json
+            $parsedVerdict.Verdict | Should -Not -BeNullOrEmpty
+            $parsedVerdict.ExitCode | Should -Be $exitCode
         }
     }
 }

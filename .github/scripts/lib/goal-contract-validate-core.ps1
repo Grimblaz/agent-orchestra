@@ -539,7 +539,19 @@ function Invoke-GoalContractValidate {
         [Parameter(Mandatory)][string]$RepoRoot,
         [Parameter(Mandatory = $false)][string]$Marker,
         [Parameter(Mandatory = $false)][string]$Repo,
-        [Parameter(Mandatory = $false)][string]$GhCliPath = 'gh'
+        [Parameter(Mandatory = $false)][string]$GhCliPath = 'gh',
+        [Parameter(Mandatory = $false)][string]$GitCliPath = 'git',
+        [Parameter(Mandatory = $false)][string]$PwshCliPath = 'pwsh',
+        [Parameter(Mandatory = $false)][string]$DiffDefaultRef = 'origin/main',
+        # s6/Part E: INTERNAL, test/fixture-harness-only override for
+        # Invoke-PesterSharded's MinTestCount floor (default 200). A tiny
+        # fixture suite cannot clear that floor, so the fixture harness
+        # (never a production run) sets this explicitly. The thin CLI
+        # wrapper goal-contract-validate.ps1 does NOT expose this on its
+        # public parameter surface -- only code that calls this function
+        # directly (fixture/test code) can reach it, so it cannot weaken the
+        # s4 green-floor gate for a real production validation run.
+        [Parameter(Mandatory = $false)][int]$MinTestCount = 200
     )
 
     if ([string]::IsNullOrWhiteSpace($Marker)) {
@@ -587,11 +599,119 @@ function Invoke-GoalContractValidate {
         return Resolve-GCVerdictDisposition -IsRefused -RefusalReasons @('refused: contract-hash-mismatch')
     }
 
-    # Intake gates all passed. s1 stops here: the worktree, target-check,
-    # suite, and diff-integrity invariants that would turn this into a real
-    # fail/pass verdict do not exist until s2-s6, so this is a provisional
-    # pass reflecting only the gates this slice implements.
-    return Resolve-GCVerdictDisposition
+    # Intake gates all passed. s6: fold the worktree/target/suite/
+    # diff-integrity signals into the same Resolve-GCVerdictDisposition
+    # lattice the intake gates use above, producing the real terminal
+    # verdict #874 consumes -- assembled via New-GCVerdictReport so every
+    # untrusted-contract-derived field is inert-rendered before it is ever
+    # echoed (U7).
+    $contractTargets = @($parseResult.Contract.targets)
+    $invariantsList = @($parseResult.Contract.invariants)
+    $budgetWallClock = $null
+    if ($parseResult.Contract.budget) {
+        $budgetWallClock = [string]$parseResult.Contract.budget.wall_clock
+    }
+
+    # Resolved independently of the worktree so the -DiffIntegrityPhase
+    # closure below has a RunSha to compare against; New-GCDisposableWorktree
+    # (inside Invoke-GCWorktreeSession) resolves and pins the identical HEAD
+    # sha for the worktree it creates, so this is the same commit. A dirty
+    # invoking tree is refused by the session itself before any phase runs,
+    # so an unusable value here is harmless (never reached downstream).
+    $runShaRaw = & $GitCliPath -C $RepoRoot rev-parse HEAD 2>$null
+    $runSha = ([string](@($runShaRaw) | Select-Object -First 1)).Trim()
+
+    # Deliberately NOT .GetNewClosure()'d: a plain scriptblock literal
+    # already retains live access to this function's local variables via its
+    # lexical defining scope, AND (unlike a GetNewClosure()'d scriptblock,
+    # which isolates command resolution into its own private scope) still
+    # resolves sibling dot-sourced functions (Invoke-GCSuitePhase etc.)
+    # normally when invoked from Invoke-GCWorktreeSession. GetNewClosure()
+    # here would break that function resolution in exactly this
+    # cross-function invocation shape (reproduced under Pester's nested
+    # BeforeAll/It scriptblock execution model).
+    $suitePhase = {
+        param($path)
+        Invoke-GCSuitePhase -WorktreePath $path -MinTestCount $MinTestCount -PwshCliPath $PwshCliPath
+    }
+
+    $checksPhase = {
+        param($path)
+        Invoke-GCTargetChecks -Targets $contractTargets -WorktreePath $path -BudgetWallClock $budgetWallClock -PwshCliPath $PwshCliPath
+    }
+
+    $diffIntegrityPhase = {
+        param($path)
+        Invoke-GCDiffIntegrityPhase -WorktreePath $path -RunSha $runSha -RepoRoot $path -Invariants $invariantsList -DefaultRef $DiffDefaultRef -GitCliPath $GitCliPath
+    }
+
+    $session = Invoke-GCWorktreeSession -RepoRoot $RepoRoot -SuitePhase $suitePhase -ChecksPhase $checksPhase -DiffIntegrityPhase $diffIntegrityPhase -GitCliPath $GitCliPath
+
+    if ($session.Refused) {
+        $disposition = Resolve-GCVerdictDisposition -IsRefused -RefusalReasons @($session.RefusalReason)
+        return New-GCVerdictReport -Disposition $disposition -ContractTargets $contractTargets -Flags @()
+    }
+
+    # s5's own refusal (e.g. refused: no-run-diff, refused:
+    # default-ref-unresolvable) means the validator could not complete the
+    # audit at all -- the same "declines to render a judgment" semantics as
+    # the intake refusals above, so it takes the same top-of-lattice
+    # precedence (AC2 fixture 6: merge-base==run-sha refuses no-run-diff).
+    $diffResult = $session.DiffIntegrityResult
+    if ($diffResult -and $diffResult.Refused) {
+        $disposition = Resolve-GCVerdictDisposition -IsRefused -RefusalReasons @($diffResult.RefusalReason)
+        return New-GCVerdictReport -Disposition $disposition -ContractTargets $contractTargets -Flags @()
+    }
+
+    $targetResults = @()
+    if ($session.ChecksResult) {
+        $targetResults = @($session.ChecksResult.Targets)
+    }
+
+    # Mandatory-review flags collected regardless of the eventual fail/pass
+    # disposition, so a worktree teardown orphan or check-induced dirt is
+    # ALWAYS surfaced in the verdict's Flags -- never a separate outcome
+    # (Part A).
+    $flags = [System.Collections.Generic.List[object]]::new()
+    if ($diffResult) {
+        foreach ($flag in @($diffResult.Flags)) {
+            $flags.Add($flag) | Out-Null
+        }
+    }
+    if ($session.ChecksResult -and $session.ChecksResult.BudgetExceeded) {
+        $flags.Add([pscustomobject]@{ Kind = 'target-checks-budget-exceeded'; Detail = "budget.wall_clock=$($session.ChecksResult.BudgetWallClockSeconds)s" }) | Out-Null
+    }
+    if ($session.OrphanedPath) {
+        $flags.Add([pscustomobject]@{ Kind = 'worktree-teardown-orphaned'; Detail = $session.OrphanedPath }) | Out-Null
+    }
+    if ($session.SuiteCleanliness -and -not $session.SuiteCleanliness.IsClean) {
+        $flags.Add([pscustomobject]@{ Kind = 'worktree-dirt-after-suite-phase'; Detail = $null }) | Out-Null
+    }
+    if ($session.ChecksCleanliness -and -not $session.ChecksCleanliness.IsClean) {
+        $flags.Add([pscustomobject]@{ Kind = 'worktree-dirt-after-checks-phase'; Detail = $null }) | Out-Null
+    }
+
+    # Suite failure -> overall fail (s4 green floor). Any target failure ->
+    # overall fail (s3). Both precede review-required in the lattice.
+    $suitePassed = Test-GCSuiteGatePass -Result $session.SuiteResult
+    $anyTargetFailed = (@($targetResults | Where-Object { $_.Outcome -eq 'fail' })).Count -gt 0
+    $hasFailure = (-not $suitePassed) -or $anyTargetFailed
+
+    if ($hasFailure) {
+        $disposition = Resolve-GCVerdictDisposition -HasFailure -Targets $targetResults
+        return New-GCVerdictReport -Disposition $disposition -ContractTargets $contractTargets -Flags @($flags)
+    }
+
+    # No suite/target failure: any diff-integrity flag alone (incl. an
+    # unrecognized-invariant literal) or any worktree/budget flag ->
+    # pass-review-required. No flags at all -> pass.
+    if (@($flags).Count -gt 0) {
+        $disposition = Resolve-GCVerdictDisposition -HasReviewRequired -ReviewReason 'review-required: mandatory-review flags present (see Flags)' -Targets $targetResults
+        return New-GCVerdictReport -Disposition $disposition -ContractTargets $contractTargets -Flags @($flags)
+    }
+
+    $disposition = Resolve-GCVerdictDisposition -Targets $targetResults
+    return New-GCVerdictReport -Disposition $disposition -ContractTargets $contractTargets -Flags @()
 }
 
 # -----------------------------------------------------------------------------
@@ -745,6 +865,14 @@ function Invoke-GCWorktreeSession {
         [Parameter(Mandatory)][string]$RepoRoot,
         [Parameter(Mandatory = $false)][scriptblock]$SuitePhase,
         [Parameter(Mandatory = $false)][scriptblock]$ChecksPhase,
+        # s6 seam: invoked with the worktree path as its only argument, AFTER
+        # ChecksPhase but still inside the try block -- the diff-integrity
+        # phase needs the worktree's committed tree to still exist, and the
+        # `finally` teardown below must still be the ONLY place that ever
+        # removes it (mirrors the SuitePhase/ChecksPhase seam contract s2
+        # already established; this function does not invent diff-integrity
+        # semantics of its own, s6 supplies the real body).
+        [Parameter(Mandatory = $false)][scriptblock]$DiffIntegrityPhase,
         [Parameter(Mandatory = $false)][string]$GitCliPath = 'git',
         [Parameter(Mandatory = $false)][int]$RetryDelayMs = 1000
     )
@@ -752,29 +880,32 @@ function Invoke-GCWorktreeSession {
     $worktree = New-GCDisposableWorktree -RepoRoot $RepoRoot -GitCliPath $GitCliPath
     if (-not $worktree.Success) {
         return [pscustomobject]@{
-            Refused           = $true
-            RefusalReason     = $worktree.RefusalReason
-            WorktreePath      = $null
-            HeadSha           = $null
-            SuiteResult       = $null
-            ChecksResult      = $null
-            SuiteCleanliness  = $null
-            ChecksCleanliness = $null
-            OrphanedPath      = $null
+            Refused             = $true
+            RefusalReason       = $worktree.RefusalReason
+            WorktreePath        = $null
+            HeadSha             = $null
+            SuiteResult         = $null
+            ChecksResult        = $null
+            DiffIntegrityResult = $null
+            SuiteCleanliness    = $null
+            ChecksCleanliness   = $null
+            OrphanedPath        = $null
         }
     }
 
     $suiteResult = $null
     $checksResult = $null
+    $diffIntegrityResult = $null
     $suiteCleanliness = $null
     $checksCleanliness = $null
     $orphanedPath = $null
 
     try {
-        # Fixed order (s2 RC): suite first, against the pristine checkout,
-        # THEN target checks. s2 wires only the order and the
-        # cleanliness-assertion contract; the suite-runner and check-runner
-        # bodies don't exist until s4/s3 supply -SuitePhase/-ChecksPhase.
+        # Fixed order (s2 RC, extended by s6): suite first, against the
+        # pristine checkout, THEN target checks, THEN diff-integrity -- all
+        # three still inside this try block so the worktree is guaranteed to
+        # exist for every phase and teardown still only ever happens once,
+        # in `finally`, below.
         if ($SuitePhase) {
             $suiteResult = & $SuitePhase $worktree.Path
         }
@@ -784,6 +915,10 @@ function Invoke-GCWorktreeSession {
             $checksResult = & $ChecksPhase $worktree.Path
         }
         $checksCleanliness = Test-GCTreeClean -Path $worktree.Path -GitCliPath $GitCliPath
+
+        if ($DiffIntegrityPhase) {
+            $diffIntegrityResult = & $DiffIntegrityPhase $worktree.Path
+        }
     }
     finally {
         # Always runs, including when a phase scriptblock throws: teardown
@@ -795,15 +930,16 @@ function Invoke-GCWorktreeSession {
     }
 
     return [pscustomobject]@{
-        Refused           = $false
-        RefusalReason     = $null
-        WorktreePath      = $worktree.Path
-        HeadSha           = $worktree.HeadSha
-        SuiteResult       = $suiteResult
-        ChecksResult      = $checksResult
-        SuiteCleanliness  = $suiteCleanliness
-        ChecksCleanliness = $checksCleanliness
-        OrphanedPath      = $orphanedPath
+        Refused             = $false
+        RefusalReason       = $null
+        WorktreePath        = $worktree.Path
+        HeadSha             = $worktree.HeadSha
+        SuiteResult         = $suiteResult
+        ChecksResult        = $checksResult
+        DiffIntegrityResult = $diffIntegrityResult
+        SuiteCleanliness    = $suiteCleanliness
+        ChecksCleanliness   = $checksCleanliness
+        OrphanedPath        = $orphanedPath
     }
 }
 
@@ -1210,13 +1346,34 @@ try {
     }
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
+    # Redirected and drained asynchronously (discarded, not captured): the
+    # child pwsh process running the full sharded suite otherwise INHERITS
+    # this process's own console handles, so its host/warning/verbosity
+    # chatter would leak straight into whatever invoked
+    # Invoke-GoalContractValidate -- corrupting the wrapper script's
+    # documented stdout-is-parseable-JSON contract (Part D) once this phase
+    # is actually wired into the real pipeline (s6). The real result is
+    # already communicated via $resultFile below, never via these streams,
+    # so draining without capturing is sufficient; leaving them
+    # un-redirected risked both the console leak AND an eventual pipe-buffer
+    # deadlock on a verbose run.
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
 
     $proc = [Diagnostics.Process]::new()
     $proc.StartInfo = $psi
     $timedOut = $false
+    $sourceIdOut = "GCVSuiteOut_$([guid]::NewGuid().ToString('N'))"
+    $sourceIdErr = "GCVSuiteErr_$([guid]::NewGuid().ToString('N'))"
 
     try {
+        Register-ObjectEvent -InputObject $proc -EventName OutputDataReceived -SourceIdentifier $sourceIdOut -Action { } | Out-Null
+        Register-ObjectEvent -InputObject $proc -EventName ErrorDataReceived -SourceIdentifier $sourceIdErr -Action { } | Out-Null
+
         $proc.Start() | Out-Null
+        $proc.BeginOutputReadLine()
+        $proc.BeginErrorReadLine()
+
         $exited = $proc.WaitForExit([Math]::Max(0, $TimeoutSeconds) * 1000)
 
         if (-not $exited) {
@@ -1237,6 +1394,10 @@ try {
             $proc.WaitForExit()
         }
     } finally {
+        Unregister-Event -SourceIdentifier $sourceIdOut -ErrorAction SilentlyContinue
+        Unregister-Event -SourceIdentifier $sourceIdErr -ErrorAction SilentlyContinue
+        Remove-Job -Name $sourceIdOut -Force -ErrorAction SilentlyContinue
+        Remove-Job -Name $sourceIdErr -Force -ErrorAction SilentlyContinue
         $proc.Dispose()
     }
 
@@ -1637,5 +1798,197 @@ function Invoke-GCDiffIntegrityPhase {
         DefaultSha    = $base.DefaultSha
         MergeBaseSha  = $base.MergeBaseSha
         Flags         = @($flags)
+    }
+}
+
+# -----------------------------------------------------------------------------
+# s6: verdict emission, backtick-safe inert-render, and the thin wrapper's
+# core entry point (frame-slice s6, AC1/AC2, terminal). This section wires
+# s2 (worktree), s3 (target checks), s4 (suite green floor), and s5
+# (diff-integrity) into Invoke-GoalContractValidate's body above via the new
+# -DiffIntegrityPhase seam on Invoke-GCWorktreeSession, and assembles the
+# final JSON-serializable verdict object every field of which -- once it
+# originates from untrusted comment-sourced contract data (M7) -- is passed
+# through Format-GCInertRender before being echoed. This is the ONE HIGH
+# stress-test fix (U7): the existing script:-scoped Format-InertMarkerLabel
+# (phase-containment-emission-check.ps1:148-152) single-backtick-wraps and
+# breaks out on any backtick already present in the content; this function
+# is net-new and backtick-SAFE.
+# -----------------------------------------------------------------------------
+
+function Format-GCInertRender {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory = $false)][AllowNull()][AllowEmptyString()][string]$Content
+    )
+
+    if ($null -eq $Content) {
+        return $null
+    }
+
+    # Strip HTML-comment delimiters (mirrors the stripping half of
+    # phase-containment-emission-check.ps1:148-152's Format-InertMarkerLabel)
+    # so this content can never be re-parsed as a live marker by a later
+    # comment-scanning sweep.
+    $stripped = $Content -replace '<!--', '' -replace '-->', ''
+
+    # Standard Markdown "longer fence" escaping technique: find the longest
+    # run of consecutive backticks anywhere in the content, then wrap in a
+    # FENCED CODE BLOCK using one MORE backtick than that longest run
+    # (minimum 3). Per CommonMark's fenced-code-block rule, a fence can only
+    # be closed by a line whose own backtick run is >= the OPENING fence's
+    # length -- since every run inside $stripped is, by construction,
+    # strictly shorter than $fenceLength, no line inside the content can
+    # ever close the block early and let the remainder escape as live,
+    # unfenced markdown (U7, HIGH). A block fence (not a single-line inline
+    # code span) is deliberate: check-output excerpts and falsifier text can
+    # be multi-line, and CommonMark's block-fence rule needs no additional
+    # leading/trailing-backtick padding the way an inline code span would.
+    $longestRun = 0
+    foreach ($m in [regex]::Matches($stripped, '`+')) {
+        if ($m.Value.Length -gt $longestRun) {
+            $longestRun = $m.Value.Length
+        }
+    }
+    $fenceLength = [Math]::Max(3, $longestRun + 1)
+    $fence = '`' * $fenceLength
+
+    return "$fence`n$stripped`n$fence"
+}
+
+# Private: bounds a report excerpt's character length (independent of
+# Invoke-GCTargetCheck's own 64KB in-memory capture cap, RC item 7/U20 --
+# that cap protects memory during capture; this one keeps the human-readable
+# report from embedding an unwieldy multi-kilobyte blob for a single field).
+function script:Get-GCExcerpt {
+    param(
+        [Parameter(Mandatory = $false)][AllowNull()][AllowEmptyString()][string]$Content,
+        [Parameter(Mandatory = $false)][int]$MaxChars = 2000
+    )
+
+    if ([string]::IsNullOrEmpty($Content)) {
+        return ''
+    }
+    if ($Content.Length -le $MaxChars) {
+        return $Content
+    }
+    return $Content.Substring(0, $MaxChars) + '...[excerpt truncated]...'
+}
+
+function New-GCVerdictReport {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][pscustomobject]$Disposition,
+        [Parameter(Mandatory = $false)][object[]]$ContractTargets = @(),
+        [Parameter(Mandatory = $false)][object[]]$Flags = @()
+    )
+
+    # #874 PREDICATE INTERFACE / EXIT-3 LOOP CONTRACT (documented here, not
+    # only in the field-lock test, since this is the one function that
+    # constructs the object #874 will consume):
+    #
+    #   ExitCode 0 (Verdict='pass')                  -- completion accepted,
+    #     no review needed.
+    #   ExitCode 1 (Verdict='fail')                  -- completion rejected;
+    #     the run did not satisfy its contract (suite red or a target
+    #     failed). A harness loop iterates/retries.
+    #   ExitCode 2 (Verdict='refused')                -- the validator could
+    #     not render a judgment at all (bad contract, dirty tree,
+    #     unauditable diff). A harness loop treats this as a hard stop
+    #     distinct from both pass and fail.
+    #   ExitCode 3 (Verdict='pass-review-required')   -- completion accepted
+    #     ENVIRONMENTALLY, but human review is MANDATORY before merge. A
+    #     harness loop must stop-for-review on this code -- never
+    #     auto-continue as if it were a plain pass -- and a PR carrying this
+    #     disposition must not merge unflagged. Reason and Flags together
+    #     are the review payload a human (or a future harness step) reads to
+    #     decide the review, distinguishing an infra/harness-error
+    #     disposition (s1) from this slice's diff-integrity/worktree-flag
+    #     disposition (s6) via the Reason string, per Resolve-GCVerdictDisposition's
+    #     own -ReviewReason parameter doc.
+    #
+    # A committed standalone verdict.schema.json is deliberately NOT
+    # required (stress-test U15): this function IS the field-lock; #872's
+    # schema guards untrusted CONTRACT input, this object is PRODUCED
+    # output, so a producer test is the proportionate contract per the
+    # plan's own Decisions section.
+
+    $targetsById = @{}
+    foreach ($ct in @($ContractTargets)) {
+        $id = [string]$ct.id
+        if (-not [string]::IsNullOrWhiteSpace($id)) {
+            $targetsById[$id] = $ct
+        }
+    }
+
+    $reportTargets = [System.Collections.Generic.List[object]]::new()
+    foreach ($t in @($Disposition.Targets)) {
+        $contractTarget = $null
+        $tId = [string]$t.Id
+        if ($targetsById.ContainsKey($tId)) {
+            $contractTarget = $targetsById[$tId]
+        }
+
+        $expected = $null
+        $falsifier = $null
+        $acRef = $null
+        if ($contractTarget) {
+            $expected = Format-GCInertRender -Content ([string]$contractTarget.expected)
+            $acRef = Format-GCInertRender -Content ([string]$contractTarget.ac_ref)
+            $hasFalsifier = $false
+            if ($contractTarget.PSObject.Properties.Match('falsifier').Count -gt 0) {
+                $hasFalsifier = -not [string]::IsNullOrWhiteSpace([string]$contractTarget.falsifier)
+            }
+            if ($hasFalsifier) {
+                $falsifier = Format-GCInertRender -Content ([string]$contractTarget.falsifier)
+            }
+        }
+
+        $reportTargets.Add([pscustomobject]@{
+                Id              = Format-GCInertRender -Content $tId
+                AcRef           = $acRef
+                Outcome         = $t.Outcome
+                ExitCode        = $t.ExitCode
+                TimedOut        = $t.TimedOut
+                Reason          = $t.Reason
+                Expected        = $expected
+                Falsifier       = $falsifier
+                AdvisoryFlags   = @($t.AdvisoryFlags)
+                StdOutExcerpt   = Format-GCInertRender -Content (script:Get-GCExcerpt -Content $t.StdOut)
+                StdErrExcerpt   = Format-GCInertRender -Content (script:Get-GCExcerpt -Content $t.StdErr)
+            }) | Out-Null
+    }
+
+    $reportFlags = [System.Collections.Generic.List[object]]::new()
+    foreach ($f in @($Flags)) {
+        $detail = $null
+        if ([string]$f.Kind -eq 'unrecognized-invariant') {
+            $detail = Format-GCInertRender -Content ([string]$f.Literal)
+        } elseif ($f.PSObject.Properties.Match('Files').Count -gt 0) {
+            $detail = ((@($f.Files)) -join ', ')
+        } elseif ($f.PSObject.Properties.Match('Detail').Count -gt 0) {
+            $detail = [string]$f.Detail
+        }
+        $reportFlags.Add([pscustomobject]@{
+                Kind   = [string]$f.Kind
+                Detail = $detail
+            }) | Out-Null
+    }
+
+    # Every refusal reason is inert-rendered: several (contract-schema-
+    # violation, no-run-diff's cause-disambiguation prose) quote validator-
+    # or contract-derived text verbatim; over-applying to the rest is always
+    # safe (a plain reason just gets fenced).
+    $reportRefusals = @(@($Disposition.Refusals) | ForEach-Object { Format-GCInertRender -Content ([string]$_) })
+
+    return [pscustomobject]@{
+        Verdict  = $Disposition.Verdict
+        ExitCode = $Disposition.ExitCode
+        Reason   = $Disposition.Reason
+        Refusals = $reportRefusals
+        Targets  = @($reportTargets)
+        Flags    = @($reportFlags)
     }
 }
