@@ -214,10 +214,15 @@
         job's `State`, which can report `Completed` even when the underlying
         check failed. Captured stdout/stderr are stream-bounded via
         `Register-ObjectEvent` + a byte-capped `StringBuilder` (default cap
-        64KB each) so an unbounded-output check cannot exhaust memory (U20);
-        once the cap is reached, further output is dropped and a
-        `'...[output truncated: cap reached]...'` marker is appended, and
-        `StdOutTruncated`/`StdErrTruncated` record which stream(s) hit it.
+        64KB each): once the accumulated buffer reaches the cap, further
+        output is dropped and a `'...[output truncated: cap reached]...'`
+        marker is appended, and `StdOutTruncated`/`StdErrTruncated` record
+        which stream(s) hit it. Known limitation (issue #894): the cap is
+        only checked between complete lines, because .NET's
+        `OutputDataReceived`/`ErrorDataReceived` fire once per whole line
+        (or at EOF) -- a single very large newline-free line is fully
+        materialized in memory before the cap check can run, so peak
+        memory during that one line is not bounded by the cap.
 
       Invoke-GCTargetChecks -Targets <object[]> -WorktreePath <string>
                              [-TimeoutSeconds <int> = 300]
@@ -702,7 +707,7 @@ function Invoke-GoalContractValidate {
     #    lib-undifferentiated causes into one fail-closed refusal.
     $payload = Get-GCContractBlock -CommentBody $body
     if ($null -eq $payload) {
-        $disposition = Resolve-GCVerdictDisposition -IsRefused -RefusalReasons @('refused: contract-block-unresolvable (absent, ambiguous, or truncated — see contract comment)')
+        $disposition = Resolve-GCVerdictDisposition -IsRefused -RefusalReasons @('refused: contract-block-unresolvable (absent, ambiguous, or truncated -- see contract comment)')
         return New-GCVerdictReport -Disposition $disposition -ContractTargets @() -Flags @()
     }
 
@@ -1369,7 +1374,12 @@ function Invoke-GCTargetCheck {
     # Stream-bounded capture (RC item 7 / U20): a synchronized hashtable so
     # the async OutputDataReceived/ErrorDataReceived event actions (which run
     # disconnected from this function's lexical scope) can safely mutate
-    # shared state. Capped in-memory, not just the eventual report excerpt.
+    # shared state. The accumulated in-memory buffer is genuinely capped,
+    # not just the eventual report excerpt -- but the cap check only runs
+    # between complete lines: OutputDataReceived/ErrorDataReceived fire once
+    # per whole line (or at EOF), so a single very large newline-free line
+    # is fully materialized before the cap can engage, and peak memory for
+    # that one line is unbounded. Known, accepted limitation (issue #894).
     $outState = [hashtable]::Synchronized(@{
         StdOut          = [System.Text.StringBuilder]::new()
         StdOutBytes     = 0

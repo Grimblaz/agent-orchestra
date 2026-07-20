@@ -80,6 +80,18 @@ if (-not $isDotSourced) {
 
     $result = Invoke-GoalContractValidate @invokeArgs
 
+    # F2 (GH review PR #892): defense-in-depth against a future refactor.
+    # $result is currently unreachable as $null/without an ExitCode -- every
+    # Invoke-GoalContractValidate return path routes through
+    # New-GCVerdictReport, which always sets ExitCode -- but if that ever
+    # changes, this must fail CLOSED (exit 2, refused) rather than either
+    # throwing an uncaught NullReferenceException on `$result.ExitCode` or
+    # falling back to exit 3 (pass-review-required), which is merge-
+    # permitting and therefore the wrong direction to fail in. This guard
+    # must run before the ConvertTo-Json emit below so a $null result never
+    # reaches stdout as the literal string "null".
+    if ($null -eq $result -or $null -eq $result.ExitCode) { exit 2 }
+
     $result | ConvertTo-Json -Depth 10 | Write-Output
 
     exit $result.ExitCode
