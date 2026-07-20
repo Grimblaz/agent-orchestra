@@ -163,15 +163,83 @@
         the caller -- this function does not swallow phase errors, only
         guarantees teardown alongside them.
 
+      Invoke-GCTargetCheck -Target <object> -WorktreePath <string>
+                            [-TimeoutSeconds <int> = 300]
+                            [-OutputCapBytes <int> = 65536]
+                            [-PwshCliPath <string> = 'pwsh']
+        Runs ONE `targets[]` entry's `check` from committed state inside the
+        worktree, via `pwsh -NoProfile -NoLogo -NonInteractive -Command
+        <check>` (873-D7: the check string is untrusted comment-sourced data,
+        M7 note; this function executes it as a knowing execution surface
+        without attempting to sanitize or interpret its content beyond that
+        -- the trust model is edit-coherence, already settled). `expected` is
+        never parsed as a pass/fail predicate -- only the process exit code
+        decides. A blank/whitespace-only `check` is refused as a per-target
+        floor (`Outcome = 'fail'`, `Reason = 'refused: blank-check'`) WITHOUT
+        spawning a process. A missing or blank `falsifier` field adds the
+        purely-informational `'falsifier-absent'` advisory flag -- it never
+        changes `Outcome` (genuine vacuity detection is undecidable, U13).
+        The timeout (default 300s) is enforced with a PREEMPTIVE
+        TREE-KILL, never `Stop-Job`/`Wait-Job` (U2: `Stop-Job` does not kill
+        descendant OS processes, which orphans grandchildren that hold
+        worktree handles and break teardown): `System.Diagnostics.Process` +
+        `Kill($true)` (the pwsh 7 / .NET Core 3+ tree-kill overload), with a
+        `taskkill /PID <pid> /T /F` fallback if `Kill($true)` itself throws
+        on Windows. A timeout ALWAYS maps `Outcome` to `'fail'` (never
+        `refused`, never review-required). The exit code is marshalled
+        explicitly by reading the `Process` object's own `ExitCode` property
+        after it has exited (normally or via kill) -- never inferred from a
+        job's `State`, which can report `Completed` even when the underlying
+        check failed. Captured stdout/stderr are stream-bounded via
+        `Register-ObjectEvent` + a byte-capped `StringBuilder` (default cap
+        64KB each) so an unbounded-output check cannot exhaust memory (U20);
+        once the cap is reached, further output is dropped and a
+        `'...[output truncated: cap reached]...'` marker is appended, and
+        `StdOutTruncated`/`StdErrTruncated` record which stream(s) hit it.
+
+      Invoke-GCTargetChecks -Targets <object[]> -WorktreePath <string>
+                             [-TimeoutSeconds <int> = 300]
+                             [-OutputCapBytes <int> = 65536]
+                             [-BudgetWallClock <string>]
+                             [-PwshCliPath <string> = 'pwsh']
+        Runs every `targets[]` entry via Invoke-GCTargetCheck (fixed
+        iteration order) and aggregates the per-target results. Bounds total
+        check time against the contract's own `budget.wall_clock` field
+        (parsed by ConvertTo-GCWallClockSeconds) -- this is an ADVISORY
+        total ceiling across all targets, not a hard per-target replacement
+        for TimeoutSeconds: exceeding it never changes any target's
+        `Outcome`, it only sets the aggregate `BudgetExceeded` flag for a
+        later slice (s6) to surface as a mandatory-review signal, mirroring
+        the unrecognized-`invariants[]` flag pattern. An absent or
+        unparseable `budget.wall_clock` degrades to "no ceiling applied"
+        (`BudgetExceeded = $false`, `BudgetWallClockSeconds = $null`) rather
+        than guessing at an ambiguous contract field. Standalone at s3: not
+        yet threaded into Invoke-GCWorktreeSession's `-ChecksPhase` seam or
+        Invoke-GoalContractValidate's control flow -- s6 wires this function
+        into `-ChecksPhase` and folds its result into
+        Resolve-GCVerdictDisposition alongside the s1/s4/s5 signals.
+
+      ConvertTo-GCWallClockSeconds -Value <string>
+        Pure parser for the contract's `budget.wall_clock` field (schema
+        type: free-form string, e.g. `"4h"`). Accepts a bare integer
+        (seconds) or an integer with a single `h`/`m`/`s` suffix
+        (case-insensitive). Any other shape (e.g. compound durations like
+        `"1h30m"`, or non-numeric text) returns `$null` deliberately: the
+        ceiling this feeds is advisory-only, so an unparseable value must
+        degrade to "no ceiling", never a guessed interpretation.
+
 .NOTES
     Trust framing (M7, inherited from goal-contract-core.ps1's own .NOTES):
     every field this validator reads ultimately comes from an untrusted,
-    externally-writable GitHub comment. This slice never executes
-    `targets[].check` or feeds prose fields into a prompt -- it only reads
-    structural fields (contract_hash, schema_version via the #872 schema
-    gate) needed for intake decisions. s3's target-check execution is the
-    first slice that treats contract content as a knowing execution surface
-    (873-D7), not this one.
+    externally-writable GitHub comment. s1/s2 never execute `targets[].check`
+    or feed prose fields into a prompt -- they only read structural fields
+    (contract_hash, schema_version via the #872 schema gate) needed for
+    intake decisions. s3's Invoke-GCTargetCheck is the first function in this
+    file that treats contract content (`targets[].check`) as a knowing
+    execution surface (873-D7) -- it executes the check as a shell command
+    via pwsh without sanitizing or interpreting its content beyond that; the
+    trust model is edit-coherence (already settled), not this function's
+    concern to re-litigate.
 #>
 
 # Sibling-lib dot-source, mirroring the repo convention (e.g.
@@ -583,5 +651,271 @@ function Invoke-GCWorktreeSession {
         SuiteCleanliness  = $suiteCleanliness
         ChecksCleanliness = $checksCleanliness
         OrphanedPath      = $orphanedPath
+    }
+}
+
+# -----------------------------------------------------------------------------
+# s3: target-check execution with a preemptive tree-killable timeout
+# (frame-slice s3, AC1). `targets[].check` is untrusted comment-sourced data
+# (M7); the trust boundary is edit-coherence (873-D7) -- this section
+# executes it as a shell command via pwsh without attempting to sanitize or
+# interpret its content beyond that. These functions are net-new (no
+# production Process.Kill($true)-timeout precedent existed before this
+# slice) and are standalone at s3: not yet threaded into
+# Invoke-GCWorktreeSession's -ChecksPhase seam or Invoke-GoalContractValidate's
+# control flow. s6 wires Invoke-GCTargetChecks into -ChecksPhase and folds
+# its result into Resolve-GCVerdictDisposition alongside the s1/s4/s5
+# signals.
+# -----------------------------------------------------------------------------
+
+function ConvertTo-GCWallClockSeconds {
+    [CmdletBinding()]
+    [OutputType([Nullable[int]])]
+    param(
+        [Parameter(Mandatory = $false)][AllowNull()][string]$Value
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return $null
+    }
+
+    # Accepted shapes: a bare integer (seconds), or an integer with a single
+    # h/m/s suffix (case-insensitive) -- e.g. "4h", "300s", "90m". Any other
+    # shape (e.g. compound "1h30m", non-numeric) is deliberately left
+    # unparsed: the ceiling this feeds is advisory-only, so an unparseable
+    # budget.wall_clock value degrades to "no ceiling applied" rather than a
+    # guessed interpretation of an ambiguous contract field.
+    if ($Value -match '^\s*(\d+)\s*([hHmMsS])?\s*$') {
+        $magnitude = [int]$Matches[1]
+        switch ($Matches[2]) {
+            { $_ -in @('h', 'H') } { return $magnitude * 3600 }
+            { $_ -in @('m', 'M') } { return $magnitude * 60 }
+            default { return $magnitude }
+        }
+    }
+
+    return $null
+}
+
+function Invoke-GCTargetCheck {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][object]$Target,
+        [Parameter(Mandatory)][string]$WorktreePath,
+        [Parameter(Mandatory = $false)][int]$TimeoutSeconds = 300,
+        [Parameter(Mandatory = $false)][int]$OutputCapBytes = 65536,
+        [Parameter(Mandatory = $false)][string]$PwshCliPath = 'pwsh'
+    )
+
+    $targetId = [string]$Target.id
+
+    # RC item 6: a missing OR blank falsifier is a purely-informational
+    # advisory flag -- genuine vacuity detection is undecidable (U13), so
+    # this is a cheap non-vacuity nudge, never a pass/fail gate.
+    $advisoryFlags = [System.Collections.Generic.List[string]]::new()
+    $hasFalsifier = $false
+    if ($Target.PSObject.Properties.Match('falsifier').Count -gt 0) {
+        $hasFalsifier = -not [string]::IsNullOrWhiteSpace([string]$Target.falsifier)
+    }
+    if (-not $hasFalsifier) {
+        $advisoryFlags.Add('falsifier-absent')
+    }
+
+    $check = [string]$Target.check
+
+    # RC item 5: a blank/whitespace-only check is a per-target floor -- a
+    # target that checks nothing cannot honestly report pass. No process is
+    # spawned.
+    if ([string]::IsNullOrWhiteSpace($check)) {
+        return [pscustomobject]@{
+            Id              = $targetId
+            Outcome         = 'fail'
+            ExitCode        = $null
+            TimedOut        = $false
+            Reason          = 'refused: blank-check'
+            AdvisoryFlags   = @($advisoryFlags)
+            StdOut          = ''
+            StdErr          = ''
+            StdOutTruncated = $false
+            StdErrTruncated = $false
+            ElapsedMs       = 0
+        }
+    }
+
+    $psi = [System.Diagnostics.ProcessStartInfo]::new()
+    $psi.FileName = $PwshCliPath
+    foreach ($arg in @('-NoProfile', '-NoLogo', '-NonInteractive', '-Command', $check)) {
+        $psi.ArgumentList.Add($arg)
+    }
+    $psi.WorkingDirectory = $WorktreePath
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.CreateNoWindow = $true
+
+    # Stream-bounded capture (RC item 7 / U20): a synchronized hashtable so
+    # the async OutputDataReceived/ErrorDataReceived event actions (which run
+    # disconnected from this function's lexical scope) can safely mutate
+    # shared state. Capped in-memory, not just the eventual report excerpt.
+    $outState = [hashtable]::Synchronized(@{
+        StdOut          = [System.Text.StringBuilder]::new()
+        StdOutBytes     = 0
+        StdOutTruncated = $false
+        StdErr          = [System.Text.StringBuilder]::new()
+        StdErrBytes     = 0
+        StdErrTruncated = $false
+        CapBytes        = $OutputCapBytes
+    })
+
+    $stdOutAction = {
+        $line = $EventArgs.Data
+        if ($null -eq $line) { return }
+        $state = $Event.MessageData
+        if ($state.StdOutTruncated) { return }
+        $bytes = [System.Text.Encoding]::UTF8.GetByteCount($line) + 1
+        if (($state.StdOutBytes + $bytes) -gt $state.CapBytes) {
+            [void]$state.StdOut.Append('...[output truncated: cap reached]...')
+            $state.StdOutTruncated = $true
+            return
+        }
+        [void]$state.StdOut.AppendLine($line)
+        $state.StdOutBytes += $bytes
+    }
+    $stdErrAction = {
+        $line = $EventArgs.Data
+        if ($null -eq $line) { return }
+        $state = $Event.MessageData
+        if ($state.StdErrTruncated) { return }
+        $bytes = [System.Text.Encoding]::UTF8.GetByteCount($line) + 1
+        if (($state.StdErrBytes + $bytes) -gt $state.CapBytes) {
+            [void]$state.StdErr.Append('...[output truncated: cap reached]...')
+            $state.StdErrTruncated = $true
+            return
+        }
+        [void]$state.StdErr.AppendLine($line)
+        $state.StdErrBytes += $bytes
+    }
+
+    $sourceIdOut = "GCVOut_$([guid]::NewGuid().ToString('N'))"
+    $sourceIdErr = "GCVErr_$([guid]::NewGuid().ToString('N'))"
+    $proc = [System.Diagnostics.Process]::new()
+    $proc.StartInfo = $psi
+
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    $timedOut = $false
+    $exitCode = $null
+
+    try {
+        Register-ObjectEvent -InputObject $proc -EventName OutputDataReceived -SourceIdentifier $sourceIdOut -MessageData $outState -Action $stdOutAction | Out-Null
+        Register-ObjectEvent -InputObject $proc -EventName ErrorDataReceived -SourceIdentifier $sourceIdErr -MessageData $outState -Action $stdErrAction | Out-Null
+
+        $proc.Start() | Out-Null
+        $proc.BeginOutputReadLine()
+        $proc.BeginErrorReadLine()
+
+        $exited = $proc.WaitForExit([Math]::Max(0, $TimeoutSeconds) * 1000)
+
+        if (-not $exited) {
+            $timedOut = $true
+            # PREEMPTIVE TREE-KILL (RC item 2): System.Diagnostics.Process +
+            # Kill($true) (pwsh 7 / .NET Core 3+ tree-kill overload) -- NOT
+            # Stop-Job/Wait-Job, which does not kill descendant OS processes
+            # (U2: orphaned grandchildren hold worktree handles and break
+            # teardown). taskkill /T /F is a Windows fallback if Kill($true)
+            # itself throws.
+            try {
+                $proc.Kill($true)
+            } catch {
+                if ($IsWindows) {
+                    try { & taskkill /PID $proc.Id /T /F 2>$null | Out-Null } catch { }
+                }
+            }
+            $null = $proc.WaitForExit(10000)
+        } else {
+            # Ensure the async output/error event pump fully drains before
+            # this function reads the captured buffers (the documented .NET
+            # pattern for redirected + event-based process output: call the
+            # parameterless WaitForExit() after the timed overload returns
+            # $true).
+            $proc.WaitForExit()
+        }
+
+        # RC item 3: marshal the exit code explicitly from the Process
+        # object's own ExitCode property -- never from a job's State, which
+        # can report Completed even when the underlying check failed.
+        try {
+            $exitCode = $proc.ExitCode
+        } catch {
+            $exitCode = $null
+        }
+    } finally {
+        Unregister-Event -SourceIdentifier $sourceIdOut -ErrorAction SilentlyContinue
+        Unregister-Event -SourceIdentifier $sourceIdErr -ErrorAction SilentlyContinue
+        Remove-Job -Name $sourceIdOut -Force -ErrorAction SilentlyContinue
+        Remove-Job -Name $sourceIdErr -Force -ErrorAction SilentlyContinue
+        $proc.Dispose()
+    }
+    $stopwatch.Stop()
+
+    # RC item 4: timeout ALWAYS maps to fail -- never refused, never
+    # review-required.
+    $outcome = 'pass'
+    $reason = $null
+    if ($timedOut) {
+        $outcome = 'fail'
+        $reason = "timeout: check exceeded ${TimeoutSeconds}s and was tree-killed"
+    } elseif ($exitCode -ne 0) {
+        $outcome = 'fail'
+    }
+
+    return [pscustomobject]@{
+        Id              = $targetId
+        Outcome         = $outcome
+        ExitCode        = $exitCode
+        TimedOut        = $timedOut
+        Reason          = $reason
+        AdvisoryFlags   = @($advisoryFlags)
+        StdOut          = $outState.StdOut.ToString()
+        StdErr          = $outState.StdErr.ToString()
+        StdOutTruncated = $outState.StdOutTruncated
+        StdErrTruncated = $outState.StdErrTruncated
+        ElapsedMs       = $stopwatch.ElapsedMilliseconds
+    }
+}
+
+function Invoke-GCTargetChecks {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][object[]]$Targets,
+        [Parameter(Mandatory)][string]$WorktreePath,
+        [Parameter(Mandatory = $false)][int]$TimeoutSeconds = 300,
+        [Parameter(Mandatory = $false)][int]$OutputCapBytes = 65536,
+        [Parameter(Mandatory = $false)][AllowNull()][string]$BudgetWallClock,
+        [Parameter(Mandatory = $false)][string]$PwshCliPath = 'pwsh'
+    )
+
+    $results = [System.Collections.Generic.List[object]]::new()
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+
+    foreach ($target in @($Targets)) {
+        $results.Add((Invoke-GCTargetCheck -Target $target -WorktreePath $WorktreePath -TimeoutSeconds $TimeoutSeconds -OutputCapBytes $OutputCapBytes -PwshCliPath $PwshCliPath))
+    }
+
+    $stopwatch.Stop()
+
+    # RC item 7: advisory total ceiling across all targets -- never a hard
+    # per-target replacement for TimeoutSeconds above, and never changes any
+    # individual target's Outcome. Exceeding it only sets the aggregate
+    # BudgetExceeded flag for s6 to surface as a mandatory-review signal.
+    $budgetSeconds = ConvertTo-GCWallClockSeconds -Value $BudgetWallClock
+    $budgetExceeded = ($null -ne $budgetSeconds) -and ($stopwatch.Elapsed.TotalSeconds -gt $budgetSeconds)
+
+    return [pscustomobject]@{
+        Targets                = @($results)
+        TotalElapsedMs         = $stopwatch.ElapsedMilliseconds
+        BudgetWallClockSeconds = $budgetSeconds
+        BudgetExceeded         = $budgetExceeded
     }
 }

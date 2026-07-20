@@ -738,4 +738,190 @@ exit `$LASTEXITCODE
             script:Remove-GCTestWorktree -RepoRoot $repo -WorktreePath $session.WorktreePath
         }
     }
+
+    Context 'ConvertTo-GCWallClockSeconds -- budget.wall_clock parsing (s3, AC1)' {
+
+        It 'parses an hour-suffixed value' {
+            script:Assert-GCVFunctionExists -Name 'ConvertTo-GCWallClockSeconds'
+            ConvertTo-GCWallClockSeconds -Value '4h' | Should -Be 14400
+        }
+
+        It 'parses a minute-suffixed value' {
+            script:Assert-GCVFunctionExists -Name 'ConvertTo-GCWallClockSeconds'
+            ConvertTo-GCWallClockSeconds -Value '90m' | Should -Be 5400
+        }
+
+        It 'parses a second-suffixed value' {
+            script:Assert-GCVFunctionExists -Name 'ConvertTo-GCWallClockSeconds'
+            ConvertTo-GCWallClockSeconds -Value '300s' | Should -Be 300
+        }
+
+        It 'parses a bare integer as seconds' {
+            script:Assert-GCVFunctionExists -Name 'ConvertTo-GCWallClockSeconds'
+            ConvertTo-GCWallClockSeconds -Value '45' | Should -Be 45
+        }
+
+        It 'returns $null for a blank value' {
+            script:Assert-GCVFunctionExists -Name 'ConvertTo-GCWallClockSeconds'
+            ConvertTo-GCWallClockSeconds -Value '' | Should -BeNullOrEmpty
+        }
+
+        It 'returns $null for an unparseable compound value (advisory-only degrade, never a guess)' {
+            script:Assert-GCVFunctionExists -Name 'ConvertTo-GCWallClockSeconds'
+            ConvertTo-GCWallClockSeconds -Value '1h30m' | Should -BeNullOrEmpty
+        }
+    }
+
+    Context 'Invoke-GCTargetCheck -- single target-check execution with tree-kill timeout (s3, AC1)' {
+
+        It 'passes a target whose check exits 0' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCTargetCheck'
+            $target = [pscustomobject]@{ id = 'T-pass'; check = 'exit 0'; falsifier = 'would show as an accumulator silently resetting' }
+
+            $result = Invoke-GCTargetCheck -Target $target -WorktreePath $TestDrive -TimeoutSeconds 10
+
+            $result.Outcome | Should -Be 'pass'
+            $result.ExitCode | Should -Be 0
+            $result.TimedOut | Should -Be $false
+            $result.Reason | Should -BeNullOrEmpty
+        }
+
+        It 'fails a target whose check exits non-zero, marshalling the real exit code from the Process object' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCTargetCheck'
+            $target = [pscustomobject]@{ id = 'T-fail'; check = 'exit 7'; falsifier = 'would show as a swallowed error' }
+
+            $result = Invoke-GCTargetCheck -Target $target -WorktreePath $TestDrive -TimeoutSeconds 10
+
+            $result.Outcome | Should -Be 'fail'
+            $result.ExitCode | Should -Be 7 -Because 'the exit code must be marshalled explicitly from the Process object, not inferred from a job State'
+            $result.TimedOut | Should -Be $false
+        }
+
+        It 'tree-kills the WHOLE process tree on timeout -- no orphaned descendant survives, and the target result is fail' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCTargetCheck'
+            $pidFile = Join-Path $TestDrive 'child.pid'
+            $pidFileEscaped = $pidFile -replace "'", "''"
+            $check = @"
+`$c = Start-Process -FilePath (Get-Process -Id `$PID).Path -ArgumentList @('-NoProfile', '-NonInteractive', '-Command', 'Start-Sleep -Seconds 30') -PassThru
+Set-Content -LiteralPath '$pidFileEscaped' -Value `$c.Id -NoNewline
+Start-Sleep -Seconds 30
+"@
+            $target = [pscustomobject]@{ id = 'T-tree'; check = $check; falsifier = 'would show as a hung check silently reported clean' }
+
+            $sw = [System.Diagnostics.Stopwatch]::StartNew()
+            $result = Invoke-GCTargetCheck -Target $target -WorktreePath $TestDrive -TimeoutSeconds 2
+            $sw.Stop()
+
+            $result.Outcome | Should -Be 'fail' -Because 'a timed-out check must map to fail, never refused or review-required'
+            $result.TimedOut | Should -Be $true
+            $result.Reason | Should -Match 'timeout'
+            $sw.Elapsed.TotalSeconds | Should -BeLessThan 15 -Because 'the tree-kill must happen promptly after the 2s timeout, not wait out the 30s child sleep'
+
+            (Test-Path -LiteralPath $pidFile) | Should -Be $true -Because 'the child process must have started and recorded its pid before the parent was killed'
+            $childPid = [int](Get-Content -LiteralPath $pidFile -Raw)
+            Start-Sleep -Milliseconds 500
+            (Get-Process -Id $childPid -ErrorAction SilentlyContinue) | Should -BeNullOrEmpty -Because 'Kill($true) (or the taskkill /T /F fallback) must reap the entire process tree, not just the immediate check process -- Stop-Job would leave this descendant orphaned (U2)'
+        }
+
+        It 'refuses a blank/whitespace-only check as a per-target floor without spawning a process' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCTargetCheck'
+            $target = [pscustomobject]@{ id = 'T-blank'; check = '   '; falsifier = 'would show as a vacuous target silently passing' }
+
+            $result = Invoke-GCTargetCheck -Target $target -WorktreePath $TestDrive -TimeoutSeconds 5
+
+            $result.Outcome | Should -Be 'fail'
+            $result.Reason | Should -Be 'refused: blank-check'
+            $result.ExitCode | Should -BeNullOrEmpty
+            $result.ElapsedMs | Should -Be 0 -Because 'no process should be spawned for a blank check'
+        }
+
+        It 'flags a target with no falsifier field as advisory, without changing its pass outcome' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCTargetCheck'
+            $target = [pscustomobject]@{ id = 'T-no-falsifier'; check = 'exit 0' }
+
+            $result = Invoke-GCTargetCheck -Target $target -WorktreePath $TestDrive -TimeoutSeconds 5
+
+            $result.Outcome | Should -Be 'pass' -Because 'falsifier-absent is purely informational and must never change the pass/fail outcome'
+            $result.AdvisoryFlags | Should -Contain 'falsifier-absent'
+        }
+
+        It 'flags a target with a blank falsifier field as advisory too' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCTargetCheck'
+            $target = [pscustomobject]@{ id = 'T-blank-falsifier'; check = 'exit 0'; falsifier = '   ' }
+
+            $result = Invoke-GCTargetCheck -Target $target -WorktreePath $TestDrive -TimeoutSeconds 5
+
+            $result.AdvisoryFlags | Should -Contain 'falsifier-absent'
+        }
+
+        It 'does not flag falsifier-absent when a non-blank falsifier is present' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCTargetCheck'
+            $target = [pscustomobject]@{ id = 'T-has-falsifier'; check = 'exit 0'; falsifier = 'would look like an accumulator silently resetting null to zero' }
+
+            $result = Invoke-GCTargetCheck -Target $target -WorktreePath $TestDrive -TimeoutSeconds 5
+
+            $result.AdvisoryFlags | Should -Not -Contain 'falsifier-absent'
+        }
+
+        It 'caps captured stdout at the byte limit and marks it truncated rather than capturing unboundedly' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCTargetCheck'
+            $check = "1..2000 | ForEach-Object { Write-Output ('line-' + `$_ + '-' + ('x' * 40)) }"
+            $target = [pscustomobject]@{ id = 'T-verbose'; check = $check; falsifier = 'would show as unbounded memory growth' }
+
+            $result = Invoke-GCTargetCheck -Target $target -WorktreePath $TestDrive -TimeoutSeconds 15 -OutputCapBytes 500
+
+            $result.StdOutTruncated | Should -Be $true
+            $result.StdOut.Length | Should -BeLessThan 2000 -Because 'the captured buffer must stay bounded near the cap, not grow to the full ~90KB the check actually writes'
+            $result.StdOut | Should -Match 'truncated'
+        }
+    }
+
+    Context 'Invoke-GCTargetChecks -- aggregate execution + advisory budget ceiling (s3, AC1)' {
+
+        It 'runs every target in order and returns per-target results' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCTargetChecks'
+            $targets = @(
+                [pscustomobject]@{ id = 'A'; check = 'exit 0'; falsifier = 'x' },
+                [pscustomobject]@{ id = 'B'; check = 'exit 1'; falsifier = 'x' }
+            )
+
+            $session = Invoke-GCTargetChecks -Targets $targets -WorktreePath $TestDrive -TimeoutSeconds 10
+
+            @($session.Targets).Count | Should -Be 2
+            $session.Targets[0].Id | Should -Be 'A'
+            $session.Targets[0].Outcome | Should -Be 'pass'
+            $session.Targets[1].Id | Should -Be 'B'
+            $session.Targets[1].Outcome | Should -Be 'fail'
+        }
+
+        It 'does not flag BudgetExceeded when no budget.wall_clock is supplied' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCTargetChecks'
+            $targets = @([pscustomobject]@{ id = 'A'; check = 'exit 0'; falsifier = 'x' })
+
+            $session = Invoke-GCTargetChecks -Targets $targets -WorktreePath $TestDrive -TimeoutSeconds 10
+
+            $session.BudgetExceeded | Should -Be $false
+            $session.BudgetWallClockSeconds | Should -BeNullOrEmpty
+        }
+
+        It 'does not flag BudgetExceeded when elapsed time is comfortably under a large parsed budget' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCTargetChecks'
+            $targets = @([pscustomobject]@{ id = 'A'; check = 'exit 0'; falsifier = 'x' })
+
+            $session = Invoke-GCTargetChecks -Targets $targets -WorktreePath $TestDrive -TimeoutSeconds 10 -BudgetWallClock '4h'
+
+            $session.BudgetExceeded | Should -Be $false
+            $session.BudgetWallClockSeconds | Should -Be 14400
+        }
+
+        It 'flags BudgetExceeded (advisory-only) when total elapsed exceeds a parsed budget.wall_clock, without changing any target Outcome' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCTargetChecks'
+            $targets = @([pscustomobject]@{ id = 'A'; check = 'exit 0'; falsifier = 'x' })
+
+            $session = Invoke-GCTargetChecks -Targets $targets -WorktreePath $TestDrive -TimeoutSeconds 10 -BudgetWallClock '0s'
+
+            $session.BudgetExceeded | Should -Be $true
+            $session.Targets[0].Outcome | Should -Be 'pass' -Because 'the budget ceiling is advisory-only and must never override a target''s own execution outcome'
+        }
+    }
 }
