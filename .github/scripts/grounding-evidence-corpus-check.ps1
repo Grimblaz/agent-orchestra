@@ -20,7 +20,7 @@
       absent:        neither of the above -- including the case where the
                       sentinel and/or bold literal appear only inside code
                       spans, or appear in prose but not adjacent to each
-                      other, or don't appear at all.
+                      other, or do not appear at all.
 
     Detection is structural (span-aware pattern matching), not
     substring-counting -- a body that merely MENTIONS the sentinel or bold
@@ -69,9 +69,12 @@
 
 .PARAMETER Since
     CLI mode only. Filters the (explicit or discovered) cohort by the
-    `design-phase-complete` marker COMMENT's own createdAt timestamp (NOT the
-    issue's own createdAt) -- so a post-fix cohort can be separated from a
-    pre-fix baseline.
+    `design-phase-complete` marker createdAt timestamp belonging to the
+    COMMENT itself (NOT the createdAt belonging to the issue) -- so a
+    post-fix cohort can be separated from a pre-fix baseline. Interpreted as
+    UTC: the supplied clock time is treated as a UTC instant (not converted
+    from the local timezone of the runner), and compared against the
+    createdAt of the marker parsed as UTC.
 
 .PARAMETER Owner
     CLI mode only. GitHub repository owner. Resolved via
@@ -196,8 +199,12 @@ function script:Get-GroundingEvidenceCodeSpans {
 
     # --- Inline code spans: runs of N backticks, closed by the next run of
     #     exactly N backticks that is not itself already inside a fenced
-    #     block. A run with no matching close is literal text (CommonMark),
-    #     not a code span, and is skipped. ---
+    #     block AND is not separated from the open run by a blank line. Per
+    #     CommonMark, an inline code span cannot contain a blank line /
+    #     paragraph break -- a close-run candidate on the far side of one is
+    #     rejected (skipped past), not treated as a valid close. A run with
+    #     no matching close is literal text (CommonMark), not a code span,
+    #     and is skipped. ---
     $runMatches = [regex]::Matches($Text, '`+')
     $k = 0
     while ($k -lt $runMatches.Count) {
@@ -211,10 +218,17 @@ function script:Get-GroundingEvidenceCodeSpans {
         for ($m = $k + 1; $m -lt $runMatches.Count; $m++) {
             $candidate = $runMatches[$m]
             if (script:Test-GroundingEvidenceIndexInSpan -Index $candidate.Index -Spans $fenceSpans) { continue }
-            if ($candidate.Length -eq $runLen) {
-                $closeIdx = $m
-                break
+            if ($candidate.Length -ne $runLen) { continue }
+            $betweenStart = $openRun.Index + $openRun.Length
+            $betweenText  = $Text.Substring($betweenStart, $candidate.Index - $betweenStart)
+            if ($betweenText -match '(?s)\r?\n[ \t]*\r?\n') {
+                # Paragraph break between open run and this candidate --
+                # not a valid close per CommonMark. Skip past it; any later
+                # candidate is even further past the same break.
+                continue
             }
+            $closeIdx = $m
+            break
         }
         if ($closeIdx -ge 0) {
             $closeRun = $runMatches[$closeIdx]
@@ -232,7 +246,7 @@ function script:Get-GroundingEvidenceCodeSpans {
 function Get-GroundingEvidenceBucket {
     <#
     .SYNOPSIS
-        Classifies a body's Grounding Evidence heading shape.
+        Classifies the Grounding Evidence heading shape of a body.
     .PARAMETER BodyText
         The full issue/comment body text to classify.
     .OUTPUTS
@@ -246,6 +260,18 @@ function Get-GroundingEvidenceBucket {
     if ([string]::IsNullOrEmpty($BodyText)) {
         return 'absent'
     }
+
+    # Normalize line endings ONCE, here at the public entry point, before any
+    # span computation or pattern matching. A real GitHub API body is
+    # CRLF-terminated; in .NET, multiline `$` anchors immediately before `\n`
+    # and `[^\r\n]*` stops before `\r`, so every `$`-anchored pattern in this
+    # file (fence-line detection, H2 heading detection) would silently never
+    # match against unnormalized CRLF text. Normalizing once here -- rather
+    # than patching each regex -- keeps character-offset math (spans computed
+    # against normalized text, matched against normalized text) internally
+    # consistent. Private helpers below intentionally do NOT normalize so
+    # they stay reusable with whatever text a caller passes them.
+    $BodyText = $BodyText -replace "`r`n", "`n" -replace "`r", "`n"
 
     $codeSpans = script:Get-GroundingEvidenceCodeSpans -Text $BodyText
 
@@ -265,9 +291,10 @@ function Get-GroundingEvidenceBucket {
         }
     }
 
-    # --- non-canonical: a bare H2 heading, or a bold heading with no
-    #     canonical adjacent sentinel, either outside code spans. ---
-    $h2Pattern  = '(?m)^[ \t]{0,3}##[ \t]+Grounding Evidence\b'
+    # --- non-canonical: a bare H2-H4 heading (case-insensitive heading
+    #     text), or a bold heading with no canonical adjacent sentinel,
+    #     either outside code spans. ---
+    $h2Pattern  = '(?im)^[ \t]{0,3}#{2,4}[ \t]+Grounding Evidence\b'
     $h2Matches  = [regex]::Matches($BodyText, $h2Pattern)
     foreach ($h2Match in $h2Matches) {
         if (-not (script:Test-GroundingEvidenceIndexInSpan -Index $h2Match.Index -Spans $codeSpans)) {
@@ -275,9 +302,16 @@ function Get-GroundingEvidenceBucket {
         }
     }
 
-    $boldMatches = [regex]::Matches($BodyText, $boldEsc)
+    # --- bold heading shape: `**Grounding Evidence**` anchored to the start
+    #     of a line (leading whitespace allowed), consistent with the
+    #     definition in the docstring of this bucket as a heading shape -- a
+    #     mid-sentence prose mention (e.g. "...the **Grounding Evidence**
+    #     block...") must not trigger this bucket. ---
+    $boldHeadingPattern = "(?m)^[ \t]*($boldEsc)"
+    $boldMatches = [regex]::Matches($BodyText, $boldHeadingPattern)
     foreach ($boldMatch in $boldMatches) {
-        if (-not (script:Test-GroundingEvidenceIndexInSpan -Index $boldMatch.Index -Spans $codeSpans)) {
+        $boldIdx = $boldMatch.Groups[1].Index
+        if (-not (script:Test-GroundingEvidenceIndexInSpan -Index $boldIdx -Spans $codeSpans)) {
             return 'non-canonical'
         }
     }
@@ -293,8 +327,9 @@ function script:Resolve-GroundingEvidenceRepoSlug {
     <#
     .SYNOPSIS
         Resolves an 'owner/repo' slug from explicit -Owner/-Repo params, or
-        falls back to parsing `git remote get-url origin` (same regex idiom
-        as lib/gate-reconciliation-core.ps1's Read-FindingDispositionIds).
+        falls back to parsing `git remote get-url origin` (as the regex idiom
+        used by the Read-FindingDispositionIds function in
+        lib/gate-reconciliation-core.ps1).
     .OUTPUTS
         [string] 'owner/repo', or '' if unresolvable.
     #>
@@ -363,7 +398,15 @@ function script:Find-GroundingEvidenceDiscoveredIssues {
         }
         $hasRealMarker = $false
         foreach ($commentNode in @($viewParsed['comments'])) {
-            if ($null -ne $commentNode -and [string]$commentNode['body'] -like "*$marker*") {
+            if ($null -eq $commentNode) { continue }
+            try {
+                $commentBody = [string]$commentNode['body']
+            }
+            catch {
+                Write-Warning "grounding-evidence-corpus-check: could not read comment body for candidate #$candidateNumber ($($_.Exception.Message)); skipping comment"
+                continue
+            }
+            if ($commentBody -like "*$marker*") {
                 $hasRealMarker = $true
                 break
             }
@@ -379,10 +422,10 @@ function script:Find-GroundingEvidenceDiscoveredIssues {
 function script:Get-GroundingEvidenceIssueRecord {
     <#
     .SYNOPSIS
-        Fetches one issue's body + comments, resolves the
-        design-phase-complete marker comment's createdAt (for -Since
-        filtering), and classifies the ISSUE BODY (never the marker
-        comment) into a bucket.
+        Fetches the body + comments belonging to one issue, resolves the
+        createdAt belonging to the design-phase-complete marker comment
+        (for -Since filtering), and classifies the ISSUE BODY (never the
+        marker comment) into a bucket.
     .OUTPUTS
         [PSCustomObject]@{ IssueNumber; Bucket; MarkerCreatedAt } or $null
         when the issue/marker could not be resolved.
@@ -414,9 +457,16 @@ function script:Get-GroundingEvidenceIssueRecord {
     $markerCreatedAt = $null
     foreach ($commentNode in @($parsed['comments'])) {
         if ($null -eq $commentNode) { continue }
-        $body = [string]$commentNode['body']
+        try {
+            $body = [string]$commentNode['body']
+        }
+        catch {
+            Write-Warning "grounding-evidence-corpus-check: could not read comment body for #$IssueNumber ($($_.Exception.Message)); treating record as unresolvable"
+            return $null
+        }
         if ($body -like "*$marker*") {
             $markerCreatedAt = $commentNode['createdAt']
+            break
         }
     }
 
@@ -454,7 +504,9 @@ if (-not $isDotSourced) {
     }
 
     $cohort = [System.Collections.Generic.List[int]]::new()
-    foreach ($n in $IssueNumbers) { $cohort.Add($n) }
+    foreach ($n in $IssueNumbers) {
+        if ($cohort -notcontains $n) { $cohort.Add($n) }
+    }
 
     if ($Discover) {
         $discovered = script:Find-GroundingEvidenceDiscoveredIssues -RepoSlug $repoSlug -GhCliPath $GhCliPath
@@ -473,9 +525,33 @@ if (-not $isDotSourced) {
         $record = script:Get-GroundingEvidenceIssueRecord -IssueNumber $issueNumber -RepoSlug $repoSlug -GhCliPath $GhCliPath
         if ($null -eq $record) { continue }
         if ($null -ne $Since) {
-            if ($null -eq $record.MarkerCreatedAt) { continue }
-            $createdAtDt = [datetime]$record.MarkerCreatedAt
-            if ($createdAtDt -lt $Since) { continue }
+            if ($null -eq $record.MarkerCreatedAt) {
+                Write-Warning "grounding-evidence-corpus-check: #$issueNumber excluded from -Since filtering -- no design-phase-complete marker comment was found (distinct from being excluded by the date filter itself)"
+                continue
+            }
+            try {
+                # Parse as UTC explicitly: a GitHub API timestamp like
+                # 2026-07-01T02:00:00Z cast via a bare [datetime] cast yields
+                # DateTimeKind.Local (implicitly converted to the local time
+                # of the machine), while -Since is DateTimeKind.Unspecified --
+                # comparing the two mixes represented instants and shifts
+                # the effective cutoff by the UTC offset of the runner.
+                $createdAtDt = [datetime]::Parse(
+                    $record.MarkerCreatedAt,
+                    [System.Globalization.CultureInfo]::InvariantCulture,
+                    ([System.Globalization.DateTimeStyles]::AdjustToUniversal -bor [System.Globalization.DateTimeStyles]::AssumeUniversal)
+                )
+            }
+            catch {
+                Write-Warning "grounding-evidence-corpus-check: could not parse MarkerCreatedAt for #$issueNumber ($($_.Exception.Message)); treating record as unresolvable"
+                continue
+            }
+            # -Since is interpreted as UTC (see parameter doc-comment):
+            # reinterpret its clock value as UTC rather than converting from
+            # the local offset of the runner, so both sides of the
+            # comparison are the same represented instant.
+            $sinceUtc = [datetime]::SpecifyKind($Since.Value, [System.DateTimeKind]::Utc)
+            if ($createdAtDt -lt $sinceUtc) { continue }
         }
         $records.Add($record)
     }

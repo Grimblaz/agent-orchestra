@@ -70,6 +70,11 @@ Describe 'grounding-evidence-corpus-check classifier' {
         $script:RepoRoot   = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
         $script:ScriptPath = Join-Path $script:RepoRoot '.github/scripts/grounding-evidence-corpus-check.ps1'
 
+        # Explicit `r`n literal (NOT a here-string, which PowerShell may
+        # normalize to LF-only) -- used to build genuinely CRLF-terminated
+        # fixture bodies below by joining line arrays with this separator.
+        $script:CRLF = "`r`n"
+
         # NOTE (genuine-red, s4): this dot-source is expected to THROW right
         # now because $script:ScriptPath does not exist yet -- s5 implements
         # it. Wrapping in try/catch so Pester's discovery/BeforeAll phase
@@ -216,5 +221,108 @@ adjacent, is non-canonical or absent -- never canonical.
   canonical under that rule, which is the bug AC7 exists to prevent.
 '@
         Get-GroundingEvidenceBucket -BodyText $body | Should -Be 'absent'
+    }
+
+    # --- Fixture 6: CRLF-fenced canonical pair (CM1 regression) ---
+    # The same sentinel+bold-heading+table shape as Fixture 1, but wrapped
+    # in a CRLF-terminated triple-backtick fence. Locks CM1: in .NET,
+    # multiline `$` anchors immediately before `\n`, and `[^\r\n]*` stops
+    # before `\r`, so a fence-line regex evaluated against unnormalized CRLF
+    # text never matches the fence -- the block would then be treated as
+    # unfenced prose and misclassify canonical instead of the correct
+    # absent (both occurrences are inside a code fence).
+    It 'classifies a canonical pair wrapped in a CRLF triple-backtick fence as absent (CM1 regression)' {
+        $lines = @(
+            '## Design Decisions',
+            '',
+            '```text',
+            '<!-- grounding-evidence -->',
+            '',
+            '**Grounding Evidence** (HEAD: abc1234)',
+            '',
+            '| Claim | Evidence |',
+            '| --- | --- |',
+            '| The API returns 404 for missing users | src/api/users.py:42 |',
+            '```',
+            '',
+            'More ordinary design prose below the block.'
+        )
+        $body = $lines -join $script:CRLF
+        $body | Should -Match "`r`n"
+        Get-GroundingEvidenceBucket -BodyText $body | Should -Be 'absent'
+    }
+
+    # --- Fixture 7: CRLF-fenced canonical pair, tilde fence (CM1 regression) ---
+    # Same shape as Fixture 6, but with a `~~~` fence instead of triple
+    # backticks -- locks that the fence-line regex's CRLF fix applies to
+    # both fence characters, not just backticks.
+    It 'classifies a canonical pair wrapped in a CRLF tilde fence as absent (CM1 regression)' {
+        $lines = @(
+            '## Design Decisions',
+            '',
+            '~~~text',
+            '<!-- grounding-evidence -->',
+            '',
+            '**Grounding Evidence** (HEAD: abc1234)',
+            '',
+            '| Claim | Evidence |',
+            '| --- | --- |',
+            '| The API returns 404 for missing users | src/api/users.py:42 |',
+            '~~~',
+            '',
+            'More ordinary design prose below the block.'
+        )
+        $body = $lines -join $script:CRLF
+        $body | Should -Match "`r`n"
+        Get-GroundingEvidenceBucket -BodyText $body | Should -Be 'absent'
+    }
+
+    # --- Fixture 8: CRLF version of Fixture 1, NOT fenced (CM1 no-regression check) ---
+    # Confirms CRLF normalization does not break the normal, unfenced
+    # canonical case -- the sentinel and bold heading are still detected as
+    # adjacent once line endings are normalized.
+    It 'classifies a CRLF-terminated (unfenced) sentinel+bold-heading+table block as canonical' {
+        $lines = @(
+            '## Design Decisions',
+            '',
+            'Some ordinary design prose above the block.',
+            '',
+            '<!-- grounding-evidence -->',
+            '',
+            '**Grounding Evidence** (HEAD: abc1234)',
+            '',
+            '| Claim | Evidence |',
+            '| --- | --- |',
+            '| The API returns 404 for missing users | src/api/users.py:42 |',
+            '| Retry logic caps at 3 attempts | src/api/retry.py:18 |',
+            '',
+            'More ordinary design prose below the block.'
+        )
+        $body = $lines -join $script:CRLF
+        $body | Should -Match "`r`n"
+        Get-GroundingEvidenceBucket -BodyText $body | Should -Be 'canonical'
+    }
+
+    # --- Fixture 9: sentinel and bold heading present but paragraph-separated (issue #863 shape) ---
+    # Both the sentinel and the bold heading are present, both outside any
+    # code span, but a genuine prose paragraph sits between them -- so they
+    # are not truly adjacent. This is the real issue #863 shape: the tokens
+    # are present and unwrapped, but not persisted as the canonical pair.
+    It 'classifies a sentinel and bold heading separated by an intervening prose paragraph as non-canonical' {
+        $lines = @(
+            '## Design Decisions',
+            '',
+            '<!-- grounding-evidence -->',
+            '',
+            'This paragraph of ordinary prose sits between the sentinel and the heading, so they are not truly adjacent.',
+            '',
+            '**Grounding Evidence** (HEAD: abc1234)',
+            '',
+            '| Claim | Evidence |',
+            '| --- | --- |',
+            '| The API returns 404 for missing users | src/api/users.py:42 |'
+        )
+        $body = $lines -join $script:CRLF
+        Get-GroundingEvidenceBucket -BodyText $body | Should -Be 'non-canonical'
     }
 }

@@ -1,6 +1,6 @@
 <!-- audit-meta
-last-verified: 76ee95659252f7c19cbc1c91d7eb63afd933b023
-generated-at: 2026-07-17T00:15:31Z
+last-verified: 37ef4082670270612231dc368cc55822d68fd312
+generated-at: 2026-07-20T18:33:13Z
 -->
 
 ## Purpose
@@ -257,6 +257,8 @@ Copilot always reads from the source tree in the hub repo. This dual-resolved be
   - `.github/scripts/bump-version.ps1`
   - `.github/scripts/frame-credit-ledger.ps1`
   - `.github/scripts/normalize-whitespace.ps1`
+  - `.github/scripts/plan-tree-state-verification.ps1`
+  - `.github/scripts/grounding-evidence-corpus-check.ps1`
 - **notes**: Root-level hook and utility scripts under .github/scripts/. Claude loads from plugin-cache; Copilot runs from source-tree. Missing script produces visible-warning because the hook that calls it will report an error but does not block the pipeline.
 
 ### `.github/scripts/lib/*.ps1`
