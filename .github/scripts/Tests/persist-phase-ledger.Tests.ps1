@@ -739,11 +739,16 @@ Describe 'Invoke-PersistPhaseLedger' {
 
             # Span ends: the next distinctly-labeled fix comment following
             # each anchor marks the start of unrelated code, bounding each
-            # branch's own span without hardcoding a line count.
-            $appendEnd = $sourceLines | Select-String -Pattern '^\s*#\s*M14 fix' | Select-Object -First 1
+            # branch's own span without hardcoding a line count. Each
+            # end-anchor search is itself bounded to lines strictly after
+            # its own start anchor (GH-F2 fix, issue #886 review-github
+            # intake, sourcery-ai): searching globally over the whole file
+            # would let an end marker that happened to precede its own
+            # branch's start anchor invert the computed span.
+            $appendEnd = $sourceLines | Select-String -Pattern '^\s*#\s*M14 fix' | Where-Object { $_.LineNumber -gt $appendAnchor.LineNumber } | Select-Object -First 1
             $appendEnd | Should -Not -BeNullOrEmpty
 
-            $replaceEnd = $sourceLines | Select-String -Pattern '^\s*#\s*M5 fix' | Select-Object -First 1
+            $replaceEnd = $sourceLines | Select-String -Pattern '^\s*#\s*M5 fix' | Where-Object { $_.LineNumber -gt $replaceAnchor.LineNumber } | Select-Object -First 1
             $replaceEnd | Should -Not -BeNullOrEmpty
 
             $appendSpan = $sourceLines[($appendAnchor.LineNumber - 1)..($appendEnd.LineNumber - 2)]
