@@ -94,6 +94,14 @@ expect(record.status).toBe("processed");
 
 Why this matters: a helper-driven integration test can stay green even when the real production wiring is missing.
 
+### Producer-Shape Fidelity
+
+A fixture for a function whose input comes from a _named upstream producer_ (a parser, converter, deserializer, or dot-sourced library call) must use the producer's actual runtime type, verified by reading the producer — not whichever type is easiest to construct in the test language.
+
+**Trap**: a `[pscustomobject]` fixture can make a `.PSObject.Properties.Match(...)` check pass while the real shape (`[hashtable]`, e.g. from a YAML/JSON parser) makes the same check silently no-op in production.
+
+This is _type_ fidelity — distinct from the path-wiring fidelity above and the cardinality fidelity in Collection / Iteration Coverage below. Mutation testing cannot catch it: mutations only prove tests catch changes within the fixture's own shape.
+
 ## Quality Gates In Practice
 
 - Run the repository's configured test command for fast red-green feedback

@@ -5,6 +5,10 @@
     Core parser library for the goal-contract plan-seat variant (issue #872,
     frame-slice s2; design decisions 872-D2/872-D3/872-D6).
 
+    Disambiguation: this is the #872 contract PARSE/HASH library (block
+    extraction, schema parsing, hashing) that goal-contract-validate-core.ps1
+    (#873's validator ENGINE) consumes -- not the same file.
+
 .DESCRIPTION
     The one shared block-extraction and parsing library for every goal-contract
     consumer (frame-validate-core.ps1, orchestra-spine.ps1, and #873's

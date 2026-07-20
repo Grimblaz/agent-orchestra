@@ -1,7 +1,7 @@
 {
   "name": "agent-orchestra",
   "description": "⚠️ Copilot/VS Code support frozen, retiring after 2026-08-31 — see https://github.com/Grimblaz/agent-orchestra/blob/main/Documents/Design/copilot-deprecation.md. Claude Code is the supported path. Multi-agent workflow system with 16 specialized agents and a shared skill library.",
-  "version": "3.4.1",
+  "version": "3.4.2",
   "author": {
     "name": "Grimblaz"
   },
