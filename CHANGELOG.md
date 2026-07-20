@@ -2,6 +2,12 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.4.2] — 2026-07-20
+
+### Added
+
+Goal-contract validator (`goal-contract-validate.ps1`): independent, non-transcript re-validation of an autonomous goal-run's completion claim — contract intake gates, detached-worktree execution, absolute green-floor suite gate, test-diff integrity flags, and an emit-only machine verdict (#873).
+
 ## [3.4.1] — 2026-07-19
 
 ### Changed
