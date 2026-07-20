@@ -325,4 +325,34 @@ adjacent, is non-canonical or absent -- never canonical.
         $body = $lines -join $script:CRLF
         Get-GroundingEvidenceBucket -BodyText $body | Should -Be 'non-canonical'
     }
+
+    # --- Fixture 10: sentinel and bold heading adjacent on the SAME line, in
+    #     ordinary prose (GH-F1/GH-F2 regression -- sourcery-ai and
+    #     chatgpt-codex-connector independently reported this on PR #895).
+    #     Neither existing fixture above catches this: every other
+    #     multi-mention fixture backticks the sentinel/bold literal (putting
+    #     them in excluded inline code spans), so this is the first fixture
+    #     to exercise the RAW, unbackticked, same-line adjacency shape.
+    #     Before the fix, $adjacencyPattern used `\s*` (no newline required),
+    #     so this prose sentence -- with nothing but a single space between
+    #     the sentinel and the bold literal -- matched and returned
+    #     'canonical'. The fix requires a newline between the sentinel and
+    #     the bold heading, so this no longer matches the canonical
+    #     adjacency pattern. NOTE: the bold token here is NOT anchored to
+    #     the start of a line (it follows "Use <!-- grounding-evidence -->
+    #     " earlier on the same line), so $boldHeadingPattern's line-start
+    #     anchor (^[ \t]*) does not match it either -- this body has no real
+    #     heading shape at all, so it falls through to 'absent', consistent
+    #     with this function's own docstring ("or appear in prose but not
+    #     adjacent to each other") and with the mid-sentence-prose-exclusion
+    #     intent already documented above the $boldHeadingPattern definition.
+    It 'classifies a sentinel and bold heading adjacent on the same line in ordinary prose as absent, not canonical (GH-F1/GH-F2 regression)' {
+        $body = @'
+## Design Decisions
+
+Use <!-- grounding-evidence --> **Grounding Evidence** as the template.
+'@
+        Get-GroundingEvidenceBucket -BodyText $body | Should -Not -Be 'canonical'
+        Get-GroundingEvidenceBucket -BodyText $body | Should -Be 'absent'
+    }
 }

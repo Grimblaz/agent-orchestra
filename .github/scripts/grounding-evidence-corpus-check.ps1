@@ -279,7 +279,7 @@ function Get-GroundingEvidenceBucket {
     #     nothing else) by the bold heading, both outside code spans. ---
     $sentinelEsc = [regex]::Escape($script:GroundingEvidenceSentinelLiteral)
     $boldEsc     = [regex]::Escape($script:GroundingEvidenceBoldLiteral)
-    $adjacencyPattern = "$sentinelEsc\s*($boldEsc)"
+    $adjacencyPattern = "$sentinelEsc[ \t]*\n\s*($boldEsc)"
     $adjMatches = [regex]::Matches($BodyText, $adjacencyPattern)
     foreach ($adjMatch in $adjMatches) {
         $sentinelIdx = $adjMatch.Index
