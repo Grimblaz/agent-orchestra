@@ -1191,6 +1191,49 @@ Start-Sleep -Seconds 30
             $result.AdvisoryFlags | Should -Not -Contain 'falsifier-absent'
         }
 
+        # F1/F2 (HIGH, CE-Gate findings): the three cases above all use a
+        # [pscustomobject] fixture, on which $Target.PSObject.Properties.
+        # Match('falsifier') happens to work -- so they stayed green while
+        # the falsifier-presence gate was 100% broken on the REAL shape
+        # ConvertFrom-GCContractBlock -> ConvertFrom-Yaml actually returns:
+        # a [System.Collections.Hashtable]. On a Hashtable,
+        # .PSObject.Properties.Match() enumerates the CLR TYPE's own members
+        # (Keys, Values, Count, ...), never the hashtable's own keys, so the
+        # match count is always 0 regardless of what the hashtable actually
+        # contains. These three cases re-run the identical assertions
+        # against literal Hashtable-shaped targets to close that
+        # fixture/production type-shape divergence gap -- proving the fixed
+        # helper (script:Test-GCPropertyPresent) is genuinely shape-tolerant
+        # in both directions, not just re-fixed for the shape that already
+        # passed.
+        It 'flags a Hashtable-shaped target with no falsifier key as advisory, without changing its pass outcome (F1/F2 real-shape coverage)' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCTargetCheck'
+            $target = @{ id = 'T-no-falsifier-hash'; check = 'exit 0' }
+
+            $result = Invoke-GCTargetCheck -Target $target -WorktreePath $TestDrive -TimeoutSeconds 5
+
+            $result.Outcome | Should -Be 'pass' -Because 'falsifier-absent is purely informational and must never change the pass/fail outcome'
+            $result.AdvisoryFlags | Should -Contain 'falsifier-absent'
+        }
+
+        It 'flags a Hashtable-shaped target with a blank falsifier key as advisory too (F1/F2 real-shape coverage)' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCTargetCheck'
+            $target = @{ id = 'T-blank-falsifier-hash'; check = 'exit 0'; falsifier = '   ' }
+
+            $result = Invoke-GCTargetCheck -Target $target -WorktreePath $TestDrive -TimeoutSeconds 5
+
+            $result.AdvisoryFlags | Should -Contain 'falsifier-absent'
+        }
+
+        It 'does not flag falsifier-absent when a Hashtable-shaped target carries a non-blank falsifier key (F1/F2 real-shape coverage, the exact production regression: this must NOT read as absent)' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCTargetCheck'
+            $target = @{ id = 'T-has-falsifier-hash'; check = 'exit 0'; falsifier = 'would look like an accumulator silently resetting null to zero' }
+
+            $result = Invoke-GCTargetCheck -Target $target -WorktreePath $TestDrive -TimeoutSeconds 5
+
+            $result.AdvisoryFlags | Should -Not -Contain 'falsifier-absent' -Because 'a real Hashtable key with genuine content must be detected -- the pre-fix .PSObject.Properties.Match() check always reported this as absent regardless of content'
+        }
+
         It 'caps captured stdout at the byte limit and marks it truncated rather than capturing unboundedly' {
             script:Assert-GCVFunctionExists -Name 'Invoke-GCTargetCheck'
             $check = "1..2000 | ForEach-Object { Write-Output ('line-' + `$_ + '-' + ('x' * 40)) }"
@@ -2247,6 +2290,42 @@ Describe 'Evade' { It 'x' { 1 | Should -Be 1 } }
             # comment reaches the JSON.
             $parsed.Targets[0].Falsifier | Should -Not -Match '<!--'
             $parsed.Targets[0].Falsifier | Should -Match 'marker-injection attempt'
+            # F3 (LOW, CE-Gate finding): this fixture's falsifier is one of
+            # the fields the fixed-point strip actually altered (it removes
+            # the embedded '<!-- goal-contract -->' marker) -- the
+            # content-free, boolean 'inert-render-altered' advisory flag
+            # must surface on this target's own row so a reader knows
+            # something was silently rewritten, without echoing what.
+            $parsed.Targets[0].AdvisoryFlags | Should -Contain 'inert-render-altered'
+        }
+
+        It 'flags AdvisoryFlags with inert-render-altered when the fixed-point strip silently rewrites benign "-->" arrow prose, not just a genuine marker-injection attempt (F3)' {
+            script:Assert-GCVFunctionExists -Name 'New-GCVerdictReport'
+            $disposition = Resolve-GCVerdictDisposition -Targets @(
+                [pscustomobject]@{ Id = 'T1'; Outcome = 'pass'; ExitCode = 0; TimedOut = $false; Reason = $null; AdvisoryFlags = @(); StdOut = ''; StdErr = '' }
+            )
+            $contractTargets = @(
+                [pscustomobject]@{ id = 'T1'; ac_ref = 'AC1'; expected = 'exit 0'; falsifier = 'benign prose using the arrow shape: went from 3 --> 0, not a marker' }
+            )
+
+            $report = New-GCVerdictReport -Disposition $disposition -ContractTargets $contractTargets -Flags @()
+
+            $report.Targets[0].AdvisoryFlags | Should -Contain 'inert-render-altered' -Because 'the fixed-point strip silently alters legitimate "-->" arrow prose with no other indicator to the reader; the flag must surface this content-free, without echoing the original or stripped text'
+            $report.Targets[0].Falsifier | Should -Not -Match '-->' -Because 'the flag is an indicator only -- it must never weaken or bypass the R2/U7 fixed-point strip itself'
+        }
+
+        It 'does not set inert-render-altered when no target field contains HTML-comment delimiters' {
+            script:Assert-GCVFunctionExists -Name 'New-GCVerdictReport'
+            $disposition = Resolve-GCVerdictDisposition -Targets @(
+                [pscustomobject]@{ Id = 'T1'; Outcome = 'pass'; ExitCode = 0; TimedOut = $false; Reason = $null; AdvisoryFlags = @(); StdOut = 'ok'; StdErr = '' }
+            )
+            $contractTargets = @(
+                [pscustomobject]@{ id = 'T1'; ac_ref = 'AC1'; expected = 'exit 0'; falsifier = 'a clean falsifier with no comment-delimiter shapes' }
+            )
+
+            $report = New-GCVerdictReport -Disposition $disposition -ContractTargets $contractTargets -Flags @()
+
+            $report.Targets[0].AdvisoryFlags | Should -Not -Contain 'inert-render-altered' -Because 'the advisory flag must only fire when a strip genuinely occurred, never unconditionally'
         }
 
         It 'surfaces StdOutTruncated/StdErrTruncated explicitly on the report, distinct from the excerpt text itself (R20)' {
@@ -2413,6 +2492,23 @@ Describe 'Evade' { It 'x' { 1 | Should -Be 1 } }
             @($verdict.Targets).Count | Should -Be 1
             $verdict.Targets[0].Outcome | Should -Be 'pass'
             @($verdict.Flags).Count | Should -Be 0
+
+            # F1 (HIGH, CE-Gate finding): this fixture's contract YAML
+            # (script:New-GCContractPayloadForHash) carries a genuine,
+            # non-blank falsifier field. It is parsed through the REAL
+            # production path -- ConvertFrom-GCContractBlock ->
+            # ConvertFrom-Yaml -- which returns a [System.Collections.
+            # Hashtable], not a [pscustomobject]. Prior to the F1 fix, the
+            # falsifier-presence gate's bare .PSObject.Properties.Match()
+            # check always read this Hashtable's real 'falsifier' key as
+            # absent (Match() only sees a Hashtable's CLR TYPE members, never
+            # its own keys), so every production run reported Falsifier as
+            # null and an unconditional falsifier-absent advisory flag
+            # regardless of contract content. This is the end-to-end,
+            # real-Hashtable-shaped proof that the fix actually closes that
+            # gap (not just the isolated Invoke-GCTargetCheck unit cases).
+            $verdict.Targets[0].Falsifier | Should -Match 'A vacuous pass would look like the check never actually running' -Because 'the real Hashtable-shaped falsifier field must survive verbatim to the verdict'
+            $verdict.Targets[0].AdvisoryFlags | Should -Not -Contain 'falsifier-absent' -Because 'a real non-blank falsifier parsed from Hashtable-shaped YAML must never be reported as absent'
         }
 
         It 'fixture 2: an assertion-count regression flags pass-review-required (never fail -- flags never block)' {

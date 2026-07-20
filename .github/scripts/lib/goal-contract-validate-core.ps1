@@ -450,6 +450,38 @@ function script:ConvertTo-GCFirstLineTrimmed {
     return ([string](@($Raw) | Select-Object -First 1)).Trim()
 }
 
+# Private: shape-tolerant key/property presence check (CE-Gate F1 fix).
+# $Target.PSObject.Properties.Match(<name>) alone only enumerates a
+# [System.Collections.Hashtable]'s own CLR TYPE members (Keys, Values,
+# Count, IsReadOnly, IsFixedSize, SyncRoot) -- NEVER the hashtable's actual
+# keys -- so it always reports 0 for a real Hashtable key, even one holding
+# genuine content. ConvertFrom-GCContractBlock -> ConvertFrom-Yaml (the
+# sibling #872 parser) returns a Hashtable, so this is the shape every
+# production contract target actually arrives in; only pscustomobject-style
+# test fixtures happened to make the old check work. Dot-access
+# ($Target.<name>) and .ContainsKey() both correctly resolve/detect a real
+# Hashtable value via PowerShell's dynamic Hashtable adapter -- only the
+# .PSObject.Properties.Match() presence CHECK itself was broken. This is the
+# ONE shared point of truth for that presence check, used at every call site
+# that needs it (both the s3 Invoke-GCTargetCheck falsifier-advisory gate
+# and the s6 New-GCVerdictReport falsifier-passthrough gate) -- duplicating
+# the corrected logic at only one of the two call sites is what let the
+# other regress unguarded for so long.
+function script:Test-GCPropertyPresent {
+    param(
+        [Parameter(Mandatory = $false)][AllowNull()]$Target,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    if ($null -eq $Target) {
+        return $false
+    }
+    if ($Target -is [System.Collections.IDictionary]) {
+        return $Target.Contains($Name)
+    }
+    return ($Target.PSObject.Properties.Match($Name).Count -gt 0)
+}
+
 function Get-GCPinnedCommentBody {
     [CmdletBinding()]
     [OutputType([string])]
@@ -1306,7 +1338,7 @@ function Invoke-GCTargetCheck {
     # this is a cheap non-vacuity nudge, never a pass/fail gate.
     $advisoryFlags = [System.Collections.Generic.List[string]]::new()
     $hasFalsifier = $false
-    if ($Target.PSObject.Properties.Match('falsifier').Count -gt 0) {
+    if (script:Test-GCPropertyPresent -Target $Target -Name 'falsifier') {
         $hasFalsifier = -not [string]::IsNullOrWhiteSpace([string]$Target.falsifier)
     }
     if (-not $hasFalsifier) {
@@ -2170,15 +2202,19 @@ function Invoke-GCDiffIntegrityPhase {
 # is net-new and backtick-SAFE.
 # -----------------------------------------------------------------------------
 
-function Format-GCInertRender {
-    [CmdletBinding()]
-    [OutputType([string])]
+# Private: single source of truth for the strip-to-fixed-point + fence
+# logic Format-GCInertRender exposes to external callers. Split out so a
+# caller that needs to know WHETHER the strip pass actually changed
+# anything (F3/CE-Gate finding, below) can get that signal without
+# duplicating the strip/fence logic itself. Format-GCInertRender remains
+# the public entry point and is now a thin wrapper around this.
+function script:Get-GCInertRenderResult {
     param(
         [Parameter(Mandatory = $false)][AllowNull()][AllowEmptyString()][string]$Content
     )
 
     if ($null -eq $Content) {
-        return $null
+        return [pscustomobject]@{ Rendered = $null; Altered = $false }
     }
 
     # Strip HTML-comment delimiters (mirrors the stripping half of
@@ -2194,11 +2230,23 @@ function Format-GCInertRender {
     # to a fixed point (repeat until a pass makes no further change) closes
     # this: any nested/overlapping delimiter shape eventually stabilizes to
     # content with no "<!--"/"-->" substring left to reassemble.
+    #
+    # F3 (LOW, CE-Gate finding): this fixed-point strip is correct and must
+    # NOT be weakened -- it is the R2/U7 security fix. But it has a
+    # documented side effect: legitimate prose that merely happens to
+    # contain a plain ASCII arrow shaped like "-->" (e.g. "3 --> 0") is
+    # silently rewritten with no indicator to the reader that anything
+    # changed. $Altered below (a content-free boolean -- never an echo of
+    # what was stripped or the original text, which would rebuild the exact
+    # reconstruction/injection channel this fixed-point loop exists to
+    # close) lets a caller surface that collateral effect as an advisory
+    # signal instead of leaving it silent.
     $stripped = $Content
     do {
         $previous = $stripped
         $stripped = $stripped -replace '<!--', '' -replace '-->', ''
     } while ($stripped -ne $previous)
+    $altered = ($stripped -ne $Content)
 
     # Standard Markdown "longer fence" escaping technique: find the longest
     # run of consecutive backticks anywhere in the content, then wrap in a
@@ -2221,7 +2269,20 @@ function Format-GCInertRender {
     $fenceLength = [Math]::Max(3, $longestRun + 1)
     $fence = '`' * $fenceLength
 
-    return "$fence`n$stripped`n$fence"
+    return [pscustomobject]@{
+        Rendered = "$fence`n$stripped`n$fence"
+        Altered  = $altered
+    }
+}
+
+function Format-GCInertRender {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory = $false)][AllowNull()][AllowEmptyString()][string]$Content
+    )
+
+    return (script:Get-GCInertRenderResult -Content $Content).Rendered
 }
 
 # Private: bounds a report excerpt's character length (independent of
@@ -2298,23 +2359,67 @@ function New-GCVerdictReport {
             $contractTarget = $targetsById[$tId]
         }
 
+        # F3 (LOW, CE-Gate finding): track whether ANY Format-GCInertRender
+        # call for this target row actually altered its input (the strip
+        # pass removed a "<!--"/"-->" substring) -- via
+        # script:Get-GCInertRenderResult directly rather than the
+        # Format-GCInertRender string-only wrapper, so the boolean signal is
+        # available without re-deriving the strip logic. Folded into this
+        # target's own AdvisoryFlags (reusing the existing array, no new
+        # verdict field) as 'inert-render-altered' below -- content-free, so
+        # it can never become an echo/reconstruction channel for what was
+        # stripped.
+        $anyAltered = $false
+
+        $idResult = script:Get-GCInertRenderResult -Content $tId
+        $anyAltered = $anyAltered -or $idResult.Altered
+
         $expected = $null
         $falsifier = $null
         $acRef = $null
         if ($contractTarget) {
-            $expected = Format-GCInertRender -Content ([string]$contractTarget.expected)
-            $acRef = Format-GCInertRender -Content ([string]$contractTarget.ac_ref)
+            $expectedResult = script:Get-GCInertRenderResult -Content ([string]$contractTarget.expected)
+            $expected = $expectedResult.Rendered
+            $anyAltered = $anyAltered -or $expectedResult.Altered
+
+            $acRefResult = script:Get-GCInertRenderResult -Content ([string]$contractTarget.ac_ref)
+            $acRef = $acRefResult.Rendered
+            $anyAltered = $anyAltered -or $acRefResult.Altered
+
+            # F1 (HIGH, CE-Gate finding): use the shared, dictionary-aware
+            # presence check (script:Test-GCPropertyPresent) instead of a
+            # bare .PSObject.Properties.Match() call -- $contractTarget is a
+            # [System.Collections.Hashtable] on the real
+            # ConvertFrom-GCContractBlock -> ConvertFrom-Yaml parse path,
+            # and .PSObject.Properties.Match() alone never sees a
+            # Hashtable's actual keys (see script:Test-GCPropertyPresent's
+            # doc comment).
             $hasFalsifier = $false
-            if ($contractTarget.PSObject.Properties.Match('falsifier').Count -gt 0) {
+            if (script:Test-GCPropertyPresent -Target $contractTarget -Name 'falsifier') {
                 $hasFalsifier = -not [string]::IsNullOrWhiteSpace([string]$contractTarget.falsifier)
             }
             if ($hasFalsifier) {
-                $falsifier = Format-GCInertRender -Content ([string]$contractTarget.falsifier)
+                $falsifierResult = script:Get-GCInertRenderResult -Content ([string]$contractTarget.falsifier)
+                $falsifier = $falsifierResult.Rendered
+                $anyAltered = $anyAltered -or $falsifierResult.Altered
             }
         }
 
+        $stdOutExcerptResult = script:Get-GCInertRenderResult -Content (script:Get-GCExcerpt -Content $t.StdOut)
+        $anyAltered = $anyAltered -or $stdOutExcerptResult.Altered
+        $stdErrExcerptResult = script:Get-GCInertRenderResult -Content (script:Get-GCExcerpt -Content $t.StdErr)
+        $anyAltered = $anyAltered -or $stdErrExcerptResult.Altered
+
+        $targetAdvisoryFlags = [System.Collections.Generic.List[string]]::new()
+        foreach ($existingFlag in @($t.AdvisoryFlags)) {
+            $targetAdvisoryFlags.Add($existingFlag)
+        }
+        if ($anyAltered) {
+            $targetAdvisoryFlags.Add('inert-render-altered')
+        }
+
         $reportTargets.Add([pscustomobject]@{
-                Id               = Format-GCInertRender -Content $tId
+                Id               = $idResult.Rendered
                 AcRef            = $acRef
                 Outcome          = $t.Outcome
                 ExitCode         = $t.ExitCode
@@ -2322,9 +2427,9 @@ function New-GCVerdictReport {
                 Reason           = $t.Reason
                 Expected         = $expected
                 Falsifier        = $falsifier
-                AdvisoryFlags    = @($t.AdvisoryFlags)
-                StdOutExcerpt    = Format-GCInertRender -Content (script:Get-GCExcerpt -Content $t.StdOut)
-                StdErrExcerpt    = Format-GCInertRender -Content (script:Get-GCExcerpt -Content $t.StdErr)
+                AdvisoryFlags    = @($targetAdvisoryFlags)
+                StdOutExcerpt    = $stdOutExcerptResult.Rendered
+                StdErrExcerpt    = $stdErrExcerptResult.Rendered
                 # R20: check output that happens to CONTAIN the genuine
                 # truncation-marker text (e.g. a check that itself prints
                 # "...[output truncated: cap reached]...") is indistinguishable
