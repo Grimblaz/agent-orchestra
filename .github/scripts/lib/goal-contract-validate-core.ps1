@@ -296,6 +296,103 @@
     where the target suite is expected to be green; it does not itself
     verify pwsh/Pester-version compatibility between the invoking
     environment and the worktree under audit.
+
+      Resolve-GCDiffBase -WorktreePath <string> -RunSha <string>
+                          [-DefaultRef <string> = 'origin/main']
+                          [-GitCliPath <string> = 'git']
+        Frame-slice s5 (AC1/AC2), the diff-base primitive for the
+        test-diff-integrity invariant. Computes `git merge-base <default-sha>
+        <run-sha>` using EXPLICIT SHA arguments in a PINNED working
+        directory (`-C $WorktreePath`) -- never symbolic `HEAD`, which could
+        resolve to whatever branch the invoking process happens to be on
+        rather than this run's own commit. `<default-sha>` is resolved via
+        `rev-parse $DefaultRef` against a ref that must ALREADY BE PRESENT
+        locally: this function NEVER calls `git fetch` (a worktree shares
+        the operator's object store and remote-tracking refs, so a fetch
+        here would mutate the operator's real repo's refs as a side
+        effect) -- an absent ref refuses (`refused: default-ref-unresolvable`)
+        rather than fetching. When `merge-base(default, run) == run-sha`
+        there is no run diff to audit -- refuses `refused: no-run-diff`,
+        and the message states only the OBSERVED condition (merge-base
+        equals the run sha) rather than fabricating a definitive cause: no
+        commits beyond the default, a direct-to-default commit, and an
+        already-merged tip are all indistinguishable from git state alone,
+        so the message names all three honestly instead of guessing which
+        one occurred.
+
+      Test-GCTestFileDeletion -WorktreePath <string> -BaseSha <string>
+                               -RunSha <string> [-AllowlistPathspecs <string[]>]
+                               [-GitCliPath <string> = 'git']
+        Mandatory-review flag (never a block): `git diff --diff-filter=DR
+        --no-renames <base> <run> -- <allowlist>`. The `--no-renames` forces
+        git to NEVER collapse a delete+create pair into a rename, so a
+        renamed-and-gutted test file still surfaces as a deletion of the old
+        path -- `--diff-filter=D` alone would miss this evasion because
+        git's default rename heuristic reclassifies a high-similarity
+        delete+create pair as a single `R` status, which `--diff-filter=D`
+        does not match.
+
+      Get-GCShouldCommandCount -Content <string>
+        Pure AST-aware counter: parses PowerShell source via
+        `[System.Management.Automation.Language.Parser]::ParseInput` and
+        counts CommandAst nodes whose command name is literally `Should` --
+        never a substring/regex match, which would mis-hit comments, string
+        literals, `SupportsShouldProcess`, and `$PSCmdlet.ShouldProcess`
+        (none of which are Pester assertions).
+
+      Test-GCAssertionWeakening -WorktreePath <string> -BaseSha <string>
+                                 -RunSha <string> -ChangedTestFilePaths <string[]>
+                                 [-GitCliPath <string> = 'git']
+        Compares the AST Should-count (via Get-GCShouldCommandCount) for
+        each changed `*.Tests.ps1` file's content at base vs. run (read via
+        `git show <sha>:<path>`, never a working-tree read); a DECREASE
+        flags the file. Only compares files present at BOTH commits --
+        deletion-class changes are Test-GCTestFileDeletion's concern.
+        Always carries an honest `HeuristicNote`: count-preserving
+        weakening (`Should -Be $x` -> `Should -Not -BeNullOrEmpty`) is
+        undetectable by count alone, and this signal does not claim to
+        catch it.
+
+      Get-GCHelperLibSet -RepoRoot <string>
+        Grounds the "helper-lib" half of the allowlist as a RULE, not a
+        frozen list: greps every `.github/scripts/Tests/**/*.Tests.ps1`
+        file for dot-source references (both a direct literal ending
+        `.ps1`, e.g. `. (Join-Path $x 'lib/name.ps1')`, and one-hop `.
+        $script:CoreFile`-style variable indirection, resolved against that
+        variable's own assignment line in the same file) and returns the
+        `.github/scripts/lib/*.ps1` files actually referenced -- computed
+        live at run time, never a hard-coded literal array.
+
+      Test-GCFixtureOrHelperModification -WorktreePath <string> -BaseSha <string>
+                                          -RunSha <string> [-HelperLibPaths <string[]>]
+                                          [-GitCliPath <string> = 'git']
+        Mandatory-review flag: any changed file under
+        `.github/scripts/Tests/fixtures/**` OR any changed file in the
+        live-computed helper-lib set (Get-GCHelperLibSet).
+
+      Test-GCUnrecognizedInvariants -Invariants <string[]>
+        Pure predicate: the contract's `invariants[]` array may carry any
+        repo-specific string, but this validator interprets only
+        `full-pester-suite-no-new-failures` (s4's green floor) and
+        `test-diff-integrity` (this section). Any OTHER literal is returned
+        so the caller can raise it as an `unchecked` mandatory-review flag
+        -- never a silent skip.
+
+      Invoke-GCDiffIntegrityPhase -WorktreePath <string> -RunSha <string>
+                                   [-RepoRoot <string>] [-Invariants <string[]>]
+                                   [-DefaultRef <string> = 'origin/main']
+                                   [-GitCliPath <string> = 'git']
+        Composes the diff-base resolution and all three detectors above
+        (plus the unrecognized-invariant check) into one seam, mirroring
+        s3/s4's own aggregate entry points (Invoke-GCTargetChecks,
+        Invoke-GCSuitePhase). A `Resolve-GCDiffBase` refusal short-circuits
+        before any detector runs. Every detector result is a FLAG, never a
+        block -- this function has no fail/pass verdict of its own.
+        Standalone at s5, like s3/s4: not yet threaded into
+        Invoke-GCWorktreeSession's seams or Invoke-GoalContractValidate's
+        control flow; s6 wires it in and folds `Flags` into
+        Resolve-GCVerdictDisposition's `-HasReviewRequired` signal
+        alongside the s1/s3/s4 signals.
 #>
 
 # Sibling-lib dot-source, mirroring the repo convention (e.g.
@@ -1173,5 +1270,372 @@ try {
         MissingFiles = @($resultObj.MissingFiles)
         FailedFiles  = @($resultObj.FailedFiles)
         TimedOut     = $false
+    }
+}
+
+# -----------------------------------------------------------------------------
+# s5: test-diff integrity invariant (frame-slice s5, AC1/AC2). Every signal in
+# this section is a MANDATORY-REVIEW FLAG, never a block -- s6 folds a
+# non-empty Flags array into Resolve-GCVerdictDisposition's
+# -HasReviewRequired path alongside the s1/s3/s4 signals. Net-new: no
+# production `git merge-base` explicit-SHA precedent, AST `Should`-count
+# precedent, or `--diff-filter=DR --no-renames` test-deletion precedent
+# existed before this slice. These functions are standalone at s5, like s3/s4:
+# not yet threaded into Invoke-GCWorktreeSession's seams or
+# Invoke-GoalContractValidate's control flow.
+# -----------------------------------------------------------------------------
+
+# The only two invariants[] literals this validator interprets (872's schema
+# requires at least these two; the array may legally carry more). Any other
+# literal is surfaced by Test-GCUnrecognizedInvariants below.
+$script:GCVKnownInvariants = @('full-pester-suite-no-new-failures', 'test-diff-integrity')
+
+function Resolve-GCDiffBase {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$WorktreePath,
+        [Parameter(Mandatory)][string]$RunSha,
+        [Parameter(Mandatory = $false)][string]$DefaultRef = 'origin/main',
+        [Parameter(Mandatory = $false)][string]$GitCliPath = 'git'
+    )
+
+    # RC item 1: resolve <default-sha> from a ref that is ALREADY PRESENT
+    # locally -- NEVER `git fetch`. A worktree shares the operator's object
+    # store and remote-tracking refs, so a fetch here would mutate the
+    # operator's real repo's refs as a side effect. An absent ref refuses
+    # rather than fetching.
+    $defaultShaRaw = & $GitCliPath -C $WorktreePath rev-parse $DefaultRef 2>$null
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($defaultShaRaw)) {
+        return [pscustomobject]@{
+            Refused       = $true
+            RefusalReason = "refused: default-ref-unresolvable (the local ref '$DefaultRef' is not present; refusing rather than fetching, since a fetch inside a disposable worktree would mutate the operator's real remote-tracking refs)"
+            DefaultSha    = $null
+            RunSha        = $RunSha
+            MergeBaseSha  = $null
+        }
+    }
+    $defaultSha = ([string](@($defaultShaRaw) | Select-Object -First 1)).Trim()
+
+    # Explicit SHA arguments in a PINNED working directory (-C $WorktreePath)
+    # -- never symbolic HEAD, which could resolve to whatever branch the
+    # invoking process happens to be on rather than this run's own commit.
+    $mergeBaseRaw = & $GitCliPath -C $WorktreePath merge-base $defaultSha $RunSha 2>$null
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($mergeBaseRaw)) {
+        return [pscustomobject]@{
+            Refused       = $true
+            RefusalReason = "refused: merge-base-unresolvable (git merge-base $defaultSha $RunSha failed; the two commits may not share history)"
+            DefaultSha    = $defaultSha
+            RunSha        = $RunSha
+            MergeBaseSha  = $null
+        }
+    }
+    $mergeBaseSha = ([string](@($mergeBaseRaw) | Select-Object -First 1)).Trim()
+
+    # RC item 2: merge-base == run-sha means there is no run diff to audit.
+    # The message states only the OBSERVED condition, not a guessed cause --
+    # no commits beyond the default, a direct-to-default commit, and an
+    # already-merged tip are all indistinguishable from git state alone.
+    if ($mergeBaseSha -eq $RunSha) {
+        return [pscustomobject]@{
+            Refused       = $true
+            RefusalReason = "refused: no-run-diff (merge-base($defaultSha, $RunSha) equals the run sha $RunSha; observed condition only -- this cannot be distinguished, from git state alone, between the run introducing no commits beyond the default branch, the run committing directly to the default branch, or the run's tip already being merged into the default branch)"
+            DefaultSha    = $defaultSha
+            RunSha        = $RunSha
+            MergeBaseSha  = $mergeBaseSha
+        }
+    }
+
+    return [pscustomobject]@{
+        Refused       = $false
+        RefusalReason = $null
+        DefaultSha    = $defaultSha
+        RunSha        = $RunSha
+        MergeBaseSha  = $mergeBaseSha
+    }
+}
+
+function Test-GCTestFileDeletion {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$WorktreePath,
+        [Parameter(Mandatory)][string]$BaseSha,
+        [Parameter(Mandatory)][string]$RunSha,
+        [Parameter(Mandatory = $false)][string[]]$AllowlistPathspecs = @('.github/scripts/Tests'),
+        [Parameter(Mandatory = $false)][string]$GitCliPath = 'git'
+    )
+
+    # RC item 3: --diff-filter=DR (deletion, including what would otherwise
+    # register as a rename) combined with --no-renames (forces git to NEVER
+    # collapse a delete+create pair into a rename) -- deliberate: a plain
+    # --diff-filter=D alone misses a rename-and-gut evasion, because git's
+    # default rename heuristic reclassifies a high-similarity delete+create
+    # pair as a single R status, which --diff-filter=D does not match.
+    $diffArgs = @('-C', $WorktreePath, 'diff', '--name-only', '--diff-filter=DR', '--no-renames', $BaseSha, $RunSha, '--') + @($AllowlistPathspecs)
+    $rawOutput = & $GitCliPath @diffArgs 2>$null
+    $deletedFiles = @(@($rawOutput) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.Trim() })
+
+    return [pscustomobject]@{
+        Flagged      = ($deletedFiles.Count -gt 0)
+        DeletedFiles = $deletedFiles
+    }
+}
+
+function Get-GCShouldCommandCount {
+    [CmdletBinding()]
+    [OutputType([int])]
+    param(
+        [Parameter(Mandatory = $false)][AllowNull()][AllowEmptyString()][string]$Content
+    )
+
+    if ([string]::IsNullOrEmpty($Content)) {
+        return 0
+    }
+
+    $tokens = $null
+    $parseErrors = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseInput($Content, [ref]$tokens, [ref]$parseErrors)
+    if ($null -eq $ast) {
+        return 0
+    }
+
+    # RC item 4: AST-aware, not substring -- count actual `Should` COMMAND
+    # invocations (CommandAst nodes whose command name is 'Should'), never a
+    # substring/regex match, which mis-hits comments, string literals,
+    # SupportsShouldProcess, and $PSCmdlet.ShouldProcess (none of which are
+    # Pester assertions; none of those shapes are a CommandAst named
+    # 'Should', so they are excluded structurally, not by extra filtering).
+    $commandAsts = $ast.FindAll({
+            param($node)
+            $node -is [System.Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Should'
+        }, $true)
+
+    return @($commandAsts).Count
+}
+
+function Test-GCAssertionWeakening {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$WorktreePath,
+        [Parameter(Mandatory)][string]$BaseSha,
+        [Parameter(Mandatory)][string]$RunSha,
+        [Parameter(Mandatory = $false)][AllowEmptyCollection()][string[]]$ChangedTestFilePaths = @(),
+        [Parameter(Mandatory = $false)][string]$GitCliPath = 'git'
+    )
+
+    # RC item 4: labelled an honest heuristic -- count-preserving weakening
+    # (Should -Be $exactValue -> Should -Not -BeNullOrEmpty) keeps the same
+    # count and is NOT detectable by count alone. This note travels with the
+    # result regardless of whether anything was flagged.
+    $heuristicNote = 'honest heuristic: counts Should command invocations via AST parsing and flags a DECREASE between base and run; count-preserving weakening (e.g. Should -Be $exactValue replaced with Should -Not -BeNullOrEmpty) keeps the same count and is not detectable by this signal.'
+
+    $regressedFiles = [System.Collections.Generic.List[object]]::new()
+
+    foreach ($path in @($ChangedTestFilePaths)) {
+        $baseContentLines = & $GitCliPath -C $WorktreePath show "${BaseSha}:${path}" 2>$null
+        $baseExists = ($LASTEXITCODE -eq 0)
+        $runContentLines = & $GitCliPath -C $WorktreePath show "${RunSha}:${path}" 2>$null
+        $runExists = ($LASTEXITCODE -eq 0)
+
+        # Only compare when the file exists at BOTH commits -- a file absent
+        # at one side is deletion-class territory (Test-GCTestFileDeletion's
+        # concern), not an assertion-count regression.
+        if (-not $baseExists -or -not $runExists) {
+            continue
+        }
+
+        $baseCount = Get-GCShouldCommandCount -Content (@($baseContentLines) -join "`n")
+        $runCount = Get-GCShouldCommandCount -Content (@($runContentLines) -join "`n")
+
+        if ($runCount -lt $baseCount) {
+            $regressedFiles.Add([pscustomobject]@{
+                    Path      = $path
+                    BaseCount = $baseCount
+                    RunCount  = $runCount
+                })
+        }
+    }
+
+    return [pscustomobject]@{
+        Flagged       = ($regressedFiles.Count -gt 0)
+        Files         = @($regressedFiles)
+        HeuristicNote = $heuristicNote
+    }
+}
+
+function Get-GCHelperLibSet {
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot
+    )
+
+    $libDir = Join-Path $RepoRoot '.github/scripts/lib'
+    $testsDir = Join-Path $RepoRoot '.github/scripts/Tests'
+
+    if (-not (Test-Path -LiteralPath $libDir -PathType Container) -or -not (Test-Path -LiteralPath $testsDir -PathType Container)) {
+        return @()
+    }
+
+    $libFileNames = @(Get-ChildItem -LiteralPath $libDir -Filter '*.ps1' -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
+    if ($libFileNames.Count -eq 0) {
+        return @()
+    }
+
+    $testsFiles = Get-ChildItem -LiteralPath $testsDir -Filter '*.Tests.ps1' -Recurse -ErrorAction SilentlyContinue
+    $found = [System.Collections.Generic.HashSet[string]]::new()
+
+    $dq = [char]34
+    $literalPattern = "['$dq]([^'$dq]*\.ps1)['$dq]"
+
+    foreach ($tf in $testsFiles) {
+        $content = Get-Content -LiteralPath $tf.FullName -Raw -ErrorAction SilentlyContinue
+        if ([string]::IsNullOrEmpty($content)) { continue }
+        $lines = $content -split "`n"
+        $indirectVars = [System.Collections.Generic.List[string]]::new()
+
+        # RC item 5, pass 1: direct dot-source lines -- e.g. `. (Join-Path $x
+        # 'lib/name.ps1')`, `. (Join-Path $x '..' 'lib' 'name.ps1')`. A
+        # quoted literal ending .ps1 whose BASENAME names a real lib file is
+        # taken directly (grounded by real existence, not path-shape
+        # guessing).
+        foreach ($line in $lines) {
+            if ($line -match '^\s*\.\s+(.+)$') {
+                $rest = $Matches[1]
+                $literalMatches = [regex]::Matches($rest, $literalPattern)
+                if ($literalMatches.Count -gt 0) {
+                    foreach ($mm in $literalMatches) {
+                        $leaf = Split-Path -Leaf $mm.Groups[1].Value
+                        if ($libFileNames -contains $leaf) { [void]$found.Add($leaf) }
+                    }
+                } elseif ($rest -match '^\$(?:script:)?([A-Za-z0-9_]+)\s*$') {
+                    # RC item 5, pass-2 candidate: `. $script:CoreFile`-style
+                    # indirection -- the dot-source line names a bare
+                    # variable, not a literal.
+                    $indirectVars.Add($Matches[1])
+                }
+            }
+        }
+
+        # Pass 2: resolve each indirection variable against its OWN
+        # assignment line(s) in the same file (e.g. `$script:LibFile =
+        # Join-Path $script:RepoRoot '.github/scripts/lib/name.ps1'`).
+        foreach ($varName in @($indirectVars | Select-Object -Unique)) {
+            $assignPattern = '\$(?:script:)?' + [regex]::Escape($varName) + '\s*=\s*(.+)$'
+            foreach ($line in $lines) {
+                if ($line -match $assignPattern) {
+                    $assignRhs = $Matches[1]
+                    $literalMatches = [regex]::Matches($assignRhs, $literalPattern)
+                    foreach ($mm in $literalMatches) {
+                        $leaf = Split-Path -Leaf $mm.Groups[1].Value
+                        if ($libFileNames -contains $leaf) { [void]$found.Add($leaf) }
+                    }
+                }
+            }
+        }
+    }
+
+    return @($found | Sort-Object | ForEach-Object { ".github/scripts/lib/$_" })
+}
+
+function Test-GCFixtureOrHelperModification {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$WorktreePath,
+        [Parameter(Mandatory)][string]$BaseSha,
+        [Parameter(Mandatory)][string]$RunSha,
+        [Parameter(Mandatory = $false)][string[]]$HelperLibPaths = @(),
+        [Parameter(Mandatory = $false)][string]$GitCliPath = 'git'
+    )
+
+    # RC item 5: any changed file under .github/scripts/Tests/fixtures/** OR
+    # any changed file in the live-computed helper-lib set.
+    $pathspecs = @('.github/scripts/Tests/fixtures') + @($HelperLibPaths)
+    $diffArgs = @('-C', $WorktreePath, 'diff', '--name-only', $BaseSha, $RunSha, '--') + $pathspecs
+    $rawOutput = & $GitCliPath @diffArgs 2>$null
+    $changedFiles = @(@($rawOutput) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.Trim() })
+
+    return [pscustomobject]@{
+        Flagged      = ($changedFiles.Count -gt 0)
+        ChangedFiles = $changedFiles
+    }
+}
+
+function Test-GCUnrecognizedInvariants {
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param(
+        [Parameter(Mandatory = $false)][string[]]$Invariants = @()
+    )
+
+    # RC item 7: any invariants[] literal beyond the two this validator
+    # interprets is surfaced here -- never a silent skip.
+    return @(@($Invariants) | Where-Object { $script:GCVKnownInvariants -notcontains $_ })
+}
+
+function Invoke-GCDiffIntegrityPhase {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$WorktreePath,
+        [Parameter(Mandatory)][string]$RunSha,
+        [Parameter(Mandatory = $false)][string]$RepoRoot,
+        [Parameter(Mandatory = $false)][string[]]$Invariants = @(),
+        [Parameter(Mandatory = $false)][string]$DefaultRef = 'origin/main',
+        [Parameter(Mandatory = $false)][string]$GitCliPath = 'git'
+    )
+
+    if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
+        $RepoRoot = $WorktreePath
+    }
+
+    $base = Resolve-GCDiffBase -WorktreePath $WorktreePath -RunSha $RunSha -DefaultRef $DefaultRef -GitCliPath $GitCliPath
+    if ($base.Refused) {
+        return [pscustomobject]@{
+            Refused       = $true
+            RefusalReason = $base.RefusalReason
+            DefaultSha    = $base.DefaultSha
+            MergeBaseSha  = $base.MergeBaseSha
+            Flags         = @()
+        }
+    }
+
+    $flags = [System.Collections.Generic.List[object]]::new()
+
+    # RC item 5 grounds the helper-lib half of the allowlist BEFORE the
+    # deletion detector runs, so a deleted helper lib is caught by the same
+    # allowlist the deletion detector uses (RC item 6).
+    $helperLibPaths = Get-GCHelperLibSet -RepoRoot $RepoRoot
+
+    $deletion = Test-GCTestFileDeletion -WorktreePath $WorktreePath -BaseSha $base.MergeBaseSha -RunSha $RunSha -AllowlistPathspecs (@('.github/scripts/Tests') + $helperLibPaths) -GitCliPath $GitCliPath
+    if ($deletion.Flagged) {
+        $flags.Add([pscustomobject]@{ Kind = 'test-file-deletion'; Files = $deletion.DeletedFiles })
+    }
+
+    $changedTestFilesRaw = & $GitCliPath -C $WorktreePath diff --name-only $base.MergeBaseSha $RunSha -- '.github/scripts/Tests' 2>$null
+    $changedTestFiles = @(@($changedTestFilesRaw) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_.Trim() -match '\.Tests\.ps1$' } | ForEach-Object { $_.Trim() })
+    $weakening = Test-GCAssertionWeakening -WorktreePath $WorktreePath -BaseSha $base.MergeBaseSha -RunSha $RunSha -ChangedTestFilePaths $changedTestFiles -GitCliPath $GitCliPath
+    if ($weakening.Flagged) {
+        $flags.Add([pscustomobject]@{ Kind = 'assertion-weakening'; Files = $weakening.Files; HeuristicNote = $weakening.HeuristicNote })
+    }
+
+    $fixtureOrHelper = Test-GCFixtureOrHelperModification -WorktreePath $WorktreePath -BaseSha $base.MergeBaseSha -RunSha $RunSha -HelperLibPaths $helperLibPaths -GitCliPath $GitCliPath
+    if ($fixtureOrHelper.Flagged) {
+        $flags.Add([pscustomobject]@{ Kind = 'fixture-or-helper-modification'; Files = $fixtureOrHelper.ChangedFiles })
+    }
+
+    foreach ($literal in (Test-GCUnrecognizedInvariants -Invariants $Invariants)) {
+        $flags.Add([pscustomobject]@{ Kind = 'unrecognized-invariant'; Literal = $literal })
+    }
+
+    return [pscustomobject]@{
+        Refused       = $false
+        RefusalReason = $null
+        DefaultSha    = $base.DefaultSha
+        MergeBaseSha  = $base.MergeBaseSha
+        Flags         = @($flags)
     }
 }

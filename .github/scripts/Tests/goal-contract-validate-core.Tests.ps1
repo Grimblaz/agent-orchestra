@@ -205,6 +205,49 @@ exit `$LASTEXITCODE
                 Remove-Item -LiteralPath $WorktreePath -Recurse -Force -ErrorAction SilentlyContinue
             }
         }
+
+        # --- s5 fixtures: writes a file (creating parent dirs), commits, and
+        # returns the resulting sha -- built on the same real-temp-git-repo
+        # pattern as the s2 fixtures above (never the invoking repo).
+        function script:Write-GCFile {
+            param([Parameter(Mandatory)][string]$RepoPath, [Parameter(Mandatory)][string]$RelativePath, [Parameter(Mandatory = $false)][string]$Content = '')
+            $fullPath = Join-Path $RepoPath $RelativePath
+            $dir = Split-Path -Parent $fullPath
+            if ($dir -and -not (Test-Path -LiteralPath $dir)) {
+                New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            }
+            [System.IO.File]::WriteAllText($fullPath, $Content, [System.Text.UTF8Encoding]::new($false))
+        }
+
+        function script:New-GCCommit {
+            param([Parameter(Mandatory)][string]$RepoPath, [Parameter(Mandatory = $false)][string]$Message = 'commit')
+            & git -C $RepoPath add -A 2>&1 | Out-Null
+            & git -C $RepoPath commit -q -m $Message 2>&1 | Out-Null
+            return (& git -C $RepoPath rev-parse HEAD).Trim()
+        }
+
+        function script:Remove-GCFile {
+            param([Parameter(Mandatory)][string]$RepoPath, [Parameter(Mandatory)][string]$RelativePath)
+            Remove-Item -LiteralPath (Join-Path $RepoPath $RelativePath) -Force -ErrorAction SilentlyContinue
+        }
+
+        # A smart forwarding mock: passes every git invocation through to the
+        # REAL git binary, but records (never blocks -- recording is enough
+        # to prove the no-fetch invariant) whenever `fetch` appears as an
+        # argument, so a test can assert the marker file was never written.
+        function script:New-MockGitNoFetch {
+            param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$MarkerFile)
+            $markerEscaped = $MarkerFile -replace "'", "''"
+            @"
+param()
+`$argsJoined = `$args -join ' '
+if (`$argsJoined -match '(^| )fetch( |`$)') {
+    Set-Content -LiteralPath '$markerEscaped' -Value 'FETCH-CALLED' -NoNewline
+}
+& git @args
+exit `$LASTEXITCODE
+"@ | Set-Content -LiteralPath $Path -Encoding UTF8
+        }
     }
 
     Context 'Get-GCPinnedCommentBody -- marker-pinned, paginated, byte-safe read' {
@@ -1125,6 +1168,484 @@ function Invoke-PesterSharded {
             $result.ExitCode | Should -Be 1
             $result.TotalFailed | Should -Be 0
             Test-GCSuiteGatePass -Result $result | Should -Be $false
+        }
+    }
+
+    Context 'Resolve-GCDiffBase -- explicit-SHA merge-base + no-fetch refusal (s5, AC1/AC2)' {
+
+        It 'computes the merge-base from EXPLICIT SHAs, honoring -RunSha regardless of what is currently checked out' {
+            script:Assert-GCVFunctionExists -Name 'Resolve-GCDiffBase'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'diffbase-repo')
+            script:Write-GCFile -RepoPath $repo -RelativePath 'main-file.txt' -Content "main`n"
+            $mainTip = script:New-GCCommit -RepoPath $repo -Message 'main commit'
+            & git -C $repo checkout -q -b feature 2>&1 | Out-Null
+            script:Write-GCFile -RepoPath $repo -RelativePath 'feature-file.txt' -Content "feature`n"
+            $runSha = script:New-GCCommit -RepoPath $repo -Message 'feature commit'
+            & git -C $repo checkout -q main 2>&1 | Out-Null
+
+            $result = Resolve-GCDiffBase -WorktreePath $repo -RunSha $runSha -DefaultRef 'main'
+
+            $result.Refused | Should -Be $false
+            $result.DefaultSha | Should -Be $mainTip
+            $result.MergeBaseSha | Should -Be $mainTip -Because 'feature branched directly from the main tip'
+        }
+
+        It 'refuses no-run-diff, naming all three plausible causes honestly, when merge-base equals the run sha' {
+            script:Assert-GCVFunctionExists -Name 'Resolve-GCDiffBase'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'no-run-diff-repo')
+            script:Write-GCFile -RepoPath $repo -RelativePath 'x.txt' -Content "x`n"
+            $mainTip = script:New-GCCommit -RepoPath $repo -Message 'commit'
+
+            $result = Resolve-GCDiffBase -WorktreePath $repo -RunSha $mainTip -DefaultRef 'main'
+
+            $result.Refused | Should -Be $true
+            $result.RefusalReason | Should -Match 'no-run-diff'
+            $result.RefusalReason | Should -Match 'no commits beyond'
+            $result.RefusalReason | Should -Match 'committing directly to the default branch'
+            $result.RefusalReason | Should -Match 'already being merged' -Because 'the message must name all three indistinguishable causes rather than guessing which one occurred'
+        }
+
+        It 'refuses default-ref-unresolvable (never fetches) when the local default ref is absent' {
+            script:Assert-GCVFunctionExists -Name 'Resolve-GCDiffBase'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'no-default-ref-repo')
+            $runSha = (& git -C $repo rev-parse HEAD).Trim()
+
+            $result = Resolve-GCDiffBase -WorktreePath $repo -RunSha $runSha -DefaultRef 'origin/main'
+
+            $result.Refused | Should -Be $true
+            $result.RefusalReason | Should -Match 'default-ref-unresolvable'
+        }
+
+        It 'never calls git fetch when the default ref is absent -- refuses instead' {
+            script:Assert-GCVFunctionExists -Name 'Resolve-GCDiffBase'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'no-fetch-repo')
+            $runSha = (& git -C $repo rev-parse HEAD).Trim()
+            $mockGitPath = Join-Path $TestDrive 'mock-git-no-fetch.ps1'
+            $markerFile = Join-Path $TestDrive 'fetch-called.marker'
+            script:New-MockGitNoFetch -Path $mockGitPath -MarkerFile $markerFile
+
+            $result = Resolve-GCDiffBase -WorktreePath $repo -RunSha $runSha -DefaultRef 'origin/main' -GitCliPath $mockGitPath
+
+            $result.Refused | Should -Be $true
+            $result.RefusalReason | Should -Match 'default-ref-unresolvable'
+            (Test-Path -LiteralPath $markerFile) | Should -Be $false -Because 'a fetch inside a disposable worktree would mutate the operators real remote-tracking refs; the function must refuse instead'
+        }
+    }
+
+    Context 'Test-GCTestFileDeletion -- rename-aware deletion detector via --diff-filter=DR --no-renames (s5, AC1/AC2)' {
+
+        It 'flags a plainly deleted test file' {
+            script:Assert-GCVFunctionExists -Name 'Test-GCTestFileDeletion'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'plain-delete-repo')
+            script:Write-GCFile -RepoPath $repo -RelativePath 'Tests/Foo.Tests.ps1' -Content @'
+Describe 'Foo' { It 'x' { 1 | Should -Be 1 } }
+'@
+            $baseSha = script:New-GCCommit -RepoPath $repo -Message 'add test file'
+            script:Remove-GCFile -RepoPath $repo -RelativePath 'Tests/Foo.Tests.ps1'
+            $runSha = script:New-GCCommit -RepoPath $repo -Message 'delete test file'
+
+            $result = Test-GCTestFileDeletion -WorktreePath $repo -BaseSha $baseSha -RunSha $runSha -AllowlistPathspecs @('.')
+
+            $result.Flagged | Should -Be $true
+            $result.DeletedFiles | Should -Contain 'Tests/Foo.Tests.ps1'
+        }
+
+        It 'flags a renamed-and-gutted test file as a deletion of the OLD path, not silently passed through as a rename' {
+            script:Assert-GCVFunctionExists -Name 'Test-GCTestFileDeletion'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'rename-gut-repo')
+            $baseContent = @'
+Describe 'Foo' {
+    It 'does something' {
+        1 | Should -Be 1
+    }
+    It 'does another thing' {
+        2 | Should -Be 2
+    }
+    It 'does a third thing' {
+        3 | Should -Be 3
+    }
+}
+'@
+            script:Write-GCFile -RepoPath $repo -RelativePath 'Tests/Foo.Tests.ps1' -Content $baseContent
+            $baseSha = script:New-GCCommit -RepoPath $repo -Message 'add test file'
+
+            $guttedContent = @'
+Describe 'Foo' {
+    It 'does something' {
+        1 | Should -Be 1
+    }
+    It 'does another thing' {
+        2 | Should -Be 2
+    }
+}
+'@
+            script:Remove-GCFile -RepoPath $repo -RelativePath 'Tests/Foo.Tests.ps1'
+            script:Write-GCFile -RepoPath $repo -RelativePath 'Tests/Bar.Tests.ps1' -Content $guttedContent
+            $runSha = script:New-GCCommit -RepoPath $repo -Message 'rename and gut'
+
+            # Sanity: confirm the fixture actually exercises a rename -- git's
+            # DEFAULT rename detection (no --no-renames) must classify this
+            # pair as a rename (status R), which a plain --diff-filter=D
+            # would never match, so this test proves something real about
+            # the --no-renames override below.
+            $renameStatus = & git -C $repo diff --name-status --diff-filter=R $baseSha $runSha 2>$null
+            @($renameStatus | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count | Should -BeGreaterThan 0 -Because 'the fixture must produce a real git-detected rename for this test to prove anything about the --no-renames override'
+
+            $result = Test-GCTestFileDeletion -WorktreePath $repo -BaseSha $baseSha -RunSha $runSha -AllowlistPathspecs @('.')
+
+            $result.Flagged | Should -Be $true -Because '--no-renames must force the rename-and-gut to surface as a deletion of the old path'
+            $result.DeletedFiles | Should -Contain 'Tests/Foo.Tests.ps1'
+        }
+
+        It 'does not flag a file that was only modified in place at the same path' {
+            script:Assert-GCVFunctionExists -Name 'Test-GCTestFileDeletion'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'modify-in-place-repo')
+            script:Write-GCFile -RepoPath $repo -RelativePath 'Tests/Foo.Tests.ps1' -Content @'
+Describe 'Foo' { It 'x' { 1 | Should -Be 1 } }
+'@
+            $baseSha = script:New-GCCommit -RepoPath $repo -Message 'add test file'
+            script:Write-GCFile -RepoPath $repo -RelativePath 'Tests/Foo.Tests.ps1' -Content @'
+Describe 'Foo' { It 'x' { 1 | Should -Be 2 } }
+'@
+            $runSha = script:New-GCCommit -RepoPath $repo -Message 'modify test file'
+
+            $result = Test-GCTestFileDeletion -WorktreePath $repo -BaseSha $baseSha -RunSha $runSha -AllowlistPathspecs @('.')
+
+            $result.Flagged | Should -Be $false
+            @($result.DeletedFiles).Count | Should -Be 0
+        }
+    }
+
+    Context 'Get-GCShouldCommandCount -- AST-aware Should-command counting (s5, AC1)' {
+
+        It 'counts real Should command invocations' {
+            script:Assert-GCVFunctionExists -Name 'Get-GCShouldCommandCount'
+            $content = @'
+Describe 'X' {
+    It 'y' {
+        1 | Should -Be 1
+        2 | Should -Be 2
+    }
+}
+'@
+            Get-GCShouldCommandCount -Content $content | Should -Be 2
+        }
+
+        It 'does not count the word Should inside a comment' {
+            script:Assert-GCVFunctionExists -Name 'Get-GCShouldCommandCount'
+            $content = @'
+# this Should not be counted
+1 | Should -Be 1
+'@
+            Get-GCShouldCommandCount -Content $content | Should -Be 1
+        }
+
+        It 'does not count the word Should inside a string literal' {
+            script:Assert-GCVFunctionExists -Name 'Get-GCShouldCommandCount'
+            $content = @'
+Write-Output 'The word Should appears here'
+1 | Should -Be 1
+'@
+            Get-GCShouldCommandCount -Content $content | Should -Be 1
+        }
+
+        It 'does not count SupportsShouldProcess or $PSCmdlet.ShouldProcess (not a CommandAst named Should)' {
+            script:Assert-GCVFunctionExists -Name 'Get-GCShouldCommandCount'
+            $content = @'
+function Foo {
+    [CmdletBinding(SupportsShouldProcess)]
+    param()
+    if ($PSCmdlet.ShouldProcess('x')) {
+        1 | Should -Be 1
+    }
+}
+'@
+            Get-GCShouldCommandCount -Content $content | Should -Be 1
+        }
+
+        It 'returns 0 for blank or null content' {
+            script:Assert-GCVFunctionExists -Name 'Get-GCShouldCommandCount'
+            Get-GCShouldCommandCount -Content '' | Should -Be 0
+            Get-GCShouldCommandCount -Content $null | Should -Be 0
+        }
+    }
+
+    Context 'Test-GCAssertionWeakening -- AST Should-count regression via git show (s5, AC1/AC2)' {
+
+        It 'flags a file that lost a real Should assertion between base and run' {
+            script:Assert-GCVFunctionExists -Name 'Test-GCAssertionWeakening'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'weaken-repo')
+            script:Write-GCFile -RepoPath $repo -RelativePath 'Tests/Foo.Tests.ps1' -Content @'
+Describe 'Foo' { It 'x' { 1 | Should -Be 1; 2 | Should -Be 2 } }
+'@
+            $baseSha = script:New-GCCommit -RepoPath $repo -Message 'two assertions'
+            script:Write-GCFile -RepoPath $repo -RelativePath 'Tests/Foo.Tests.ps1' -Content @'
+Describe 'Foo' { It 'x' { 1 | Should -Be 1 } }
+'@
+            $runSha = script:New-GCCommit -RepoPath $repo -Message 'one assertion removed'
+
+            $result = Test-GCAssertionWeakening -WorktreePath $repo -BaseSha $baseSha -RunSha $runSha -ChangedTestFilePaths @('Tests/Foo.Tests.ps1')
+
+            $result.Flagged | Should -Be $true
+            $result.Files[0].Path | Should -Be 'Tests/Foo.Tests.ps1'
+            $result.Files[0].BaseCount | Should -Be 2
+            $result.Files[0].RunCount | Should -Be 1
+            $result.HeuristicNote | Should -Match 'count-preserving weakening' -Because 'the result must always carry the honest heuristic caveat'
+        }
+
+        It 'does not flag when only a comment or string literal containing the word Should is added (real count unchanged)' {
+            script:Assert-GCVFunctionExists -Name 'Test-GCAssertionWeakening'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'weaken-decoy-repo')
+            script:Write-GCFile -RepoPath $repo -RelativePath 'Tests/Foo.Tests.ps1' -Content @'
+Describe 'Foo' { It 'x' { 1 | Should -Be 1 } }
+'@
+            $baseSha = script:New-GCCommit -RepoPath $repo -Message 'one assertion'
+            script:Write-GCFile -RepoPath $repo -RelativePath 'Tests/Foo.Tests.ps1' -Content @'
+# this Should not change the count
+Describe 'Foo' { It 'x' { Write-Output 'Should stay the same'; 1 | Should -Be 1 } }
+'@
+            $runSha = script:New-GCCommit -RepoPath $repo -Message 'decoy comment + string added, real count unchanged'
+
+            $result = Test-GCAssertionWeakening -WorktreePath $repo -BaseSha $baseSha -RunSha $runSha -ChangedTestFilePaths @('Tests/Foo.Tests.ps1')
+
+            $result.Flagged | Should -Be $false -Because 'the AST count is unchanged at 1; substring hits on comments/strings must never trigger a false flag'
+        }
+
+        It 'does not flag an increase in assertions' {
+            script:Assert-GCVFunctionExists -Name 'Test-GCAssertionWeakening'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'weaken-increase-repo')
+            script:Write-GCFile -RepoPath $repo -RelativePath 'Tests/Foo.Tests.ps1' -Content @'
+Describe 'Foo' { It 'x' { 1 | Should -Be 1 } }
+'@
+            $baseSha = script:New-GCCommit -RepoPath $repo -Message 'one assertion'
+            script:Write-GCFile -RepoPath $repo -RelativePath 'Tests/Foo.Tests.ps1' -Content @'
+Describe 'Foo' { It 'x' { 1 | Should -Be 1; 2 | Should -Be 2 } }
+'@
+            $runSha = script:New-GCCommit -RepoPath $repo -Message 'assertion added'
+
+            $result = Test-GCAssertionWeakening -WorktreePath $repo -BaseSha $baseSha -RunSha $runSha -ChangedTestFilePaths @('Tests/Foo.Tests.ps1')
+
+            $result.Flagged | Should -Be $false
+        }
+
+        It 'skips a file that is absent at one of the two commits (deletion-class, not this detectors concern)' {
+            script:Assert-GCVFunctionExists -Name 'Test-GCAssertionWeakening'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'weaken-deleted-repo')
+            script:Write-GCFile -RepoPath $repo -RelativePath 'Tests/Foo.Tests.ps1' -Content @'
+Describe 'Foo' { It 'x' { 1 | Should -Be 1 } }
+'@
+            $baseSha = script:New-GCCommit -RepoPath $repo -Message 'add'
+            script:Remove-GCFile -RepoPath $repo -RelativePath 'Tests/Foo.Tests.ps1'
+            $runSha = script:New-GCCommit -RepoPath $repo -Message 'delete'
+
+            $result = Test-GCAssertionWeakening -WorktreePath $repo -BaseSha $baseSha -RunSha $runSha -ChangedTestFilePaths @('Tests/Foo.Tests.ps1')
+
+            $result.Flagged | Should -Be $false
+            @($result.Files).Count | Should -Be 0
+        }
+    }
+
+    Context 'Get-GCHelperLibSet -- live-computed helper-lib set, not a frozen list (s5, AC1)' {
+
+        It 'includes a lib file referenced via a direct Join-Path literal dot-source' {
+            script:Assert-GCVFunctionExists -Name 'Get-GCHelperLibSet'
+            $root = Join-Path $TestDrive 'direct-repo'
+            script:Write-GCFile -RepoPath $root -RelativePath '.github/scripts/lib/foo-core.ps1' -Content 'function Get-Foo { }'
+            script:Write-GCFile -RepoPath $root -RelativePath '.github/scripts/Tests/foo.Tests.ps1' -Content @'
+. (Join-Path $PSScriptRoot '../lib/foo-core.ps1')
+'@
+
+            $result = Get-GCHelperLibSet -RepoRoot $root
+
+            $result | Should -Contain '.github/scripts/lib/foo-core.ps1'
+        }
+
+        It 'includes a lib file referenced via one-hop $script: variable indirection (. $script:CoreFile-style)' {
+            script:Assert-GCVFunctionExists -Name 'Get-GCHelperLibSet'
+            $root = Join-Path $TestDrive 'indirect-repo'
+            script:Write-GCFile -RepoPath $root -RelativePath '.github/scripts/lib/bar-core.ps1' -Content 'function Get-Bar { }'
+            script:Write-GCFile -RepoPath $root -RelativePath '.github/scripts/Tests/bar.Tests.ps1' -Content @'
+$script:CoreFile = Join-Path $PSScriptRoot '../lib/bar-core.ps1'
+. $script:CoreFile
+'@
+
+            $result = Get-GCHelperLibSet -RepoRoot $root
+
+            $result | Should -Contain '.github/scripts/lib/bar-core.ps1'
+        }
+
+        It 'does not include a lib filename that only appears in a comment, never actually dot-sourced' {
+            script:Assert-GCVFunctionExists -Name 'Get-GCHelperLibSet'
+            $root = Join-Path $TestDrive 'comment-only-repo'
+            script:Write-GCFile -RepoPath $root -RelativePath '.github/scripts/lib/baz-core.ps1' -Content 'function Get-Baz { }'
+            script:Write-GCFile -RepoPath $root -RelativePath '.github/scripts/Tests/baz.Tests.ps1' -Content @'
+# see lib/baz-core.ps1 for details, but never dot-sourced here
+'@
+
+            $result = Get-GCHelperLibSet -RepoRoot $root
+
+            $result | Should -Not -Contain '.github/scripts/lib/baz-core.ps1'
+        }
+
+        It 'never invents a phantom lib file that does not actually exist' {
+            script:Assert-GCVFunctionExists -Name 'Get-GCHelperLibSet'
+            $root = Join-Path $TestDrive 'phantom-repo'
+            New-Item -ItemType Directory -Path (Join-Path $root '.github/scripts/lib') -Force | Out-Null
+            script:Write-GCFile -RepoPath $root -RelativePath '.github/scripts/Tests/phantom.Tests.ps1' -Content @'
+. (Join-Path $PSScriptRoot '../lib/does-not-exist.ps1')
+'@
+
+            $result = Get-GCHelperLibSet -RepoRoot $root
+
+            @($result).Count | Should -Be 0
+        }
+    }
+
+    Context 'Test-GCFixtureOrHelperModification -- fixture/helper mandatory-review flag (s5, AC1/AC2)' {
+
+        It 'flags a changed file under Tests/fixtures/**' {
+            script:Assert-GCVFunctionExists -Name 'Test-GCFixtureOrHelperModification'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'fixture-mod-repo')
+            script:Write-GCFile -RepoPath $repo -RelativePath '.github/scripts/Tests/fixtures/sample.json' -Content '{}'
+            $baseSha = script:New-GCCommit -RepoPath $repo -Message 'add fixture'
+            script:Write-GCFile -RepoPath $repo -RelativePath '.github/scripts/Tests/fixtures/sample.json' -Content '{"changed":true}'
+            $runSha = script:New-GCCommit -RepoPath $repo -Message 'modify fixture'
+
+            $result = Test-GCFixtureOrHelperModification -WorktreePath $repo -BaseSha $baseSha -RunSha $runSha -HelperLibPaths @()
+
+            $result.Flagged | Should -Be $true
+            $result.ChangedFiles | Should -Contain '.github/scripts/Tests/fixtures/sample.json'
+        }
+
+        It 'flags a changed helper-lib file that IS in HelperLibPaths' {
+            script:Assert-GCVFunctionExists -Name 'Test-GCFixtureOrHelperModification'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'helper-mod-repo')
+            script:Write-GCFile -RepoPath $repo -RelativePath '.github/scripts/lib/helper-core.ps1' -Content 'function A { 1 }'
+            $baseSha = script:New-GCCommit -RepoPath $repo -Message 'add helper'
+            script:Write-GCFile -RepoPath $repo -RelativePath '.github/scripts/lib/helper-core.ps1' -Content 'function A { 2 }'
+            $runSha = script:New-GCCommit -RepoPath $repo -Message 'modify helper'
+
+            $result = Test-GCFixtureOrHelperModification -WorktreePath $repo -BaseSha $baseSha -RunSha $runSha -HelperLibPaths @('.github/scripts/lib/helper-core.ps1')
+
+            $result.Flagged | Should -Be $true
+            $result.ChangedFiles | Should -Contain '.github/scripts/lib/helper-core.ps1'
+        }
+
+        It 'does not flag a lib file change when that file is NOT in HelperLibPaths (not dot-sourced by any test)' {
+            script:Assert-GCVFunctionExists -Name 'Test-GCFixtureOrHelperModification'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'unrelated-lib-repo')
+            script:Write-GCFile -RepoPath $repo -RelativePath '.github/scripts/lib/unrelated.ps1' -Content 'function B { 1 }'
+            $baseSha = script:New-GCCommit -RepoPath $repo -Message 'add unrelated lib'
+            script:Write-GCFile -RepoPath $repo -RelativePath '.github/scripts/lib/unrelated.ps1' -Content 'function B { 2 }'
+            $runSha = script:New-GCCommit -RepoPath $repo -Message 'modify unrelated lib'
+
+            $result = Test-GCFixtureOrHelperModification -WorktreePath $repo -BaseSha $baseSha -RunSha $runSha -HelperLibPaths @()
+
+            $result.Flagged | Should -Be $false
+        }
+    }
+
+    Context 'Test-GCUnrecognizedInvariants -- unchecked mandatory-review flag (s5, AC1)' {
+
+        It 'returns empty when only the two known literals are present' {
+            script:Assert-GCVFunctionExists -Name 'Test-GCUnrecognizedInvariants'
+            $result = Test-GCUnrecognizedInvariants -Invariants @('full-pester-suite-no-new-failures', 'test-diff-integrity')
+
+            @($result).Count | Should -Be 0
+        }
+
+        It 'flags a third invariant literal beyond the two known ones -- never a silent skip' {
+            script:Assert-GCVFunctionExists -Name 'Test-GCUnrecognizedInvariants'
+            $result = Test-GCUnrecognizedInvariants -Invariants @('full-pester-suite-no-new-failures', 'test-diff-integrity', 'some-repo-specific-invariant')
+
+            @($result).Count | Should -Be 1
+            $result | Should -Contain 'some-repo-specific-invariant'
+        }
+
+        It 'never silently drops multiple unrecognized literals' {
+            script:Assert-GCVFunctionExists -Name 'Test-GCUnrecognizedInvariants'
+            $result = Test-GCUnrecognizedInvariants -Invariants @('unknown-a', 'unknown-b')
+
+            @($result).Count | Should -Be 2
+        }
+    }
+
+    Context 'Invoke-GCDiffIntegrityPhase -- composed diff-integrity seam (s5, AC1/AC2)' {
+
+        It 'short-circuits with the no-run-diff refusal and runs no detectors when merge-base equals run-sha' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCDiffIntegrityPhase'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'phase-norundiff-repo')
+            script:Write-GCFile -RepoPath $repo -RelativePath 'x.txt' -Content "x`n"
+            $mainTip = script:New-GCCommit -RepoPath $repo -Message 'commit'
+
+            $result = Invoke-GCDiffIntegrityPhase -WorktreePath $repo -RunSha $mainTip -RepoRoot $repo -DefaultRef 'main'
+
+            $result.Refused | Should -Be $true
+            $result.RefusalReason | Should -Match 'no-run-diff'
+            @($result.Flags).Count | Should -Be 0
+        }
+
+        It 'aggregates deletion, weakening, fixture/helper, and unrecognized-invariant flags from one base/run diff' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCDiffIntegrityPhase'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'phase-aggregate-repo')
+
+            # Base state: a test file with two real assertions, a fixture, a
+            # helper lib dot-sourced by a Tests file, and a soon-to-be-deleted
+            # test file.
+            script:Write-GCFile -RepoPath $repo -RelativePath '.github/scripts/lib/helper-core.ps1' -Content 'function Get-Helper { 1 }'
+            script:Write-GCFile -RepoPath $repo -RelativePath '.github/scripts/Tests/uses-helper.Tests.ps1' -Content @'
+. (Join-Path $PSScriptRoot '../lib/helper-core.ps1')
+Describe 'UsesHelper' { It 'x' { 1 | Should -Be 1 } }
+'@
+            script:Write-GCFile -RepoPath $repo -RelativePath '.github/scripts/Tests/foo.Tests.ps1' -Content @'
+Describe 'Foo' { It 'x' { 1 | Should -Be 1; 2 | Should -Be 2 } }
+'@
+            script:Write-GCFile -RepoPath $repo -RelativePath '.github/scripts/Tests/fixtures/sample.json' -Content '{}'
+            script:Write-GCFile -RepoPath $repo -RelativePath '.github/scripts/Tests/todelete.Tests.ps1' -Content @'
+Describe 'ToDelete' { It 'x' { 1 | Should -Be 1 } }
+'@
+            $mainTip = script:New-GCCommit -RepoPath $repo -Message 'base state'
+            & git -C $repo checkout -q -b feature 2>&1 | Out-Null
+
+            # Run state: delete a test file, weaken an assertion, and modify
+            # a fixture and the dot-sourced helper lib. HEAD is left on
+            # `feature` (== the run sha) so the live filesystem scan inside
+            # Get-GCHelperLibSet reflects the run's own tree, mirroring the
+            # production worktree (which is checked out at the run's commit).
+            script:Remove-GCFile -RepoPath $repo -RelativePath '.github/scripts/Tests/todelete.Tests.ps1'
+            script:Write-GCFile -RepoPath $repo -RelativePath '.github/scripts/Tests/foo.Tests.ps1' -Content @'
+Describe 'Foo' { It 'x' { 1 | Should -Be 1 } }
+'@
+            script:Write-GCFile -RepoPath $repo -RelativePath '.github/scripts/Tests/fixtures/sample.json' -Content '{"changed":true}'
+            script:Write-GCFile -RepoPath $repo -RelativePath '.github/scripts/lib/helper-core.ps1' -Content 'function Get-Helper { 2 }'
+            $runSha = script:New-GCCommit -RepoPath $repo -Message 'run state'
+
+            $result = Invoke-GCDiffIntegrityPhase -WorktreePath $repo -RunSha $runSha -RepoRoot $repo -Invariants @('full-pester-suite-no-new-failures', 'test-diff-integrity', 'custom-repo-invariant') -DefaultRef 'main'
+
+            $result.Refused | Should -Be $false
+            $kinds = @($result.Flags | ForEach-Object { $_.Kind })
+            $kinds | Should -Contain 'test-file-deletion'
+            $kinds | Should -Contain 'assertion-weakening'
+            $kinds | Should -Contain 'fixture-or-helper-modification'
+            $kinds | Should -Contain 'unrecognized-invariant'
+
+            $unrecognizedFlag = $result.Flags | Where-Object { $_.Kind -eq 'unrecognized-invariant' }
+            $unrecognizedFlag.Literal | Should -Be 'custom-repo-invariant'
+        }
+
+        It 'returns no flags when nothing in the allowlist changed and only known invariants are supplied' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCDiffIntegrityPhase'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'phase-noflags-repo')
+            script:Write-GCFile -RepoPath $repo -RelativePath 'README.md' -Content "seed readme`n"
+            $mainTip = script:New-GCCommit -RepoPath $repo -Message 'base state'
+            & git -C $repo checkout -q -b feature 2>&1 | Out-Null
+            script:Write-GCFile -RepoPath $repo -RelativePath 'README.md' -Content "changed readme, outside the allowlist`n"
+            $runSha = script:New-GCCommit -RepoPath $repo -Message 'run state'
+
+            $result = Invoke-GCDiffIntegrityPhase -WorktreePath $repo -RunSha $runSha -RepoRoot $repo -Invariants @('full-pester-suite-no-new-failures', 'test-diff-integrity') -DefaultRef 'main'
+
+            $result.Refused | Should -Be $false
+            @($result.Flags).Count | Should -Be 0
         }
     }
 }
