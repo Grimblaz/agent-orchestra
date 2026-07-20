@@ -352,7 +352,12 @@
         path -- `--diff-filter=D` alone would miss this evasion because
         git's default rename heuristic reclassifies a high-similarity
         delete+create pair as a single `R` status, which `--diff-filter=D`
-        does not match.
+        does not match. PF2: a `git diff` command failure returns
+        `GitError = $true` / `ErrorDetail = "<sentinel text>"` with an EMPTY
+        `DeletedFiles` -- the error sentinel never lands inside
+        `DeletedFiles` itself, so `Invoke-GCDiffIntegrityPhase` can route it
+        to the dedicated `diff-integrity-git-error` Kind instead of the
+        `test-file-deletion` Kind a real deletion would use.
 
       Get-GCShouldCommandCount -Content <string>
         Pure AST-aware counter: parses PowerShell source via
@@ -390,7 +395,9 @@
                                           [-GitCliPath <string> = 'git']
         Mandatory-review flag: any changed file under
         `.github/scripts/Tests/fixtures/**` OR any changed file in the
-        live-computed helper-lib set (Get-GCHelperLibSet).
+        live-computed helper-lib set (Get-GCHelperLibSet). PF2: same
+        `GitError`/`ErrorDetail`/dedicated-Kind routing as
+        Test-GCTestFileDeletion above on a `git diff` command failure.
 
       Test-GCUnrecognizedInvariants -Invariants <string[]>
         Pure predicate: the contract's `invariants[]` array may carry any
@@ -747,22 +754,34 @@ function Invoke-GoalContractValidate {
     }
 
     $diffIntegrityPhase = {
-        param($path)
-        # R11: RunSha is derived from the WORKTREE'S OWN resolved HEAD,
-        # captured fresh at the moment this phase actually runs -- never a
-        # pre-worktree `rev-parse HEAD` resolved on $RepoRoot before
-        # New-GCDisposableWorktree ever ran. The prior two-call shape (one
-        # resolve here, a second independent resolve inside
-        # New-GCDisposableWorktree) left a narrow window where a commit
-        # landing on the invoking branch between the two calls could audit a
-        # different sha than the worktree actually checked out. Resolving
-        # HEAD against the worktree path itself is the single source of
-        # truth for "the commit that was actually validated": nothing in the
-        # suite/checks phases commits inside the disposable worktree, so its
-        # HEAD never moves after New-GCDisposableWorktree's own checkout.
-        $worktreeHeadShaRaw = & $GitCliPath -C $path rev-parse HEAD 2>$null
-        $worktreeRunSha = script:ConvertTo-GCFirstLineTrimmed -Raw $worktreeHeadShaRaw
-        Invoke-GCDiffIntegrityPhase -WorktreePath $path -RunSha $worktreeRunSha -RepoRoot $path -Invariants $invariantsList -DefaultRef $DiffDefaultRef -GitCliPath $GitCliPath
+        param($path, $headSha)
+        # PF1 (post-fix targeted prosecution, HIGH; supersedes R11): RunSha
+        # is the worktree's PRE-CHECKS HeadSha, threaded in as this
+        # scriptblock's second argument by Invoke-GCWorktreeSession (sourced
+        # from $worktree.HeadSha, which New-GCDisposableWorktree resolves via
+        # `rev-parse HEAD` at worktree-creation time, BEFORE the suite or
+        # checks phase ever runs) -- never a fresh `rev-parse HEAD` resolved
+        # here, after the checks phase has already executed.
+        #
+        # R11's original claim -- "nothing in the suite/checks phases commits
+        # inside the disposable worktree, so its HEAD never moves" -- is
+        # FALSE under this module's own stated threat model: `targets[].check`
+        # is untrusted comment-sourced content (873-D7) executed with the
+        # worktree as its working directory (Invoke-GCTargetCheck's
+        # -WorkingDirectory), so a malicious check can run `git commit`
+        # inside the worktree. That commit leaves `git status --porcelain`
+        # EMPTY (so the post-checks Test-GCTreeClean tamper-detection flag
+        # never fires) while it MOVES the worktree's HEAD. A fresh
+        # post-checks `rev-parse HEAD` would then pick up the attacker's
+        # crafted commit, and this phase would audit THAT commit instead of
+        # the commit that was actually suite-tested and check-executed --
+        # letting a run that deleted/weakened a test earlier "restore" it via
+        # a check-time commit and read clean. Resolving HeadSha once, before
+        # any phase runs, closes both this tamper vector and the original R11
+        # TOCTOU concern (a commit landing on the invoking branch mid-run) in
+        # one fix: it is the single tamper-immune source of truth for "the
+        # commit that was actually validated."
+        Invoke-GCDiffIntegrityPhase -WorktreePath $path -RunSha $headSha -RepoRoot $path -Invariants $invariantsList -DefaultRef $DiffDefaultRef -GitCliPath $GitCliPath
     }
 
     # R9: everything from worktree creation through the final disposition is
@@ -1072,7 +1091,14 @@ function Invoke-GCWorktreeSession {
         $checksCleanliness = Test-GCTreeClean -Path $worktree.Path -GitCliPath $GitCliPath
 
         if ($DiffIntegrityPhase) {
-            $diffIntegrityResult = & $DiffIntegrityPhase $worktree.Path
+            # PF1 (post-fix targeted prosecution, HIGH): pass the worktree's
+            # PRE-CHECKS $worktree.HeadSha (captured by New-GCDisposableWorktree
+            # before ANY phase runs) as the phase's second positional argument,
+            # never letting the phase re-resolve `rev-parse HEAD` fresh after
+            # the checks phase has already run. See the closure's own comment
+            # in Invoke-GoalContractValidate for the full threat-model
+            # rationale.
+            $diffIntegrityResult = & $DiffIntegrityPhase $worktree.Path $worktree.HeadSha
         }
     }
     finally {
@@ -1731,9 +1757,20 @@ function Test-GCTestFileDeletion {
         # is the safe direction (mirrors R3's fail-closed discipline for
         # Test-GCTreeClean, reapplied here since this detector suppressed
         # stderr with no $LASTEXITCODE check).
+        #
+        # PF2 (post-fix targeted prosecution, LOW): the error sentinel text
+        # travels on GitError/ErrorDetail, never stuffed into DeletedFiles --
+        # DeletedFiles is reserved for actual deleted-file paths so a
+        # git-command failure can never be mistaken, downstream, for a
+        # literal (attacker-influenceable) filename under the same Kind a
+        # real deletion finding would use. Invoke-GCDiffIntegrityPhase reads
+        # GitError to route this case to the dedicated
+        # 'diff-integrity-git-error' Kind instead of 'test-file-deletion'.
         return [pscustomobject]@{
             Flagged      = $true
-            DeletedFiles = @("git diff failed (exit $LASTEXITCODE) while checking for deleted test files between $BaseSha and $RunSha; unable to verify -- flagging for review")
+            DeletedFiles = @()
+            GitError     = $true
+            ErrorDetail  = "git diff failed (exit $LASTEXITCODE) while checking for deleted test files between $BaseSha and $RunSha; unable to verify -- flagging for review"
         }
     }
     $deletedFiles = @(@($rawOutput) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.Trim() })
@@ -1741,6 +1778,8 @@ function Test-GCTestFileDeletion {
     return [pscustomobject]@{
         Flagged      = ($deletedFiles.Count -gt 0)
         DeletedFiles = $deletedFiles
+        GitError     = $false
+        ErrorDetail  = $null
     }
 }
 
@@ -1988,9 +2027,18 @@ function Test-GCFixtureOrHelperModification {
         # Test-GCTestFileDeletion above -- an advisory flag, never a hard
         # gate, so a git-diff failure must never silently read as "nothing
         # changed".
+        #
+        # PF2 (post-fix targeted prosecution, LOW): same GitError/ErrorDetail
+        # routing as Test-GCTestFileDeletion above -- the error sentinel text
+        # never lands in ChangedFiles, so it can never be mistaken for a
+        # literal changed-file path under the 'fixture-or-helper-modification'
+        # Kind. Invoke-GCDiffIntegrityPhase reads GitError to route this case
+        # to the dedicated 'diff-integrity-git-error' Kind instead.
         return [pscustomobject]@{
             Flagged      = $true
-            ChangedFiles = @("git diff failed (exit $LASTEXITCODE) while checking fixtures/helper files between $BaseSha and $RunSha; unable to verify -- flagging for review")
+            ChangedFiles = @()
+            GitError     = $true
+            ErrorDetail  = "git diff failed (exit $LASTEXITCODE) while checking fixtures/helper files between $BaseSha and $RunSha; unable to verify -- flagging for review"
         }
     }
     $changedFiles = @(@($rawOutput) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.Trim() })
@@ -1998,6 +2046,8 @@ function Test-GCFixtureOrHelperModification {
     return [pscustomobject]@{
         Flagged      = ($changedFiles.Count -gt 0)
         ChangedFiles = $changedFiles
+        GitError     = $false
+        ErrorDetail  = $null
     }
 }
 
@@ -2053,7 +2103,15 @@ function Invoke-GCDiffIntegrityPhase {
     $helperLibPaths = Get-GCHelperLibSet -RepoRoot $RepoRoot -BaseSha $base.MergeBaseSha -GitCliPath $GitCliPath
 
     $deletion = Test-GCTestFileDeletion -WorktreePath $WorktreePath -BaseSha $base.MergeBaseSha -RunSha $RunSha -AllowlistPathspecs (@('.github/scripts/Tests') + $helperLibPaths) -GitCliPath $GitCliPath
-    if ($deletion.Flagged) {
+    if ($deletion.GitError) {
+        # PF2: a git-command failure is a distinct signal from an actual
+        # deletion finding -- route it through the same dedicated
+        # 'diff-integrity-git-error' Kind the changed-test-files diff below
+        # already uses, never the 'test-file-deletion' Kind a real deletion
+        # would use (which would make the error sentinel text look like a
+        # literal deleted-file path in Files).
+        $flags.Add([pscustomobject]@{ Kind = 'diff-integrity-git-error'; Detail = $deletion.ErrorDetail })
+    } elseif ($deletion.Flagged) {
         $flags.Add([pscustomobject]@{ Kind = 'test-file-deletion'; Files = $deletion.DeletedFiles })
     }
 
@@ -2076,7 +2134,11 @@ function Invoke-GCDiffIntegrityPhase {
     }
 
     $fixtureOrHelper = Test-GCFixtureOrHelperModification -WorktreePath $WorktreePath -BaseSha $base.MergeBaseSha -RunSha $RunSha -HelperLibPaths $helperLibPaths -GitCliPath $GitCliPath
-    if ($fixtureOrHelper.Flagged) {
+    if ($fixtureOrHelper.GitError) {
+        # PF2: same dedicated-Kind routing as the deletion detector above --
+        # never 'fixture-or-helper-modification' for a git-command failure.
+        $flags.Add([pscustomobject]@{ Kind = 'diff-integrity-git-error'; Detail = $fixtureOrHelper.ErrorDetail })
+    } elseif ($fixtureOrHelper.Flagged) {
         $flags.Add([pscustomobject]@{ Kind = 'fixture-or-helper-modification'; Files = $fixtureOrHelper.ChangedFiles })
     }
 

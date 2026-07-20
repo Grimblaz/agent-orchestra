@@ -1606,7 +1606,17 @@ Describe 'Foo' { It 'x' { 1 | Should -Be 2 } }
             $result = Test-GCTestFileDeletion -WorktreePath $repo -BaseSha 'not-a-real-sha' -RunSha 'also-not-a-real-sha' -AllowlistPathspecs @('.') -WarningAction SilentlyContinue
 
             $result.Flagged | Should -Be $true -Because 'this is an advisory mandatory-review flag, never a hard gate -- erring toward MORE review-flagging on a git failure is the safe direction'
-            @($result.DeletedFiles).Count | Should -BeGreaterThan 0
+        }
+
+        It 'PF2: surfaces the git-command failure via GitError/ErrorDetail, never inside DeletedFiles (never looking like a literal deleted-file path)' {
+            script:Assert-GCVFunctionExists -Name 'Test-GCTestFileDeletion'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'pf2-deletion-git-error-repo')
+
+            $result = Test-GCTestFileDeletion -WorktreePath $repo -BaseSha 'not-a-real-sha' -RunSha 'also-not-a-real-sha' -AllowlistPathspecs @('.') -WarningAction SilentlyContinue
+
+            $result.GitError | Should -Be $true
+            $result.ErrorDetail | Should -Not -BeNullOrEmpty
+            @($result.DeletedFiles).Count | Should -Be 0 -Because 'the error sentinel must never masquerade as a literal deleted-file path in DeletedFiles'
         }
     }
 
@@ -1880,7 +1890,17 @@ $script:CoreFile = Join-Path $PSScriptRoot '../lib/bar-core.ps1'
             $result = Test-GCFixtureOrHelperModification -WorktreePath $repo -BaseSha 'not-a-real-sha' -RunSha 'also-not-a-real-sha' -HelperLibPaths @() -WarningAction SilentlyContinue
 
             $result.Flagged | Should -Be $true -Because 'this is an advisory mandatory-review flag, never a hard gate -- erring toward MORE review-flagging on a git failure is the safe direction'
-            @($result.ChangedFiles).Count | Should -BeGreaterThan 0
+        }
+
+        It 'PF2: surfaces the git-command failure via GitError/ErrorDetail, never inside ChangedFiles (never looking like a literal changed-file path)' {
+            script:Assert-GCVFunctionExists -Name 'Test-GCFixtureOrHelperModification'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'pf2-fixture-git-error-repo')
+
+            $result = Test-GCFixtureOrHelperModification -WorktreePath $repo -BaseSha 'not-a-real-sha' -RunSha 'also-not-a-real-sha' -HelperLibPaths @() -WarningAction SilentlyContinue
+
+            $result.GitError | Should -Be $true
+            $result.ErrorDetail | Should -Not -BeNullOrEmpty
+            @($result.ChangedFiles).Count | Should -Be 0 -Because 'the error sentinel must never masquerade as a literal changed-file path in ChangedFiles'
         }
     }
 
@@ -2018,6 +2038,74 @@ exit $LASTEXITCODE
             $result.Refused | Should -Be $false
             $kinds = @($result.Flags | ForEach-Object { $_.Kind })
             $kinds | Should -Contain 'diff-integrity-git-error' -Because 'a failed changed-test-files diff must never silently collapse to an empty list (which would make assertion-weakening detection quietly skip every file in this range) -- it must be surfaced as its own mandatory-review flag'
+        }
+
+        It 'PF2: routes a Test-GCTestFileDeletion git-command failure through the SAME dedicated diff-integrity-git-error Kind, never the test-file-deletion Kind' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCDiffIntegrityPhase'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'pf2-phase-deletion-git-error-repo')
+            script:Write-GCFile -RepoPath $repo -RelativePath 'x.txt' -Content "x`n"
+            $mainTip = script:New-GCCommit -RepoPath $repo -Message 'base state'
+            & git -C $repo checkout -q -b feature 2>&1 | Out-Null
+            script:Write-GCFile -RepoPath $repo -RelativePath 'x.txt' -Content "changed`n"
+            $runSha = script:New-GCCommit -RepoPath $repo -Message 'run state'
+
+            $mockGitPath = Join-Path $TestDrive 'pf2-git-deletion-diff-fail.ps1'
+            # Targets ONLY Test-GCTestFileDeletion's own --diff-filter=DR
+            # --no-renames call -- every other git invocation (including the
+            # phase's own changed-test-files diff and
+            # Test-GCFixtureOrHelperModification's call) forwards through to
+            # the real git binary untouched.
+            @'
+param()
+$argsJoined = $args -join ' '
+if ($argsJoined -match 'diff-filter=DR') {
+    exit 128
+}
+& git @args
+exit $LASTEXITCODE
+'@ | Set-Content -LiteralPath $mockGitPath -Encoding UTF8
+
+            $result = Invoke-GCDiffIntegrityPhase -WorktreePath $repo -RunSha $runSha -RepoRoot $repo -DefaultRef 'main' -GitCliPath $mockGitPath -WarningAction SilentlyContinue
+
+            $result.Refused | Should -Be $false
+            $kinds = @($result.Flags | ForEach-Object { $_.Kind })
+            $kinds | Should -Contain 'diff-integrity-git-error' -Because 'a Test-GCTestFileDeletion git-command failure must surface under the SAME dedicated Kind the other two git-error paths use'
+            $kinds | Should -Not -Contain 'test-file-deletion' -Because 'a git-command failure must never be labeled with the Kind a real deletion finding would use'
+            $errorFlag = $result.Flags | Where-Object { $_.Kind -eq 'diff-integrity-git-error' } | Select-Object -First 1
+            $errorFlag.Detail | Should -Not -BeNullOrEmpty
+            $errorFlag.PSObject.Properties.Match('Files').Count | Should -Be 0 -Because 'the dedicated error Kind carries Detail, never a Files array shaped like the real-finding Kinds'
+        }
+
+        It 'PF2: routes a Test-GCFixtureOrHelperModification git-command failure through the SAME dedicated diff-integrity-git-error Kind, never the fixture-or-helper-modification Kind' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCDiffIntegrityPhase'
+            $repo = script:New-GCTestRepo -Path (Join-Path $TestDrive 'pf2-phase-fixture-git-error-repo')
+            script:Write-GCFile -RepoPath $repo -RelativePath 'x.txt' -Content "x`n"
+            $mainTip = script:New-GCCommit -RepoPath $repo -Message 'base state'
+            & git -C $repo checkout -q -b feature 2>&1 | Out-Null
+            script:Write-GCFile -RepoPath $repo -RelativePath 'x.txt' -Content "changed`n"
+            $runSha = script:New-GCCommit -RepoPath $repo -Message 'run state'
+
+            $mockGitPath = Join-Path $TestDrive 'pf2-git-fixture-diff-fail.ps1'
+            # Targets ONLY Test-GCFixtureOrHelperModification's own pathspec
+            # call (fixtures pathspec, no --diff-filter at all) -- every
+            # other git invocation forwards through to the real git binary
+            # untouched.
+            @'
+param()
+$argsJoined = $args -join ' '
+if ($argsJoined -match 'diff --name-only' -and $argsJoined -notmatch 'diff-filter' -and $argsJoined -match 'Tests/fixtures') {
+    exit 128
+}
+& git @args
+exit $LASTEXITCODE
+'@ | Set-Content -LiteralPath $mockGitPath -Encoding UTF8
+
+            $result = Invoke-GCDiffIntegrityPhase -WorktreePath $repo -RunSha $runSha -RepoRoot $repo -DefaultRef 'main' -GitCliPath $mockGitPath -WarningAction SilentlyContinue
+
+            $result.Refused | Should -Be $false
+            $kinds = @($result.Flags | ForEach-Object { $_.Kind })
+            $kinds | Should -Contain 'diff-integrity-git-error' -Because 'a Test-GCFixtureOrHelperModification git-command failure must surface under the SAME dedicated Kind the other two git-error paths use'
+            $kinds | Should -Not -Contain 'fixture-or-helper-modification' -Because 'a git-command failure must never be labeled with the Kind a real fixture/helper modification finding would use'
         }
 
         It 'grounds the helper-lib allowlist in the MERGE-BASE commit, so a run that de-references then guts a helper cannot evade test-file-deletion detection (R8)' {
@@ -2519,6 +2607,88 @@ budget:
             $script:r9Verdict.Verdict | Should -Be 'pass-review-required'
             $script:r9Verdict.ExitCode | Should -Be 3
             $script:r9Verdict.Reason | Should -Match 'infra-error'
+        }
+
+        It 'fixture 10 (PF1): threads the PRE-CHECKS captured HeadSha into the diff-integrity phase as -RunSha, never a fresh post-checks rev-parse HEAD' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GoalContractValidate'
+            $repo = script:New-GCFixtureRepo -Path (Join-Path $TestDrive 'pf1-toctou-sha-repo')
+            & git -C $repo checkout -q -b run-branch 2>&1 | Out-Null
+            [System.IO.File]::WriteAllText((Join-Path $repo 'run-marker.txt'), "run change`n", [System.Text.UTF8Encoding]::new($false))
+            & git -C $repo add -A 2>&1 | Out-Null
+            & git -C $repo commit -q -m 'run state: unrelated harmless change' 2>&1 | Out-Null
+            # The sha the worktree is actually checked out at BEFORE any
+            # phase runs -- New-GCDisposableWorktree resolves this same value
+            # via `rev-parse HEAD` on $RepoRoot at worktree-creation time.
+            $preChecksHeadSha = (& git -C $repo rev-parse HEAD).Trim()
+
+            # A malicious `check`: simulates the PF1 threat model directly --
+            # targets[].check is untrusted comment-sourced content executed
+            # with the worktree as its cwd (873-D7), so a check can commit
+            # inside the worktree during the checks phase. That commit moves
+            # the worktree's HEAD to a NEW sha while leaving `git status
+            # --porcelain` EMPTY (the tamper is itself committed, so the R3
+            # post-checks cleanliness assertion never fires).
+            $checkCommand = 'git commit -q --allow-empty -m ''attacker: poison commit during checks phase''; exit 0'
+
+            $mockGhPath = Join-Path $TestDrive 'gh-pf1-toctou-sha.ps1'
+            $payload = script:New-GCApprovedContractBody -CheckCommand $checkCommand
+            script:New-GCMockGhForContract -MockGhPath $mockGhPath -ContractPayload $payload
+
+            Mock Invoke-GCDiffIntegrityPhase { [pscustomobject]@{ Refused = $false; RefusalReason = $null; DefaultSha = $null; MergeBaseSha = $null; Flags = @() } }
+
+            $verdict = Invoke-GoalContractValidate -Issue 873 -RepoRoot $repo -Repo 'example-owner/example-repo' -GhCliPath $mockGhPath -DiffDefaultRef 'main' -MinTestCount 1 -WarningAction SilentlyContinue
+
+            # The direct proof: the diff-integrity phase must have been
+            # invoked with -RunSha equal to the sha captured BEFORE the
+            # checks phase ran, never the attacker's poison-commit sha (which
+            # would differ, since the check moved HEAD during the run).
+            Should -Invoke Invoke-GCDiffIntegrityPhase -Times 1 -ParameterFilter { $RunSha -eq $preChecksHeadSha } -Because "diff-integrity must audit the pre-checks HeadSha ($preChecksHeadSha), never a post-checks re-resolved HEAD that a malicious check could have moved"
+            $verdict.ExitCode | Should -Not -Be 2 -Because 'the run should have reached the worktree phases (a refusal here would mean the test setup itself is broken, not proving anything about PF1)'
+        }
+
+        It 'fixture 11 (PF1): a run that weakens an assertion, then "restores" it via a check-time commit, is STILL flagged assertion-weakening -- proving the audited sha is the pre-attack run state, not the attacker restore' {
+            script:Assert-GCVFunctionExists -Name 'Invoke-GoalContractValidate'
+            $repo = script:New-GCFixtureRepo -Path (Join-Path $TestDrive 'pf1-toctou-behavior-repo')
+            & git -C $repo checkout -q -b run-branch 2>&1 | Out-Null
+            # Run state: weaken sample1.Tests.ps1 from 2 Should calls down to
+            # 1 (mirrors AC2 fixture 2's assertion-count regression). Both
+            # versions still pass green, so the suite phase (which runs
+            # BEFORE the checks phase, against this exact commit) is
+            # unaffected either way.
+            [System.IO.File]::WriteAllText((Join-Path $repo '.github/scripts/Tests/sample1.Tests.ps1'), "Describe 'Fixture' { It 'passes one' { 1 | Should -Be 1 } }`n", [System.Text.UTF8Encoding]::new($false))
+            & git -C $repo add -A 2>&1 | Out-Null
+            & git -C $repo commit -q -m 'run state: weaken assertion count' 2>&1 | Out-Null
+
+            # The malicious check: during the CHECKS phase (which runs AFTER
+            # the suite phase has already validated the weakened commit),
+            # restore sample1.Tests.ps1 to its original 2-assertion content
+            # and commit that "restoration" inside the worktree. If the
+            # diff-integrity phase re-resolved RunSha fresh (the pre-fix
+            # bug), it would audit THIS restore commit -- which reads
+            # identical to the original base state, so the assertion-
+            # weakening detector would find no regression and the run would
+            # come back a false-clean pass-review-required-free 'pass'.
+            #
+            # The restore content is written to a fixture file OUTSIDE the
+            # worktree (under $TestDrive) and the check merely copies it
+            # into place -- this keeps the `check` string itself a single
+            # line with no embedded double quotes or raw newlines, both of
+            # which the contract's YAML double-quoted `check: "..."` scalar
+            # cannot safely carry.
+            $restoreSourcePath = Join-Path $TestDrive 'pf1-restore-sample1.Tests.ps1'
+            [System.IO.File]::WriteAllText($restoreSourcePath, "Describe 'Fixture' { It 'passes one' { 1 | Should -Be 1; 2 | Should -Be 2 } }`n", [System.Text.UTF8Encoding]::new($false))
+            $restoreSourceForwardSlash = $restoreSourcePath -replace '\\', '/'
+            $checkCommand = "Copy-Item -LiteralPath '$restoreSourceForwardSlash' -Destination '.github/scripts/Tests/sample1.Tests.ps1' -Force; git add -A; git commit -q -m 'attacker: restore weakened assertion mid-run'; exit 0"
+
+            $mockGhPath = Join-Path $TestDrive 'gh-pf1-toctou-behavior.ps1'
+            $payload = script:New-GCApprovedContractBody -CheckCommand $checkCommand
+            script:New-GCMockGhForContract -MockGhPath $mockGhPath -ContractPayload $payload
+
+            $verdict = Invoke-GoalContractValidate -Issue 873 -RepoRoot $repo -Repo 'example-owner/example-repo' -GhCliPath $mockGhPath -DiffDefaultRef 'main' -MinTestCount 1 -WarningAction SilentlyContinue
+
+            $flagKinds = ($verdict.Flags | ForEach-Object { $_.Kind }) -join ', '
+            $verdict.Verdict | Should -Be 'pass-review-required' -Because "the fix must audit the PRE-CHECKS weakened-assertion commit, not the attacker's mid-run restore commit; a 'pass' here would mean the false-GREEN vector is still open. verdict=$($verdict.Verdict) reason=$($verdict.Reason) refusals=$($verdict.Refusals -join '; ') flags=$flagKinds"
+            $flagKinds | Should -Match 'assertion-weakening' -Because 'the weakened-assertion regression committed BEFORE the checks phase ran must still be detected even though a check-time commit later reverted it in the worktree'
         }
     }
 
