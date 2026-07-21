@@ -86,15 +86,6 @@ if (-not [string]::IsNullOrWhiteSpace($TmpRoot) -and $null -eq $IssueNumber) {
     Write-Warning "-TmpRoot supplied without -IssueNumber; no scratch files will be cleared."
 }
 
-function Get-RepoFromOrigin {
-    $originUrl = (git remote get-url origin) 2>$null
-    if (-not $originUrl) { return $null }
-    if ($originUrl -match 'github.com[:/](?<owner>[^/]+)/(?<repo>[^/]+?)(?:\.git)?$') {
-        return "$($Matches.owner)/$($Matches.repo)"
-    }
-    return $null
-}
-
 function Remove-EmptyDirectory {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param([string]$Root)
@@ -722,7 +713,7 @@ if (-not $SkipLocalDelete -and $FeatureBranch) {
 
 if ($null -ne $IssueNumber) {
     if ($UseGh) {
-        $resolvedRepo = if ($Repo) { $Repo } else { Get-RepoFromOrigin }
+        $resolvedRepo = if ($Repo) { $Repo } else { Get-SCDOriginRepo }
         if (-not $resolvedRepo) {
             Write-Warning 'gh enabled, but repo could not be resolved. Use -Repo owner/name.'
         }
