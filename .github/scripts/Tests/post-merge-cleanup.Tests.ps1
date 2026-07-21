@@ -751,6 +751,52 @@ exit $LASTEXITCODE
             $worktreeRemovals.Count | Should -BeGreaterThan 0 -Because 'git worktree remove must be called for sibling path'
         }
 
+        It 'G5/G6 (#897 review) correctly detects a present, non-empty sibling worktree whose path contains brackets' {
+            # Real-filesystem repro, not mockable: non-literal Test-Path/Get-ChildItem
+            # parse '[' / ']' in a path as wildcard glob syntax, so on a directory
+            # whose ANCESTOR contains brackets (e.g. the consumer's clone location,
+            # `C:\Users\X\Code\My [Project]\...`) they misreport a present, populated
+            # directory as absent/empty. Both bugs are exercised together here:
+            # $dirAbsent (G5, feeds the double-force `worktree remove --force --force`
+            # decision) and the post-attempt FileSystemProbe (G6, feeds the honest
+            # removed/residue-remaining outcome classification).
+            $workDir = Join-Path $TestDrive 'g5g6-bracket-root'
+            $siblingPath = Join-Path $TestDrive 'g5g6-bracket-root-sibling [Locked Project]'
+            New-Item -ItemType Directory -Path $workDir, $siblingPath -Force | Out-Null
+            # A real file survives the mocked `git worktree remove` call below (the
+            # residue flag tells the mock to skip its own Remove-Item side effect),
+            # simulating a process still holding the directory open.
+            'held-open-content' | Set-Content -LiteralPath (Join-Path $siblingPath 'locked-file.txt')
+            $branch = 'pester-temp/issue-500-sibling-bracket-branch'
+            $siblingFwdPath = $siblingPath -replace '\\', '/'
+
+            $result = & $script:InvokeScript -WorkDir $workDir -GitConfig @{
+                'symbolic-ref-origin-HEAD'                              = 'refs/remotes/origin/main'
+                'show-ref-refs/remotes/origin/main'                     = 0
+                'fetch-exit'                                            = 0
+                'worktree-list-porcelain'                               = (& $script:NewPrimaryPorcelain -WorkDir $workDir)
+                "rev-list-count-$branch"                                = '2'
+                "cherry-$branch"                                        = ''
+                'worktree-remove-exit'                                  = 0
+                "worktree-remove-leave-residue-$siblingFwdPath"         = $true
+                'branch-d-exit'                                         = 0
+                'path-configs'                                          = @{
+                    $siblingFwdPath = @{ 'branch--show-current' = $branch }
+                }
+            } -ScriptParams @{
+                SiblingWorktrees = [string[]]@($siblingFwdPath)
+            }
+
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match ([regex]::Escape('worktree unregistered but files remain at')) `
+                -Because 'a non-literal Test-Path/Get-ChildItem on the bracket-containing path would misreport the surviving file as absent, falsely claiming a clean removal instead of flagging held content for manual inspection'
+            $result.Output | Should -Match ([regex]::Escape($siblingFwdPath))
+            $result.Output | Should -Match 'inspect manually'
+            $result.Output | Should -Match ([regex]::Escape('with residue remaining'))
+            (Test-Path -LiteralPath (Join-Path $siblingPath 'locked-file.txt')) | Should -BeTrue `
+                -Because 'sanity check: the real file must still exist on disk for this to be a genuine repro, not an artifact of the mock deleting it'
+        }
+
         It 'TC-Sibling-2: emits no zero-count summary when SiblingWorktrees is empty (with IssueNumber as guard-bypass)' {
             $workDir = Join-Path $TestDrive 'sibling-zero'
             New-Item -ItemType Directory -Path $workDir -Force | Out-Null

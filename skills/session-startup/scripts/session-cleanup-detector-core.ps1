@@ -1083,7 +1083,16 @@ function Invoke-SessionCleanupDetector {
         $null = $_
     }
 
-    $currentLocationPath = (Get-Location).Path
+    # Issue #897 review fix (G1): use the caller-resolved $RepoRoot (the wrapper
+    # derives this via `git rev-parse --show-toplevel`, which survives a
+    # SessionStart hook launched from a subdirectory of the worktree) instead
+    # of re-deriving from Get-Location. Get-Location returns the raw launch
+    # CWD, which is a SUBDIRECTORY for a supported subdirectory launch — that
+    # would never equal a `worktree list --porcelain` root record, causing
+    # this site to misreport "not in a registered worktree" for an ordinary
+    # in-worktree invocation. $RepoRoot is guaranteed non-empty here (the
+    # empty case returns early above).
+    $currentLocationPath = $RepoRoot
     # Degraded only when we have POSITIVE evidence the current location is not a
     # registered worktree — an empty/unavailable registry (common when a caller
     # never mocks `worktree list`, and never possible for a real git repo) is

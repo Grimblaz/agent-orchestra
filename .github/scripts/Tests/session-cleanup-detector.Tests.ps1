@@ -425,7 +425,16 @@ exit $LASTEXITCODE
             param(
                 [string]$WorkDir,
                 [hashtable]$GitConfig,
-                [string]$RepoRoot = $script:RepoRoot,
+                # Issue #897 review fix (G1): default -RepoRoot to $WorkDir, not the
+                # outer test-suite checkout ($script:RepoRoot). Production always
+                # resolves -RepoRoot to the SAME worktree the process is running in
+                # (via `git rev-parse --show-toplevel`), so fixtures whose `worktree
+                # list --porcelain` records are keyed by $WorkDir need -RepoRoot to
+                # match $WorkDir by default too, or every degraded-CWD comparison in
+                # Invoke-SessionCleanupDetector spuriously mismatches. Tests that
+                # specifically exercise a subdirectory-launch mismatch pass an
+                # explicit -RepoRoot that differs from -WorkDir.
+                [string]$RepoRoot = $WorkDir,
                 [switch]$IncludeGitCalls,
                 [hashtable]$GhConfig = $null,
                 [switch]$IncludeGhCalls
@@ -581,6 +590,12 @@ exit $LASTEXITCODE
         $workDir = Join-Path $TestDrive 'copilot-current-branch-baseline'
         New-Item -ItemType Directory -Path $workDir -Force | Out-Null
 
+        # -RepoRoot must stay pinned to the fixture's baked-in 'C:/agent-orchestra'
+        # safe-root path — this test has no worktree-list-porcelain fixture, so
+        # -RepoRoot never participates in degraded-CWD comparison (see the
+        # fail-open comment in Invoke-SessionCleanupDetector); it only feeds the
+        # rendered composite command's path, which this byte-for-byte compat
+        # fixture pins.
         $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -RepoRoot 'C:/agent-orchestra' -GitConfig @{
             'branch--show-current'                                   = 'feature/issue-452-cleanup-detector-worktrees'
             'symbolic-ref-origin-HEAD'                               = 'refs/remotes/origin/main'
@@ -645,7 +660,7 @@ exit $LASTEXITCODE
                 (& $script:NewWorktreeRecord -Path $currentPath -Branch $branch)
             ) -join "`n`n"
 
-            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -RepoRoot 'C:/agent-orchestra' -GitConfig @{
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GitConfig @{
                 'branch--show-current'              = $branch
                 'symbolic-ref-origin-HEAD'          = 'refs/remotes/origin/main'
                 'rev-parse-exit'                    = 128
@@ -667,6 +682,49 @@ exit $LASTEXITCODE
             $insideFence | Should -Not -Match "git branch -D\s+'?$([regex]::Escape($branch))'?"
         }
 
+        It 'G1 (#897 review) resolves against the wrapper-provided -RepoRoot, not the raw launch CWD, when the hook starts from a subdirectory' {
+            $rootDir = Join-Path $TestDrive 'g1-subdir-launch-root'
+            New-Item -ItemType Directory -Path $rootDir -Force | Out-Null
+            $subDir = Join-Path $rootDir 'nested/deep'
+            New-Item -ItemType Directory -Path $subDir -Force | Out-Null
+            $branch = 'claude/g1-subdir-launch-abcde'
+            $rootPath = & $script:ToPorcelainPath -Path $rootDir
+            $primaryPath = & $script:ToPorcelainPath -Path (Join-Path $TestDrive 'g1-subdir-launch-primary')
+            $worktreeList = @(
+                (& $script:NewWorktreeRecord -Path $primaryPath -Branch 'main'),
+                (& $script:NewWorktreeRecord -Path $rootPath -Branch $branch)
+            ) -join "`n`n"
+
+            # Simulates the wrapper (session-cleanup-detector.ps1) launching from a
+            # subdirectory of the worktree: `git rev-parse --show-toplevel` resolves
+            # $RepoRoot to the worktree ROOT ($rootDir), but the process CWD (what
+            # Get-Location would return) is the nested $subDir. The `worktree list
+            # --porcelain` record for this worktree is keyed by the root, not the
+            # subdirectory.
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $subDir -RepoRoot $rootDir -GitConfig @{
+                'branch--show-current'              = $branch
+                'symbolic-ref-origin-HEAD'          = 'refs/remotes/origin/main'
+                'rev-parse-exit'                    = 128
+                'worktree-list-porcelain'           = $worktreeList
+                'show-ref-refs/remotes/origin/main' = 0
+                'fetch-exit'                         = 0
+                'merge-base-exit'                    = 0
+            }
+            $context = & $script:GetAdditionalContext -Output $result.Output
+            $outsideFence = & $script:RemoveFencedPowerShellBlocks -Context $context
+
+            $result.ExitCode | Should -Be 0
+            $context | Should -Match 'current Claude worktree branch is merged' `
+                -Because 'the degraded-CWD check must compare the RESOLVED repo root against worktree records, not the raw subdirectory launch CWD — otherwise a normal subdirectory-launched session falsely reports "not in a registered worktree", downgrades the CURRENT-worktree candidate to a manual-review sibling finding (or drops it), and the one-click cleanup command is lost'
+            $context | Should -Match ([regex]::Escape($branch))
+            $outsideFence | Should -Match '(?s)git worktree remove.*git branch -D' `
+                -Because 'a correctly-recognized current worktree gets an eligible one-click composite cleanup command, not a manual-review-only downgrade'
+            $context | Should -Not -Match 'Sibling worktree branch' `
+                -Because 'the branch is the CURRENT worktree, not a sibling — misclassifying it as a sibling is a symptom of comparing against the wrong CWD'
+            $context | Should -Not -Match 'did not match a registered worktree' `
+                -Because 'the degraded-CWD note must not fire for a normal subdirectory-launched session'
+        }
+
         It 'T2 D1 AC1 derives the current claude merge-base target from the default branch remote' {
             $workDir = Join-Path $TestDrive 'current-claude-upstream-default-remote'
             New-Item -ItemType Directory -Path $workDir -Force | Out-Null
@@ -678,7 +736,7 @@ exit $LASTEXITCODE
                 (& $script:NewWorktreeRecord -Path $currentPath -Branch $branch)
             ) -join "`n`n"
 
-            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -RepoRoot 'C:/agent-orchestra' -IncludeGitCalls -GitConfig @{
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -IncludeGitCalls -GitConfig @{
                 'branch--show-current'                          = $branch
                 'symbolic-ref-HEAD'                             = 'refs/heads/main'
                 'rev-parse-exit'                                = 128
@@ -1335,7 +1393,7 @@ exit $LASTEXITCODE
             $baselineText = [System.IO.File]::ReadAllText($script:CopilotBaselineFixturePath)
             $expectedCopilotBullet = @($baselineText -split "`r?`n" | Where-Object { $_ -like '- Current branch *' } | Select-Object -First 1)[0]
 
-            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -RepoRoot 'C:/agent-orchestra' -GitConfig @{
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GitConfig @{
                 'branch--show-current'                              = $copilotBranch
                 'symbolic-ref-origin-HEAD'                          = 'refs/remotes/origin/main'
                 'rev-parse-exit'                                    = 0
@@ -1560,7 +1618,14 @@ exit $LASTEXITCODE
     }
 
     It 'reports only the stale issue artifact when calibration data coexists with stale tracking state' {
-        $workDir = Join-Path $TestDrive 'calibration-plus-stale-issue'
+        # Folder name intentionally avoids the substring "calibration" (unlike the
+        # .copilot-tracking/calibration/ fixture path written below) — G1 (#897
+        # review) made -RepoRoot default to -WorkDir in the test harness, and
+        # -RepoRoot feeds the rendered composite command's path, so a WorkDir name
+        # containing "calibration" would spuriously trip the
+        # AssertCalibrationNoiseExcluded substring check below via the rendered
+        # pwsh path text rather than any real leaked calibration-tracking noise.
+        $workDir = Join-Path $TestDrive 'excl-tracking-plus-stale-issue'
         New-Item -ItemType Directory -Path $workDir -Force | Out-Null
         & $script:WriteFixtureFile -WorkDir $workDir -RelativePath '.copilot-tracking\calibration\review-data.json' -Content '{"calibration_version":1,"entries":[]}' | Out-Null
         & $script:WriteFixtureFile -WorkDir $workDir -RelativePath '.copilot-tracking\research\issue-185-red.md' -Content @'
@@ -1585,7 +1650,9 @@ title: "Issue 185 RED fixture"
     }
 
     It 'still reports a stale branch when calibration data is present' {
-        $workDir = Join-Path $TestDrive 'calibration-plus-stale-branch'
+        # See the naming note on the sibling test above — avoid "calibration" in
+        # the WorkDir name since -RepoRoot now defaults to -WorkDir.
+        $workDir = Join-Path $TestDrive 'excl-tracking-plus-stale-branch'
         New-Item -ItemType Directory -Path $workDir -Force | Out-Null
         & $script:WriteFixtureFile -WorkDir $workDir -RelativePath '.copilot-tracking\calibration\review-data.json' -Content '{"calibration_version":1,"entries":[]}' | Out-Null
 

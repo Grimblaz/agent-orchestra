@@ -89,11 +89,15 @@ if (-not [string]::IsNullOrWhiteSpace($TmpRoot) -and $null -eq $IssueNumber) {
 function Remove-EmptyDirectory {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param([string]$Root)
-    if (-not (Test-Path $Root)) { return }
-    Get-ChildItem -Path $Root -Recurse -Directory |
+    # G5/G6 sweep (#897 review): -LiteralPath throughout — $Root is resolved
+    # relative to the worktree CWD, so an ancestor directory containing '['/']'
+    # (e.g. the consumer's clone location) would otherwise make Test-Path/
+    # Get-ChildItem misreport a present, non-empty tracking tree as absent/empty.
+    if (-not (Test-Path -LiteralPath $Root)) { return }
+    Get-ChildItem -LiteralPath $Root -Recurse -Directory |
         Sort-Object FullName -Descending |
         ForEach-Object {
-            $hasFiles = Get-ChildItem -Path $_.FullName -Recurse -File -ErrorAction SilentlyContinue
+            $hasFiles = Get-ChildItem -LiteralPath $_.FullName -Recurse -File -ErrorAction SilentlyContinue
             if (-not $hasFiles -and $PSCmdlet.ShouldProcess($_.FullName, 'Remove empty directory')) {
                 Remove-Item -LiteralPath $_.FullName -Force
             }
@@ -378,7 +382,12 @@ function Remove-SiblingWorktree {
         if ($matchedBlock -match '(?m)^locked') { $isLocked = $true }
         if ($matchedBlock -match '(?m)^prunable') { $isPrunable = $true }
     }
-    $dirAbsent = -not (Test-Path $WorktreePath)
+    # G5 (#897 review): -LiteralPath, not positional -Path — a bracket in an
+    # ANCESTOR directory of $WorktreePath (e.g. the consumer's clone location,
+    # `C:\Users\X\Code\My [Project]\...`) makes non-literal Test-Path return
+    # $false for a directory that genuinely exists, which would misroute a
+    # present, locked worktree into the double-force removal path below.
+    $dirAbsent = -not (Test-Path -LiteralPath $WorktreePath)
 
     if ($isLocked -and $dirAbsent) {
         # D5/#522, corrected (Issue #889 fix cycle, finding B1): real git never
@@ -439,8 +448,13 @@ function Remove-SiblingWorktree {
             return ($null -ne $probeBlock)
         } `
         -FileSystemProbe {
-            if (-not (Test-Path $WorktreePath)) { return 'absent' }
-            $children = Get-ChildItem -Path $WorktreePath -Force -ErrorAction SilentlyContinue
+            # G6 (#897 review): -LiteralPath on both calls — same bracket-in-ancestor
+            # risk as G5 above. Non-literal Test-Path/Get-ChildItem on a
+            # bracket-containing path would misreport a present, populated worktree
+            # as absent, corrupting the honest post-attempt outcome this probe exists
+            # to provide.
+            if (-not (Test-Path -LiteralPath $WorktreePath)) { return 'absent' }
+            $children = Get-ChildItem -LiteralPath $WorktreePath -Force -ErrorAction SilentlyContinue
             if ($null -eq $children -or @($children).Count -eq 0) { return 'empty' }
             return 'non-empty'
         }
@@ -500,14 +514,16 @@ function Remove-IssueTmpScratch {
         $resolvedTmpRoot = Join-Path $baseDir $TmpRoot
     }
 
-    if (-not (Test-Path $resolvedTmpRoot)) {
+    # G5/G6 sweep (#897 review): -LiteralPath — $resolvedTmpRoot is under the
+    # worktree root, same ancestor-bracket risk as $WorktreePath above.
+    if (-not (Test-Path -LiteralPath $resolvedTmpRoot)) {
         Write-Output "Cleaned 0 .tmp/ scratch files for issue #$IssueNumber"
         return
     }
 
     $escapedN = [regex]::Escape($IssueNumber)
     # Flat scope only — scratch convention uses top-level .tmp/{N}-* files; nested subdirs are not swept.
-    $allTmpFiles = Get-ChildItem -Path $resolvedTmpRoot -File -ErrorAction SilentlyContinue
+    $allTmpFiles = Get-ChildItem -LiteralPath $resolvedTmpRoot -File -ErrorAction SilentlyContinue
     $filesToRemove = @($allTmpFiles | Where-Object {
         $name = $_.Name
         # Form 1: {N}-* (literal '-' already anchors the right boundary)
@@ -602,7 +618,9 @@ if ($UntaggedTrackingFiles.Count -gt 0) {
     # C2: Resolve the canonical .copilot-tracking root for path-traversal validation.
     $trackingRootCanonical = $null
     $trackingRootDir = Join-Path $repoRoot '.copilot-tracking'
-    if (Test-Path $trackingRootDir) {
+    # G5/G6 sweep (#897 review): -LiteralPath — $trackingRootDir hangs off
+    # $repoRoot, same ancestor-bracket risk.
+    if (Test-Path -LiteralPath $trackingRootDir) {
         $trackingRootCanonical = (Resolve-Path -LiteralPath $trackingRootDir).Path.TrimEnd('\', '/')
     }
     $timestamp = Get-Date
@@ -612,7 +630,8 @@ if ($UntaggedTrackingFiles.Count -gt 0) {
     New-Item -ItemType Directory -Path $unknownArchiveDir -Force | Out-Null
     foreach ($relPath in $UntaggedTrackingFiles) {
         $absPath = Join-Path $repoRoot $relPath
-        if (-not (Test-Path $absPath)) {
+        # G5/G6 sweep (#897 review): -LiteralPath — same ancestor-bracket risk.
+        if (-not (Test-Path -LiteralPath $absPath)) {
             Write-Warning "Untagged tracking file not found: '$relPath' — skipping"
             continue
         }
@@ -635,7 +654,8 @@ if ($UntaggedTrackingFiles.Count -gt 0) {
             Write-Warning "Persistent tracking file skipped — registry-protected, will not be archived: '$relPath'"
             continue
         }
-        $fileInfo = Get-Item $absPath
+        # G5/G6 sweep (#897 review): -LiteralPath — same ancestor-bracket risk.
+        $fileInfo = Get-Item -LiteralPath $absPath
         # CR-5 defensive guard: skip directories (caller should only pass files via -File,
         # but guard against API misuse that could move an entire tracking subtree)
         if ($fileInfo.PSIsContainer) {
@@ -649,7 +669,9 @@ if ($UntaggedTrackingFiles.Count -gt 0) {
         $destPath = Join-Path $unknownArchiveDir $destName
         # Collision-safe: add suffix if needed
         $suffix = 1
-        while (Test-Path $destPath) {
+        # G5/G6 sweep (#897 review): -LiteralPath — $destPath hangs off the
+        # worktree-relative archive dir, same ancestor-bracket risk.
+        while (Test-Path -LiteralPath $destPath) {
             $destPath = Join-Path $unknownArchiveDir "$nameNoExt-$mtime-$suffix$ext"
             $suffix++
         }
@@ -685,7 +707,10 @@ if ($null -ne $IssueNumber) {
     else {
         Join-Path (Get-Location).Path $trackingRoot
     }
-    $allTrackingFiles = Get-ChildItem -Path $trackingRoot -Recurse -File -ErrorAction SilentlyContinue
+    # G5/G6 sweep (#897 review): -LiteralPath — $trackingRoot is CWD-relative
+    # ('.copilot-tracking'), and GetFullPath still resolves it against a CWD
+    # whose ancestor could contain '['/']'.
+    $allTrackingFiles = Get-ChildItem -LiteralPath $trackingRoot -Recurse -File -ErrorAction SilentlyContinue
     # Exclude .gitkeep placeholder files, then filter to only files belonging to this issue
     $trackingFiles = @($allTrackingFiles | Where-Object { $_.Name -ne '.gitkeep' } | Where-Object {
             # Registry guard: skip persistent root-level files (AC4)
@@ -718,7 +743,8 @@ if ($null -ne $IssueNumber) {
 
     Remove-EmptyDirectory -Root $trackingRoot
 
-    $remaining = (Get-ChildItem -Path $trackingRoot -Recurse -File -ErrorAction SilentlyContinue | Measure-Object).Count
+    # G5/G6 sweep (#897 review): -LiteralPath — same rationale as above.
+    $remaining = (Get-ChildItem -LiteralPath $trackingRoot -Recurse -File -ErrorAction SilentlyContinue | Measure-Object).Count
     Write-Output "Archived $archivedCount file(s). Tracking files remaining: $remaining"
 }
 
