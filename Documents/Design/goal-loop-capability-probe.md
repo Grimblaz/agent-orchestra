@@ -37,14 +37,19 @@ never silently omitted.
 | Leg | Question | Label | Outcome |
 | --- | --- | --- | --- |
 | (a) | headless launch | `observed` | Works, with three hard requirements (below) |
-| (b) | terminal-outcome readability | `observed` | Terminal `result` event parses; 2 of 3 discriminator paths seen live |
-| (c) | `--max-budget-usd` breach | `observed` | **Report path** — structured terminal event, not silent kill |
+| (b) | terminal-outcome readability | `observed` (2/3 paths) / **partial gap** | Terminal `result` event parses; `judged-impossible` never produced live |
+| (c) | `--max-budget-usd` breach | `observed` | **Report path** — structured terminal event, not silent kill. **Also surfaced a silent-zero `usage` defect — see [leg (c)](#leg-c--max-budget-usd-breach-behavior)** |
 | (d) | `/goal` registration | `observed` | `goal` present in `system/init` `slash_commands` |
 | (e) | supervisor force-halt | **explicit gap** | Not run — see [gaps](#explicit-gaps) |
 | (f) | transcript usage-reader | `observed` (parse) / **partial gap** (live) | Reader validated on real data; live pre-termination poll not exercised |
 | (g) | clean release | `observed` | **No system-rendered completion status line** |
 
-Five legs fully observed, one partial, one explicit gap.
+**Four legs fully observed (a, c, d, g), two partial (b, f), one explicit gap (e).**
+
+> **Most consequential finding**: the terminal `result` event's `usage` object
+> reported **all zeros on a run that genuinely consumed 648 output tokens**
+> (leg (c)). Any consumer trusting `result.usage` for token accounting will
+> silently under-count. See [leg (c)](#leg-c--max-budget-usd-breach-behavior).
 
 ---
 
@@ -56,8 +61,16 @@ well-formed terminal `result` event with `is_error: false`,
 the instructed `<goal-status>satisfied</goal-status>` tag. Artifact:
 `leg-a-print.jsonl` (20210 bytes), empty stderr, exit 0.
 
-Reaching that success required three discoveries, each `observed` as a distinct
-failing run before the working invocation:
+Reaching that success required three discoveries, each seen as a distinct failing
+run before the working invocation.
+
+> **Artifact-retention caveat**: each probe run redirected over the *same* capture
+> filenames, so only the final successful capture survives on disk. The three
+> failure modes below were directly observed at the time, but their captures were
+> **not retained** and are therefore **not independently re-verifiable** — they do
+> not meet this document's own "`observed` … with an artifact backing it" bar as
+> strictly as legs (a)-success, (c), (d), and (g) do. Treat them as reliable
+> operational guidance, not as re-checkable evidence.
 
 1. **`--verbose` is mandatory.** `--print` combined with
    `--output-format stream-json` is rejected outright without it:
@@ -140,11 +153,53 @@ This is a materially favourable result for the harness: the vendor's own budget
 flag surfaces breaches as a parseable, uniquely-subtyped terminal event rather
 than silently killing the process.
 
+The event's `errors` field echoes the configured cap back:
+`"Reached maximum budget ($0.01)"`.
+
 **Overshoot (`observed`)**: the run spent **$0.0335877 against a $0.01 cap** —
-roughly 3.4× the ceiling. Enforcement is evaluated at the **turn boundary**,
-after the turn that exceeded the cap, not pre-emptively. Any harness delegating
-budget enforcement to this flag must tolerate overshoot proportional to a single
-turn's cost. This bears directly on the #848 D9 sub-ceiling question.
+roughly 3.4× the ceiling. Any harness delegating budget enforcement to this flag
+must tolerate overshoot proportional to a single turn's cost. This bears directly
+on the #848 D9 sub-ceiling question.
+
+**Enforcement timing (`inferred`)**: the overshoot is consistent with enforcement
+being evaluated at the **turn boundary**, after the turn that exceeded the cap,
+rather than pre-emptively. Nothing in the artifact shows evaluation timing
+directly — this is a mechanism conclusion drawn from a single data point (n=1,
+one cap value, one model), not an observation.
+
+### Silent-zero `usage` on the breach path (`observed`) — most consequential finding
+
+The same terminal event reports **mutually contradictory** token accounting:
+
+| Field | Value |
+| --- | --- |
+| `total_cost_usd` | `0.0335877` |
+| `errors` | `"Reached maximum budget ($0.01)"` |
+| `usage` | `input_tokens 0, output_tokens 0, cache_creation_input_tokens 0, cache_read_input_tokens 0`, `iterations: []` |
+| `modelUsage["claude-sonnet-4-6"]` | `inputTokens 3, outputTokens 648, cacheReadInputTokens 18779, cacheCreationInputTokens 4860, costUSD 0.0335877` |
+
+Real money was spent and **648 output tokens were genuinely consumed**, yet the
+`usage` object reports **all four token counts as zero** with an empty
+`iterations[]`. `modelUsage` and `total_cost_usd` carry the truth; `usage` does
+not.
+
+**Why this matters more than any other finding here**: 874-D5 designates the
+platform `result` event as Arm H's end-of-run token accounting source. A harness
+reading `result.usage` would record **zero tokens consumed on every budget
+breach** — silently, with no error, on precisely the path the budget arm exists
+to police. This is the **#873 silent-zero defect class reproduced in live vendor
+output**, and it is not a hypothesis: it is in the retained `leg-c.jsonl`.
+
+**Consequence for the harness**: token accounting MUST read `modelUsage` (or
+`total_cost_usd`), **never** `result.usage` alone. Any reader that treats a
+well-formed all-zero `usage` object as a truthful zero is wrong on this path.
+
+**Correction this forces elsewhere in this document**: leg (f)'s reader
+correctly *classified* an all-zero usage object as `usage-present-zero`. That
+classification is the right answer to "is this object well-formed and zero?" —
+but it must not be read as "zero tokens were truly consumed." The truthfulness
+of a vendor zero is **not established by shape validation**, and this probe now
+has a concrete counter-example.
 
 ## Leg (d) — goal registration in spawned sessions
 
@@ -153,9 +208,11 @@ a `slash_commands` array of 96 entries which **includes `goal`**. Goal
 registration in a headless-spawned session is therefore confirmed directly from
 the session's own emitted init event.
 
-As the run-book predicted, this leg was not gated by the leg-(a) cascade —
-`system.init` is emitted before any auth-gated turn resolves, and `goal` was in
-fact visible in the earlier failing captures too.
+As the run-book (`.github/scripts/README-goal-probe.md`) predicted, this leg was
+not gated by the leg-(a) cascade — `system.init` is emitted before any auth-gated
+turn resolves, and `goal` was visible in the 404 and 401 captures as well. (Not
+the `--verbose`-rejection run, which produced a zero-byte capture containing no
+events at all.)
 
 ## Leg (e) — supervisor-side force-halt
 
@@ -180,14 +237,25 @@ This is `documented` (from the vendor hooks reference), not `observed`.
 
 | Input | `State` | `LastTurnUsage` | `ReadLatencyMs` |
 | --- | --- | --- | --- |
-| 401 run (real all-zero usage, all four keys present) | `usage-present-zero` | all zeros | — |
-| successful run | `usage-present-nonzero` | input 3, output 1, cache_creation 8673, cache_read 14946 | ~2.3 |
+| 401 run (all-zero usage, all four keys present; **truthfulness of the zeros not established**) | `usage-present-zero` | all zeros | — |
+| successful run | `usage-present-nonzero` | input 3, output 1, cache_creation 8673, cache_read 14946 | ~2.3 (single sample) |
 
-The first row matters: the usage object was genuinely present with all four
-canonical token keys set to zero, and the reader correctly reported
-`usage-present-zero` rather than routing to the wrong-shape `usage-unavailable`
-branch. The absent-versus-zero discrimination (the #873 silent-zero defect class)
-is validated against **real vendor output**, not only fixtures.
+The first row matters, but read it precisely: the usage object was well-formed
+with all four canonical token keys present and set to zero, and the reader
+correctly reported `usage-present-zero` rather than routing to the wrong-shape
+`usage-unavailable` branch. The **shape** discrimination (well-formed-zero versus
+absent/wrong-shape — the #873 defect class) is validated against **real vendor
+output**, not only fixtures.
+
+**What that row does *not* establish**: that the zeros were *truthful*. Leg (c)
+produced a direct counter-example — an all-zero `usage` object on a run that
+genuinely consumed 648 output tokens. Shape validation cannot distinguish a
+truthful zero from a vendor-emitted false zero, and no consumer should treat
+`usage-present-zero` as proof that nothing was consumed.
+
+**Latency caveat**: `~2.3 ms` is a **single unrepeated sample**; a re-run measured
+4.24 ms (1.8×). Do not anchor a latency budget on it — and note these are
+post-hoc file reads, not live-poll latencies (below).
 
 **Partial gap**: these are **completed stream-json output captures**, not live,
 mid-write session transcripts under `~/.claude/projects/`. Leg (f)'s actual
@@ -242,11 +310,28 @@ before and after** the run. The scratch directory contained only the goal's own
 `haiku.txt` plus a `.gitignore` written by the plugin's own
 `Ensure-ScratchGitignore` SessionStart hook. No scope expansion occurred.
 
-**Incidental observation (`observed`)**: the app surfaced *"Approaching weekly
-usage limit — Resets Sat, Jul 25, 4:00 AM"*. A vendor **account-level weekly
-ceiling** exists, distinct from the per-run `--max-budget-usd` cap, and is
-surfaced with a reset timestamp. This is a second, independent budget constraint
-the harness's budget model must account for.
+**Account-level weekly ceiling (`observed`, both surfaces)**: the app surfaced
+*"Approaching weekly usage limit — Resets Sat, Jul 25, 4:00 AM"*. Critically,
+this ceiling is **not app-only** — the headless `leg-a-print.jsonl` capture
+carries a structured, machine-readable event for the same limit:
+
+```json
+{"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning",
+"resetsAt":1784966400,"rateLimitType":"seven_day","utilization":0.76,
+"isUsingOverage":false,"surpassedThreshold":0.75}}
+```
+
+`resetsAt: 1784966400` decodes to 2026-07-25T08:00Z — exactly the in-app string.
+
+This is materially more useful to the harness than a rendered warning: the
+ceiling is readable **headlessly and pre-emptively**, carrying current
+`utilization` (0.76) against a `surpassedThreshold` (0.75), the limit type
+(`seven_day`), an overage flag, and a reset epoch. A budget model can consume it
+*during* a run rather than discovering the ceiling by hitting it.
+
+This is a second, independent budget constraint — distinct from the per-run
+`--max-budget-usd` cap — and `rate_limit_event` / `rate_limit_info{}` is an
+undocumented platform surface now enumerated in the drift guard below.
 
 ---
 
@@ -277,8 +362,15 @@ second controlling input to the token-arm decision.
 
 ### Leg (b) — `judged-impossible` path: not exercised live
 
-Only `satisfied` and `stopped` were produced by real runs. The
-`judged-impossible` classification remains fixture-tested only.
+**Reason**: no probe run produced a goal the agent judged impossible. Only
+`satisfied` and `stopped` were emitted by real runs, so 2 of the 3 outcome
+classifications were validated against live data.
+
+**Consequence**: the `judged-impossible` classification remains **fixture-tested
+only**. A harness relying on it to distinguish "the executor concluded the goal
+cannot be met" from an ordinary error stop has no live evidence that the
+discriminator fires correctly. This is why leg (b) is recorded as **partial**,
+not fully observed, in the summary table.
 
 ---
 
@@ -288,16 +380,28 @@ Drift-guard checklist. Each item is an undocumented or version-specific surface
 the harness would depend on; re-verify each against a new build before trusting
 harness behaviour.
 
-1. **Terminal result event shape** — `type: result`; `subtype`
-   (`success` | `error_max_budget_usd` observed); `is_error`; `api_error_status`;
-   `num_turns`; `total_cost_usd`; `stop_reason`; `terminal_reason`; `result`;
-   `session_id`; `uuid`; `duration_ms`; `duration_api_ms`; `ttft_ms`;
-   `permission_denials[]`; `fast_mode_state`.
+1. **Terminal result event shape — success path** (`subtype: success`) —
+   `type: result`; `is_error`; `api_error_status`; `num_turns`; `total_cost_usd`;
+   `stop_reason`; `terminal_reason`; `result`; `session_id`; `uuid`;
+   `duration_ms`; `duration_api_ms`; `ttft_ms`; `permission_denials[]`;
+   `fast_mode_state`.
+1a. **Terminal result event shape — error path** (`subtype:
+   error_max_budget_usd` observed) — **the field set differs and the budget arm
+   lives here**. `api_error_status` and `terminal_reason` are **absent**; an
+   `errors` field is **present** and is the only place the configured cap is
+   echoed back (`"Reached maximum budget ($0.01)"`). Do not assume the
+   success-path field list holds.
 2. **Usage object shape** — `usage.{input_tokens, output_tokens,
    cache_creation_input_tokens, cache_read_input_tokens}` plus nested
    `server_tool_use{}`, `cache_creation{ephemeral_1h_input_tokens,
    ephemeral_5m_input_tokens}`, `service_tier`, `iterations[]`, `speed`,
    `inference_geo`.
+   **⚠ Most dangerous property in this enumeration**: `usage` is **not reliably
+   truthful**. On the observed budget-breach run it reported all four token
+   counts as `0` with `iterations: []` while `modelUsage` and `total_cost_usd`
+   recorded 648 output tokens and real spend. Token accounting must read
+   `modelUsage`/`total_cost_usd`; a well-formed all-zero `usage` object is not
+   evidence that nothing was consumed.
 3. **Per-model usage** — `modelUsage{<model-id>{inputTokens, outputTokens,
    cacheReadInputTokens, cacheCreationInputTokens, costUSD, contextWindow,
    maxOutputTokens}}`.
@@ -315,8 +419,14 @@ harness behaviour.
    satisfaction (app surface).
 10. **Budget enforcement timing** — `--max-budget-usd` evaluated at turn
     boundary, permitting single-turn overshoot.
-11. **Account-level weekly usage ceiling** — exists, surfaced in-app with a reset
-    timestamp; independent of per-run caps.
+11. **Account-level weekly usage ceiling** — exists and is independent of per-run
+    caps; surfaced in-app *and* headlessly.
+12. **`rate_limit_event` / `rate_limit_info{}`** — undocumented structured event
+    in the headless stream carrying `status` (`allowed_warning` observed),
+    `rateLimitType` (`seven_day` observed), `utilization` (float),
+    `surpassedThreshold` (float), `isUsingOverage` (bool), and `resetsAt` (unix
+    epoch seconds). This is the machine-readable, pre-emptive form of item 11 and
+    the only observed surface that reports budget headroom *during* a run.
 
 ## Instrument dispositions
 
@@ -324,8 +434,8 @@ What the harness inherits versus what it should replace.
 
 | Instrument | Disposition | Rationale |
 | --- | --- | --- |
-| `goal-probe-streamjson.ps1` (I1) | **promote-candidate** | Parsed the real terminal event correctly across all three observed outcome shapes. Release/outcome detection can build on it directly. Caveat: its `<goal-status>` tag convention is a probe-stage assumption, not a vendor contract. |
-| `goal-probe-usage-reader.ps1` (I2) | **promote-candidate (conditional)** | Absent-versus-zero discrimination validated on real vendor output. But its headline live-read purpose is unexercised — promote only once leg (f)'s live question is answered. |
+| `goal-probe-streamjson.ps1` (I1) | **promote-candidate** | Parsed real terminal events correctly across every shape encountered (success, 401 error, budget breach), covering 2 of 3 outcome *classifications* — `judged-impossible` was never produced live. Two caveats before promotion: its `<goal-status>` tag convention is a **probe-stage assumption, not a vendor contract**; and it does not surface `errors`/`modelUsage`, which the budget path needs. |
+| `goal-probe-usage-reader.ps1` (I2) | **promote-candidate (conditional)** | Well-formed-zero versus absent/wrong-shape discrimination validated on real vendor output. Two blockers: its headline live-read purpose is unexercised, and leg (c) proved a well-formed zero can be **untruthful**, so its `usage-present-zero` state must not be consumed as "nothing was spent" without a `modelUsage`/`total_cost_usd` cross-check. |
 | `goal-probe-forcehalt-rig.ps1` (I3) | **hold** | Logic Pester-tested, zero live validation. Leg (c) reduces the need for supervisor-side force-halt. Revisit only if the harness needs non-budget hard-halt. |
 | `goal-probe-forcehalt-hook.ps1` (stub) | **hold** | Block-decision contract never verified live; same rationale as I3. |
 
@@ -351,3 +461,15 @@ decisions.
    delegate budget enforcement to the vendor flag rather than operating its own
    token arm at all. This is consistent with 874-D1's vendor-native-engine lock.
    Flagged for the harness plan to decide.
+5. **874-D5's token-accounting source needs amending** *(new, raised by leg (c)'s
+   silent-zero finding)* — 874-D5 designates the platform `result` event as Arm
+   H's end-of-run token accounting source without naming a field. As written, the
+   obvious reading (`result.usage`) is **wrong**: it reports zeros on the breach
+   path. The harness plan must pin `modelUsage`/`total_cost_usd` explicitly, and
+   #848 should consider whether D5's wording needs correcting at the umbrella
+   level.
+6. **Pre-emptive headroom via `rate_limit_event`** *(new)* — the weekly-ceiling
+   event exposes live `utilization` against a `surpassedThreshold` mid-run. This
+   is the only observed mechanism that could support *pre-emptive* budget action
+   rather than post-hoc breach reporting, and no design decision currently
+   contemplates it.
