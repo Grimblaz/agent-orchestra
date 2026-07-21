@@ -277,6 +277,37 @@ if ($a.Count -ge 4 -and $a[0] -eq 'merge-base' -and $a[1] -eq '--is-ancestor') {
     exit ([int]$exitValue)
 }
 
+if ($a.Count -ge 3 -and $a[0] -eq 'rev-list' -and $a[-1] -eq '--count') {
+    # git rev-list <range> --count (Issue #889 s4 eligibility-primitive rung 1).
+    # DEFAULT (unconfigured) is "1" — deliberately the OPPOSITE default from the
+    # s1 primitive's own dedicated mock (session-startup-git-helpers.Tests.ps1,
+    # which defaults to 0) — routing pre-existing fixtures here (whose branch
+    # names mostly do not match the real issue-id derivation regex) through the
+    # primitive's rung-2 tree-equivalence check instead of rung-3 issue/PR
+    # derivation, so this file's large pre-#889 fixture set stays green without
+    # per-test gh mocking. Tests exercising rung 3 explicitly set
+    # "rev-list-count-<range>" = 0.
+    $range = $a[1]
+    $exitValue = Get-MockConfigValue "rev-list-exit-$range"
+    if ($null -eq $exitValue) { $exitValue = 0 }
+    $val = Get-MockConfigValue "rev-list-count-$range"
+    if ($null -eq $val) { $val = 1 }
+    if ([int]$exitValue -eq 0) { Write-Output "$val" }
+    exit ([int]$exitValue)
+}
+
+if ($a.Count -ge 4 -and $a[0] -eq 'diff' -and $a[1] -eq '--quiet') {
+    # git diff --quiet [--ignore-cr-at-eol] <baseRef> <branch> (rung 2 primary check).
+    # DEFAULT (unconfigured) exit 0 = tree-equivalent, for the same backward-
+    # compatibility reason as the rev-list-count default above.
+    $argIndex = 2
+    if ($a[$argIndex] -eq '--ignore-cr-at-eol') { $argIndex++ }
+    $targetBranch = if ($argIndex + 1 -lt $a.Count) { $a[$argIndex + 1] } else { '' }
+    $exitValue = Get-MockConfigValue "diff-quiet-exit-$targetBranch"
+    if ($null -eq $exitValue) { $exitValue = 0 }
+    exit ([int]$exitValue)
+}
+
 if ($a.Count -ge 3 -and $a[0] -eq 'branch' -and $a[1] -eq '--list') {
     $pattern = $a[2]
     $key = "branch-list-$pattern"
@@ -310,6 +341,71 @@ exit $LASTEXITCODE
             return $mockDir
         }
 
+        # ---------------------------------------------------------------------------
+        # Mock gh factory (Issue #889 s4, M15) — writes a gh.ps1 shim + gh.cmd wrapper
+        # to the same mock dir as the git mock, mirroring the pattern already shipped
+        # in session-startup-git-helpers.Tests.ps1 for the s1 eligibility primitive.
+        # Only layered onto PATH when a test explicitly passes -GhConfig — most
+        # fixtures never reach gh at all (they resolve at rung-2 tree-equivalence via
+        # the git mock's rev-list/diff defaults above), so this stays opt-in.
+        # ---------------------------------------------------------------------------
+        $script:AddMockGh = {
+            param(
+                [string]$MockDir,
+                [hashtable]$GhConfig
+            )
+
+            $GhConfig | ConvertTo-Json -Depth 4 | Set-Content -Path (Join-Path $MockDir 'gh-mock-config.json') -Encoding UTF8
+
+            $ghMockPs1 = @'
+param()
+$configPath = Join-Path $PSScriptRoot 'gh-mock-config.json'
+$config = Get-Content $configPath -Raw | ConvertFrom-Json
+$a = $args
+$callLogPath = Join-Path $PSScriptRoot 'gh-mock-calls.log'
+($a -join "`t") | Add-Content -Path $callLogPath -Encoding UTF8
+
+function Get-GhConfigValue {
+    param([string]$Name)
+    $prop = $config.PSObject.Properties[$Name]
+    if ($null -ne $prop) { return $prop.Value }
+    return $null
+}
+
+# gh pr list --head <branch> --base <default> --state merged --json number,headRefOid
+if ($a.Count -ge 2 -and $a[0] -eq 'pr' -and $a[1] -eq 'list') {
+    $headIdx = [Array]::IndexOf([string[]]$a, '--head')
+    $branch = if ($headIdx -ge 0 -and $headIdx + 1 -lt $a.Count) { $a[$headIdx + 1] } else { '' }
+    $key = "pr-list-merged-$branch"
+    $val = Get-GhConfigValue $key
+    if ($null -ne $val) { Write-Output $val }
+    exit 0
+}
+
+# gh issue view <id> --repo <owner/repo> --json state
+if ($a.Count -ge 2 -and $a[0] -eq 'issue' -and $a[1] -eq 'view') {
+    $issueId = $a[2]
+    $key = "issue-view-$issueId"
+    $val = Get-GhConfigValue $key
+    if ($null -ne $val) { Write-Output $val; exit 0 }
+    exit 1
+}
+
+exit 0
+'@
+            Set-Content -Path (Join-Path $MockDir 'gh-mock.ps1') -Value $ghMockPs1 -Encoding UTF8
+
+            $ghPs1Shim = @'
+#!/usr/bin/env pwsh
+& (Join-Path $PSScriptRoot 'gh-mock.ps1') @args
+exit $LASTEXITCODE
+'@
+            Set-Content -Path (Join-Path $MockDir 'gh.ps1') -Value $ghPs1Shim -Encoding UTF8
+
+            $ghCmdContent = "@echo off`r`npwsh -NoProfile -NonInteractive -File `"%~dp0gh-mock.ps1`" %*`r`nexit %ERRORLEVEL%"
+            Set-Content -Path (Join-Path $MockDir 'gh.cmd') -Value $ghCmdContent -Encoding ASCII
+        }
+
         # In-process helper: injects git mock via PATH, changes CWD, calls library directly.
         # Note: git mock .cmd wrappers internally spawn child pwsh processes — this is a known
         # residual limitation of the git mock infrastructure and cannot be eliminated here.
@@ -318,10 +414,15 @@ exit $LASTEXITCODE
                 [string]$WorkDir,
                 [hashtable]$GitConfig,
                 [string]$RepoRoot = $script:RepoRoot,
-                [switch]$IncludeGitCalls
+                [switch]$IncludeGitCalls,
+                [hashtable]$GhConfig = $null,
+                [switch]$IncludeGhCalls
             )
 
             $mockDir = & $script:NewMockGitDir -ParentDir $WorkDir -Config $GitConfig
+            if ($null -ne $GhConfig) {
+                & $script:AddMockGh -MockDir $mockDir -GhConfig $GhConfig
+            }
             try {
                 $env:PATH = "$mockDir$([System.IO.Path]::PathSeparator)$script:SavedPath"
                 Push-Location $WorkDir
@@ -331,6 +432,15 @@ exit $LASTEXITCODE
                         $callLogPath = Join-Path $mockDir 'git-mock-calls.log'
                         $result['GitCalls'] = if (Test-Path $callLogPath) {
                             @(Get-Content -Path $callLogPath -ErrorAction SilentlyContinue)
+                        }
+                        else {
+                            @()
+                        }
+                    }
+                    if ($IncludeGhCalls) {
+                        $ghCallLogPath = Join-Path $mockDir 'gh-mock-calls.log'
+                        $result['GhCalls'] = if (Test-Path $ghCallLogPath) {
+                            @(Get-Content -Path $ghCallLogPath -ErrorAction SilentlyContinue)
                         }
                         else {
                             @()
@@ -516,14 +626,21 @@ exit $LASTEXITCODE
             $workDir = Join-Path $TestDrive 'current-claude-merged'
             New-Item -ItemType Directory -Path $workDir -Force | Out-Null
             $branch = 'claude/widget-fixer-abcde'
+            $currentPath = & $script:ToPorcelainPath -Path $workDir
+            $primaryPath = & $script:ToPorcelainPath -Path (Join-Path $TestDrive 'current-claude-merged-primary')
+            $worktreeList = @(
+                (& $script:NewWorktreeRecord -Path $primaryPath -Branch 'main'),
+                (& $script:NewWorktreeRecord -Path $currentPath -Branch $branch)
+            ) -join "`n`n"
 
             $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -RepoRoot 'C:/agent-orchestra' -GitConfig @{
                 'branch--show-current'              = $branch
                 'symbolic-ref-origin-HEAD'          = 'refs/remotes/origin/main'
                 'rev-parse-exit'                    = 128
+                'worktree-list-porcelain'           = $worktreeList
                 'show-ref-refs/remotes/origin/main' = 0
-                'fetch-exit'                        = 0
-                'merge-base-exit'                   = 0
+                'fetch-exit'                         = 0
+                'merge-base-exit'                    = 0
             }
             $context = & $script:GetAdditionalContext -Output $result.Output
             $outsideFence = & $script:RemoveFencedPowerShellBlocks -Context $context
@@ -542,11 +659,18 @@ exit $LASTEXITCODE
             $workDir = Join-Path $TestDrive 'current-claude-upstream-default-remote'
             New-Item -ItemType Directory -Path $workDir -Force | Out-Null
             $branch = 'claude/upstream-default-abcde'
+            $currentPath = & $script:ToPorcelainPath -Path $workDir
+            $primaryPath = & $script:ToPorcelainPath -Path (Join-Path $TestDrive 'current-claude-upstream-default-remote-primary')
+            $worktreeList = @(
+                (& $script:NewWorktreeRecord -Path $primaryPath -Branch 'main'),
+                (& $script:NewWorktreeRecord -Path $currentPath -Branch $branch)
+            ) -join "`n`n"
 
             $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -RepoRoot 'C:/agent-orchestra' -IncludeGitCalls -GitConfig @{
                 'branch--show-current'                          = $branch
                 'symbolic-ref-HEAD'                             = 'refs/heads/main'
                 'rev-parse-exit'                                = 128
+                'worktree-list-porcelain'                       = $worktreeList
                 'config-branch.main.remote'                     = 'upstream'
                 'show-ref-refs/remotes/origin/main'             = 1
                 'show-ref-refs/remotes/origin/master'           = 1
@@ -561,7 +685,12 @@ exit $LASTEXITCODE
             $result.ExitCode | Should -Be 0
             $context | Should -Match 'Post-merge cleanup detected'
             $context | Should -Match ([regex]::Escape($branch))
-            $context | Should -Match 'refs/remotes/upstream/main'
+            # Issue #889 s4 (D6): the rendered evidence text now comes from the shared
+            # eligibility primitive, not the site-level ancestry ref used only to decide
+            # whether to flag the candidate — so the primitive's own remote-default
+            # resolution (which does not see this test's upstream-remote config) is not
+            # asserted here. The upstream-vs-origin derivation this test targets is fully
+            # covered by the $mergeBaseCalls assertions below.
             $result['GitCalls'] | Should -Contain "config`t--get`tbranch.main.remote"
             $result['GitCalls'] | Should -Contain "show-ref`t--verify`t--quiet`trefs/remotes/upstream/main"
             $mergeBaseCalls | Should -Contain "merge-base`t--is-ancestor`t$branch`trefs/remotes/upstream/main"
@@ -623,11 +752,18 @@ exit $LASTEXITCODE
             $workDir = Join-Path $TestDrive 'current-claude-fetch-failure'
             New-Item -ItemType Directory -Path $workDir -Force | Out-Null
             $branch = 'claude/fetch-failure-abcde'
+            $currentPath = & $script:ToPorcelainPath -Path $workDir
+            $primaryPath = & $script:ToPorcelainPath -Path (Join-Path $TestDrive 'current-claude-fetch-failure-primary')
+            $worktreeList = @(
+                (& $script:NewWorktreeRecord -Path $primaryPath -Branch 'main'),
+                (& $script:NewWorktreeRecord -Path $currentPath -Branch $branch)
+            ) -join "`n`n"
 
             $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GitConfig @{
                 'branch--show-current'              = $branch
                 'symbolic-ref-origin-HEAD'          = 'refs/remotes/origin/main'
                 'rev-parse-exit'                    = 128
+                'worktree-list-porcelain'           = $worktreeList
                 'show-ref-refs/remotes/origin/main' = 0
                 'fetch-exit'                        = 128
                 'merge-base-exit'                   = 0
@@ -644,11 +780,18 @@ exit $LASTEXITCODE
             $workDir = Join-Path $TestDrive 'current-claude-fetch-timeout'
             New-Item -ItemType Directory -Path $workDir -Force | Out-Null
             $branch = 'claude/fetch-timeout-abcde'
+            $currentPath = & $script:ToPorcelainPath -Path $workDir
+            $primaryPath = & $script:ToPorcelainPath -Path (Join-Path $TestDrive 'current-claude-fetch-timeout-primary')
+            $worktreeList = @(
+                (& $script:NewWorktreeRecord -Path $primaryPath -Branch 'main'),
+                (& $script:NewWorktreeRecord -Path $currentPath -Branch $branch)
+            ) -join "`n`n"
 
             $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GitConfig @{
                 'branch--show-current'              = $branch
                 'symbolic-ref-origin-HEAD'          = 'refs/remotes/origin/main'
                 'rev-parse-exit'                    = 128
+                'worktree-list-porcelain'           = $worktreeList
                 'show-ref-refs/remotes/origin/main' = 0
                 'fetch-mode'                        = 'timeout'
                 'merge-base-exit'                   = 0
@@ -843,9 +986,15 @@ exit $LASTEXITCODE
             New-Item -ItemType Directory -Path $workDir, $siblingDir -Force | Out-Null
             $currentPath = & $script:ToPorcelainPath -Path $workDir
             $siblingPath = & $script:ToPorcelainPath -Path $siblingDir
+            $primaryPath = & $script:ToPorcelainPath -Path (Join-Path $TestDrive 'sibling-placement-primary')
             $currentBranch = 'claude/current-merged-abcde'
             $siblingBranch = 'claude/sibling-merged-abcde'
+            # Issue #889 s4: primary (first record) must be a DISTINCT path from the
+            # current session worktree — Test-WorktreeIsPrimary treats the first
+            # `git worktree list --porcelain` record as primary, and the primary
+            # checkout can never be a `git worktree remove` target.
             $worktreeList = @(
+                (& $script:NewWorktreeRecord -Path $primaryPath -Branch 'main'),
                 (& $script:NewWorktreeRecord -Path $currentPath -Branch $currentBranch),
                 (& $script:NewWorktreeRecord -Path $siblingPath -Branch $siblingBranch)
             ) -join "`n`n"
@@ -1246,11 +1395,17 @@ exit $LASTEXITCODE
             New-Item -ItemType Directory -Path $workDir -Force | Out-Null
             $currentBranch = 'claude/current-overflow-abcde'
             $orphanBranches = 1..10 | ForEach-Object { 'claude/reclaimable-{0:d2}-abcde' -f $_ }
+            $currentPath = & $script:ToPorcelainPath -Path $workDir
+            $primaryPath = & $script:ToPorcelainPath -Path (Join-Path $TestDrive 'current-plus-orphan-claude-bounded-primary')
+            $worktreeList = @(
+                (& $script:NewWorktreeRecord -Path $primaryPath -Branch 'main'),
+                (& $script:NewWorktreeRecord -Path $currentPath -Branch $currentBranch)
+            ) -join "`n`n"
             $gitConfig = @{
                 'branch--show-current'              = $currentBranch
                 'symbolic-ref-origin-HEAD'          = 'refs/remotes/origin/main'
                 'rev-parse-exit'                    = 128
-                'worktree-list-porcelain'           = (& $script:NewWorktreeRecord -Path (& $script:ToPorcelainPath -Path $workDir) -Branch $currentBranch)
+                'worktree-list-porcelain'           = $worktreeList
                 'show-ref-refs/remotes/origin/main' = 0
                 'fetch-exit'                        = 0
                 'for-each-ref-refs/heads/claude/'   = @($currentBranch) + $orphanBranches
@@ -1694,6 +1849,359 @@ Write-Output "OUT:`$(`$r.Output)"
             )
             $matches | Should -BeNullOrEmpty `
                 -Because "'$fname' must only appear in the accessor, not as a literal in other session-startup scripts"
+        }
+    }
+}
+
+Describe 'session-cleanup-detector.ps1 — Issue #889 s4: shared eligibility gating' {
+
+    BeforeAll {
+        # Reuses $script:RepoRoot / $script:InvokeDetectorInWorkDir / $script:ToPorcelainPath /
+        # $script:NewWorktreeRecord / $script:GetAdditionalContext / $script:GetFencedPowerShellBlocks /
+        # $script:RemoveFencedPowerShellBlocks — all set in the "calibration tracking exclusion"
+        # Describe's BeforeAll earlier in this file. Functions are per-Describe-scope in Pester 5
+        # (unlike $script: variables), so the core library must be re-dot-sourced here — same
+        # pattern already used by the "Get-OrphanBranchLines" Describe above.
+        . (Join-Path $script:RepoRoot 'skills/session-startup/scripts/session-cleanup-detector-core.ps1')
+    }
+
+    Context 'zero-commit candidates are not flagged (rung-3 primitive path, all five sites)' {
+
+        It 'site 1: sibling remote-head-missing zero-commit candidate is manual-review only' {
+            $workDir = Join-Path $TestDrive 's4-zero-sibling-remote-head-current'
+            $siblingDir = Join-Path $TestDrive 's4-zero-sibling-remote-head-other'
+            New-Item -ItemType Directory -Path $workDir, $siblingDir -Force | Out-Null
+            $currentPath = & $script:ToPorcelainPath -Path $workDir
+            $siblingPath = & $script:ToPorcelainPath -Path $siblingDir
+            $siblingBranch = 'feature/issue-9001-zero-commit-remote-head'
+            $worktreeList = @(
+                (& $script:NewWorktreeRecord -Path $currentPath -Branch 'main'),
+                (& $script:NewWorktreeRecord -Path $siblingPath -Branch $siblingBranch)
+            ) -join "`n`n"
+
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GhConfig @{} -GitConfig @{
+                'branch--show-current'                        = 'main'
+                'symbolic-ref-origin-HEAD'                    = 'refs/remotes/origin/main'
+                'worktree-list-porcelain'                     = $worktreeList
+                "ls-remote-$siblingBranch"                    = ''
+                "rev-list-count-origin/main..$siblingBranch"  = 0
+                'path-configs'                                 = @{
+                    "$siblingPath" = @{
+                        'branch--show-current'                = $siblingBranch
+                        'rev-parse-exit'                       = 0
+                        'rev-parse-upstream'                   = "origin/$siblingBranch"
+                        "config-branch.$siblingBranch.remote" = 'origin'
+                        "config-branch.$siblingBranch.merge"  = "refs/heads/$siblingBranch"
+                    }
+                }
+            }
+            $context = & $script:GetAdditionalContext -Output $result.Output
+            $insideFence = (& $script:GetFencedPowerShellBlocks -Context $context) -join "`n"
+
+            $result.ExitCode | Should -Be 0
+            $context | Should -Match ([regex]::Escape($siblingBranch))
+            $context | Should -Match 'needs manual review'
+            $insideFence | Should -Not -Match ([regex]::Escape($siblingPath)) `
+                -Because 'an ineligible sibling candidate must not appear in the -SiblingWorktrees composite argument'
+        }
+
+        It 'site 2: sibling ancestry zero-commit candidate is manual-review only' {
+            $workDir = Join-Path $TestDrive 's4-zero-sibling-ancestry-current'
+            $siblingDir = Join-Path $TestDrive 's4-zero-sibling-ancestry-other'
+            New-Item -ItemType Directory -Path $workDir, $siblingDir -Force | Out-Null
+            $currentPath = & $script:ToPorcelainPath -Path $workDir
+            $siblingPath = & $script:ToPorcelainPath -Path $siblingDir
+            $siblingBranch = 'claude/scratch-ancestor-zero'
+            $worktreeList = @(
+                (& $script:NewWorktreeRecord -Path $currentPath -Branch 'main'),
+                (& $script:NewWorktreeRecord -Path $siblingPath -Branch $siblingBranch)
+            ) -join "`n`n"
+
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GhConfig @{} -GitConfig @{
+                'branch--show-current'                               = 'main'
+                'symbolic-ref-origin-HEAD'                           = 'refs/remotes/origin/main'
+                'worktree-list-porcelain'                            = $worktreeList
+                'show-ref-refs/remotes/origin/main'                  = 0
+                'fetch-exit'                                         = 0
+                "merge-base-$siblingBranch-refs/remotes/origin/main" = 0
+                "rev-list-count-origin/main..$siblingBranch"         = 0
+                'path-configs'                                        = @{
+                    "$siblingPath" = @{
+                        'branch--show-current' = $siblingBranch
+                        'rev-parse-exit'       = 128
+                    }
+                }
+            }
+            $context = & $script:GetAdditionalContext -Output $result.Output
+            $insideFence = (& $script:GetFencedPowerShellBlocks -Context $context) -join "`n"
+
+            $result.ExitCode | Should -Be 0
+            $context | Should -Match ([regex]::Escape($siblingBranch))
+            $context | Should -Match ([regex]::Escape("needs manual review: no issue number derivable"))
+            $insideFence | Should -Not -Match ([regex]::Escape($siblingPath)) `
+                -Because 'an ineligible sibling candidate must not appear in the -SiblingWorktrees composite argument'
+        }
+
+        It 'site 3: orphan remote-head-missing zero-commit candidate is manual-review only' {
+            $workDir = Join-Path $TestDrive 's4-zero-orphan-remote-head'
+            New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+            $branch = 'feature/issue-9002-zero-commit-orphan'
+
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GhConfig @{} -GitConfig @{
+                'branch--show-current'                    = 'main'
+                'symbolic-ref-origin-HEAD'                = 'refs/remotes/origin/main'
+                'worktree-list-porcelain'                 = (& $script:NewWorktreeRecord -Path (& $script:ToPorcelainPath -Path $workDir) -Branch 'main')
+                'fetch-exit'                               = 0
+                'for-each-ref-refs/heads/feature/issue-*' = @($branch)
+                'for-each-ref-refs/heads/feature/'        = @($branch)
+                'for-each-ref-refs/heads/'                = @($branch)
+                "config-branch.$branch.remote"            = 'origin'
+                "config-branch.$branch.merge"             = "refs/heads/$branch"
+                "ls-remote-$branch"                       = ''
+                "rev-list-count-origin/main..$branch"     = 0
+            }
+            $context = & $script:GetAdditionalContext -Output $result.Output
+            $insideFence = (& $script:GetFencedPowerShellBlocks -Context $context) -join "`n"
+
+            $result.ExitCode | Should -Be 0
+            $context | Should -Match ([regex]::Escape($branch))
+            $context | Should -Match 'needs manual review'
+            $insideFence | Should -Not -Match ([regex]::Escape($branch)) `
+                -Because 'an ineligible orphan candidate must not appear in the -OrphanBranches composite argument'
+        }
+
+        It 'site 4: orphan ancestry zero-commit candidate is manual-review only' {
+            $workDir = Join-Path $TestDrive 's4-zero-orphan-ancestry'
+            New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+            $branch = 'claude/scratch-orphan-zero'
+
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GhConfig @{} -GitConfig @{
+                'branch--show-current'                        = 'main'
+                'symbolic-ref-origin-HEAD'                    = 'refs/remotes/origin/main'
+                'worktree-list-porcelain'                     = (& $script:NewWorktreeRecord -Path (& $script:ToPorcelainPath -Path $workDir) -Branch 'main')
+                'show-ref-refs/remotes/origin/main'           = 0
+                'fetch-exit'                                  = 0
+                'for-each-ref-refs/heads/claude/'             = @($branch)
+                "merge-base-$branch-refs/remotes/origin/main" = 0
+                "rev-list-count-origin/main..$branch"         = 0
+            }
+            $context = & $script:GetAdditionalContext -Output $result.Output
+            $insideFence = (& $script:GetFencedPowerShellBlocks -Context $context) -join "`n"
+
+            $result.ExitCode | Should -Be 0
+            $context | Should -Match ([regex]::Escape($branch))
+            $context | Should -Match ([regex]::Escape("needs manual review: no issue number derivable"))
+            $insideFence | Should -Not -Match ([regex]::Escape($branch)) `
+                -Because 'an ineligible orphan candidate must not appear in the -OrphanBranches composite argument'
+        }
+
+        It 'site 5: current-no-upstream zero-commit candidate is manual-review only' {
+            $workDir = Join-Path $TestDrive 's4-zero-current-current'
+            New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+            $branch = 'claude/scratch-current-zero'
+            $currentPath = & $script:ToPorcelainPath -Path $workDir
+            $primaryPath = & $script:ToPorcelainPath -Path (Join-Path $TestDrive 's4-zero-current-primary')
+            $worktreeList = @(
+                (& $script:NewWorktreeRecord -Path $primaryPath -Branch 'main'),
+                (& $script:NewWorktreeRecord -Path $currentPath -Branch $branch)
+            ) -join "`n`n"
+
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GhConfig @{} -GitConfig @{
+                'branch--show-current'                = $branch
+                'symbolic-ref-origin-HEAD'            = 'refs/remotes/origin/main'
+                'rev-parse-exit'                      = 128
+                'worktree-list-porcelain'              = $worktreeList
+                'show-ref-refs/remotes/origin/main'   = 0
+                'fetch-exit'                            = 0
+                'merge-base-exit'                       = 0
+                "rev-list-count-origin/main..$branch" = 0
+            }
+            $context = & $script:GetAdditionalContext -Output $result.Output
+            $insideFence = (& $script:GetFencedPowerShellBlocks -Context $context) -join "`n"
+            $outsideFence = & $script:RemoveFencedPowerShellBlocks -Context $context
+
+            $result.ExitCode | Should -Be 0
+            $context | Should -Match ([regex]::Escape($branch))
+            $context | Should -Match ([regex]::Escape("needs manual review: no issue number derivable"))
+            $outsideFence | Should -Not -Match 'git worktree remove' `
+                -Because 'an ineligible current-branch candidate must not render the worktree-remove command block'
+            $insideFence | Should -Not -Match 'git worktree remove'
+        }
+    }
+
+    Context 'structural primary-worktree guard' {
+
+        It 'primary worktree on a non-default branch is not flagged as a sibling candidate' {
+            $workDir = Join-Path $TestDrive 's4-primary-sibling-current'
+            $primaryDir = Join-Path $TestDrive 's4-primary-sibling-primary'
+            New-Item -ItemType Directory -Path $workDir, $primaryDir -Force | Out-Null
+            $currentPath = & $script:ToPorcelainPath -Path $workDir
+            $primaryPath = & $script:ToPorcelainPath -Path $primaryDir
+            $primaryBranch = 'claude/primary-on-feature-abcde'
+            # Primary (first record) is on a NON-default branch — the 2026-07-20 incident
+            # shape: the agent runs from a non-primary linked worktree ($workDir) while the
+            # primary checkout ($primaryDir) sits on some other branch, not main.
+            $worktreeList = @(
+                (& $script:NewWorktreeRecord -Path $primaryPath -Branch $primaryBranch),
+                (& $script:NewWorktreeRecord -Path $currentPath -Branch 'main')
+            ) -join "`n`n"
+
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GitConfig @{
+                'branch--show-current'                               = 'main'
+                'symbolic-ref-origin-HEAD'                           = 'refs/remotes/origin/main'
+                'worktree-list-porcelain'                            = $worktreeList
+                'show-ref-refs/remotes/origin/main'                  = 0
+                'fetch-exit'                                         = 0
+                "merge-base-$primaryBranch-refs/remotes/origin/main" = 0
+            }
+
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match '^\{\s*\}$' `
+                -Because 'the primary worktree must never be offered as a sibling cleanup candidate, regardless of eligibility signals'
+        }
+
+        It 'primary worktree on a non-default branch is not flagged as the current-branch candidate' {
+            $workDir = Join-Path $TestDrive 's4-primary-current-current'
+            New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+            $branch = 'claude/primary-current-abcde'
+            $currentPath = & $script:ToPorcelainPath -Path $workDir
+            # Single-record layout: the current location IS the primary (first and only
+            # worktree record) — the common solo-checkout shape, where `git worktree
+            # remove` can never legitimately target the current location.
+            $worktreeList = (& $script:NewWorktreeRecord -Path $currentPath -Branch $branch)
+
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GitConfig @{
+                'branch--show-current'              = $branch
+                'symbolic-ref-origin-HEAD'          = 'refs/remotes/origin/main'
+                'rev-parse-exit'                    = 128
+                'worktree-list-porcelain'           = $worktreeList
+                'show-ref-refs/remotes/origin/main' = 0
+                'fetch-exit'                        = 0
+                'merge-base-exit'                   = 0
+            }
+
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match '^\{\s*\}$' `
+                -Because 'the primary checkout can never be a git worktree remove target, so the current-branch category must be suppressed'
+        }
+    }
+
+    Context 'eligible vs manual-review mutual exclusivity and line rendering' {
+
+        It 'an ineligible candidate is absent from composite args while an eligible candidate from the same run is present, and each renders its own evidence/reason string' {
+            $workDir = Join-Path $TestDrive 's4-mutual-exclusivity-current'
+            $eligibleDir = Join-Path $TestDrive 's4-mutual-exclusivity-eligible'
+            $ineligibleDir = Join-Path $TestDrive 's4-mutual-exclusivity-ineligible'
+            New-Item -ItemType Directory -Path $workDir, $eligibleDir, $ineligibleDir -Force | Out-Null
+            $currentPath = & $script:ToPorcelainPath -Path $workDir
+            $eligiblePath = & $script:ToPorcelainPath -Path $eligibleDir
+            $ineligiblePath = & $script:ToPorcelainPath -Path $ineligibleDir
+            $eligibleBranch = 'claude/mutual-eligible-abcde'
+            $ineligibleBranch = 'claude/mutual-ineligible-zero'
+            $worktreeList = @(
+                (& $script:NewWorktreeRecord -Path $currentPath -Branch 'main'),
+                (& $script:NewWorktreeRecord -Path $eligiblePath -Branch $eligibleBranch),
+                (& $script:NewWorktreeRecord -Path $ineligiblePath -Branch $ineligibleBranch)
+            ) -join "`n`n"
+
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GhConfig @{} -GitConfig @{
+                'branch--show-current'                                  = 'main'
+                'symbolic-ref-origin-HEAD'                              = 'refs/remotes/origin/main'
+                'worktree-list-porcelain'                               = $worktreeList
+                'show-ref-refs/remotes/origin/main'                     = 0
+                'fetch-exit'                                            = 0
+                "merge-base-$eligibleBranch-refs/remotes/origin/main"   = 0
+                "merge-base-$ineligibleBranch-refs/remotes/origin/main" = 0
+                "rev-list-count-origin/main..$ineligibleBranch"         = 0
+                'path-configs'                                           = @{
+                    "$eligiblePath"   = @{ 'branch--show-current' = $eligibleBranch; 'rev-parse-exit' = 128 }
+                    "$ineligiblePath" = @{ 'branch--show-current' = $ineligibleBranch; 'rev-parse-exit' = 128 }
+                }
+            }
+            $context = & $script:GetAdditionalContext -Output $result.Output
+            $insideFence = (& $script:GetFencedPowerShellBlocks -Context $context) -join "`n"
+
+            $result.ExitCode | Should -Be 0
+            $insideFence | Should -Match ([regex]::Escape("-SiblingWorktrees @('$eligiblePath')")) `
+                -Because 'the eligible sibling must appear alone in the composite -SiblingWorktrees argument'
+            $insideFence | Should -Not -Match ([regex]::Escape($ineligiblePath)) `
+                -Because 'the ineligible sibling must never appear in the composite args'
+            $context | Should -Match ([regex]::Escape($ineligibleBranch))
+            $context | Should -Match ([regex]::Escape("needs manual review: no issue number derivable")) `
+                -Because 'the manual-review line must render the primitive ManualReviewReason string'
+            $context | Should -Match ([regex]::Escape('merged into origin/main (tree-equivalent)')) `
+                -Because 'the eligible line must render the primitive Evidence string'
+        }
+    }
+
+    Context 'degraded-CWD downgrade' {
+
+        It 'degraded CWD downgrades sibling candidates to manual review, suppresses current-branch, and adds a caveat' {
+            $workDir = Join-Path $TestDrive 's4-degraded-cwd-current'
+            $otherPrimaryDir = Join-Path $TestDrive 's4-degraded-cwd-other-primary'
+            $siblingDir = Join-Path $TestDrive 's4-degraded-cwd-sibling'
+            New-Item -ItemType Directory -Path $workDir, $otherPrimaryDir, $siblingDir -Force | Out-Null
+            $otherPrimaryPath = & $script:ToPorcelainPath -Path $otherPrimaryDir
+            $siblingPath = & $script:ToPorcelainPath -Path $siblingDir
+            $siblingBranch = 'claude/degraded-sibling-abcde'
+            $currentBranch = 'claude/degraded-current-abcde'
+            # Neither record matches $workDir (the actual CWD) — simulates a wiped/relocated
+            # linked worktree whose directory-walk falls through to a DIFFERENT checkout, so
+            # `git worktree list --porcelain` never lists $workDir at all (issue #889's own
+            # dispatch-env shape).
+            $worktreeList = @(
+                (& $script:NewWorktreeRecord -Path $otherPrimaryPath -Branch 'main'),
+                (& $script:NewWorktreeRecord -Path $siblingPath -Branch $siblingBranch)
+            ) -join "`n`n"
+
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GitConfig @{
+                'branch--show-current'                               = $currentBranch
+                'symbolic-ref-origin-HEAD'                           = 'refs/remotes/origin/main'
+                'rev-parse-exit'                                     = 128
+                'worktree-list-porcelain'                            = $worktreeList
+                'show-ref-refs/remotes/origin/main'                  = 0
+                'fetch-exit'                                         = 0
+                "merge-base-$currentBranch-refs/remotes/origin/main" = 0
+                "merge-base-$siblingBranch-refs/remotes/origin/main" = 0
+                'path-configs'                                        = @{
+                    "$siblingPath" = @{
+                        'branch--show-current' = $siblingBranch
+                        'rev-parse-exit'       = 128
+                    }
+                }
+            }
+            $context = & $script:GetAdditionalContext -Output $result.Output
+            $insideFence = (& $script:GetFencedPowerShellBlocks -Context $context) -join "`n"
+            $outsideFence = & $script:RemoveFencedPowerShellBlocks -Context $context
+
+            $result.ExitCode | Should -Be 0
+            $context | Should -Not -Match ([regex]::Escape($currentBranch)) `
+                -Because 'the current-branch category must be suppressed entirely under degraded CWD'
+            $outsideFence | Should -Not -Match 'git worktree remove'
+            $context | Should -Match ([regex]::Escape($siblingBranch))
+            $context | Should -Match 'needs manual review'
+            $insideFence | Should -Not -Match ([regex]::Escape($siblingPath)) `
+                -Because 'degraded CWD must downgrade sibling candidates to report-only, excluded from composite args'
+            $context | Should -Match 'did not match a registered worktree' `
+                -Because 'the degraded-CWD caveat note must be rendered'
+        }
+    }
+
+    Context 'collection-time gh budget' {
+
+        It 'no candidates yields zero gh calls' {
+            $workDir = Join-Path $TestDrive 's4-no-candidates-zero-gh'
+            New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GhConfig @{} -IncludeGhCalls -GitConfig @{
+                'branch--show-current'     = 'main'
+                'symbolic-ref-origin-HEAD' = 'refs/remotes/origin/main'
+            }
+
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match '^\{\s*\}$'
+            $result['GhCalls'].Count | Should -Be 0 `
+                -Because 'zero candidates must never spend the gh mock (or a real gh call in production)'
         }
     }
 }

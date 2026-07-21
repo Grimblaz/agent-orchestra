@@ -16,6 +16,176 @@
 
 . "$PSScriptRoot/session-startup-git-helpers.ps1"
 
+# ===========================================================================
+# Issue #889 s4 — eligibility-gating helpers for the detector's candidate-
+# append sites. These wrap the shared Test-WorktreeBranchRemovalEligible
+# primitive (session-startup-git-helpers.ps1, s1) with a detector-only
+# degraded-CWD short-circuit and a collection-time gh budget, neither of
+# which are concerns of the primitive itself.
+# ===========================================================================
+
+# Detector-only manual-review reason for the degraded-CWD downgrade (D6/AC7).
+# Not part of $script:WorktreeEligibilityReasons in session-startup-git-helpers.ps1:
+# that dictionary enumerates reasons the PRIMITIVE itself produces; this reason
+# is produced by the detector's own structural guard and never by the primitive.
+$script:SCDDegradedCwdManualReviewReason = "couldn't verify: current worktree location not registered"
+
+function Test-SCDCurrentLocationMatchesWorktreeRecord {
+    <#
+    .SYNOPSIS
+        Issue #889 s4: returns $true when $CurrentPath matches (normalized,
+        case-insensitive) any record's WorktreePath in $WorktreeRecords.
+        Used to detect the degraded-CWD condition — the current location
+        does not correspond to any worktree `git worktree list --porcelain`
+        knows about (e.g. a wiped/relocated linked worktree whose directory
+        walk silently falls through to a different checkout).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$CurrentPath,
+
+        [AllowNull()]
+        [array]$WorktreeRecords
+    )
+
+    if ($null -eq $WorktreeRecords -or $WorktreeRecords.Count -eq 0) {
+        return $false
+    }
+
+    $normCurrent = ConvertTo-SCDNormalizedPath -Path $CurrentPath
+    if (-not $normCurrent) {
+        return $false
+    }
+
+    foreach ($record in $WorktreeRecords) {
+        $normRecord = ConvertTo-SCDNormalizedPath -Path $record.WorktreePath
+        if ($normRecord -and [string]::Equals($normRecord, $normCurrent, [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function New-SCDCollectionGhBudget {
+    <#
+    .SYNOPSIS
+        Issue #889 s4: collection-time gh budget for the detector's
+        eligibility-gating calls. Distinct from the render-time
+        $claudeCleanupLimit further down this file, which only truncates
+        already-collected output and never bounds gh calls.
+    #>
+    [CmdletBinding()]
+    param(
+        # 20 comfortably exceeds the render-time $claudeCleanupLimit (10) further down
+        # this file, so the collection budget is never a tighter bottleneck than the
+        # existing render truncation for realistic candidate counts; it exists to bound
+        # pathological cases (hundreds of stale branches), not everyday cleanup runs.
+        [int]$PerCategoryLimit = 20,
+        [int]$GlobalSeconds = 10
+    )
+
+    return @{
+        PerCategoryLimit = $PerCategoryLimit
+        GlobalSeconds    = $GlobalSeconds
+        Stopwatch        = [System.Diagnostics.Stopwatch]::StartNew()
+        CategoryCounts   = @{}
+    }
+}
+
+function Test-SCDCollectionGhBudgetExceeded {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [hashtable]$Budget,
+
+        [Parameter(Mandatory)]
+        [string]$Category
+    )
+
+    if ($Budget.Stopwatch.Elapsed.TotalSeconds -ge $Budget.GlobalSeconds) {
+        return $true
+    }
+
+    $count = 0
+    if ($Budget.CategoryCounts.ContainsKey($Category)) {
+        $count = $Budget.CategoryCounts[$Category]
+    }
+    if ($count -ge $Budget.PerCategoryLimit) {
+        return $true
+    }
+
+    $Budget.CategoryCounts[$Category] = $count + 1
+    return $false
+}
+
+function Get-SCDGatedEligibility {
+    <#
+    .SYNOPSIS
+        Issue #889 s4: shared wrapper around Test-WorktreeBranchRemovalEligible
+        for every candidate-append site. Short-circuits to a manual-review
+        result (never calling the primitive, never spending gh budget) when
+        $IsDegradedCwd is set; otherwise spends one collection-time budget
+        unit before delegating to the primitive.
+    .OUTPUTS
+        Hashtable: @{ Eligible = <bool>; Evidence = <string|$null>; ManualReviewReason = <string|$null> }
+        (same shape as Test-WorktreeBranchRemovalEligible's own output).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [hashtable]$Budget,
+
+        [Parameter(Mandatory)]
+        [string]$Category,
+
+        [Parameter(Mandatory)]
+        [string]$BranchName,
+
+        [Parameter(Mandatory)]
+        [string]$DefaultBranch,
+
+        [bool]$IsDegradedCwd = $false
+    )
+
+    if ($IsDegradedCwd) {
+        return @{ Eligible = $false; Evidence = $null; ManualReviewReason = $script:SCDDegradedCwdManualReviewReason }
+    }
+
+    if (Test-SCDCollectionGhBudgetExceeded -Budget $Budget -Category $Category) {
+        return @{ Eligible = $false; Evidence = $null; ManualReviewReason = $script:WorktreeEligibilityReasons.GhTimeout }
+    }
+
+    return Test-WorktreeBranchRemovalEligible -BranchName $BranchName -DefaultBranch $DefaultBranch
+}
+
+function Get-SCDManualReviewLines {
+    <#
+    .SYNOPSIS
+        Issue #889 s4 (D6): renders manual-review lines for candidates the
+        shared eligibility primitive declined to clear. Mutually exclusive
+        with the eligible-line renderers (Get-SiblingWorktreeLines /
+        Get-SCDOrphanBranchLines / Get-CurrentNoUpstreamWorktreeLines) — a
+        candidate renders through exactly one of the two paths, never both.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Label,
+
+        [Parameter(Mandatory)]
+        [array]$Items
+    )
+
+    $out = @()
+    foreach ($item in $Items) {
+        $locationSuffix = if ($item.WorktreePath) { " at ``$($item.WorktreePath)``" } else { '' }
+        $out += "- $Label ``$($item.BranchName)``$locationSuffix needs manual review: $($item.ManualReviewReason)"
+    }
+    return $out
+}
+
 function Test-SCDPersistentTrackingFile {
     param(
         [Parameter(Mandatory)]
@@ -401,7 +571,11 @@ function Get-SCDSiblingWorktreeCleanups {
         [System.Collections.Generic.IDictionary[string, bool]]$FetchLookup = $null,
 
         [AllowNull()]
-        [array]$WorktreeRecords = $null
+        [array]$WorktreeRecords = $null,
+
+        [hashtable]$GhBudget = (New-SCDCollectionGhBudget),
+
+        [bool]$IsDegradedCwd = $false
     )
 
     $cleanups = @()
@@ -456,6 +630,14 @@ function Get-SCDSiblingWorktreeCleanups {
                     continue
                 }
 
+                # Issue #889 s4 (D2/AC2): exclude the primary worktree even when it is
+                # NOT the "current" record — the 2026-07-20 incident scenario where the
+                # agent runs from a non-primary linked worktree and the primary checkout
+                # (which `git worktree remove` can never target) shows up as a sibling.
+                if (Test-WorktreeIsPrimary -WorktreePath $record.WorktreePath) {
+                    continue
+                }
+
                 $branchName = $record.BranchName
                 if ($branchName -eq $DefaultBranch) {
                     continue
@@ -478,13 +660,16 @@ function Get-SCDSiblingWorktreeCleanups {
                     }
 
                     if (Test-SCDRemoteHeadMissing -RemoteName $upstreamBranch.RemoteName -BranchPattern $upstreamBranch.BranchName) {
+                        $eligibility = Get-SCDGatedEligibility -Budget $GhBudget -Category 'sibling' -BranchName $branchName -DefaultBranch $DefaultBranch -IsDegradedCwd $IsDegradedCwd
                         $cleanups += @{
-                            BranchName   = $branchName
-                            WorktreePath = $normalizedPath
-                            Reason       = 'remote branch merged/deleted'
-                            IsLocked     = $record.IsLocked
-                            LockReason   = $record.LockReason
-                            IsPrunable   = $record.IsPrunable
+                            BranchName         = $branchName
+                            WorktreePath       = $normalizedPath
+                            Reason             = $eligibility.Evidence
+                            Eligible           = $eligibility.Eligible
+                            ManualReviewReason = $eligibility.ManualReviewReason
+                            IsLocked           = $record.IsLocked
+                            LockReason         = $record.LockReason
+                            IsPrunable         = $record.IsPrunable
                         }
                     }
                     continue
@@ -503,14 +688,17 @@ function Get-SCDSiblingWorktreeCleanups {
                 }
 
                 if (Test-SCDMergeBaseAncestor -BranchName $branchName -TargetRef $remoteDefault.RefName -WorktreePath $record.WorktreePath) {
+                    $eligibility = Get-SCDGatedEligibility -Budget $GhBudget -Category 'sibling' -BranchName $branchName -DefaultBranch $DefaultBranch -IsDegradedCwd $IsDegradedCwd
                     $cleanups += @{
-                        BranchName       = $branchName
-                        WorktreePath     = $normalizedPath
-                        Reason           = "reachable from ``$($remoteDefault.RefName)``"
-                        RemoteDefaultRef = $remoteDefault.RefName
-                        IsLocked         = $record.IsLocked
-                        LockReason       = $record.LockReason
-                        IsPrunable       = $record.IsPrunable
+                        BranchName         = $branchName
+                        WorktreePath       = $normalizedPath
+                        Reason             = $eligibility.Evidence
+                        RemoteDefaultRef   = $remoteDefault.RefName
+                        Eligible           = $eligibility.Eligible
+                        ManualReviewReason = $eligibility.ManualReviewReason
+                        IsLocked           = $record.IsLocked
+                        LockReason         = $record.LockReason
+                        IsPrunable         = $record.IsPrunable
                     }
                 }
             }
@@ -702,7 +890,11 @@ function Get-SCDOrphanBranchCleanups {
         [System.Collections.Generic.IDictionary[string, bool]]$FetchLookup = $null,
 
         [AllowNull()]
-        [array]$WorktreeRecords = $null
+        [array]$WorktreeRecords = $null,
+
+        [hashtable]$GhBudget = (New-SCDCollectionGhBudget),
+
+        [bool]$IsDegradedCwd = $false
     )
 
     $cleanups = @()
@@ -743,11 +935,14 @@ function Get-SCDOrphanBranchCleanups {
         if (Test-SCDGitRefExists -RefName $remoteDefault.RefName) {
             foreach ($branchName in $noUpstreamCandidates) {
                 if (Test-SCDMergeBaseAncestor -BranchName $branchName -TargetRef $remoteDefault.RefName) {
+                    $eligibility = Get-SCDGatedEligibility -Budget $GhBudget -Category 'orphan' -BranchName $branchName -DefaultBranch $DefaultBranch -IsDegradedCwd $IsDegradedCwd
                     $cleanups += @{
-                        BranchName       = $branchName
-                        Reason           = "reachable from ``$($remoteDefault.RefName)``"
-                        RemoteDefaultRef = $remoteDefault.RefName
-                        Kind             = 'orphan-no-upstream'
+                        BranchName         = $branchName
+                        Reason             = $eligibility.Evidence
+                        RemoteDefaultRef   = $remoteDefault.RefName
+                        Eligible           = $eligibility.Eligible
+                        ManualReviewReason = $eligibility.ManualReviewReason
+                        Kind               = 'orphan-no-upstream'
                     }
                 }
             }
@@ -773,10 +968,13 @@ function Get-SCDOrphanBranchCleanups {
         }
 
         if (Test-SCDRemoteHeadMissing -RemoteName $upstreamBranch.RemoteName -BranchPattern $upstreamBranch.BranchName) {
+            $eligibility = Get-SCDGatedEligibility -Budget $GhBudget -Category 'orphan' -BranchName $branchName -DefaultBranch $DefaultBranch -IsDegradedCwd $IsDegradedCwd
             $cleanups += @{
-                BranchName = $branchName
-                Reason     = 'remote branch merged/deleted'
-                Kind       = 'orphan-upstream'
+                BranchName         = $branchName
+                Reason             = $eligibility.Evidence
+                Eligible           = $eligibility.Eligible
+                ManualReviewReason = $eligibility.ManualReviewReason
+                Kind               = 'orphan-upstream'
             }
         }
     }
@@ -841,6 +1039,32 @@ function Invoke-SessionCleanupDetector {
     $noUpstreamBranchPrefixes = @('claude/')
     $upstreamDeletedBranchPrefixes = @('feature/issue-')
     $fetchLookup = New-SCDStringLookup
+    $ghBudget = New-SCDCollectionGhBudget
+
+    # ============================================================
+    # STEP 0: WORKTREE REGISTRY + DEGRADED-CWD DETECTION (Issue #889 s4)
+    # Computed before STEP 1 so the current-branch (site 5) check below can
+    # consult $isDegradedCwd, and reused by the sibling/orphan calls further
+    # down instead of a second `git worktree list --porcelain` invocation.
+    # ============================================================
+    $worktreeRecords = $null
+    try {
+        $worktreePorcelain = @(git worktree list --porcelain 2>$null)
+        if ($LASTEXITCODE -eq 0) {
+            $worktreeRecords = @(Get-SCDWorktreeRecords -PorcelainLines $worktreePorcelain)
+        }
+    }
+    catch {
+        $null = $_
+    }
+
+    $currentLocationPath = (Get-Location).Path
+    # Degraded only when we have POSITIVE evidence the current location is not a
+    # registered worktree — an empty/unavailable registry (common when a caller
+    # never mocks `worktree list`, and never possible for a real git repo) is
+    # treated as non-degraded so it never masks the git-only sibling/orphan
+    # detection paths, which do not themselves depend on worktree records.
+    $isDegradedCwd = ($null -ne $worktreeRecords -and $worktreeRecords.Count -gt 0 -and -not (Test-SCDCurrentLocationMatchesWorktreeRecord -CurrentPath $currentLocationPath -WorktreeRecords $worktreeRecords))
 
     # ============================================================
     # STEP 1: BRANCH CHECK (runs before tracking-file gate)
@@ -879,16 +1103,27 @@ function Invoke-SessionCleanupDetector {
             else {
                 $isNoUpstreamCandidate = Test-SCDBranchMatchesPrefixes -BranchName $currentBranch -Prefixes $noUpstreamBranchPrefixes
 
-                if ($isNoUpstreamCandidate) {
+                # Issue #889 s4 (site 5, D2/AC2/AC7): structural primary-worktree guard and
+                # degraded-CWD suppression, both applied before spending a fetch/ancestry
+                # call. Primary is excluded because `git worktree remove` can never target
+                # the primary checkout; degraded CWD is suppressed because (Get-Location).Path
+                # cannot be trusted to name a real worktree when it matches no registered
+                # record (this is the "current branch" category — sibling/orphan candidates
+                # get a softer report-only downgrade instead of outright suppression).
+                if ($isNoUpstreamCandidate -and -not $isDegradedCwd -and -not (Test-WorktreeIsPrimary -WorktreePath $currentLocationPath)) {
                     $remoteDefault = Get-SCDRemoteDefaultRef -DefaultBranch $defaultBranch
                     Invoke-SCDNonInteractiveFetchOnce -RemoteName $remoteDefault.RemoteName -CacheKey $remoteDefault.RefName -FetchLookup $fetchLookup
 
                     if (Test-SCDGitRefExists -RefName $remoteDefault.RefName) {
                         if (Test-SCDMergeBaseAncestor -BranchName $currentBranch -TargetRef $remoteDefault.RefName) {
+                            $eligibility = Get-SCDGatedEligibility -Budget $ghBudget -Category 'current' -BranchName $currentBranch -DefaultBranch $defaultBranch
                             $currentNoUpstreamWorktree = @{
-                                BranchName       = $currentBranch
-                                RemoteDefaultRef = $remoteDefault.RefName
-                                WorktreePath     = (Get-Location).Path
+                                BranchName         = $currentBranch
+                                RemoteDefaultRef   = $remoteDefault.RefName
+                                WorktreePath       = $currentLocationPath
+                                Eligible           = $eligibility.Eligible
+                                Evidence           = $eligibility.Evidence
+                                ManualReviewReason = $eligibility.ManualReviewReason
                             }
                         }
                     }
@@ -897,19 +1132,8 @@ function Invoke-SessionCleanupDetector {
         }
     }
 
-    $worktreeRecords = $null
-    try {
-        $worktreePorcelain = @(git worktree list --porcelain 2>$null)
-        if ($LASTEXITCODE -eq 0) {
-            $worktreeRecords = @(Get-SCDWorktreeRecords -PorcelainLines $worktreePorcelain)
-        }
-    }
-    catch {
-        $null = $_
-    }
-
-    $siblingWorktreeCleanups = @(Get-SCDSiblingWorktreeCleanups -CurrentWorktreePath (Get-Location).Path -DefaultBranch $defaultBranch -NoUpstreamBranchPrefixes $noUpstreamBranchPrefixes -UpstreamDeletedBranchPrefixes $upstreamDeletedBranchPrefixes -FetchLookup $fetchLookup -WorktreeRecords $worktreeRecords)
-    $orphanBranchCleanups = @(Get-SCDOrphanBranchCleanups -CurrentBranch $currentBranch -DefaultBranch $defaultBranch -NoUpstreamBranchPrefixes $noUpstreamBranchPrefixes -UpstreamDeletedBranchPrefixes $upstreamDeletedBranchPrefixes -FetchLookup $fetchLookup -WorktreeRecords $worktreeRecords)
+    $siblingWorktreeCleanups = @(Get-SCDSiblingWorktreeCleanups -CurrentWorktreePath $currentLocationPath -DefaultBranch $defaultBranch -NoUpstreamBranchPrefixes $noUpstreamBranchPrefixes -UpstreamDeletedBranchPrefixes $upstreamDeletedBranchPrefixes -FetchLookup $fetchLookup -WorktreeRecords $worktreeRecords -GhBudget $ghBudget -IsDegradedCwd $isDegradedCwd)
+    $orphanBranchCleanups = @(Get-SCDOrphanBranchCleanups -CurrentBranch $currentBranch -DefaultBranch $defaultBranch -NoUpstreamBranchPrefixes $noUpstreamBranchPrefixes -UpstreamDeletedBranchPrefixes $upstreamDeletedBranchPrefixes -FetchLookup $fetchLookup -WorktreeRecords $worktreeRecords -GhBudget $ghBudget -IsDegradedCwd $isDegradedCwd)
 
     # ============================================================
     # STEP 2: TRACKING FILE CHECK (existing logic, intact)
@@ -1003,10 +1227,15 @@ function Invoke-SessionCleanupDetector {
     function Get-CurrentNoUpstreamWorktreeLines {
         param([hashtable]$Item)
 
+        $out = @()
+        if (-not $Item.Eligible) {
+            $out += "- Current Claude worktree branch ``$($Item.BranchName)`` at ``$($Item.WorktreePath)`` needs manual review: $($Item.ManualReviewReason)"
+            return $out
+        }
+
         $safeWorktreePath = ConvertTo-SCDPowerShellSingleQuoteEscapedText -Value $Item.WorktreePath
         $safeBranch = ConvertTo-SCDPowerShellSingleQuoteEscapedText -Value $Item.BranchName
-        $out = @()
-        $out += "- Current Claude worktree branch ``$($Item.BranchName)`` is reachable from ``$($Item.RemoteDefaultRef)``."
+        $out += "- Current Claude worktree branch ``$($Item.BranchName)`` — $($Item.Evidence)."
         $out += ''
         $out += "Current-worktree cleanup must be run from another checkout: ``git worktree remove '$safeWorktreePath'`` followed by ``git branch -D '$safeBranch'``."
         return $out
@@ -1122,6 +1351,15 @@ function Invoke-SessionCleanupDetector {
             })
     }
 
+    # Issue #889 s4 (D6): split visible candidates into eligible (render via the
+    # normal per-category line renderer + composite args) and manual-review
+    # (render via Get-SCDManualReviewLines, excluded from composite args) —
+    # a candidate renders through exactly one of the two, never both.
+    $eligibleVisibleSiblingWorktreeCleanups = @($visibleSiblingWorktreeCleanups | Where-Object { $_.Eligible })
+    $manualReviewVisibleSiblingWorktreeCleanups = @($visibleSiblingWorktreeCleanups | Where-Object { -not $_.Eligible })
+    $eligibleVisibleOrphanBranchCleanups = @($visibleOrphanBranchCleanups | Where-Object { $_.Eligible })
+    $manualReviewVisibleOrphanBranchCleanups = @($visibleOrphanBranchCleanups | Where-Object { -not $_.Eligible })
+
     if ($siblingWorktreeCleanups.Count -gt 0 -or $orphanBranchCleanups.Count -gt 0) {
         $signalNames = @()
         if ($null -ne $staleBranch) { $signalNames += 'stale branch' }
@@ -1144,14 +1382,24 @@ function Invoke-SessionCleanupDetector {
             $lines += (Get-TrackingLines -Items $cleanupNeeded)
             $lines += ''
         }
-        if ($visibleSiblingWorktreeCleanups.Count -gt 0) {
-            $lines += (Get-SiblingWorktreeLines -Items $visibleSiblingWorktreeCleanups)
+        if ($eligibleVisibleSiblingWorktreeCleanups.Count -gt 0) {
+            $lines += (Get-SiblingWorktreeLines -Items $eligibleVisibleSiblingWorktreeCleanups)
         }
-        if ($visibleOrphanBranchCleanups.Count -gt 0) {
-            $lines += (Get-SCDOrphanBranchLines -Items $visibleOrphanBranchCleanups)
+        if ($eligibleVisibleOrphanBranchCleanups.Count -gt 0) {
+            $lines += (Get-SCDOrphanBranchLines -Items $eligibleVisibleOrphanBranchCleanups)
+        }
+        if ($manualReviewVisibleSiblingWorktreeCleanups.Count -gt 0) {
+            $lines += (Get-SCDManualReviewLines -Label 'Sibling worktree branch' -Items $manualReviewVisibleSiblingWorktreeCleanups)
+        }
+        if ($manualReviewVisibleOrphanBranchCleanups.Count -gt 0) {
+            $lines += (Get-SCDManualReviewLines -Label 'Orphan branch' -Items $manualReviewVisibleOrphanBranchCleanups)
         }
         if ($hiddenClaudeCleanupCount -gt 0) {
             $lines += "- +$hiddenClaudeCleanupCount more — run ``git for-each-ref --format='%(refname:short)' refs/heads/claude/`` to see the full list."
+        }
+        if ($isDegradedCwd) {
+            $lines += ''
+            $lines += '_Note: the current location did not match a registered worktree, so sibling and orphan branch findings above are report-only — re-run from a registered worktree to enable one-click cleanup._'
         }
         $lines += ''
         $lines += 'To clean up, run:'
@@ -1175,14 +1423,14 @@ function Invoke-SessionCleanupDetector {
         if ($null -ne $staleBranch -and -not $staleBranch.IssueId) {
             $compositeArgs += "-FeatureBranch '$escaped'"
         }
-        if ($visibleSiblingWorktreeCleanups.Count -gt 0) {
-            $siblingPaths = $visibleSiblingWorktreeCleanups | ForEach-Object {
+        if ($eligibleVisibleSiblingWorktreeCleanups.Count -gt 0) {
+            $siblingPaths = $eligibleVisibleSiblingWorktreeCleanups | ForEach-Object {
                 "'" + (ConvertTo-SCDPowerShellSingleQuoteEscapedText -Value $_.WorktreePath) + "'"
             }
             $compositeArgs += "-SiblingWorktrees @($($siblingPaths -join ','))"
         }
-        if ($visibleOrphanBranchCleanups.Count -gt 0) {
-            $orphanNames = $visibleOrphanBranchCleanups | ForEach-Object {
+        if ($eligibleVisibleOrphanBranchCleanups.Count -gt 0) {
+            $orphanNames = $eligibleVisibleOrphanBranchCleanups | ForEach-Object {
                 "'" + (ConvertTo-SCDPowerShellSingleQuoteEscapedText -Value $_.BranchName) + "'"
             }
             $compositeArgs += "-OrphanBranches @($($orphanNames -join ','))"
