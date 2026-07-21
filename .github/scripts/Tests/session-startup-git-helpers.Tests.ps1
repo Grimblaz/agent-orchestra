@@ -149,6 +149,28 @@ if ($a.Count -ge 3 -and $a[0] -eq 'remote' -and $a[1] -eq 'get-url') {
     exit 1
 }
 
+# git worktree list --porcelain (Issue #889 s2 — Test-WorktreeIsPrimary / Test-WorktreeRemovalPreflight)
+if ($a.Count -ge 3 -and $a[0] -eq 'worktree' -and $a[1] -eq 'list' -and $a[2] -eq '--porcelain') {
+    $val = Get-ConfigValue 'worktree-list-porcelain'
+    $exitVal = Get-ConfigValue 'worktree-list-porcelain-exit'
+    if ($null -eq $exitVal) { $exitVal = 0 }
+    "worktree-list-porcelain-called" | Add-Content -Path $callLogPath -Encoding UTF8
+    if ($null -ne $val -and $val -ne '') { Write-Output $val }
+    exit ([int]$exitVal)
+}
+
+# git -C <path> status --porcelain (Issue #889 s2 — Test-WorktreeRemovalPreflight dirty probe)
+if ($a.Count -ge 4 -and $a[0] -eq '-C' -and $a[2] -eq 'status' -and $a[3] -eq '--porcelain') {
+    $path = $a[1]
+    $key = "status-porcelain-$path"
+    $val = Get-ConfigValue $key
+    $exitVal = Get-ConfigValue "status-porcelain-exit-$path"
+    if ($null -eq $exitVal) { $exitVal = 0 }
+    "status-porcelain-called`t$path" | Add-Content -Path $callLogPath -Encoding UTF8
+    if ($null -ne $val -and $val -ne '') { Write-Output $val }
+    exit ([int]$exitVal)
+}
+
 # Default: success, no output
 exit 0
 '@
@@ -452,6 +474,324 @@ exit $LASTEXITCODE
                 }
                 $script:EapResult.Eligible | Should -Be $false
                 $script:EapResult.ManualReviewReason | Should -Be "couldn't verify: git signal failed"
+            }
+        }
+    }
+
+    # =========================================================================
+    # Test-WorktreeIsPrimary — shared primary-worktree guard (Issue #889 s2)
+    # =========================================================================
+    Context 'Test-WorktreeIsPrimary — shared primary-worktree guard' {
+
+        It 'TC-Primary-1: returns $true when the path matches the FIRST porcelain record' {
+            $porcelain = @(
+                'worktree /repo/main'
+                'HEAD aaa111'
+                'branch refs/heads/main'
+                ''
+                'worktree /repo/sibling'
+                'HEAD bbb222'
+                'branch refs/heads/feature/issue-2-x'
+            ) -join "`n"
+
+            & $script:WithMockedGit -GitConfig ($script:DefaultGitConfig + @{
+                'worktree-list-porcelain' = $porcelain
+            }) -Body {
+                param($MockDir)
+                Test-WorktreeIsPrimary -WorktreePath '/repo/main' | Should -Be $true
+            }
+        }
+
+        It 'TC-Primary-2: returns $false when the path matches a LATER (non-first) porcelain record' {
+            $porcelain = @(
+                'worktree /repo/main'
+                'HEAD aaa111'
+                'branch refs/heads/main'
+                ''
+                'worktree /repo/sibling'
+                'HEAD bbb222'
+                'branch refs/heads/feature/issue-2-x'
+            ) -join "`n"
+
+            & $script:WithMockedGit -GitConfig ($script:DefaultGitConfig + @{
+                'worktree-list-porcelain' = $porcelain
+            }) -Body {
+                param($MockDir)
+                Test-WorktreeIsPrimary -WorktreePath '/repo/sibling' | Should -Be $false
+            }
+        }
+
+        It 'TC-Primary-3: bare-main record #1 (no branch line) is still treated as the primary record when its path matches' {
+            $porcelain = @(
+                'worktree /repo/bare.git'
+                'bare'
+                ''
+                'worktree /repo/sibling'
+                'HEAD bbb222'
+                'branch refs/heads/feature/issue-2-x'
+            ) -join "`n"
+
+            & $script:WithMockedGit -GitConfig ($script:DefaultGitConfig + @{
+                'worktree-list-porcelain' = $porcelain
+            }) -Body {
+                param($MockDir)
+                Test-WorktreeIsPrimary -WorktreePath '/repo/bare.git' | Should -Be $true
+            }
+        }
+
+        It 'TC-Primary-4: porcelain probe failure (non-zero exit) fails SAFE toward primary ($true — never authorizes removal on an indeterminate primary check)' {
+            & $script:WithMockedGit -GitConfig ($script:DefaultGitConfig + @{
+                'worktree-list-porcelain-exit' = 128
+            }) -Body {
+                param($MockDir)
+                Test-WorktreeIsPrimary -WorktreePath '/repo/anything' | Should -Be $true
+            }
+        }
+
+        It 'TC-Primary-5: path comparison is normalized (backslash separators + case-insensitive on Windows)' {
+            $porcelain = @(
+                'worktree C:/repo/main'
+                'HEAD aaa111'
+                'branch refs/heads/main'
+            ) -join "`n"
+
+            & $script:WithMockedGit -GitConfig ($script:DefaultGitConfig + @{
+                'worktree-list-porcelain' = $porcelain
+            }) -Body {
+                param($MockDir)
+                Test-WorktreeIsPrimary -WorktreePath 'C:\REPO\Main\' | Should -Be $true
+            }
+        }
+    }
+
+    # =========================================================================
+    # Get-WorktreeRemovalOutcome — pure 7-state diagnosis over injected probes (Issue #889 s2, M5)
+    # =========================================================================
+    Context 'Get-WorktreeRemovalOutcome — full registered x {absent,empty,non-empty} matrix' {
+
+        It 'TC-Outcome-1: not-registered + absent -> removed' {
+            $result = Get-WorktreeRemovalOutcome -WorktreePath '/repo/x' -RemovalExitCode 0 `
+                -PorcelainRegistrationProbe { $false } -FileSystemProbe { 'absent' }
+            $result | Should -Be 'removed'
+        }
+
+        It 'TC-Outcome-2: not-registered + empty -> removed-partial-root-held' {
+            $result = Get-WorktreeRemovalOutcome -WorktreePath '/repo/x' -RemovalExitCode 1 `
+                -PorcelainRegistrationProbe { $false } -FileSystemProbe { 'empty' }
+            $result | Should -Be 'removed-partial-root-held'
+        }
+
+        It 'TC-Outcome-3: not-registered + non-empty -> removed-partial-content-remains' {
+            $result = Get-WorktreeRemovalOutcome -WorktreePath '/repo/x' -RemovalExitCode 1 `
+                -PorcelainRegistrationProbe { $false } -FileSystemProbe { 'non-empty' }
+            $result | Should -Be 'removed-partial-content-remains'
+        }
+
+        It 'TC-Outcome-4: registered + absent -> stale-registration' {
+            $result = Get-WorktreeRemovalOutcome -WorktreePath '/repo/x' -RemovalExitCode 1 `
+                -PorcelainRegistrationProbe { $true } -FileSystemProbe { 'absent' }
+            $result | Should -Be 'stale-registration'
+        }
+
+        It 'TC-Outcome-5: registered + empty -> removed-partial-root-held' {
+            $result = Get-WorktreeRemovalOutcome -WorktreePath '/repo/x' -RemovalExitCode 1 `
+                -PorcelainRegistrationProbe { $true } -FileSystemProbe { 'empty' }
+            $result | Should -Be 'removed-partial-root-held'
+        }
+
+        It 'TC-Outcome-6: registered + non-empty -> failed' {
+            $result = Get-WorktreeRemovalOutcome -WorktreePath '/repo/x' -RemovalExitCode 1 `
+                -PorcelainRegistrationProbe { $true } -FileSystemProbe { 'non-empty' }
+            $result | Should -Be 'failed'
+        }
+
+        It 'TC-Outcome-7: registration-probe error ($null) -> verification-indeterminate' {
+            $result = Get-WorktreeRemovalOutcome -WorktreePath '/repo/x' -RemovalExitCode 1 `
+                -PorcelainRegistrationProbe { $null } -FileSystemProbe { 'absent' }
+            $result | Should -Be 'verification-indeterminate'
+        }
+
+        It 'TC-Outcome-8: filesystem-probe error ($null) -> verification-indeterminate' {
+            $result = Get-WorktreeRemovalOutcome -WorktreePath '/repo/x' -RemovalExitCode 1 `
+                -PorcelainRegistrationProbe { $true } -FileSystemProbe { $null }
+            $result | Should -Be 'verification-indeterminate'
+        }
+
+        It 'TC-Outcome-9: purity — each injected probe is invoked exactly once, no live git/fs call is made' {
+            $script:RegProbeCalls = 0
+            $script:FsProbeCalls = 0
+            $result = Get-WorktreeRemovalOutcome -WorktreePath '/repo/x' -RemovalExitCode 0 `
+                -PorcelainRegistrationProbe { $script:RegProbeCalls++; $false } `
+                -FileSystemProbe { $script:FsProbeCalls++; 'absent' }
+            $result | Should -Be 'removed'
+            $script:RegProbeCalls | Should -Be 1
+            $script:FsProbeCalls | Should -Be 1
+        }
+    }
+
+    # =========================================================================
+    # Get-WorktreeRemovalOutcomeMessage — self-contained message-mapping table (Issue #889 s2, M24)
+    # =========================================================================
+    Context 'Get-WorktreeRemovalOutcomeMessage — outcome-to-literal-message mapping' {
+
+        It 'TC-Message-1: removed' {
+            Get-WorktreeRemovalOutcomeMessage -Outcome 'removed' -WorktreePath '/repo/x' | Should -Be 'removed /repo/x'
+        }
+
+        It 'TC-Message-2: removed-partial-root-held' {
+            Get-WorktreeRemovalOutcomeMessage -Outcome 'removed-partial-root-held' -WorktreePath '/repo/x' |
+                Should -Be 'contents removed but the root directory was held by another process — the worktree is gone; an empty directory remains at /repo/x'
+        }
+
+        It 'TC-Message-3: removed-partial-content-remains' {
+            Get-WorktreeRemovalOutcomeMessage -Outcome 'removed-partial-content-remains' -WorktreePath '/repo/x' |
+                Should -Be 'worktree unregistered but files remain at /repo/x (a process is holding content) — inspect manually'
+        }
+
+        It 'TC-Message-4: stale-registration' {
+            Get-WorktreeRemovalOutcomeMessage -Outcome 'stale-registration' -WorktreePath '/repo/x' |
+                Should -Be 'removing stale registration — directory already gone at /repo/x'
+        }
+
+        It 'TC-Message-5: failed carries the supplied Detail' {
+            Get-WorktreeRemovalOutcomeMessage -Outcome 'failed' -WorktreePath '/repo/x' -Detail 'exit 128' |
+                Should -Be 'could not remove /repo/x (exit 128)'
+        }
+
+        It 'TC-Message-6: verification-indeterminate' {
+            Get-WorktreeRemovalOutcomeMessage -Outcome 'verification-indeterminate' -WorktreePath '/repo/x' |
+                Should -Be 'could not verify the final state — inspect manually at /repo/x'
+        }
+    }
+
+    # =========================================================================
+    # Test-WorktreeRemovalPreflight — skip-before-attempt decision (Issue #889 s2, M12/M14)
+    # =========================================================================
+    Context 'Test-WorktreeRemovalPreflight — skip decision' {
+
+        It 'TC-Preflight-1: primary worktree -> Skip=true, Reason=primary (checked before locked/dirty)' {
+            $porcelain = @(
+                'worktree /repo/main'
+                'HEAD aaa111'
+                'branch refs/heads/main'
+            ) -join "`n"
+
+            & $script:WithMockedGit -GitConfig ($script:DefaultGitConfig + @{
+                'worktree-list-porcelain' = $porcelain
+            }) -Body {
+                param($MockDir)
+                $result = Test-WorktreeRemovalPreflight -WorktreePath '/repo/main'
+                $result.Skip | Should -Be $true
+                $result.Reason | Should -Be 'primary'
+            }
+        }
+
+        It 'TC-Preflight-2: locked-and-not-prunable (not primary) -> Skip=true, Reason=locked' {
+            $porcelain = @(
+                'worktree /repo/main'
+                'HEAD aaa111'
+                'branch refs/heads/main'
+                ''
+                'worktree /repo/sibling'
+                'HEAD bbb222'
+                'branch refs/heads/feature/issue-2-x'
+            ) -join "`n"
+
+            & $script:WithMockedGit -GitConfig ($script:DefaultGitConfig + @{
+                'worktree-list-porcelain' = $porcelain
+            }) -Body {
+                param($MockDir)
+                $result = Test-WorktreeRemovalPreflight -WorktreePath '/repo/sibling' -IsLocked $true -IsPrunable $false
+                $result.Skip | Should -Be $true
+                $result.Reason | Should -Be 'locked'
+            }
+        }
+
+        It 'TC-Preflight-3: locked-AND-prunable (M14 qualified predicate) does NOT skip at preflight — falls through to a clean dirty-check' {
+            $porcelain = @(
+                'worktree /repo/main'
+                'HEAD aaa111'
+                'branch refs/heads/main'
+                ''
+                'worktree /repo/sibling'
+                'HEAD bbb222'
+                'branch refs/heads/feature/issue-2-x'
+            ) -join "`n"
+
+            & $script:WithMockedGit -GitConfig ($script:DefaultGitConfig + @{
+                'worktree-list-porcelain'   = $porcelain
+                'status-porcelain-/repo/sibling' = ''
+            }) -Body {
+                param($MockDir)
+                $result = Test-WorktreeRemovalPreflight -WorktreePath '/repo/sibling' -IsLocked $true -IsPrunable $true
+                $result.Skip | Should -Be $false
+                $result.Reason | Should -BeNullOrEmpty
+            }
+        }
+
+        It 'TC-Preflight-4: dirty (non-empty status --porcelain) -> Skip=true, Reason=dirty' {
+            $porcelain = @(
+                'worktree /repo/main'
+                'HEAD aaa111'
+                'branch refs/heads/main'
+                ''
+                'worktree /repo/sibling'
+                'HEAD bbb222'
+                'branch refs/heads/feature/issue-2-x'
+            ) -join "`n"
+
+            & $script:WithMockedGit -GitConfig ($script:DefaultGitConfig + @{
+                'worktree-list-porcelain'         = $porcelain
+                'status-porcelain-/repo/sibling'  = ' M some-file.txt'
+            }) -Body {
+                param($MockDir)
+                $result = Test-WorktreeRemovalPreflight -WorktreePath '/repo/sibling'
+                $result.Skip | Should -Be $true
+                $result.Reason | Should -Be 'dirty'
+            }
+        }
+
+        It "TC-Preflight-5: the preflight's OWN dirty probe erroring (non-zero exit) skips WITHOUT attempt — never falls through" {
+            $porcelain = @(
+                'worktree /repo/main'
+                'HEAD aaa111'
+                'branch refs/heads/main'
+                ''
+                'worktree /repo/sibling'
+                'HEAD bbb222'
+                'branch refs/heads/feature/issue-2-x'
+            ) -join "`n"
+
+            & $script:WithMockedGit -GitConfig ($script:DefaultGitConfig + @{
+                'worktree-list-porcelain'              = $porcelain
+                'status-porcelain-exit-/repo/sibling'  = 128
+            }) -Body {
+                param($MockDir)
+                $result = Test-WorktreeRemovalPreflight -WorktreePath '/repo/sibling'
+                $result.Skip | Should -Be $true
+                $result.Reason | Should -Be "couldn't verify preflight state"
+            }
+        }
+
+        It 'TC-Preflight-6: not primary, not locked, clean status -> Skip=false, Reason=$null' {
+            $porcelain = @(
+                'worktree /repo/main'
+                'HEAD aaa111'
+                'branch refs/heads/main'
+                ''
+                'worktree /repo/sibling'
+                'HEAD bbb222'
+                'branch refs/heads/feature/issue-2-x'
+            ) -join "`n"
+
+            & $script:WithMockedGit -GitConfig ($script:DefaultGitConfig + @{
+                'worktree-list-porcelain'         = $porcelain
+                'status-porcelain-/repo/sibling'  = ''
+            }) -Body {
+                param($MockDir)
+                $result = Test-WorktreeRemovalPreflight -WorktreePath '/repo/sibling'
+                $result.Skip | Should -Be $false
+                $result.Reason | Should -BeNullOrEmpty
             }
         }
     }

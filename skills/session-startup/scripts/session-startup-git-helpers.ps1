@@ -876,3 +876,271 @@ function Test-WorktreeBranchRemovalEligible {
     $result.ManualReviewReason = ($script:WorktreeEligibilityReasons.IssueStillOpen -f $issueId)
     return $result
 }
+
+# ===========================================================================
+# Issue #889 s2 — removal-outcome diagnosis, pre-flight, shared primary-detection.
+# Foundation consumed by s3 (executor rewiring) and s4 (detector gating).
+# ===========================================================================
+
+# Message-mapping table (Issue #889 s2, M24) — single authoritative source for
+# the six Get-WorktreeRemovalOutcome literal messages. 'skipped-intact' is NOT
+# a key here — that message is caller-synthesized by s3 on a pre-flight skip
+# (no removal attempt made), not by this table. Consumed verbatim via
+# Get-WorktreeRemovalOutcomeMessage below; do not introduce a differently-worded
+# literal elsewhere.
+$script:WorktreeRemovalOutcomeMessages = @{
+    'removed'                         = 'removed {0}'
+    'removed-partial-root-held'       = 'contents removed but the root directory was held by another process — the worktree is gone; an empty directory remains at {0}'
+    'removed-partial-content-remains' = 'worktree unregistered but files remain at {0} (a process is holding content) — inspect manually'
+    'stale-registration'              = 'removing stale registration — directory already gone at {0}'
+    'failed'                          = 'could not remove {0} ({1})'
+    'verification-indeterminate'      = 'could not verify the final state — inspect manually at {0}'
+}
+
+function Test-WorktreeIsPrimary {
+    <#
+    .SYNOPSIS
+        Shared primary-worktree guard (Issue #889 s2, M3/AC2). Returns $true
+        when $WorktreePath is the FIRST `git worktree list --porcelain`
+        record — the main worktree (or, in bare-main layouts, the bare
+        record #1, which is likewise never removable — no special-casing is
+        needed beyond "first record wins" since that record's path is
+        compared the same way). Both the detector (s4) and the executor (s3)
+        call this SAME implementation so the primary guard cannot diverge
+        across call sites — this closes the exact 2026-07-20 incident gap
+        where the primary checkout could be offered for deletion.
+    .NOTES
+        Self-contained porcelain parsing: git-helpers.ps1 is dot-sourced by
+        the executor WITHOUT session-cleanup-detector-core.ps1
+        (post-merge-cleanup.ps1 sources only this file), so this cannot
+        delegate to that file's Get-SCDWorktreeRecords — only the first
+        record is needed here, so a lightweight first-record parse is used
+        instead of a full record-list parser.
+        Fail-safe direction: any porcelain-probe failure (non-zero exit,
+        empty output, unparseable first record) returns $true — treat as
+        primary when unprovable. A guard whose purpose is "never remove the
+        primary worktree" must never resolve an indeterminate check toward
+        "not primary".
+    .OUTPUTS
+        [bool]
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$WorktreePath
+    )
+
+    $savedEap = $ErrorActionPreference
+    $ErrorActionPreference = 'SilentlyContinue'
+    try {
+        $porcelainOutput = Invoke-SCDNativeCommand { git worktree list --porcelain 2>$null }
+        $exitCode = $LASTEXITCODE
+    }
+    finally { $ErrorActionPreference = $savedEap }
+
+    if ($exitCode -ne 0 -or -not $porcelainOutput) {
+        return $true
+    }
+
+    $porcelainText = ((@($porcelainOutput) -join "`n") -replace "`r`n", "`n" -replace "`r", "`n").Trim()
+    if ([string]::IsNullOrWhiteSpace($porcelainText)) {
+        return $true
+    }
+
+    $firstRecordText = ([regex]::Split($porcelainText, "`n\s*`n"))[0]
+    if ([string]::IsNullOrWhiteSpace($firstRecordText)) {
+        return $true
+    }
+
+    $firstRecordLines = @($firstRecordText -split "`n" | ForEach-Object { $_.TrimEnd() })
+    $worktreeLine = $firstRecordLines | Where-Object { $_ -like 'worktree *' } | Select-Object -First 1
+    if ([string]::IsNullOrWhiteSpace($worktreeLine)) {
+        # Unparseable first record — cannot prove this ISN'T primary (fail-safe).
+        return $true
+    }
+
+    $firstWorktreePath = $worktreeLine.Substring('worktree '.Length)
+    $normFirst = $firstWorktreePath.Replace('\', '/').TrimEnd('/')
+    $normTarget = $WorktreePath.Replace('\', '/').TrimEnd('/')
+
+    return [string]::Equals($normFirst, $normTarget, [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Get-WorktreeRemovalOutcome {
+    <#
+    .SYNOPSIS
+        Pure post-removal-attempt diagnosis over injected probes (Issue #889
+        s2, M5). Returns exactly one closed-enum outcome value describing the
+        VERIFIED post-state of a worktree-removal attempt, covering the full
+        registered x {absent,empty,non-empty} matrix — no post-state
+        force-fits. This is the honesty-fix core of the whole issue: it
+        replaces the old Test-Path+porcelain-scan inference that produced a
+        false "skipping" message for a worktree a removal attempt had
+        already partially destroyed.
+    .NOTES
+        Pure over injected probes ONLY — this function makes no git/fs calls
+        itself — so fixtures can simulate the non-atomic held-directory
+        post-states that CI cannot produce for real (holding a directory
+        open across a test process). 'skipped-intact' is NOT a return value
+        of this function; it is caller-synthesized by the executor (s3) on a
+        pre-flight skip, where no removal attempt was made at all.
+    .PARAMETER WorktreePath
+        The worktree path a removal was attempted against. Not used in the
+        outcome derivation itself (which depends only on the two probes) —
+        carried through for caller-side message formatting/logging.
+    .PARAMETER RemovalExitCode
+        The exit code from the `git worktree remove` attempt. Not used in
+        the outcome derivation itself: a non-atomic partial removal can
+        exit non-zero OR zero depending on what failed, so the verified
+        probe results below — not the exit code — determine the outcome.
+        Carried through for caller-side diagnostics.
+    .PARAMETER PorcelainRegistrationProbe
+        Scriptblock, no arguments, closing over the target path: returns
+        $true (still registered in `git worktree list`), $false (not
+        registered), or $null (probe error).
+    .PARAMETER FileSystemProbe
+        Scriptblock, no arguments, closing over the target path: returns
+        'absent', 'empty', 'non-empty', or $null (probe error).
+    .OUTPUTS
+        [string] one of: 'removed' | 'removed-partial-root-held' |
+        'removed-partial-content-remains' | 'stale-registration' | 'failed' |
+        'verification-indeterminate'
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$WorktreePath,
+
+        [Parameter(Mandatory)]
+        [AllowNull()]
+        [Nullable[int]]$RemovalExitCode,
+
+        [Parameter(Mandatory)]
+        [scriptblock]$PorcelainRegistrationProbe,
+
+        [Parameter(Mandatory)]
+        [scriptblock]$FileSystemProbe
+    )
+
+    $registered = & $PorcelainRegistrationProbe
+    $fsState = & $FileSystemProbe
+
+    if ($null -eq $registered -or $null -eq $fsState) {
+        return 'verification-indeterminate'
+    }
+
+    if ($registered) {
+        switch ($fsState) {
+            'absent' { return 'stale-registration' }
+            'empty' { return 'removed-partial-root-held' }
+            'non-empty' { return 'failed' }
+            default { return 'verification-indeterminate' }
+        }
+    }
+    else {
+        switch ($fsState) {
+            'absent' { return 'removed' }
+            'empty' { return 'removed-partial-root-held' }
+            'non-empty' { return 'removed-partial-content-remains' }
+            default { return 'verification-indeterminate' }
+        }
+    }
+}
+
+function Get-WorktreeRemovalOutcomeMessage {
+    <#
+    .SYNOPSIS
+        Formats the literal removal-outcome message for a
+        Get-WorktreeRemovalOutcome value (Issue #889 s2, M24). Single
+        authoritative mapping ($script:WorktreeRemovalOutcomeMessages above)
+        — consumed by s3 so the executor's removal-reporting text matches
+        the verified post-state exactly, word for word.
+    .OUTPUTS
+        [string]
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('removed', 'removed-partial-root-held', 'removed-partial-content-remains', 'stale-registration', 'failed', 'verification-indeterminate')]
+        [string]$Outcome,
+
+        [Parameter(Mandatory)]
+        [string]$WorktreePath,
+
+        [string]$Detail = 'see stderr for details'
+    )
+
+    $template = $script:WorktreeRemovalOutcomeMessages[$Outcome]
+    return ($template -f $WorktreePath, $Detail)
+}
+
+function Test-WorktreeRemovalPreflight {
+    <#
+    .SYNOPSIS
+        Skip-before-attempt decision (Issue #889 s2, M12/M14/AC5). Returns a
+        skip decision + reason evaluated BEFORE any destructive `git
+        worktree remove` call is made — never after. Skip is the fail-safe
+        direction: any of the preflight's OWN probe failures (dirty-check
+        errors, unreadable path — the wiped/held-dir incident condition)
+        resolve toward skip, never toward "attempt".
+    .NOTES
+        Locked/Prunable state is supplied by the caller (s3), which already
+        parses `git worktree list --porcelain` block flags for its own
+        purposes (post-merge-cleanup.ps1:197-268) — this function does not
+        re-implement that porcelain block scan; it only runs the `git -C
+        <path> status --porcelain` dirty probe and calls the shared
+        Test-WorktreeIsPrimary guard.
+        M14 qualified predicate: locked-AND-NOT-prunable skips HERE with
+        reason 'locked'. Locked-AND-prunable is intentionally NOT skipped at
+        preflight — it falls through so s3's D5 (#522) Test-Path-verified
+        clause can still clear a stale registration whose directory is
+        confirmed gone, or route a dir-present case to manual review there.
+        Reason values ('primary' | 'locked' | 'dirty' | "couldn't verify
+        preflight state") are short literals the executor (s3) embeds inside
+        its own "skipped-intact ({reason})" wrapper message — this function
+        does not itself format the path-carrying user-facing sentence.
+    .OUTPUTS
+        Hashtable: @{ Skip = <bool>; Reason = <string|$null> }
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$WorktreePath,
+
+        [bool]$IsLocked = $false,
+
+        [bool]$IsPrunable = $false
+    )
+
+    # Primary/current identity — the shared structural guard, checked first
+    # regardless of lock/dirty state (AC2 must hold unconditionally).
+    if (Test-WorktreeIsPrimary -WorktreePath $WorktreePath) {
+        return @{ Skip = $true; Reason = 'primary' }
+    }
+
+    # Locked-and-not-prunable (M14 qualified predicate).
+    if ($IsLocked -and -not $IsPrunable) {
+        return @{ Skip = $true; Reason = 'locked' }
+    }
+
+    # Dirty check — the preflight's OWN probe. Any probe error/unreadable
+    # path (the wiped/held-dir incident condition) is own-probe-error (M12):
+    # skip-without-attempt, never fall through to "attempt".
+    $savedEap = $ErrorActionPreference
+    $ErrorActionPreference = 'SilentlyContinue'
+    try {
+        $statusOutput = Invoke-SCDNativeCommand { git -C $WorktreePath status --porcelain 2>$null }
+        $statusExit = $LASTEXITCODE
+    }
+    finally { $ErrorActionPreference = $savedEap }
+
+    if ($statusExit -ne 0) {
+        return @{ Skip = $true; Reason = "couldn't verify preflight state" }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace((@($statusOutput) -join "`n"))) {
+        return @{ Skip = $true; Reason = 'dirty' }
+    }
+
+    return @{ Skip = $false; Reason = $null }
+}
