@@ -1,6 +1,8 @@
 # Session-Cleanup Persistent-File Exclusion Registry
 
 > Issue: [#656](https://github.com/Grimblaz/agent-orchestra/issues/656)
+>
+> Related: [session-hooks.md § Worktree & Branch Removal Eligibility and Honest Outcome Reporting](session-hooks.md#worktree--branch-removal-eligibility-and-honest-outcome-reporting-issue-889) documents issue #889's rework of `post-merge-cleanup.ps1`'s other guard surfaces (the `mf6-executor-failsafe` blocks live in the same file as this registry's executor guard, but are a distinct removal-eligibility subsystem).
 
 ## Problem
 
@@ -38,6 +40,8 @@ Both consumers must fail loudly toward preservation, never silently toward delet
 2. **Accessor returns null/missing key**: if the accessor is defined but returns `$null` or a hashtable without a `Filenames` key, also abort with a HALT diagnostic. Exit code 1.
 3. **Executor scope**: the executor consumes only the `Filenames` axis (root-level files). The `Subtrees` axis is honored only by the detector, which excludes subtree-protected files before writing its `-UntaggedTrackingFiles` output.
 
+   **Known gap** ([#896](https://github.com/Grimblaz/agent-orchestra/issues/896), filed during #889's code review, Cluster A / N6): this split is safe only as long as the executor exclusively archives files the detector already filtered. It is currently inert — no `issue_id`-tagged file exists under the `calibration/` subtree today — but is a latent contract gap if the executor ever gains a discovery path the detector didn't pre-filter. Not fixed here; see #896 for the ask.
+
 ### Writer-oracle parity (AC7)
 
 A Pester test in `session-cleanup-detector.Tests.ps1` scans all non-test, non-cleanup `.ps1` files for `Join-Path` patterns that write to `.copilot-tracking/` root and asserts every discovered writer is enrolled in the registry. This catches new persistent writers at CI time.
@@ -46,4 +50,4 @@ A Pester test in `session-cleanup-detector.Tests.ps1` scans all non-test, non-cl
 
 To protect a new root-level persistent file, add its basename to the `Filenames` array in `Get-SCDPersistentTrackingExclusions`. The writer-oracle AC7 test will fail CI until the entry is added, prompting the change.
 
-To protect a new persistent subtree, add the directory name to the `Subtrees` array. Note: the executor does not currently enforce subtree protection (by design, because the detector already excludes subtree files before emitting untagged-file lists). If subtree protection at the executor level is ever needed, add a Subtrees guard to the two registry-guard blocks in `post-merge-cleanup.ps1` (search for `mf6-executor-failsafe`).
+To protect a new persistent subtree, add the directory name to the `Subtrees` array. Note: the executor does not currently enforce subtree protection — see the Known gap under § Fail-safe contracts and [#896](https://github.com/Grimblaz/agent-orchestra/issues/896). If subtree protection at the executor level is ever needed (or when #896 is picked up), add a Subtrees guard to the two registry-guard blocks in `post-merge-cleanup.ps1` (search for `mf6-executor-failsafe`).
