@@ -2051,6 +2051,86 @@ prunable
         $result.Output | Should -Match ([regex]::Escape("Deleted 1 sibling worktree(s): $siblingFwdPath")) -Because 'a genuinely eligible squash-merged worktree must still be counted as removed'
     }
 
+    It 'S3-Rollup-QualifiesPartial: a rollup with one clean removal and one content-residue removal is qualified with an N-fully-removed/M-with-residue split, distinct from an all-clean batch (CE Gate F1+F2, AC4)' {
+        # CE Gate F1+F2 (issue #889 fix cycle, merged low-severity finding): the
+        # rollup line previously counted 'removed' and both partial outcomes
+        # ('removed-partial-root-held', 'removed-partial-content-remains')
+        # identically into one unqualified total, so a maintainer reading only
+        # the summary line could not tell a fully clean batch from one that left
+        # residue behind. This fixture drives a real two-sibling batch — one
+        # clean, one with a file left on disk after removal (mirroring
+        # 'removed-partial-content-remains') — and asserts the rollup line
+        # itself distinguishes the two, per-outcome-count still summing to the
+        # unchanged total.
+        $workDir = Join-Path $TestDrive 's3-rollup-mixed'
+        $cleanSiblingPath = Join-Path $TestDrive 's3-rollup-mixed-clean'
+        $partialSiblingPath = Join-Path $TestDrive 's3-rollup-mixed-partial'
+        New-Item -ItemType Directory -Path $workDir, $cleanSiblingPath, $partialSiblingPath -Force | Out-Null
+        # Leave a real file inside the partial sibling so that once the mock
+        # opts out of deleting it, the post-removal filesystem probe observes
+        # 'non-empty' — the honest 'removed-partial-content-remains' outcome.
+        Set-Content -Path (Join-Path $partialSiblingPath 'leftover.txt') -Value 'held open' -Encoding UTF8
+
+        $cleanFwdPath = $cleanSiblingPath -replace '\\', '/'
+        $partialFwdPath = $partialSiblingPath -replace '\\', '/'
+        $cleanBranch = 'pester-temp/issue-889-s3-rollup-clean'
+        $partialBranch = 'pester-temp/issue-889-s3-rollup-partial'
+
+        $result = & $script:InvokeScript -WorkDir $workDir -GitConfig @{
+            'symbolic-ref-origin-HEAD'                            = 'refs/remotes/origin/main'
+            'show-ref-refs/remotes/origin/main'                   = 0
+            'fetch-exit'                                          = 0
+            'worktree-list-porcelain'                             = (& $script:NewPrimaryPorcelain -WorkDir $workDir)
+            "rev-list-count-$cleanBranch"                         = '2'
+            "diff-quiet-exit-$cleanBranch"                        = 0
+            "rev-list-count-$partialBranch"                       = '2'
+            "diff-quiet-exit-$partialBranch"                      = 0
+            'worktree-remove-exit'                                = 0
+            "worktree-remove-leave-residue-$partialFwdPath"       = $true
+            'branch-d-exit'                                       = 0
+            'path-configs'                                        = @{
+                $cleanFwdPath   = @{ 'branch--show-current' = $cleanBranch }
+                $partialFwdPath = @{ 'branch--show-current' = $partialBranch }
+            }
+        } -ScriptParams @{
+            SiblingWorktrees = [string[]]@($cleanFwdPath, $partialFwdPath)
+        }
+
+        $result.ExitCode | Should -Be 0
+        $result.Output | Should -Match ([regex]::Escape("removed $cleanFwdPath")) -Because 'the clean sibling must report the honest removed outcome'
+        $result.Output | Should -Match ([regex]::Escape("files remain at $partialFwdPath")) -Because 'the partial sibling must report the honest content-remains per-entry outcome'
+        $result.Output | Should -Match ([regex]::Escape('Deleted 2 sibling worktree(s):')) -Because 'both outcomes still count toward the same unchanged total (messaging-only fix)'
+        $result.Output | Should -Match ([regex]::Escape('(1 fully removed, 1 with residue remaining')) -Because 'the rollup line itself must distinguish the clean removal from the residue-left removal, not just the per-entry lines above it'
+    }
+
+    It 'S3-Rollup-AllCleanUnqualified: an all-clean sibling removal batch keeps the original unqualified rollup wording (no spurious residue qualifier)' {
+        $workDir = Join-Path $TestDrive 's3-rollup-all-clean'
+        $siblingPath = Join-Path $TestDrive 's3-rollup-all-clean-target'
+        New-Item -ItemType Directory -Path $workDir, $siblingPath -Force | Out-Null
+        $siblingFwdPath = $siblingPath -replace '\\', '/'
+        $branch = 'pester-temp/issue-889-s3-rollup-all-clean'
+
+        $result = & $script:InvokeScript -WorkDir $workDir -GitConfig @{
+            'symbolic-ref-origin-HEAD'          = 'refs/remotes/origin/main'
+            'show-ref-refs/remotes/origin/main' = 0
+            'fetch-exit'                        = 0
+            'worktree-list-porcelain'           = (& $script:NewPrimaryPorcelain -WorkDir $workDir)
+            "rev-list-count-$branch"            = '2'
+            "diff-quiet-exit-$branch"           = 0
+            'worktree-remove-exit'              = 0
+            'branch-d-exit'                     = 0
+            'path-configs'                      = @{
+                $siblingFwdPath = @{ 'branch--show-current' = $branch }
+            }
+        } -ScriptParams @{
+            SiblingWorktrees = [string[]]@($siblingFwdPath)
+        }
+
+        $result.ExitCode | Should -Be 0
+        $result.Output | Should -Match ([regex]::Escape("Deleted 1 sibling worktree(s): $siblingFwdPath")) -Because 'an all-clean batch must keep the original unqualified wording'
+        $result.Output | Should -Not -Match ([regex]::Escape('with residue remaining')) -Because 'the residue qualifier must not appear when every counted outcome was a clean removal'
+    }
+
     It 'S3-Orphan-ZeroCommit-OpenIssue-Retained: a zero-commit claude/* orphan branch with an open parent issue and no merged PR is retained, not deleted (regression test for the literal #889 defect)' {
         # Test-BranchMergedIntoDefault's primary signal is git tree-equivalence, which
         # is trivially TRUE for any zero-unique-commit branch by definition. Without the

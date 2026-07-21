@@ -329,6 +329,8 @@ function Remove-SiblingWorktree {
 
         [System.Collections.Generic.List[string]]$DeletedPaths,
 
+        [System.Collections.Generic.List[string]]$DeletedOutcomes,
+
         [string]$Repo
     )
 
@@ -462,6 +464,9 @@ function Remove-SiblingWorktree {
 
     $DeletedCount.Value++
     $DeletedPaths.Add($WorktreePath)
+    if ($null -ne $DeletedOutcomes) {
+        $DeletedOutcomes.Add($outcome)
+    }
 
     Invoke-SCDNativeCommand { git branch -d $worktreeBranch 2>$null }
     if ($LASTEXITCODE -ne 0) {
@@ -558,11 +563,25 @@ if ($deletedOrphanCount -gt 0) {
 # ── Sibling worktree cleanup ───────────────────────────────────────────────
 $deletedSiblingCount = 0
 $deletedSiblingPaths = [System.Collections.Generic.List[string]]::new()
+$deletedSiblingOutcomes = [System.Collections.Generic.List[string]]::new()
 foreach ($worktreePath in $SiblingWorktrees) {
-    Remove-SiblingWorktree -WorktreePath $worktreePath -DefaultBranch $defaultBranch -DeletedCount ([ref]$deletedSiblingCount) -DeletedPaths $deletedSiblingPaths -Repo $Repo
+    Remove-SiblingWorktree -WorktreePath $worktreePath -DefaultBranch $defaultBranch -DeletedCount ([ref]$deletedSiblingCount) -DeletedPaths $deletedSiblingPaths -DeletedOutcomes $deletedSiblingOutcomes -Repo $Repo
 }
 if ($deletedSiblingCount -gt 0) {
-    Write-Output "Deleted $deletedSiblingCount sibling worktree(s): $($deletedSiblingPaths -join ', ')"
+    # Issue #889 CE Gate fix (F1+F2, AC4): the unqualified rollup previously
+    # counted 'removed', 'removed-partial-root-held' (empty husk, nothing left
+    # to inspect), and 'removed-partial-content-remains' (real files survive on
+    # disk) identically, so a maintainer reading only this summary line — not
+    # the honest per-entry messages above it — could not tell a fully clean
+    # removal batch from one that left residue behind. Qualify the total here
+    # without changing what counts toward it.
+    $partialSiblingCount = @($deletedSiblingOutcomes | Where-Object { $_ -ne 'removed' }).Count
+    if ($partialSiblingCount -gt 0) {
+        $cleanSiblingCount = $deletedSiblingCount - $partialSiblingCount
+        Write-Output "Deleted $deletedSiblingCount sibling worktree(s): $($deletedSiblingPaths -join ', ') ($cleanSiblingCount fully removed, $partialSiblingCount with residue remaining — see line(s) above)"
+    } else {
+        Write-Output "Deleted $deletedSiblingCount sibling worktree(s): $($deletedSiblingPaths -join ', ')"
+    }
 }
 
 # ── Issue .tmp/ scratch clearing ──────────────────────────────────────────
