@@ -142,6 +142,23 @@ if ($a.Count -ge 3 -and $a[0] -eq 'cherry') {
     exit ([int]$cherryExit)
 }
 
+# git log --no-merges --pretty=format: --name-only <range> (Issue #889 fix cycle,
+# finding C — Test-SCDUniqueCommitsAllEmpty). DEFAULT (unconfigured) returns a
+# placeholder touched path so pre-existing tree-equivalence fixtures keep
+# resolving as "not all empty" without per-test mocking, mirroring the same
+# backward-compatibility convention used by the rev-list-count/diff-quiet-exit
+# defaults above. A fixture that wants to exercise the all-empty-commit guard
+# sets "log-name-only-<range>" = '' explicitly.
+if ($a.Count -ge 5 -and $a[0] -eq 'log' -and $a[1] -eq '--no-merges' -and $a[2] -eq '--pretty=format:' -and $a[3] -eq '--name-only') {
+    $range = $a[4]
+    $key = "log-name-only-$range"
+    $val = Get-ConfigValue $key
+    if ($null -eq $val) { $val = 'placeholder-touched-file.txt' }
+    "log-name-only-called`t$range" | Add-Content -Path $callLogPath -Encoding UTF8
+    if ($val -ne '') { Write-Output $val }
+    exit 0
+}
+
 # git remote get-url origin
 if ($a.Count -ge 3 -and $a[0] -eq 'remote' -and $a[1] -eq 'get-url') {
     $val = Get-ConfigValue 'remote-url'
@@ -458,6 +475,48 @@ exit $LASTEXITCODE
             }
         } -Tag 'Slow'
 
+        It 'TC-Router-13: a non-numeric git rev-list --count result (exit 0, unparseable output) retains with the git-signal-failed reason instead of silently defaulting to zero-commits (finding I — #889 fix cycle)' {
+            $branch = 'feature/issue-13-nonnumeric-count'
+            & $script:WithMockedGit -GitConfig ($script:DefaultGitConfig + @{
+                "rev-list-count-origin/main..$branch" = 'not-a-number'
+            }) -Body {
+                param($MockDir)
+                $result = Test-WorktreeBranchRemovalEligible -BranchName $branch -DefaultBranch 'main'
+                $result.Eligible | Should -Be $false
+                $result.ManualReviewReason | Should -Be "couldn't verify: git signal failed" `
+                    -Because 'an unparseable rev-list --count result must never be silently treated as a verified zero-commit branch'
+            }
+        }
+
+        It 'TC-Router-11: a branch whose unique commits are ALL --allow-empty no-ops must NOT be accepted as rung-2 tree-equivalence evidence (finding C — #889 fix cycle)' {
+            $branch = 'feature/issue-11-all-empty-commits'
+            & $script:WithMockedGit -GitConfig ($script:DefaultGitConfig + @{
+                "rev-list-count-origin/main..$branch" = 1
+                "diff-quiet-exit-$branch"              = 0   # trivially tree-equivalent — no commit changed any file
+                "log-name-only-origin/main..$branch"   = ''  # explicit: zero touched paths across all unique commits
+            }) -GhConfig @{
+                'pr-list-default-exit' = 0
+            } -Body {
+                param($MockDir)
+                $result = Test-WorktreeBranchRemovalEligible -BranchName $branch -DefaultBranch 'main'
+                $result.Evidence | Should -Not -Match '\(tree-equivalent\)' -Because 'an all-empty-commit branch must not be accepted as merged via the trivial tree-equivalence shortcut'
+            }
+        }
+
+        It 'TC-Router-12: a commit-carrying branch that IS genuinely tree-equivalent (at least one commit touched a real path) is still accepted at rung 2' {
+            $branch = 'feature/issue-12-real-tree-equiv'
+            & $script:WithMockedGit -GitConfig ($script:DefaultGitConfig + @{
+                "rev-list-count-origin/main..$branch" = 1
+                "diff-quiet-exit-$branch"              = 0
+                "log-name-only-origin/main..$branch"   = 'skills/session-startup/scripts/post-merge-cleanup.ps1'
+            }) -Body {
+                param($MockDir)
+                $result = Test-WorktreeBranchRemovalEligible -BranchName $branch -DefaultBranch 'main'
+                $result.Eligible | Should -Be $true
+                $result.Evidence | Should -Match '\(tree-equivalent\)'
+            }
+        }
+
         It 'TC-Router-10: a call made while the caller has $ErrorActionPreference = "Stop" does not throw (EAP-suppression invariant, M7)' {
             $branch = 'feature/issue-800-eap-stop'
             & $script:WithMockedGit -GitConfig ($script:DefaultGitConfig + @{
@@ -545,6 +604,24 @@ exit $LASTEXITCODE
             }) -Body {
                 param($MockDir)
                 Test-WorktreeIsPrimary -WorktreePath '/repo/anything' | Should -Be $true
+            }
+        }
+
+        It 'TC-Primary-6: path comparison resolves relative segments via GetFullPath (finding E — #889 fix cycle), not just lexical slash/case normalization' {
+            $porcelain = @(
+                'worktree /repo/main'
+                'HEAD aaa111'
+                'branch refs/heads/main'
+            ) -join "`n"
+
+            & $script:WithMockedGit -GitConfig ($script:DefaultGitConfig + @{
+                'worktree-list-porcelain' = $porcelain
+            }) -Body {
+                param($MockDir)
+                # '/repo/sub/../main' names the SAME directory as '/repo/main' only after
+                # path resolution — a purely lexical (slash/case) comparison would treat
+                # these as different strings and incorrectly return $false.
+                Test-WorktreeIsPrimary -WorktreePath '/repo/sub/../main' | Should -Be $true
             }
         }
 

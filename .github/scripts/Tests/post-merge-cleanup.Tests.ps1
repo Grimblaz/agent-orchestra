@@ -277,10 +277,52 @@ if ($a.Count -ge 3 -and $a[0] -eq 'cherry') {
     exit ([int]$cherryExit)
 }
 
+# git log --no-merges --pretty=format: --name-only <range> (Issue #889 fix cycle,
+# finding C — Test-SCDUniqueCommitsAllEmpty). DEFAULT (unconfigured) returns a
+# placeholder touched path so pre-existing tree-equivalence fixtures keep
+# resolving as "not all empty" without per-test mocking. A fixture that wants to
+# exercise the all-empty-commit guard sets "log-name-only-<range>" = '' explicitly.
+if ($a.Count -ge 5 -and $a[0] -eq 'log' -and $a[1] -eq '--no-merges' -and $a[2] -eq '--pretty=format:' -and $a[3] -eq '--name-only') {
+    $range = $a[4]
+    $key = "log-name-only-$range"
+    $val = Get-ConfigValue $key
+    if ($null -eq $val) { $val = 'placeholder-touched-file.txt' }
+    if ($val -ne '') { Write-Output $val }
+    exit 0
+}
+
 # git worktree list --porcelain (Issue #889 s3: Test-WorktreeIsPrimary + locked/prunable scan)
+# Issue #889 fix cycle, finding B2: dynamically reflects deregistration recorded by
+# a successful `git worktree remove` call below — the static config value alone
+# does NOT model real git's deregistration side effect, which previously made
+# every "removal succeeded" fixture here misreport as 'stale-registration' (the
+# post-attempt registration probe found the STATIC fixture text still listing the
+# path even though a real `git worktree remove` would have deregistered it).
 if ($a.Count -ge 2 -and $a[0] -eq 'worktree' -and $a[1] -eq 'list') {
     $val = Get-ConfigValue 'worktree-list-porcelain'
-    if ($null -ne $val) { Write-Output $val; exit 0 }
+    if ($null -ne $val) {
+        $deregLogPath = Join-Path $PSScriptRoot 'deregistered-paths.log'
+        if (Test-Path $deregLogPath) {
+            $deregistered = @(Get-Content -Path $deregLogPath -ErrorAction SilentlyContinue |
+                ForEach-Object { ($_ -replace '\\', '/').TrimEnd('/').ToLowerInvariant() } |
+                Where-Object { $_ -ne '' })
+            if ($deregistered.Count -gt 0) {
+                $blocks = [regex]::Split(($val -replace "`r`n", "`n"), "`n\s*`n")
+                $keptBlocks = @($blocks | Where-Object {
+                    $block = $_
+                    $wtLine = ($block -split "`n" | Where-Object { $_ -match '^worktree\s' } | Select-Object -First 1)
+                    if ($wtLine -match '^worktree\s+(.+)$') {
+                        $blockPath = ($Matches[1].Trim() -replace '\\', '/').TrimEnd('/').ToLowerInvariant()
+                        -not ($deregistered -contains $blockPath)
+                    }
+                    else { $true }
+                })
+                $val = ($keptBlocks -join "`n`n")
+            }
+        }
+        Write-Output $val
+        exit 0
+    }
     exit 0
 }
 
@@ -314,7 +356,7 @@ if ($a.Count -ge 2 -and $a[0] -eq 'status' -and $a[1] -eq '--porcelain') {
     exit ([int]$exitVal)
 }
 
-# git worktree remove [--force] <path>
+# git worktree remove [--force] [--force] <path>
 if ($a.Count -ge 3 -and $a[0] -eq 'worktree' -and $a[1] -eq 'remove') {
     $path = $a[-1]
     $key = "worktree-remove-exit-$path"
@@ -330,6 +372,13 @@ if ($a.Count -ge 3 -and $a[0] -eq 'worktree' -and $a[1] -eq 'remove') {
         if (-not $leaveResidue) {
             Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
         }
+        # Issue #889 fix cycle, finding B2: mirror real git's REGISTRY side effect too
+        # (the worktree list no longer shows this path) unless the fixture explicitly
+        # opts out to model a genuine stale-registration (deregistration failure).
+        $leaveRegistered = Get-ConfigValue "worktree-remove-leave-registered-$path"
+        if (-not $leaveRegistered) {
+            $path | Add-Content -Path (Join-Path $PSScriptRoot 'deregistered-paths.log') -Encoding UTF8
+        }
     }
     exit ([int]$exitVal)
 }
@@ -344,6 +393,10 @@ if ($a.Count -ge 2 -and $a[0] -eq 'worktree' -and $a[1] -eq 'remove') {
         $leaveResidue = Get-ConfigValue "worktree-remove-leave-residue-$path"
         if (-not $leaveResidue) {
             Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        $leaveRegistered = Get-ConfigValue "worktree-remove-leave-registered-$path"
+        if (-not $leaveRegistered) {
+            $path | Add-Content -Path (Join-Path $PSScriptRoot 'deregistered-paths.log') -Encoding UTF8
         }
     }
     exit ([int]$exitVal)
@@ -946,7 +999,7 @@ exit $LASTEXITCODE
             $ancestorCalls.Count | Should -Be 0 -Because 'must NEVER use --is-ancestor; use git cherry instead'
         }
 
-        It 'TC-Cherry-2: when git cherry exits non-zero, falls back to gh pr list' {
+        It 'TC-Cherry-2: when git cherry exits non-zero, falls back to an OID-checked gh pr lookup — a name-only match with a mismatched headRefOid must NOT be treated as evidence of merge (finding A, M4-class false positive)' {
             $workDir = Join-Path $TestDrive 'cherry-fallback-gh'
             New-Item -ItemType Directory -Path $workDir -Force | Out-Null
             $branch = 'pester-temp/issue-500-cherry-gh-fallback'
@@ -956,9 +1009,12 @@ exit $LASTEXITCODE
                 'show-ref-refs/remotes/origin/main' = 0
                 'fetch-exit'                   = 0
                 "cherry-exit-$branch"          = 128  # cherry fails
+                "rev-parse-$branch"            = 'currentbranchtipsha'
                 'branch-d-exit'                = 0
             } -GhConfig @{
-                "pr-list-merged-$branch" = '[{"number":42}]'
+                # Name-only match: a differently-headed PR happens to share the branch's
+                # name, but its recorded headRefOid does NOT match the current branch tip.
+                "pr-list-merged-$branch" = '[{"number":42,"headRefOid":"unrelatedstalesha"}]'
                 'pr-list-default-exit'   = 0
             } -ScriptParams @{
                 OrphanBranches = [string[]]@($branch)
@@ -966,8 +1022,35 @@ exit $LASTEXITCODE
 
             $result.ExitCode | Should -Be 0
             $ghCalls = @($result.GhCalls | Where-Object { $_ -match '^pr\tlist' })
-            $ghCalls.Count | Should -BeGreaterThan 0 -Because 'gh pr list must be called when git cherry fails'
-            $ghCalls | Should -Contain "pr`tlist`t--head`t$branch`t--base`tmain`t--state`tmerged`t--json`tnumber" -Because 'GitHub fallback must constrain the PR lookup to the resolved default branch'
+            $ghCalls.Count | Should -BeGreaterThan 0 -Because 'gh pr list must still be called when git cherry fails'
+            $ghCalls | Should -Contain "pr`tlist`t--head`t$branch`t--base`tmain`t--state`tmerged`t--json`tnumber,headRefOid" -Because 'the fallback must request headRefOid so the match can be OID-verified, not a name-only lookup'
+            $deleteCalls = @($result.GitCalls | Where-Object { $_ -match "^branch-deleted\t.*$([regex]::Escape($branch))" })
+            $deleteCalls.Count | Should -Be 0 -Because 'a name-only PR match with a mismatched headRefOid must NOT be treated as evidence of merge'
+        }
+
+        It 'TC-Cherry-2-OidMatch: when git cherry exits non-zero, an OID-matching merged PR IS treated as evidence of merge' {
+            $workDir = Join-Path $TestDrive 'cherry-fallback-gh-oid-match'
+            New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+            $branch = 'pester-temp/issue-500-cherry-gh-oid-match'
+            $branchTip = 'matchingtipsha'
+
+            $result = & $script:InvokeScript -WorkDir $workDir -GitConfig @{
+                'symbolic-ref-origin-HEAD' = 'refs/remotes/origin/main'
+                'show-ref-refs/remotes/origin/main' = 0
+                'fetch-exit'                   = 0
+                "cherry-exit-$branch"          = 128  # cherry fails
+                "rev-parse-$branch"            = $branchTip
+                'branch-d-exit'                = 0
+            } -GhConfig @{
+                "pr-list-merged-$branch" = "[{`"number`":42,`"headRefOid`":`"$branchTip`"}]"
+                'pr-list-default-exit'   = 0
+            } -ScriptParams @{
+                OrphanBranches = [string[]]@($branch)
+            }
+
+            $result.ExitCode | Should -Be 0
+            $deleteCalls = @($result.GitCalls | Where-Object { $_ -match "^branch-deleted\t.*$([regex]::Escape($branch))" })
+            $deleteCalls.Count | Should -BeGreaterThan 0 -Because 'an OID-matched merged PR must still be treated as evidence of merge and delete the branch'
         }
 
         It 'TC-Cherry-3: when gh is unavailable, treats branch as unmerged (returns false for safety)' {
@@ -989,6 +1072,28 @@ exit $LASTEXITCODE
             $result.ExitCode | Should -Be 0 -Because 'script must fail-open when gh is unavailable'
             $deleteCalls = @($result.GitCalls | Where-Object { $_ -match "^branch-deleted\t.*$([regex]::Escape($branch))" })
             $deleteCalls.Count | Should -Be 0 -Because 'when gh is unavailable, branch must be treated as unmerged (safe default: do not delete)'
+        }
+
+        It 'TC-NonNumericCount: a claude/* branch with a non-numeric rev-list --count result falls through to the legacy git-cherry chain instead of being treated as a verified zero-commit branch (finding I — #889 fix cycle)' {
+            $workDir = Join-Path $TestDrive 'nonnumeric-count'
+            New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+            $branch = 'claude/some-work-501-abcdef'
+
+            $result = & $script:InvokeScript -WorkDir $workDir -GitConfig @{
+                'symbolic-ref-origin-HEAD' = 'refs/remotes/origin/main'
+                'show-ref-refs/remotes/origin/main' = 0
+                'fetch-exit'             = 0
+                "rev-list-count-$branch" = 'garbage'
+                "cherry-$branch"         = '+ deadbee an unmerged commit'
+            } -ScriptParams @{
+                OrphanBranches = [string[]]@($branch)
+            }
+
+            $result.ExitCode | Should -Be 0
+            $cherryCalls = @($result.GitCalls | Where-Object { $_ -match "^cherry-called\t.*$([regex]::Escape($branch))" })
+            $cherryCalls.Count | Should -BeGreaterThan 0 -Because 'a rev-list --count parse failure must fall through to the legacy git-cherry chain, never be silently treated as a verified zero-commit branch'
+            $deleteCalls = @($result.GitCalls | Where-Object { $_ -match "^branch-deleted\t.*$([regex]::Escape($branch))" })
+            $deleteCalls.Count | Should -Be 0 -Because 'an unparseable git signal must never authorize deletion'
         }
 
         It 'TC-Cherry-OrgRef: git cherry is called with the origin/ prefixed default-branch ref as the base ref (not the bare default-branch name)' {
@@ -1664,6 +1769,34 @@ branch refs/heads/$branch
         $branchDeleteCalls.Count | Should -Be 0 -Because 'git branch -D must never be called for an ineligible feature branch'
     }
 
+    It 'S3-FeatureBranch-Ineligible-RemoteNotDeleted: -FeatureBranch on an ineligible branch never deletes the REMOTE ref either — the remote delete must not race ahead of the shared re-verification (nit, #889 fix cycle)' {
+        $workDir = Join-Path $TestDrive 's3-featurebranch-ineligible-remote'
+        New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+        $branch = 'pester-temp/issue-889-s3-fb-ineligible-remote'
+
+        $result = & $script:InvokeScript -WorkDir $workDir -GitConfig @{
+            'symbolic-ref-origin-HEAD'          = 'refs/remotes/origin/main'
+            'show-ref-refs/remotes/origin/main' = 0
+            'fetch-exit'                        = 0
+            'checkout-exit'                     = 0
+            'pull-exit'                         = 0
+            "branch-list-$branch"               = "  $branch"
+            'branch--show-current'              = 'main'
+            "rev-list-count-$branch"            = '3'
+            "diff-quiet-exit-$branch"           = 1
+            "merge-tree-exit-$branch"           = 1
+            "cherry-exit-$branch"               = 1
+            "ls-remote-$branch"                 = "abc123 refs/heads/$branch"
+        } -ScriptParams @{
+            FeatureBranch = $branch
+            SkipGitUpdate = $true
+        }
+
+        $result.ExitCode | Should -Be 0
+        $result.Output | Should -Match 'detector flagged this, but re-verification declined' -Because 'an ineligible feature branch must be declined by the shared re-verification'
+        $result.Output | Should -Not -Match ([regex]::Escape("Deleting remote branch: $branch")) -Because 'a declined re-verification must gate the remote delete too, not just the local delete'
+    }
+
     It 'S3-LockedDirPresent: a locked+prunable sibling worktree whose directory is still present is skipped for manual review' {
         $workDir = Join-Path $TestDrive 's3-locked-dir-present'
         $siblingPath = Join-Path $TestDrive 's3-locked-dir-present-target'
@@ -1703,7 +1836,14 @@ prunable
         $forceCalls.Count | Should -Be 0 -Because 'no destructive git worktree remove call may be attempted while the lock is present and the directory still exists'
     }
 
-    It 'S3-PrunableLockedDirAbsent: a locked+prunable worktree with a directory confirmed absent via Test-Path clears as stale-registration' {
+    It 'S3-PrunableLockedDirAbsent: a locked worktree (with the porcelain prunable marker also present) whose directory is confirmed absent via Test-Path is double-force-removed and honestly counted as removed' {
+        # Issue #889 fix cycle, finding B1: real git never emits BOTH 'locked' and
+        # 'prunable' together, so this fixture exercises the corrected
+        # isLocked-and-dirAbsent clause (not the old, unreachable isLocked-and-
+        # isPrunable dead code). The mock's `worktree list --porcelain` now
+        # dynamically reflects a successful `git worktree remove`'s deregistration
+        # side effect (finding B2), so a genuinely successful double-force removal
+        # here must report 'removed', not 'stale-registration'.
         $workDir = Join-Path $TestDrive 's3-locked-dir-absent'
         # NOTE: the sibling path is intentionally never created on disk — Test-Path
         # must independently confirm absence (not merely trust the porcelain 'prunable' marker).
@@ -1741,14 +1881,61 @@ prunable
         }
 
         $result.ExitCode | Should -Be 0
-        $staleRegPattern = [regex]::Escape('removing stale registration') + ' (?:—|-) ' + [regex]::Escape("directory already gone at $siblingFwdPath")
-        $result.Output | Should -Match $staleRegPattern -Because 'a locked+prunable worktree with a Test-Path-confirmed-absent directory must clear via the honest stale-registration message'
+        $result.Output | Should -Match ([regex]::Escape("removed $siblingFwdPath")) -Because 'a genuinely deregistered locked worktree must report the honest removed outcome, not stale-registration'
         $forceCalls = @($result.GitCalls | Where-Object { $_ -eq "worktree-removed`t$siblingFwdPath" })
-        $forceCalls.Count | Should -BeGreaterThan 0 -Because 'clearing a confirmed-absent locked registration requires a --force git worktree remove call'
-        $result.Output | Should -Match ([regex]::Escape("Deleted 1 sibling worktree(s): $siblingFwdPath")) -Because 'the stale registration clear must count as a removal'
+        $forceCalls.Count | Should -BeGreaterThan 0 -Because 'clearing a confirmed-absent locked registration requires a git worktree remove call'
+        $result.Output | Should -Match ([regex]::Escape("Deleted 1 sibling worktree(s): $siblingFwdPath")) -Because 'a genuinely successful removal must count as a removal'
     }
 
-    It 'S3-PlainPrunable: a plain (not locked) prunable worktree with a directory confirmed absent clears as stale-registration' {
+    It 'S3-LockedDirAbsent-Realistic: a locked (NOT prunable) worktree whose directory is confirmed absent via Test-Path is double-force-removed instead of falsely skipped-intact (regression test for finding B1 — the literal #889 fix-cycle defect)' {
+        # This is the REALISTIC production shape: real git never sets 'prunable' on a
+        # locked worktree, so this fixture (locked only) is what B1's fix must
+        # actually reach. Before the fix, this fell through to
+        # Test-WorktreeRemovalPreflight's locked-and-not-prunable skip, producing a
+        # false "skipped-intact (locked)" message for a directory Test-Path already
+        # proves is gone.
+        $workDir = Join-Path $TestDrive 's3-locked-only-dir-absent'
+        $siblingPath = Join-Path $TestDrive 's3-locked-only-dir-absent-target'
+        New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+        $siblingFwdPath = $siblingPath -replace '\\', '/'
+        $branch = 'pester-temp/issue-889-s3-locked-only-absent'
+
+        $porcelain = @"
+worktree $($workDir -replace '\\', '/')
+HEAD 1111111111111111111111111111111111111111
+branch refs/heads/main
+
+worktree $siblingFwdPath
+HEAD 6666666666666666666666666666666666666666
+branch refs/heads/$branch
+locked
+"@
+
+        $result = & $script:InvokeScript -WorkDir $workDir -GitConfig @{
+            'symbolic-ref-origin-HEAD'          = 'refs/remotes/origin/main'
+            'show-ref-refs/remotes/origin/main' = 0
+            'fetch-exit'                        = 0
+            'worktree-list-porcelain'           = $porcelain
+            "rev-list-count-$branch"            = '2'
+            "diff-quiet-exit-$branch"           = 0
+            'worktree-remove-exit'              = 0
+            'branch-d-exit'                     = 0
+            'path-configs'                      = @{
+                $siblingFwdPath = @{ 'branch--show-current' = $branch }
+            }
+        } -ScriptParams @{
+            SiblingWorktrees = [string[]]@($siblingFwdPath)
+        }
+
+        $result.ExitCode | Should -Be 0
+        $result.Output | Should -Not -Match 'skipped-intact' -Because 'a Test-Path-confirmed-absent locked directory must never be reported as skipped-intact'
+        $result.Output | Should -Match ([regex]::Escape("removed $siblingFwdPath")) -Because 'the corrected clause must actually attempt and honestly report the removal'
+        $forceCalls = @($result.GitCalls | Where-Object { $_ -eq "worktree-removed`t$siblingFwdPath" })
+        $forceCalls.Count | Should -BeGreaterThan 0 -Because 'a locked-and-dir-absent worktree must be removal-attempted, not merely skipped on the lock flag alone'
+        $result.Output | Should -Match ([regex]::Escape("Deleted 1 sibling worktree(s): $siblingFwdPath")) -Because 'a genuinely successful removal must count as a removal'
+    }
+
+    It 'S3-PlainPrunable: a plain (not locked) prunable worktree with a directory confirmed absent clears and is honestly counted as removed' {
         $workDir = Join-Path $TestDrive 's3-plain-prunable'
         $siblingPath = Join-Path $TestDrive 's3-plain-prunable-target'
         New-Item -ItemType Directory -Path $workDir -Force | Out-Null
@@ -1783,9 +1970,56 @@ prunable
         }
 
         $result.ExitCode | Should -Be 0
+        $result.Output | Should -Match ([regex]::Escape("removed $siblingFwdPath")) -Because 'plain-prunable (dir absent, not locked) genuinely deregisters and must report the honest removed outcome'
+        $result.Output | Should -Match ([regex]::Escape("Deleted 1 sibling worktree(s): $siblingFwdPath")) -Because 'a genuinely successful removal must count as a removal'
+    }
+
+    It 'S3-StaleRegistration-NotCounted: a genuine stale-registration outcome (deregistration verifiably failed) is NOT counted as a removed sibling worktree (regression test for finding B2)' {
+        # Unlike the two tests above, this fixture opts OUT of the mock''s dynamic
+        # deregistration side effect via 'worktree-remove-leave-registered-<path>',
+        # so the post-attempt porcelain probe still finds the path registered even
+        # though the directory is confirmed absent — the actual 'stale-registration'
+        # outcome (a FAILED deregistration), not a successful removal.
+        $workDir = Join-Path $TestDrive 's3-stale-registration-not-counted'
+        $siblingPath = Join-Path $TestDrive 's3-stale-registration-not-counted-target'
+        New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+        $siblingFwdPath = $siblingPath -replace '\\', '/'
+        $branch = 'pester-temp/issue-889-s3-stale-reg-not-counted'
+
+        $porcelain = @"
+worktree $($workDir -replace '\\', '/')
+HEAD 1111111111111111111111111111111111111111
+branch refs/heads/main
+
+worktree $siblingFwdPath
+HEAD 7777777777777777777777777777777777777777
+branch refs/heads/$branch
+prunable
+"@
+
+        $result = & $script:InvokeScript -WorkDir $workDir -GitConfig @{
+            'symbolic-ref-origin-HEAD'          = 'refs/remotes/origin/main'
+            'show-ref-refs/remotes/origin/main' = 0
+            'fetch-exit'                        = 0
+            'worktree-list-porcelain'           = $porcelain
+            "rev-list-count-$branch"            = '2'
+            "diff-quiet-exit-$branch"           = 0
+            'worktree-remove-exit'              = 0
+            "worktree-remove-leave-registered-$siblingFwdPath" = $true
+            'branch-d-exit'                     = 0
+            'path-configs'                      = @{
+                $siblingFwdPath = @{ 'branch--show-current' = $branch }
+            }
+        } -ScriptParams @{
+            SiblingWorktrees = [string[]]@($siblingFwdPath)
+        }
+
+        $result.ExitCode | Should -Be 0
         $staleRegPattern = [regex]::Escape('removing stale registration') + ' (?:—|-) ' + [regex]::Escape("directory already gone at $siblingFwdPath")
-        $result.Output | Should -Match $staleRegPattern -Because 'plain-prunable (dir absent, not locked) must also clear via the stale-registration message'
-        $result.Output | Should -Match ([regex]::Escape("Deleted 1 sibling worktree(s): $siblingFwdPath")) -Because 'the stale registration clear must count as a removal'
+        $result.Output | Should -Match $staleRegPattern -Because 'a genuinely-still-registered post-attempt state must still surface the stale-registration message'
+        $result.Output | Should -Not -Match ([regex]::Escape('Deleted 1 sibling worktree')) -Because 'a stale-registration outcome (failed deregistration) must NOT be counted as a successful removal'
+        $branchDeleteCalls = @($result.GitCalls | Where-Object { $_ -match "^branch-deleted\t.*$([regex]::Escape($branch))" })
+        $branchDeleteCalls.Count | Should -Be 0 -Because 'the branch must not be deleted when the worktree deregistration itself could not be verified as successful'
     }
 
     It 'S3-EligibleSquashMerged: an eligible squash-merged sibling worktree is removed with evidence named in the message' {

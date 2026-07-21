@@ -98,6 +98,18 @@ function Get-RemoteDefaultRef {
     if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($upstream)) {
         return $upstream.Trim()
     }
+
+    # Finding K (#889 fix cycle): fall back to reading branch.<X>.remote directly
+    # before defaulting to a hardcoded 'origin/<DefaultBranch>' — merged in from
+    # the detector's own (previously separate, now-consolidated) config-first
+    # resolver, Get-SCDRemoteDefaultRef, which correctly handled a configured
+    # non-'origin' remote name even when the @{upstream} shorthand above is
+    # unavailable (e.g. a fork workflow where 'main' tracks a custom remote name).
+    $configuredRemote = Invoke-SCDNativeCommand { git config --get "branch.$DefaultBranch.remote" 2>$null }
+    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($configuredRemote)) {
+        return "$($configuredRemote.Trim())/$DefaultBranch"
+    }
+
     return "origin/$DefaultBranch"
 }
 
@@ -204,26 +216,25 @@ function Test-BranchMergedIntoDefault {
     $treeEquivalent = Test-BranchTreeEquivalentToDefault -BranchName $BranchName -DefaultBranch $DefaultBranch
     if ($null -ne $treeEquivalent) {
         # Definitive git-only answer (merged, or git cherry ran and showed
-        # unmerged commits) — do not fall through to the name-only gh lookup,
+        # unmerged commits) — do not fall through to the gh lookup,
         # preserving this function's original short-circuit behavior.
         return $treeEquivalent
     }
 
-    # Fallback: gh pr list (name-only — retained here for this function's existing
-    # callers; Test-WorktreeBranchRemovalEligible does NOT use this fallback and
-    # instead performs its own OID-checked PR match — see Get-SCDMergedPrByHeadOid).
-    if (Get-Command gh -ErrorAction SilentlyContinue) {
-        $prJson = Invoke-SCDNativeCommand { gh pr list --head $BranchName --base $DefaultBranch --state merged --json number 2>$null }
-        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($prJson)) {
-            try {
-                $prs = $prJson | ConvertFrom-Json -ErrorAction Stop
-                return ($prs.Count -gt 0)
-            }
-            catch { }
-        }
+    # Fallback: OID-checked merged-PR-by-head lookup (Issue #889 fix cycle, finding
+    # A). The previous fallback here was a NAME-ONLY `gh pr list --head ... --state
+    # merged --json number` match — a branch that merely shares a name with an
+    # already-merged-and-since-advanced (or entirely unrelated) PR would be
+    # misreported as merged (the M4-class false positive). Get-SCDMergedPrByHeadOid
+    # requires the PR's headRefOid to equal the branch's current tip before treating
+    # it as evidence, matching the same OID-checked pattern
+    # Test-WorktreeBranchRemovalEligible already uses.
+    $pr = Get-SCDMergedPrByHeadOid -Branch $BranchName -DefaultBranch $DefaultBranch
+    if ($pr.Status -eq 'matched') {
+        return $true
     }
 
-    # Conservative: treat as unmerged for safety
+    # Conservative: treat as unmerged for safety (covers 'no-match', 'unavailable', 'timeout')
     return $false
 }
 
@@ -734,6 +745,52 @@ function Get-SCDIssueState {
     return @{ Status = 'ok'; State = $issue.state }
 }
 
+function Test-SCDUniqueCommitsAllEmpty {
+    <#
+    .SYNOPSIS
+        Issue #889 fix cycle, finding C: returns $true only when EVERY commit
+        unique to $BranchName (relative to $RemoteDefaultRef) touched zero files —
+        i.e. the unique-commit set is exclusively --allow-empty no-op commits.
+        Used to withhold rung-2 tree-equivalence evidence from
+        Test-WorktreeBranchRemovalEligible, which would otherwise be trivially
+        TRUE for such a branch (no commit changed any file, so there is no diff
+        against the default branch either) — fabricating "merged (tree-
+        equivalent)" evidence for a branch that may still be about to receive
+        real work. Mirrors the legacy Test-OrphanBranchCommitsAbsorbed's
+        "if ($paths.Count -eq 0) { return $false }" empty-path rejection pattern.
+    .OUTPUTS
+        [bool] $true only on a confirmed all-empty unique-commit set. Any git
+        failure, or any commit with at least one touched path, returns $false —
+        the caller uses $false to mean "do not withhold the evidence", so failing
+        toward $false here costs nothing (the caller still proceeds to its next
+        rung on any doubt) while never silently withholding legitimate evidence
+        because of an unrelated git-invocation error.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$BranchName,
+
+        [Parameter(Mandatory)]
+        [string]$RemoteDefaultRef
+    )
+
+    $savedEap = $ErrorActionPreference
+    $ErrorActionPreference = 'SilentlyContinue'
+    try {
+        $logOutput = Invoke-SCDNativeCommand { git log --no-merges --pretty=format: --name-only "$RemoteDefaultRef..$BranchName" 2>$null }
+        $logExit = $LASTEXITCODE
+    }
+    finally { $ErrorActionPreference = $savedEap }
+
+    if ($logExit -ne 0) { return $false }
+
+    foreach ($line in @($logOutput)) {
+        if (-not [string]::IsNullOrWhiteSpace($line)) { return $false }
+    }
+    return $true
+}
+
 function Test-WorktreeBranchRemovalEligible {
     <#
     .SYNOPSIS
@@ -798,19 +855,36 @@ function Test-WorktreeBranchRemovalEligible {
         return $result
     }
 
+    # Finding I (#889 fix cycle): a successful (exit 0) but non-numeric or empty
+    # `git rev-list --count` result must NOT silently default to 0 — that would
+    # misroute an unparseable git signal into the zero-commit rung (rung 3) as if
+    # it were a genuinely-verified zero-unique-commit branch. Require an explicit
+    # successful parse before proceeding; any parse failure retains with the same
+    # git-signal-failed reason as an outright rev-list exit failure.
     $uniqueCount = 0
+    $countParsedOk = $false
     if ($countOutput) {
         $firstLine = (@($countOutput) | Select-Object -First 1)
-        [void][int]::TryParse(("$firstLine").Trim(), [ref]$uniqueCount)
+        $countParsedOk = [int]::TryParse(("$firstLine").Trim(), [ref]$uniqueCount)
+    }
+    if (-not $countParsedOk) {
+        $result.ManualReviewReason = $script:WorktreeEligibilityReasons.GitSignalFailed
+        return $result
     }
 
     if ($uniqueCount -ge 1) {
         # Rung 2: git-only tree-equivalence first (never the name-only gh fallback — M4),
         # then the primitive's own OID-checked merged-PR-by-head rung.
         if (Test-BranchTreeEquivalentToDefault -BranchName $BranchName -DefaultBranch $DefaultBranch) {
-            $result.Eligible = $true
-            $result.Evidence = "merged into $remoteDefault (tree-equivalent)"
-            return $result
+            # Finding C (#889 fix cycle): a branch whose unique commits are
+            # exclusively --allow-empty no-ops is trivially tree-equivalent by
+            # definition (no commit changed any file) — do not accept that as
+            # merge evidence; fall through to the OID-checked PR rung instead.
+            if (-not (Test-SCDUniqueCommitsAllEmpty -BranchName $BranchName -RemoteDefaultRef $remoteDefault)) {
+                $result.Eligible = $true
+                $result.Evidence = "merged into $remoteDefault (tree-equivalent)"
+                return $result
+            }
         }
 
         $pr = Get-SCDMergedPrByHeadOid -Branch $BranchName -DefaultBranch $DefaultBranch
@@ -897,6 +971,37 @@ $script:WorktreeRemovalOutcomeMessages = @{
     'verification-indeterminate'      = 'could not verify the final state — inspect manually at {0}'
 }
 
+function ConvertTo-SCDPathForComparison {
+    <#
+    .SYNOPSIS
+        Issue #889 fix cycle, finding E: resolves $Path through
+        [System.IO.Path]::GetFullPath before the slash/case-insensitive
+        comparison Test-WorktreeIsPrimary performs, matching the same
+        resolution the detector's own ConvertTo-SCDNormalizedPath
+        (session-cleanup-detector-core.ps1) already applies two files over. A
+        lexical-only comparison (backslash/case/trailing-separator
+        normalization alone, with no path resolution) cannot detect two
+        paths that name the SAME directory via a relative segment, a
+        trailing '.', or other path forms GetFullPath collapses to an
+        identical string.
+    .OUTPUTS
+        [string] forward-slash-normalized, trailing-slash-trimmed absolute
+        path, or the lexically-normalized (non-resolved) input on any
+        GetFullPath failure — never throws.
+    #>
+    [CmdletBinding()]
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) { return '' }
+
+    try {
+        return [System.IO.Path]::GetFullPath($Path).Replace('\', '/').TrimEnd('/')
+    }
+    catch {
+        return $Path.Replace('\', '/').TrimEnd('/')
+    }
+}
+
 function Test-WorktreeIsPrimary {
     <#
     .SYNOPSIS
@@ -916,6 +1021,20 @@ function Test-WorktreeIsPrimary {
         delegate to that file's Get-SCDWorktreeRecords — only the first
         record is needed here, so a lightweight first-record parse is used
         instead of a full record-list parser.
+        Perf note (finding F, #889 fix cycle, LOW/deferred): this function
+        re-spawns `git worktree list --porcelain` on every call, including
+        once per sibling-worktree record when a caller (e.g. the detector's
+        Get-SCDSiblingWorktreeCleanups loop, or post-merge-cleanup.ps1's
+        per-worktree Remove-SiblingWorktree/Test-WorktreeRemovalPreflight
+        calls) iterates a candidate list. Callers that already hold parsed
+        worktree records for their own purposes could pass them through
+        instead of re-invoking git per record. Not changed here: doing so
+        cleanly would widen this function's signature (or add an overload)
+        across every s2/s3/s4 call site, and the added complexity is not
+        justified by a real-world worktree-count scale where a handful of
+        redundant `git worktree list` invocations per cleanup run is
+        immaterial. Left as a documented perf note per judge guidance rather
+        than a signature change.
         Fail-safe direction: any porcelain-probe failure (non-zero exit,
         empty output, unparseable first record) returns $true — treat as
         primary when unprovable. A guard whose purpose is "never remove the
@@ -960,8 +1079,8 @@ function Test-WorktreeIsPrimary {
     }
 
     $firstWorktreePath = $worktreeLine.Substring('worktree '.Length)
-    $normFirst = $firstWorktreePath.Replace('\', '/').TrimEnd('/')
-    $normTarget = $WorktreePath.Replace('\', '/').TrimEnd('/')
+    $normFirst = ConvertTo-SCDPathForComparison -Path $firstWorktreePath
+    $normTarget = ConvertTo-SCDPathForComparison -Path $WorktreePath
 
     return [string]::Equals($normFirst, $normTarget, [System.StringComparison]::OrdinalIgnoreCase)
 }

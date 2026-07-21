@@ -182,15 +182,23 @@ function Remove-OrphanBranch {
     }
     finally { $ErrorActionPreference = $savedEap }
 
+    # Finding I (#889 fix cycle): a non-numeric (or empty) rev-list --count result
+    # despite exit 0 must not silently default to "0 unique commits" — that would
+    # incorrectly route a genuinely-unparseable git signal through the
+    # primitive's zero-commit rung as if verified zero. Track parse success
+    # explicitly; a parse failure falls through to the existing >=1 chain below
+    # (same "a git rev-list failure does not confirm zero" fail-closed intent
+    # already documented above for the countExit-nonzero case).
     $uniqueCount = 0
+    $countParsedOk = $false
     if ($countExit -eq 0 -and $countOutput) {
         $firstLine = (@($countOutput) | Select-Object -First 1)
-        [void][int]::TryParse(("$firstLine").Trim(), [ref]$uniqueCount)
+        $countParsedOk = [int]::TryParse(("$firstLine").Trim(), [ref]$uniqueCount)
     }
 
     $derivedIssueId = Get-WorktreeBranchIssueId -BranchName $Branch
 
-    if ($countExit -eq 0 -and $uniqueCount -eq 0 -and $derivedIssueId) {
+    if ($countExit -eq 0 -and $countParsedOk -and $uniqueCount -eq 0 -and $derivedIssueId) {
         $eligibility = Test-WorktreeBranchRemovalEligible -BranchName $Branch -DefaultBranch $DefaultBranch
         if (-not $eligibility.Eligible) {
             Write-Output "Skipped '$Branch' — $($eligibility.ManualReviewReason) — review before deleting"
@@ -370,20 +378,37 @@ function Remove-SiblingWorktree {
     }
     $dirAbsent = -not (Test-Path $WorktreePath)
 
-    if ($isPrunable -and $dirAbsent) {
+    if ($isLocked -and $dirAbsent) {
+        # D5/#522, corrected (Issue #889 fix cycle, finding B1): real git never
+        # emits the porcelain 'prunable' flag for a locked worktree — the two
+        # markers are mutually exclusive in practice — so the original
+        # "$isPrunable -and $isLocked" dead-code branch below could never fire,
+        # and a genuinely gone-but-locked directory fell through to
+        # Test-WorktreeRemovalPreflight's own "locked-and-not-prunable" skip,
+        # producing a false "skipped-intact (locked)" message for a directory that
+        # Test-Path already independently confirms is gone. The corrected clause
+        # keys on Test-Path-verified absence alone (never the porcelain 'prunable'
+        # self-report) for the locked case. git requires a DOUBLE --force to
+        # remove a locked worktree registration; the actual post-attempt state is
+        # then verified through the same honest Get-WorktreeRemovalOutcome probe
+        # every other removal path below uses — never assumed.
+        Invoke-SCDNativeCommand { git worktree remove --force --force $WorktreePath 2>$null }
+        $removalExitCode = $LASTEXITCODE
+    }
+    elseif ($isLocked) {
+        # Directory still present: a locked worktree with content still on disk is
+        # manual-review territory, never force-removed on the lock flag alone (D5/#522).
+        Write-Output "skipped locked worktree at $WorktreePath - remove the lock first"
+        return
+    }
+    elseif ($isPrunable -and $dirAbsent) {
         # D5/#522: directory confirmed ABSENT via Test-Path (not merely git's own
-        # 'prunable' self-report). Safe to clear the stale registration even when
-        # locked — there is nothing left to check for dirtiness — so this bypasses
+        # 'prunable' self-report). Safe to clear the stale registration — there is
+        # nothing left to check for dirtiness — so this bypasses
         # Test-WorktreeRemovalPreflight's dirty probe, which would otherwise
         # spuriously own-probe-error on a directory that genuinely no longer exists.
         Invoke-SCDNativeCommand { git worktree remove --force $WorktreePath 2>$null }
         $removalExitCode = $LASTEXITCODE
-    }
-    elseif ($isLocked -and $isPrunable) {
-        # Directory still present: locked+prunable is manual-review territory,
-        # never force-removed on the porcelain marker alone (D5/#522).
-        Write-Output "skipped locked worktree at $WorktreePath - remove the lock first"
-        return
     }
     else {
         $preflight = Test-WorktreeRemovalPreflight -WorktreePath $WorktreePath -IsLocked $isLocked -IsPrunable $isPrunable
@@ -420,7 +445,17 @@ function Remove-SiblingWorktree {
     $outcomeMessage = Get-WorktreeRemovalOutcomeMessage -Outcome $outcome -WorktreePath $WorktreePath -Detail "exit $removalExitCode"
     Write-Output $outcomeMessage
 
-    $survivedOutcomes = @('removed', 'removed-partial-root-held', 'removed-partial-content-remains', 'stale-registration')
+    # Issue #889 fix cycle, finding B2: 'stale-registration' is NOT a successful
+    # removal — per Get-WorktreeRemovalOutcome's own matrix, that outcome means the
+    # post-attempt probe still found the worktree REGISTERED (dir absent, but git
+    # worktree list still lists it) — i.e. the deregistration attempt itself
+    # FAILED, even though the exit code may have been 0. A genuinely successful
+    # removal of an already-dir-absent worktree yields 'removed' (not registered
+    # anymore), never 'stale-registration'. Counting it here would report a
+    # deregistration failure to the user as "Deleted N sibling worktree(s)" and
+    # would proceed to delete the branch out from under an entry git still
+    # believes is a live worktree.
+    $survivedOutcomes = @('removed', 'removed-partial-root-held', 'removed-partial-content-remains')
     if ($outcome -notin $survivedOutcomes) {
         return
     }
@@ -676,7 +711,21 @@ if (-not $SkipGitUpdate) {
     if ($LASTEXITCODE -ne 0) { throw "git pull failed (exit $LASTEXITCODE). Cleanup aborted." }
 }
 
-if (-not $SkipRemoteDelete -and $FeatureBranch) {
+# Nit (#889 fix cycle): compute the -FeatureBranch re-verification ONCE, before
+# EITHER destructive action, so the remote delete below can never race ahead of
+# the same eligibility check the local delete already required (Issue #889 s3,
+# M9/AC3). Previously the remote branch ref was deleted unconditionally before
+# this re-verification ran at all — a branch the re-verification would go on to
+# DECLINE still had its remote ref irreversibly deleted first.
+$featureEligibility = $null
+if ($FeatureBranch -and (-not $SkipRemoteDelete -or -not $SkipLocalDelete)) {
+    $featureEligibility = Test-WorktreeBranchRemovalEligible -BranchName $FeatureBranch -DefaultBranch $defaultBranch -Repo $Repo
+    if (-not $featureEligibility.Eligible) {
+        Write-Output "detector flagged this, but re-verification declined: $($featureEligibility.ManualReviewReason)"
+    }
+}
+
+if (-not $SkipRemoteDelete -and $FeatureBranch -and $featureEligibility.Eligible) {
     $remoteExists = git ls-remote --heads origin $FeatureBranch 2>$null
     if ($remoteExists) {
         Write-Output "Deleting remote branch: $FeatureBranch"
@@ -690,11 +739,8 @@ if (-not $SkipRemoteDelete -and $FeatureBranch) {
 if (-not $SkipLocalDelete -and $FeatureBranch) {
     $localExists = git branch --list $FeatureBranch
     if ($localExists) {
-        # (b) Independent re-verification via the shared eligibility primitive,
-        # ahead of the destructive `git branch -D` call (Issue #889 s3, M9/AC3).
-        $featureEligibility = Test-WorktreeBranchRemovalEligible -BranchName $FeatureBranch -DefaultBranch $defaultBranch -Repo $Repo
         if (-not $featureEligibility.Eligible) {
-            Write-Output "detector flagged this, but re-verification declined: $($featureEligibility.ManualReviewReason)"
+            # Already reported by the shared re-verification above.
         }
         else {
             $currentBranch = git branch --show-current 2>$null

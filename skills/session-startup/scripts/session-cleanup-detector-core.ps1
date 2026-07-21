@@ -30,6 +30,18 @@
 # is produced by the detector's own structural guard and never by the primitive.
 $script:SCDDegradedCwdManualReviewReason = "couldn't verify: current worktree location not registered"
 
+# Detector-only manual-review reason for the collection-time gh budget cap
+# (finding D, #889 fix cycle). Test-SCDCollectionGhBudgetExceeded trips on EITHER
+# a per-category candidate COUNT cap or the run's elapsed-time cap — neither of
+# which means a gh subprocess was actually invoked and hung. Previously both
+# cases were reported via $script:WorktreeEligibilityReasons.GhTimeout (the
+# PRIMITIVE's own reason for a genuine per-call gh timeout inside
+# Invoke-SCDGhWithTimeout), which conflated "we deliberately declined to spend
+# more of this run's gh budget" with "a gh call actually hung". This reason is
+# used only for the collection-budget short-circuit; GhTimeout is reserved for
+# genuine per-call timeouts surfaced by the primitive itself.
+$script:SCDCollectionBudgetExceededManualReviewReason = "couldn't verify: too many candidates this run"
+
 function Test-SCDCurrentLocationMatchesWorktreeRecord {
     <#
     .SYNOPSIS
@@ -154,7 +166,7 @@ function Get-SCDGatedEligibility {
     }
 
     if (Test-SCDCollectionGhBudgetExceeded -Budget $Budget -Category $Category) {
-        return @{ Eligible = $false; Evidence = $null; ManualReviewReason = $script:WorktreeEligibilityReasons.GhTimeout }
+        return @{ Eligible = $false; Evidence = $null; ManualReviewReason = $script:SCDCollectionBudgetExceededManualReviewReason }
     }
 
     return Test-WorktreeBranchRemovalEligible -BranchName $BranchName -DefaultBranch $DefaultBranch
@@ -233,34 +245,47 @@ function Test-SCDPersistentTrackingFile {
 }
 
 function Get-SCDRemoteDefaultRef {
+    <#
+    .SYNOPSIS
+        Finding K (#889 fix cycle): single-sourced on the shared
+        Get-RemoteDefaultRef (session-startup-git-helpers.ps1) resolution
+        strategy — upstream-tracking-ref-first (`git rev-parse --abbrev-ref
+        <branch>@{upstream}`), falling back to `origin/<DefaultBranch>` —
+        instead of maintaining a second, independently-diverging config-first
+        strategy (`git config --get branch.<X>.remote`, falling back to
+        parsing `origin/HEAD`'s symbolic-ref) here. The two strategies agree
+        in the overwhelming majority of real repos (a branch's `@{upstream}`
+        resolution is itself derived from the same `branch.<X>.remote` /
+        `branch.<X>.merge` config this function used to read directly), so
+        this file's own resolver was pure duplicated logic that could
+        silently drift from the shared one. Only the RETURN SHAPE
+        (RemoteName/BranchName/RefName hashtable, vs. the shared helper's
+        bare "remote/branch" string) remains detector-specific — this
+        wrapper derives that shape from the shared helper's single string
+        result so every detector call site keeps working unchanged.
+    #>
     param(
         [Parameter(Mandatory)]
         [string]$DefaultBranch
     )
 
-    $configuredRemote = (git config --get "branch.$DefaultBranch.remote" 2>$null)
-    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($configuredRemote)) {
-        $remoteName = $configuredRemote.Trim()
+    $refString = Get-RemoteDefaultRef -DefaultBranch $DefaultBranch
+    $parts = $refString -split '/', 2
+    if ($parts.Count -eq 2 -and -not [string]::IsNullOrWhiteSpace($parts[0]) -and -not [string]::IsNullOrWhiteSpace($parts[1])) {
         return @{
-            RemoteName = $remoteName
-            BranchName = $DefaultBranch
-            RefName    = "refs/remotes/$remoteName/$DefaultBranch"
+            RemoteName = $parts[0]
+            BranchName = $parts[1]
+            RefName    = "refs/remotes/$($parts[0])/$($parts[1])"
         }
     }
 
-    $remoteName = 'origin'
-    $branchName = $DefaultBranch
-
-    $symbolicRef = (git symbolic-ref refs/remotes/origin/HEAD 2>$null)
-    if ($LASTEXITCODE -eq 0 -and $symbolicRef -match '^refs/remotes/([^/]+)/(.+)$') {
-        $remoteName = $Matches[1]
-        $branchName = $Matches[2]
-    }
-
+    # Malformed/unexpected shape from the shared resolver (should not happen
+    # given its own contract) — fail toward the historical 'origin'/$DefaultBranch
+    # default rather than propagate an unparseable ref.
     return @{
-        RemoteName = $remoteName
-        BranchName = $branchName
-        RefName    = "refs/remotes/$remoteName/$branchName"
+        RemoteName = 'origin'
+        BranchName = $DefaultBranch
+        RefName    = "refs/remotes/origin/$DefaultBranch"
     }
 }
 
@@ -1094,9 +1119,24 @@ function Invoke-SessionCleanupDetector {
                     if ($currentBranch -match $script:OrphanIssueRegex) {
                         $branchIssueId = $Matches[1]
                     }
+                    # Finding G (#889 fix cycle): this was the sixth candidate-append
+                    # site never routed through Get-SCDGatedEligibility — the other
+                    # five (sibling x2, orphan x2, current-no-upstream) all gate
+                    # through the shared primitive before being reported as
+                    # cleanup-ready. This site's -FeatureBranch composite command is
+                    # still independently re-verified by post-merge-cleanup.ps1's own
+                    # eligibility check before any deletion occurs (M9/AC3), so
+                    # gating here is a reporting-honesty fix, not a new safety net —
+                    # but the manual-review reason is now surfaced so an ineligible
+                    # stale branch is visibly flagged rather than silently presented
+                    # as if the composite command were unconditionally safe to run.
+                    $staleEligibility = Get-SCDGatedEligibility -Budget $ghBudget -Category 'current' -BranchName $currentBranch -DefaultBranch $defaultBranch -IsDegradedCwd $isDegradedCwd
                     $staleBranch = @{
-                        BranchName = $currentBranch
-                        IssueId    = $branchIssueId
+                        BranchName         = $currentBranch
+                        IssueId            = $branchIssueId
+                        Eligible           = $staleEligibility.Eligible
+                        Evidence           = $staleEligibility.Evidence
+                        ManualReviewReason = $staleEligibility.ManualReviewReason
                     }
                 }
             }
@@ -1241,6 +1281,29 @@ function Invoke-SessionCleanupDetector {
         return $out
     }
 
+    function Get-SCDStaleBranchLine {
+        <#
+        .SYNOPSIS
+            Finding G (#889 fix cycle): renders the current-branch stale-branch
+            bullet, appending a manual-review annotation when the eligibility
+            gate (Get-SCDGatedEligibility, computed at STEP 1 detection time)
+            declined. The base "remote branch merged/deleted" wording is
+            preserved unconditionally — it is a factual detection statement,
+            true regardless of eligibility — and the composite -FeatureBranch
+            command is still emitted either way, since post-merge-cleanup.ps1
+            independently re-verifies eligibility before any deletion (M9/AC3);
+            this annotation is a reporting-honesty improvement, not a new
+            deletion gate.
+        #>
+        param([hashtable]$StaleBranch)
+
+        $line = "- Current branch ``$($StaleBranch.BranchName)`` — remote branch merged/deleted"
+        if ($StaleBranch.ContainsKey('Eligible') -and -not $StaleBranch.Eligible) {
+            $line += " (needs manual review before running the cleanup command below: $($StaleBranch.ManualReviewReason))"
+        }
+        return $line
+    }
+
     function Get-SiblingWorktreeLines {
         param([array]$Items)
 
@@ -1371,7 +1434,7 @@ function Invoke-SessionCleanupDetector {
         $lines += "**Post-merge cleanup detected** — $($signalNames -join ', ') found:"
         $lines += ''
         if ($null -ne $staleBranch) {
-            $lines += "- Current branch ``$($staleBranch.BranchName)`` — remote branch merged/deleted"
+            $lines += (Get-SCDStaleBranchLine -StaleBranch $staleBranch)
             $lines += ''
         }
         if ($null -ne $currentNoUpstreamWorktree) {
@@ -1475,7 +1538,7 @@ function Invoke-SessionCleanupDetector {
         # ── Branch-only signal ─────────────────────────────────────────────────────
         $lines += '**Post-merge cleanup detected** — you''re on a stale branch:'
         $lines += ''
-        $lines += "- Current branch ``$($staleBranch.BranchName)`` — remote branch merged/deleted"
+        $lines += (Get-SCDStaleBranchLine -StaleBranch $staleBranch)
         $lines += ''
         $lines += 'To clean up, run:'
         $lines += '```powershell'
@@ -1494,7 +1557,7 @@ function Invoke-SessionCleanupDetector {
         # ── Both signals — branch info MUST precede 'post-merge cleanup detected' ──
         $lines += '**Post-merge cleanup detected** — stale branch and tracking artifacts found:'
         $lines += ''
-        $lines += "- Current branch ``$($staleBranch.BranchName)`` — remote branch merged/deleted"
+        $lines += (Get-SCDStaleBranchLine -StaleBranch $staleBranch)
         $lines += ''
         if ($dedupedCleanup.Count -gt 0) {
             $lines += '**Post-merge cleanup detected** — stale tracking artifacts also found:'

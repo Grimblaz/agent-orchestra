@@ -308,6 +308,18 @@ if ($a.Count -ge 4 -and $a[0] -eq 'diff' -and $a[1] -eq '--quiet') {
     exit ([int]$exitValue)
 }
 
+if ($a.Count -ge 5 -and $a[0] -eq 'log' -and $a[1] -eq '--no-merges' -and $a[2] -eq '--pretty=format:' -and $a[3] -eq '--name-only') {
+    # git log --no-merges --pretty=format: --name-only <range> (Issue #889 fix
+    # cycle, finding C — Test-SCDUniqueCommitsAllEmpty). DEFAULT (unconfigured) is
+    # a placeholder touched path, for the same backward-compatibility reason as
+    # the rev-list-count/diff-quiet-exit defaults above.
+    $range = $a[4]
+    $val = Get-MockConfigValue "log-name-only-$range"
+    if ($null -eq $val) { $val = 'placeholder-touched-file.txt' }
+    if ($val -ne '') { Write-Output $val }
+    exit 0
+}
+
 if ($a.Count -ge 3 -and $a[0] -eq 'branch' -and $a[1] -eq '--list') {
     $pattern = $a[2]
     $key = "branch-list-$pattern"
@@ -2202,6 +2214,116 @@ Describe 'session-cleanup-detector.ps1 — Issue #889 s4: shared eligibility gat
             $result.Output | Should -Match '^\{\s*\}$'
             $result['GhCalls'].Count | Should -Be 0 `
                 -Because 'zero candidates must never spend the gh mock (or a real gh call in production)'
+        }
+
+        It 'finding D (#889 fix cycle): a per-category COUNT-cap exhaustion is reported with the distinct "too many candidates" reason, not GhTimeout' {
+            $budget = New-SCDCollectionGhBudget -PerCategoryLimit 1 -GlobalSeconds 999
+            # Spend the single count-cap slot for this category.
+            Test-SCDCollectionGhBudgetExceeded -Budget $budget -Category 'orphan' | Should -Be $false
+            $result = Get-SCDGatedEligibility -Budget $budget -Category 'orphan' -BranchName 'feature/issue-1-x' -DefaultBranch 'main'
+            $result.Eligible | Should -Be $false
+            $result.ManualReviewReason | Should -Be "couldn't verify: too many candidates this run" `
+                -Because 'a count-cap exhaustion means no gh call was even attempted — GhTimeout is reserved for a genuine per-call timeout'
+        }
+
+        It 'finding D (#889 fix cycle): an elapsed-time budget-cap exhaustion is reported with the distinct "too many candidates" reason, not GhTimeout' {
+            $budget = New-SCDCollectionGhBudget -PerCategoryLimit 999 -GlobalSeconds 0
+            Start-Sleep -Milliseconds 5
+            $result = Get-SCDGatedEligibility -Budget $budget -Category 'orphan' -BranchName 'feature/issue-2-x' -DefaultBranch 'main'
+            $result.Eligible | Should -Be $false
+            $result.ManualReviewReason | Should -Be "couldn't verify: too many candidates this run" `
+                -Because 'the elapsed-time cap is also a collection-budget decision, not a genuine gh subprocess timeout'
+        }
+    }
+
+    Context 'finding K (#889 fix cycle): Get-SCDRemoteDefaultRef single-sources on the shared Get-RemoteDefaultRef resolution strategy' {
+
+        It 'falls back to branch.<X>.remote config (via the shared resolver''s own fallback) when the @{upstream} shorthand is unavailable, matching the previously-separate detector-only resolver''s behavior' {
+            $workDir = Join-Path $TestDrive 's4-remote-default-ref-config-fallback'
+            New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+            $mockDir = & $script:NewMockGitDir -ParentDir $workDir -Config @{
+                'config-branch.main.remote' = 'upstream'
+            }
+            try {
+                $env:PATH = "$mockDir$([System.IO.Path]::PathSeparator)$script:SavedPath"
+                Push-Location $workDir
+                try {
+                    $result = Get-SCDRemoteDefaultRef -DefaultBranch 'main'
+                    $result.RemoteName | Should -Be 'upstream'
+                    $result.BranchName | Should -Be 'main'
+                    $result.RefName | Should -Be 'refs/remotes/upstream/main'
+                }
+                finally { Pop-Location }
+            }
+            finally { $env:PATH = $script:SavedPath }
+        }
+
+        It 'falls back to the shared helper''s origin/<DefaultBranch> default when no upstream ref or remote config is resolvable' {
+            $workDir = Join-Path $TestDrive 's4-remote-default-ref-hard-default'
+            New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+            $mockDir = & $script:NewMockGitDir -ParentDir $workDir -Config @{}
+            try {
+                $env:PATH = "$mockDir$([System.IO.Path]::PathSeparator)$script:SavedPath"
+                Push-Location $workDir
+                try {
+                    $result = Get-SCDRemoteDefaultRef -DefaultBranch 'main'
+                    $result.RemoteName | Should -Be 'origin'
+                    $result.BranchName | Should -Be 'main'
+                    $result.RefName | Should -Be 'refs/remotes/origin/main'
+                }
+                finally { Pop-Location }
+            }
+            finally { $env:PATH = $script:SavedPath }
+        }
+    }
+
+    Context 'finding G (#889 fix cycle): the sixth candidate site (current branch, upstream configured, remote gone) is gated' {
+
+        It 'an eligible stale current branch still emits the plain detection line and the composite -FeatureBranch command' {
+            $workDir = Join-Path $TestDrive 's4-staleBranch-gated-eligible'
+            New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+            $branch = 'feature/issue-9100-stale-gated-eligible'
+
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GitConfig @{
+                'branch--show-current'      = $branch
+                'symbolic-ref-origin-HEAD'  = 'refs/remotes/origin/main'
+                'rev-parse-exit'            = 0
+                'rev-parse-upstream'        = "origin/$branch"
+                "ls-remote-$branch"         = ''
+                "diff-quiet-exit-$branch"   = 0
+            }
+            $context = & $script:GetAdditionalContext -Output $result.Output
+
+            $result.ExitCode | Should -Be 0
+            $context | Should -Match ([regex]::Escape($branch))
+            $context | Should -Match ([regex]::Escape('remote branch merged/deleted'))
+            $context | Should -Not -Match 'needs manual review before running the cleanup command below' `
+                -Because 'an eligible stale branch must not be annotated as needing manual review'
+            $context | Should -Match ([regex]::Escape("-FeatureBranch '$branch'")) `
+                -Because 'the composite command must still be emitted for an eligible candidate'
+        }
+
+        It 'an ineligible stale current branch is annotated with a manual-review reason (regression test for finding G — previously this was the one ungated site)' {
+            $workDir = Join-Path $TestDrive 's4-staleBranch-gated-ineligible'
+            New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+            $branch = 'bugfix/random-stale-no-derivable-id'
+
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GhConfig @{} -GitConfig @{
+                'branch--show-current'                       = $branch
+                'symbolic-ref-origin-HEAD'                   = 'refs/remotes/origin/main'
+                'rev-parse-exit'                              = 0
+                'rev-parse-upstream'                          = "origin/$branch"
+                "ls-remote-$branch"                           = ''
+                "rev-list-count-origin/main..$branch"         = 0
+            }
+            $context = & $script:GetAdditionalContext -Output $result.Output
+
+            $result.ExitCode | Should -Be 0
+            $context | Should -Match ([regex]::Escape($branch))
+            $context | Should -Match 'needs manual review before running the cleanup command below' `
+                -Because 'a genuinely ineligible stale branch must be visibly flagged now that this site is gated'
+            $context | Should -Match ([regex]::Escape('no issue number derivable')) `
+                -Because 'the manual-review annotation must name the eligibility primitive''s actual reason'
         }
     }
 }
