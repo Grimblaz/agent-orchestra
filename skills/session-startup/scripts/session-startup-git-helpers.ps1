@@ -15,6 +15,19 @@
 #>
 
 $script:OrphanIssueRegex = '^feature/issue-(\d+)-'
+$script:ClaudeBranchIssueRegex = '^claude/.*-(\d+)-[0-9a-f]{6}$'
+
+# Issue #889 s1: manual-review reason enum — single authoritative source, consumed
+# verbatim by Test-WorktreeBranchRemovalEligible callers in s2/s3/s4. Do not
+# introduce a differently-worded literal elsewhere; parity is checked downstream.
+$script:WorktreeEligibilityReasons = @{
+    UnmergedCommits    = 'unmerged commits'
+    NoIssueDerivable   = 'no issue number derivable'
+    IssueStillOpen     = "issue #{0} still open"
+    GhUnavailable      = "couldn't verify: gh unavailable"
+    GhTimeout          = "couldn't verify: gh timeout"
+    GitSignalFailed    = "couldn't verify: git signal failed"
+}
 
 function Get-SCDPersistentTrackingExclusions {
     <#
@@ -88,6 +101,96 @@ function Get-RemoteDefaultRef {
     return "origin/$DefaultBranch"
 }
 
+function Test-BranchTreeEquivalentToDefault {
+    <#
+    .SYNOPSIS
+        Git-only merged-detection (Issue #889 M4): tree-equivalence, accumulated-squash
+        merge-tree no-op, and git-cherry patch-equivalence — with NO gh fallback.
+        Extracted from Test-BranchMergedIntoDefault so the eligibility primitive
+        (Test-WorktreeBranchRemovalEligible) can call a purely git-only merged
+        check that never risks the name-only gh pr list fallback's false
+        "tree-equivalent" evidence for a branch that only shares a name with an
+        unrelated merged PR.
+    .OUTPUTS
+        Tri-state [bool]/$null, matching this file's existing tri-state
+        convention (e.g. Test-OrphanBranchGitHubSignalsShipped): $true when
+        git-only signals show the branch is merged/absorbed; $false when git
+        cherry ran successfully and shows the branch is definitively NOT
+        merged (a conclusive git-only answer — callers must not fall back to
+        a name-only gh lookup in this case, since it would be redundant with
+        a definitive git-only "no"); $null when every git-only signal was
+        inconclusive (git cherry itself failed) and the caller should attempt
+        an independent fallback (gh pr list, or an OID-checked PR match).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$BranchName,
+
+        [Parameter(Mandatory)]
+        [string]$DefaultBranch
+    )
+
+    $remoteDefault = Get-RemoteDefaultRef -DefaultBranch $DefaultBranch
+
+    # Primary: tree-equivalence check (AC1/AC6) — catches squash-merged branches
+    # whose tip content is identical to the remote default even when commit history differs.
+    $savedEap = $ErrorActionPreference
+    $ErrorActionPreference = 'SilentlyContinue'
+    try {
+        Invoke-SCDNativeCommand { git diff --quiet --ignore-cr-at-eol $remoteDefault $BranchName 2>$null }
+        $diffExit = $LASTEXITCODE
+    }
+    finally { $ErrorActionPreference = $savedEap }
+    if ($diffExit -eq 0) { return $true }
+
+    # Accumulated squash branch: if merging the branch into the current default
+    # would produce the same tree, cleanup is still safe after default advances.
+    $savedEap = $ErrorActionPreference
+    $ErrorActionPreference = 'SilentlyContinue'
+    try {
+        $mergeTreeOutput = @(Invoke-SCDNativeCommand { git merge-tree --write-tree $remoteDefault $BranchName 2>$null })
+        $mergeTreeExit = $LASTEXITCODE
+    }
+    finally { $ErrorActionPreference = $savedEap }
+    if ($mergeTreeExit -eq 0) {
+        $mergedTree = @($mergeTreeOutput | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1)
+        if ($mergedTree.Count -gt 0) {
+            $mergedTreeOid = $mergedTree[0].Trim()
+            $savedEap = $ErrorActionPreference
+            $ErrorActionPreference = 'SilentlyContinue'
+            try {
+                Invoke-SCDNativeCommand { git diff --quiet --ignore-cr-at-eol $remoteDefault $mergedTreeOid 2>$null }
+                $mergedTreeDiffExit = $LASTEXITCODE
+            }
+            finally { $ErrorActionPreference = $savedEap }
+            if ($mergedTreeDiffExit -eq 0) { return $true }
+        }
+    }
+
+    # Secondary: git cherry against the resolved remote default ref (G1)
+    $savedEap = $ErrorActionPreference
+    $ErrorActionPreference = 'SilentlyContinue'
+    try {
+        $cherryOutput = Invoke-SCDNativeCommand { git cherry $remoteDefault $BranchName 2>$null }
+        $cherryExit = $LASTEXITCODE
+    }
+    finally { $ErrorActionPreference = $savedEap }
+    if ($cherryExit -eq 0) {
+        # C4: cherry prefixes lines with '+' (not in upstream) or '-' (patch-equivalent
+        # already in upstream). Branch is merged when there are NO '+' lines.
+        # (Empty stdout is the trivial subset of "no '+' lines".)
+        $unmergedLines = @($cherryOutput | Where-Object { $_ -match '^\+\s' })
+        return ($unmergedLines.Count -eq 0)
+    }
+
+    # git cherry itself failed: every git-only signal was inconclusive. Return
+    # $null (not $false) so the caller can distinguish "definitively unmerged"
+    # from "no git-only answer" and decide whether an independent fallback
+    # (gh pr list, or an OID-checked PR match) is warranted.
+    return $null
+}
+
 function Test-BranchMergedIntoDefault {
     [CmdletBinding()]
     param(
@@ -98,35 +201,17 @@ function Test-BranchMergedIntoDefault {
         [string]$DefaultBranch
     )
 
-    # Primary: tree-equivalence check (AC1/AC6) — catches squash-merged branches
-    # whose tip content is identical to the remote default even when commit history differs.
-    $remoteDefault = Get-RemoteDefaultRef -DefaultBranch $DefaultBranch
-    Invoke-SCDNativeCommand { git diff --quiet --ignore-cr-at-eol $remoteDefault $BranchName 2>$null }
-    if ($LASTEXITCODE -eq 0) { return $true }
-
-    # Accumulated squash branch: if merging the branch into the current default
-    # would produce the same tree, cleanup is still safe after default advances.
-    $mergeTreeOutput = @(Invoke-SCDNativeCommand { git merge-tree --write-tree $remoteDefault $BranchName 2>$null })
-    if ($LASTEXITCODE -eq 0) {
-        $mergedTree = @($mergeTreeOutput | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1)
-        if ($mergedTree.Count -gt 0) {
-            $mergedTreeOid = $mergedTree[0].Trim()
-            Invoke-SCDNativeCommand { git diff --quiet --ignore-cr-at-eol $remoteDefault $mergedTreeOid 2>$null }
-            if ($LASTEXITCODE -eq 0) { return $true }
-        }
+    $treeEquivalent = Test-BranchTreeEquivalentToDefault -BranchName $BranchName -DefaultBranch $DefaultBranch
+    if ($null -ne $treeEquivalent) {
+        # Definitive git-only answer (merged, or git cherry ran and showed
+        # unmerged commits) — do not fall through to the name-only gh lookup,
+        # preserving this function's original short-circuit behavior.
+        return $treeEquivalent
     }
 
-    # Secondary: git cherry against the resolved remote default ref (G1)
-    $cherryOutput = Invoke-SCDNativeCommand { git cherry $remoteDefault $BranchName 2>$null }
-    if ($LASTEXITCODE -eq 0) {
-        # C4: cherry prefixes lines with '+' (not in upstream) or '-' (patch-equivalent
-        # already in upstream). Branch is merged when there are NO '+' lines.
-        # (Empty stdout is the trivial subset of "no '+' lines".)
-        $unmergedLines = @($cherryOutput | Where-Object { $_ -match '^\+\s' })
-        return ($unmergedLines.Count -eq 0)
-    }
-
-    # Fallback: gh pr list
+    # Fallback: gh pr list (name-only — retained here for this function's existing
+    # callers; Test-WorktreeBranchRemovalEligible does NOT use this fallback and
+    # instead performs its own OID-checked PR match — see Get-SCDMergedPrByHeadOid).
     if (Get-Command gh -ErrorAction SilentlyContinue) {
         $prJson = Invoke-SCDNativeCommand { gh pr list --head $BranchName --base $DefaultBranch --state merged --json number 2>$null }
         if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($prJson)) {
@@ -439,4 +524,355 @@ function Test-OrphanBranchAutoResolveEligible {
     if ($null -eq $absorbed) { return $null }
 
     return ($absorbed -eq $true)
+}
+
+# ===========================================================================
+# Issue #889 s1 — evidence-gated worktree/branch removal eligibility primitive.
+# Foundation for s2 (structural guarding), s3 (executor rewiring), and s4
+# (detector gating). Both detector and executor dot-source this file, so every
+# gh/git call below saves/restores $ErrorActionPreference exactly like
+# Test-OrphanBranchGitHubSignalsShipped (M7) — the executor runs under
+# $ErrorActionPreference = 'Stop'.
+# ===========================================================================
+
+function Get-WorktreeBranchIssueId {
+    <#
+    .SYNOPSIS
+        Derives the numeric issue id from a worktree/branch name, or $null when
+        no id is derivable (Issue #889 s1, M6).
+    .NOTES
+        `^feature/issue-(\d+)-` matches feature branches.
+        `^claude/.*-(\d+)-[0-9a-f]{6}$` matches claude branches: the leading
+        `^claude/` guard prevents firing on unrelated names (e.g.
+        'bugfix/foo-123-abc123'), and the trailing `-[0-9a-f]{6}$` anchor pins
+        the issue-number segment immediately before the 6-hex disambiguator.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$BranchName
+    )
+
+    if ($BranchName -match $script:OrphanIssueRegex) {
+        return [long]$Matches[1]
+    }
+    if ($BranchName -match $script:ClaudeBranchIssueRegex) {
+        return [long]$Matches[1]
+    }
+    return $null
+}
+
+function Get-SCDOriginRepo {
+    <#
+    .SYNOPSIS
+        Resolves 'owner/repo' from the 'origin' remote URL for --repo-pinning
+        gh calls (M6 — prevents cross-repo wrong-issue resolution). Returns
+        $null when the remote is absent or unparseable.
+    #>
+    [CmdletBinding()]
+    param()
+
+    $savedEap = $ErrorActionPreference
+    $ErrorActionPreference = 'SilentlyContinue'
+    try {
+        $originUrl = Invoke-SCDNativeCommand { git remote get-url origin 2>$null }
+        $exitCode = $LASTEXITCODE
+    }
+    finally { $ErrorActionPreference = $savedEap }
+
+    if ($exitCode -ne 0 -or [string]::IsNullOrWhiteSpace($originUrl)) { return $null }
+    if ($originUrl -match 'github\.com[:/](?<owner>[^/]+)/(?<repo>[^/]+?)(?:\.git)?$') {
+        return "$($Matches.owner)/$($Matches.repo)"
+    }
+    return $null
+}
+
+function Invoke-SCDGhWithTimeout {
+    <#
+    .SYNOPSIS
+        Runs a gh invocation with a concrete per-call timeout (M10). PowerShell
+        has no native per-subprocess timeout, so this uses Start-Process +
+        Process.WaitForExit(ms) and kills (discarding partial stdout) on
+        timeout, per the plan's explicit mechanism.
+    .OUTPUTS
+        Hashtable: @{ Status = 'ok'|'unavailable'|'timeout'; Output = <string|$null> }
+        'unavailable' covers gh-not-installed, non-zero exit, and any
+        Start-Process failure — all resolve toward not-eligible identically.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string[]]$ArgumentList,
+
+        [int]$TimeoutMs = 3000
+    )
+
+    # Start-Process performs raw process creation (no PowerShell script-engine
+    # shortcut), so it needs a genuinely launchable executable. When multiple
+    # gh matches exist on PATH (e.g. both a .ps1 and a .cmd shim), prefer the
+    # exe/cmd/bat form; Get-Command's default resolution order is not
+    # guaranteed to prefer an executable extension over a .ps1 script.
+    $ghCommands = @(Get-Command gh -All -ErrorAction SilentlyContinue)
+    if ($ghCommands.Count -eq 0) { return @{ Status = 'unavailable'; Output = $null } }
+    $ghCommand = $ghCommands | Where-Object { $_.Source -match '\.(exe|cmd|bat)$' } | Select-Object -First 1
+    if (-not $ghCommand) { $ghCommand = $ghCommands[0] }
+
+    $stdoutFile = [System.IO.Path]::GetTempFileName()
+    $stderrFile = [System.IO.Path]::GetTempFileName()
+    $savedEap = $ErrorActionPreference
+    $ErrorActionPreference = 'SilentlyContinue'
+    try {
+        try {
+            $proc = Start-Process -FilePath $ghCommand.Source -ArgumentList $ArgumentList -NoNewWindow -PassThru `
+                -RedirectStandardOutput $stdoutFile -RedirectStandardError $stderrFile -ErrorAction Stop
+        }
+        catch {
+            return @{ Status = 'unavailable'; Output = $null }
+        }
+
+        $exited = $proc.WaitForExit($TimeoutMs)
+        if (-not $exited) {
+            try { $proc.Kill() } catch { }
+            # Discard any partial stdout collected before the kill (M10).
+            return @{ Status = 'timeout'; Output = $null }
+        }
+        if ($proc.ExitCode -ne 0) {
+            return @{ Status = 'unavailable'; Output = $null }
+        }
+
+        $output = Get-Content -Path $stdoutFile -Raw -ErrorAction SilentlyContinue
+        return @{ Status = 'ok'; Output = $output }
+    }
+    finally {
+        $ErrorActionPreference = $savedEap
+        Remove-Item -Path $stdoutFile, $stderrFile -ErrorAction SilentlyContinue
+    }
+}
+
+function Get-SCDMergedPrByHeadOid {
+    <#
+    .SYNOPSIS
+        OID-checked merged-PR-by-head lookup (Issue #889 s1). Requires
+        headRefOid to equal the current branch tip — reuses the
+        Test-OrphanBranchGitHubSignalsShipped OID-match pattern
+        (git-helpers.ps1 Test-OrphanBranchGitHubSignalsShipped) rather than a
+        name-only PR count, so a branch that merely shares a name with an
+        already-merged-and-since-advanced PR is never misreported as eligible.
+    .OUTPUTS
+        Hashtable: @{ Status = 'matched'|'no-match'|'unavailable'|'timeout'; Number = <int|$null> }
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Branch,
+
+        [Parameter(Mandatory)]
+        [string]$DefaultBranch
+    )
+
+    $prResult = Invoke-SCDGhWithTimeout -ArgumentList @('pr', 'list', '--head', $Branch, '--base', $DefaultBranch, '--state', 'merged', '--json', 'number,headRefOid')
+    if ($prResult.Status -eq 'timeout') { return @{ Status = 'timeout'; Number = $null } }
+    if ($prResult.Status -ne 'ok') { return @{ Status = 'unavailable'; Number = $null } }
+    if ([string]::IsNullOrWhiteSpace($prResult.Output)) { return @{ Status = 'no-match'; Number = $null } }
+
+    try {
+        $prs = $prResult.Output | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch { return @{ Status = 'unavailable'; Number = $null } }
+
+    $prs = @($prs)
+    if ($prs.Count -eq 0) { return @{ Status = 'no-match'; Number = $null } }
+
+    $savedEap = $ErrorActionPreference
+    $ErrorActionPreference = 'SilentlyContinue'
+    try {
+        $branchTip = Invoke-SCDNativeCommand { git rev-parse $Branch 2>$null }
+        $tipExit = $LASTEXITCODE
+    }
+    finally { $ErrorActionPreference = $savedEap }
+    if ($tipExit -ne 0 -or [string]::IsNullOrWhiteSpace($branchTip)) { return @{ Status = 'unavailable'; Number = $null } }
+    $branchTip = $branchTip.Trim()
+
+    foreach ($pr in $prs) {
+        if ($pr.headRefOid -eq $branchTip) {
+            return @{ Status = 'matched'; Number = $pr.number }
+        }
+    }
+    return @{ Status = 'no-match'; Number = $null }
+}
+
+function Get-SCDIssueState {
+    <#
+    .SYNOPSIS
+        --repo-pinned issue-state lookup (M6): `gh issue view <id> --repo
+        <owner/repo> --json state`. Repo-pinning prevents a bare issue number
+        from resolving against the wrong repository.
+    .OUTPUTS
+        Hashtable: @{ Status = 'ok'|'unavailable'|'timeout'; State = <string|$null> }
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [long]$IssueId,
+
+        [string]$Repo
+    )
+
+    $repoArg = if ($Repo) { $Repo } else { Get-SCDOriginRepo }
+    if (-not $repoArg) { return @{ Status = 'unavailable'; State = $null } }
+
+    $result = Invoke-SCDGhWithTimeout -ArgumentList @('issue', 'view', "$IssueId", '--repo', $repoArg, '--json', 'state')
+    if ($result.Status -eq 'timeout') { return @{ Status = 'timeout'; State = $null } }
+    if ($result.Status -ne 'ok') { return @{ Status = 'unavailable'; State = $null } }
+    if ([string]::IsNullOrWhiteSpace($result.Output)) { return @{ Status = 'unavailable'; State = $null } }
+
+    try {
+        $issue = $result.Output | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch { return @{ Status = 'unavailable'; State = $null } }
+
+    return @{ Status = 'ok'; State = $issue.state }
+}
+
+function Test-WorktreeBranchRemovalEligible {
+    <#
+    .SYNOPSIS
+        Evidence-gated eligibility primitive (Issue #889 s1). Returns a closed
+        tri-outcome result — eligible with named evidence, or not eligible with
+        a ManualReviewReason drawn from the authoritative reason enum below.
+        This is the single foundation primitive s2 (structural guarding), s3
+        (executor rewiring), and s4 (detector gating) build on and call.
+    .OUTPUTS
+        Hashtable: @{ Eligible = <bool>; Evidence = <string|$null>; ManualReviewReason = <string|$null> }
+    .NOTES
+        Reason enum (single authoritative source, consumed verbatim by s2/s3/s4
+        — see $script:WorktreeEligibilityReasons):
+        'unmerged commits' | 'no issue number derivable' | 'issue #N still open' |
+        "couldn't verify: gh unavailable" | "couldn't verify: gh timeout" |
+        "couldn't verify: git signal failed"
+
+        Router:
+          1. unique-commit count via `git rev-list <remoteDefaultRef>..<branch> --count`.
+             Git failure -> retain, 'couldn't verify: git signal failed'.
+          2. >=1 unique commit -> git-only tree-equivalence (Test-BranchTreeEquivalentToDefault,
+             NO name-only gh fallback) -> eligible, "merged into <ref> (tree-equivalent)";
+             else OID-checked merged-PR-by-head -> eligible, "PR #N merged";
+             else not eligible, 'unmerged commits'.
+          3. 0 unique commits -> OID-checked merged-PR-by-head FIRST (D2 rung a);
+             then derive issue id, and if derivable AND the issue is CLOSED ->
+             eligible, "issue #N closed (no code changes)"; else not eligible
+             with the appropriate reason.
+
+        Any git/gh failure, timeout, $null, or malformed JSON resolves toward
+        NOT eligible (retain) — never eligible.
+
+        Non-goal: this primitive performs no structural (primary/current
+        worktree) guarding — that is a separate shared helper (s2) called by
+        the callers. It does not delete anything.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$BranchName,
+
+        [Parameter(Mandatory)]
+        [string]$DefaultBranch,
+
+        [string]$Repo
+    )
+
+    $result = @{ Eligible = $false; Evidence = $null; ManualReviewReason = $null }
+    $remoteDefault = Get-RemoteDefaultRef -DefaultBranch $DefaultBranch
+
+    # Rung 1: unique-commit count (network-free, must run first)
+    $savedEap = $ErrorActionPreference
+    $ErrorActionPreference = 'SilentlyContinue'
+    try {
+        $countOutput = Invoke-SCDNativeCommand { git rev-list "$remoteDefault..$BranchName" --count 2>$null }
+        $countExit = $LASTEXITCODE
+    }
+    finally { $ErrorActionPreference = $savedEap }
+
+    if ($countExit -ne 0) {
+        $result.ManualReviewReason = $script:WorktreeEligibilityReasons.GitSignalFailed
+        return $result
+    }
+
+    $uniqueCount = 0
+    if ($countOutput) {
+        $firstLine = (@($countOutput) | Select-Object -First 1)
+        [void][int]::TryParse(("$firstLine").Trim(), [ref]$uniqueCount)
+    }
+
+    if ($uniqueCount -ge 1) {
+        # Rung 2: git-only tree-equivalence first (never the name-only gh fallback — M4),
+        # then the primitive's own OID-checked merged-PR-by-head rung.
+        if (Test-BranchTreeEquivalentToDefault -BranchName $BranchName -DefaultBranch $DefaultBranch) {
+            $result.Eligible = $true
+            $result.Evidence = "merged into $remoteDefault (tree-equivalent)"
+            return $result
+        }
+
+        $pr = Get-SCDMergedPrByHeadOid -Branch $BranchName -DefaultBranch $DefaultBranch
+        if ($pr.Status -eq 'matched') {
+            $result.Eligible = $true
+            $result.Evidence = "PR #$($pr.Number) merged"
+            return $result
+        }
+        if ($pr.Status -eq 'timeout') {
+            $result.ManualReviewReason = $script:WorktreeEligibilityReasons.GhTimeout
+            return $result
+        }
+        if ($pr.Status -eq 'unavailable') {
+            $result.ManualReviewReason = $script:WorktreeEligibilityReasons.GhUnavailable
+            return $result
+        }
+        # 'no-match' — a same-name PR may exist but its headRefOid does not match
+        # the current branch tip (M4's OID-mismatch guard), or no PR exists at all.
+        $result.ManualReviewReason = $script:WorktreeEligibilityReasons.UnmergedCommits
+        return $result
+    }
+
+    # Rung 3: 0 unique commits — OID-checked merged-PR-by-head FIRST (D2 rung a),
+    # then closed-issue derivation.
+    $pr = Get-SCDMergedPrByHeadOid -Branch $BranchName -DefaultBranch $DefaultBranch
+    if ($pr.Status -eq 'matched') {
+        $result.Eligible = $true
+        $result.Evidence = "PR #$($pr.Number) merged"
+        return $result
+    }
+    if ($pr.Status -eq 'timeout') {
+        $result.ManualReviewReason = $script:WorktreeEligibilityReasons.GhTimeout
+        return $result
+    }
+    if ($pr.Status -eq 'unavailable') {
+        $result.ManualReviewReason = $script:WorktreeEligibilityReasons.GhUnavailable
+        return $result
+    }
+
+    # 'no-match' falls through to issue derivation.
+    $issueId = Get-WorktreeBranchIssueId -BranchName $BranchName
+    if (-not $issueId) {
+        $result.ManualReviewReason = $script:WorktreeEligibilityReasons.NoIssueDerivable
+        return $result
+    }
+
+    $issueState = Get-SCDIssueState -IssueId $issueId -Repo $Repo
+    if ($issueState.Status -eq 'timeout') {
+        $result.ManualReviewReason = $script:WorktreeEligibilityReasons.GhTimeout
+        return $result
+    }
+    if ($issueState.Status -ne 'ok') {
+        $result.ManualReviewReason = $script:WorktreeEligibilityReasons.GhUnavailable
+        return $result
+    }
+
+    if ($issueState.State -eq 'CLOSED') {
+        $result.Eligible = $true
+        $result.Evidence = "issue #$issueId closed (no code changes)"
+        return $result
+    }
+
+    $result.ManualReviewReason = ($script:WorktreeEligibilityReasons.IssueStillOpen -f $issueId)
+    return $result
 }
