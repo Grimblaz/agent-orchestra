@@ -502,10 +502,57 @@ next, recording:
   explicit gap (per the #871 "probes not completed" discipline) rather
   than omitting it or guessing at what would have happened.
 
+### Leg (h) — headless goal-loop start
+
+**Added after the original seven.** Reviewing legs (a)–(g) exposed an unexamined
+assumption: every headless leg used a **plain prompt**, so nothing had ever
+tested whether a *goal loop* can start headlessly. Without this leg, "arm-H
+enabling" silently over-claims.
+
+**Classification**: scripted, but owner-executed (it invokes the CLI).
+
+**Command** — reuse leg (g)'s **exact goal text** so the surfaces are directly
+comparable, and run from a throwaway directory outside the product checkout:
+
+```powershell
+claude -p "/goal <verbatim leg (g) goal text>" --output-format stream-json --print `
+  --verbose --model sonnet --max-budget-usd 0.50 > leg-h.jsonl 2> leg-h.stderr.log
+"EXIT:$LASTEXITCODE"
+```
+
+**The `--max-budget-usd` belt is mandatory on this leg, not optional.** An agent
+that cannot satisfy its goal will iterate until something stops it; without a cap
+that "something" may be the account's weekly ceiling. Set it well above one
+turn's cost (see the overshoot characterisation) but low enough that a total loss
+is acceptable.
+
+**Detection**: grep the capture *and* the session transcript under
+`~/.claude/projects/` for `goal_status`.
+
+**Bar**:
+
+- `observed` (loop started) — one or more `goal_status` events appear.
+- `observed` (loop did **not** start) — zero `goal_status` events while the run
+  otherwise proceeds. This is a genuine, recordable negative result, not a
+  failed leg; `/goal` having been consumed as literal prompt text is itself the
+  finding.
+- Record `permission_denials`, `num_turns`, `total_cost_usd`, and
+  `terminal_reason` regardless of outcome — a headless run's permission posture
+  and burn rate are load-bearing evidence in their own right.
+
 ## Platform version
 
-At the start of the session, record `claude --version` output. Step 4's
-evidence document ties every finding to this build (per the spike's own
-convention and 874-D12's platform-drift guard), so it must be captured
-once, alongside the pre-probe fingerprint, not reconstructed later from
-memory.
+At the start of **each** run, record `claude --version`. Do **not** capture it
+once and attribute every leg to that build: this probe's legs ran on three
+different builds (CLI 2.1.150, desktop app 2.1.215, CLI 2.1.216), the app and CLI
+version independently, and an earlier draft of the evidence document had to be
+corrected for attributing all findings to a single build.
+
+For interactive/app legs, the build is recorded **inside the session transcript**
+(`version` field on every event) — prefer that over a separately-typed
+`claude --version`, since it cannot drift from the run it describes.
+
+Real drift was observed across this probe's own run window (`terminal_reason`
+population, `--model sonnet` resolution, `usage` truthfulness on the breach path,
+and a new event type), so per-run build capture is a correctness requirement, not
+bookkeeping.

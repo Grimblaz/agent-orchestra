@@ -8,16 +8,23 @@ document reuses.
 
 ## Platform build and limits
 
-All findings below are against **`claude 2.1.150` (Claude Code)**, captured
-2026-07-21. `observed` claims are **n=1** live observations against that build
-unless a repeat count is stated. The version travels with the findings because
-most surfaces described here are undocumented implementation detail that can
-change without notice — see the [874-D12 drift-guard enumeration](#874-d12-platform-internal-dependency-enumeration).
+**The legs did not all run on one build.** An earlier draft of this document
+attributed every finding to `2.1.150`; that was wrong and is corrected here.
+Build and surface are recorded per leg:
 
-Where a run happened matters and is recorded per leg: legs (a)–(d) and (f) ran
-**headless** (`claude -p`) from `C:\Users\Micah`; leg (g) ran **interactively in
-the Claude Code desktop app** (the owner's normal use case), which is a different
-surface and is labelled as such.
+| Legs | Surface | Build |
+| --- | --- | --- |
+| (a)–(d), (f) | headless `claude -p` from `C:\Users\Micah` | **2.1.150** (CLI, captured at run time) |
+| (g) | **Claude Code desktop app** (the owner's normal use case) | **2.1.215** (recorded in the session transcript) |
+| (h) | headless `claude -p` from a scratch directory | **2.1.216** (CLI, captured at run time) |
+
+`observed` claims are **n=1** live observations against the stated build unless a
+repeat count is given. The build travels with each finding because most surfaces
+described here are undocumented implementation detail that can change without
+notice — and this probe **directly observed such drift** between 2.1.150 and
+2.1.216 (see the [drift-guard enumeration](#874-d12-platform-internal-dependency-enumeration)).
+Do not generalise a single-build observation across builds; two of this
+document's own findings had to be narrowed for exactly that reason.
 
 ## Evidence labels
 
@@ -42,14 +49,24 @@ never silently omitted.
 | (d) | `/goal` registration | `observed` | `goal` present in `system/init` `slash_commands` |
 | (e) | supervisor force-halt | **explicit gap** | Not run — see [gaps](#explicit-gaps) |
 | (f) | transcript usage-reader | `observed` (parse) / **partial gap** (live) | Reader validated on real data; live pre-termination poll not exercised |
-| (g) | clean release | `observed` | **No system-rendered completion status line** |
+| (g) | clean release | `observed` | Releases **silently** to the eye, but emits a **typed `goal_status` event** to the transcript |
+| (h) | headless goal-loop start | `observed` | **`/goal` does NOT start a goal loop under `claude -p`** — and headless default permissions deny every write |
 
-**Four legs fully observed (a, c, d, g), two partial (b, f), one explicit gap (e).**
+**Five legs fully observed (a, c, d, g, h), two partial (b, f), one explicit gap (e).**
 
-> **Most consequential finding**: the terminal `result` event's `usage` object
-> reported **all zeros on a run that genuinely consumed 648 output tokens**
-> (leg (c)). Any consumer trusting `result.usage` for token accounting will
-> silently under-count. See [leg (c)](#leg-c--max-budget-usd-breach-behavior).
+> **The two findings that most change the harness design:**
+>
+> 1. **The goal loop is only startable interactively.** `/goal` is consumed as
+>    literal prompt text under `claude -p` — no loop, no evaluator, no
+>    `goal_status` (leg h). Any headless arm must be re-scoped around this.
+> 2. **The interactive surface emits a typed release signal.** `goal_status`
+>    carries `met`, the evaluator's own `reason`, `iterations`, `durationMs`, and
+>    `tokens` straight into the session transcript (leg g). Release is invisible
+>    on screen but fully machine-readable on disk — the harness should
+>    **consume this event rather than invent a parallel run-log**.
+>
+> Together these invert the surface story: the surface that can actually *run* a
+> goal loop is also the one that reports it best.
 
 ---
 
@@ -156,20 +173,39 @@ than silently killing the process.
 The event's `errors` field echoes the configured cap back:
 `"Reached maximum budget ($0.01)"`.
 
-**Overshoot (`observed`)**: the run spent **$0.0335877 against a $0.01 cap** —
-roughly 3.4× the ceiling. Any harness delegating budget enforcement to this flag
-must tolerate overshoot proportional to a single turn's cost. This bears directly
-on the #848 D9 sub-ceiling question.
+**Overshoot (`observed`, n=2) — express it in dollars, not as a ratio**: an
+earlier draft of this document reported "roughly 3.4× the ceiling". That framing
+was misleading, and leg (h) supplied the second data point that corrects it:
 
-**Enforcement timing (`inferred`)**: the overshoot is consistent with enforcement
-being evaluated at the **turn boundary**, after the turn that exceeded the cap,
-rather than pre-emptively. Nothing in the artifact shows evaluation timing
-directly — this is a mechanism conclusion drawn from a single data point (n=1,
-one cap value, one model), not an observation.
+| Run | Build | Cap | Spent | Over (absolute) | Ratio |
+| --- | --- | --- | --- | --- | --- |
+| (c) | 2.1.150 | $0.01 | $0.0335877 | **$0.024** | 3.36× |
+| (h) | 2.1.216 | $0.50 | $0.5159808 | **$0.016** | 1.03× |
 
-### Silent-zero `usage` on the breach path (`observed`) — most consequential finding
+The **absolute** overshoot is roughly one turn's cost in both runs; the *ratio*
+only looked alarming in leg (c) because that cap was pathologically small — of
+the same order as a single turn. The actionable rule for the harness is
+**"budget one additional turn beyond the cap"**, not "expect 3.4× your cap". A
+cap set meaningfully above per-turn cost overshoots by a few percent.
 
-The same terminal event reports **mutually contradictory** token accounting:
+**Enforcement timing (`inferred`)**: the overshoot pattern is consistent with
+enforcement being evaluated at the **turn boundary**, after the turn that
+exceeded the cap, rather than pre-emptively — and the n=2 result strengthens that
+reading, since a fixed one-turn overshoot at two very different cap sizes is what
+turn-boundary evaluation predicts. Still `inferred`: nothing in either artifact
+shows evaluation timing directly.
+
+### Silent-zero `usage` on the breach path — `observed` on 2.1.150, **NOT reproduced** on 2.1.216
+
+> **Scope correction.** An earlier draft of this document presented this as a
+> general property of the platform ("`result.usage` lies"). It is not. The
+> defect was observed **once, on build 2.1.150**, and leg (h) — a
+> same-subtype `error_max_budget_usd` run on **2.1.216** — reported a fully
+> populated, correct `usage` object. The finding below is real and retained,
+> but it is **build-specific evidence, not a standing platform property**.
+
+On build **2.1.150**, the terminal event reported **mutually contradictory**
+token accounting:
 
 | Field | Value |
 | --- | --- |
@@ -183,16 +219,26 @@ Real money was spent and **648 output tokens were genuinely consumed**, yet the
 `iterations[]`. `modelUsage` and `total_cost_usd` carry the truth; `usage` does
 not.
 
-**Why this matters more than any other finding here**: 874-D5 designates the
-platform `result` event as Arm H's end-of-run token accounting source. A harness
-reading `result.usage` would record **zero tokens consumed on every budget
-breach** — silently, with no error, on precisely the path the budget arm exists
-to police. This is the **#873 silent-zero defect class reproduced in live vendor
-output**, and it is not a hypothesis: it is in the retained `leg-c.jsonl`.
+**Why it still matters**: 874-D5 designates the platform `result` event as Arm
+H's end-of-run token accounting source without naming a field. On a build
+exhibiting this defect, a harness reading `result.usage` would record **zero
+tokens consumed on every budget breach** — silently, with no error, on precisely
+the path the budget arm exists to police. This is the **#873 silent-zero defect
+class appearing in live vendor output**, and it is not a hypothesis: it is in the
+retained `leg-c.jsonl`.
 
-**Consequence for the harness**: token accounting MUST read `modelUsage` (or
-`total_cost_usd`), **never** `result.usage` alone. Any reader that treats a
-well-formed all-zero `usage` object as a truthful zero is wrong on this path.
+**The contrasting evidence (`observed`, 2.1.216)**: leg (h)'s
+`error_max_budget_usd` event reported `usage` = `input 34 / output 4342 /
+cache_read 840600 / cache_creation 26718` alongside `modelUsage`, both populated
+and mutually consistent.
+
+**Consequence for the harness** — unchanged by the narrowing, because the safe
+practice is the same either way: token accounting should read `modelUsage` /
+`total_cost_usd` and **cross-check** rather than trust `usage` alone. A
+well-formed all-zero `usage` object cannot be assumed truthful on every build, and
+a reader that silently accepts one has no way to tell a real zero from this
+defect. Whether 2.1.150 was buggy or 2.1.216 fixed it is **not established** —
+n=1 per build, and no changelog was consulted.
 
 **Correction this forces elsewhere in this document**: leg (f)'s reader
 correctly *classified* an all-zero usage object as `usage-present-zero`. That
@@ -248,10 +294,13 @@ absent/wrong-shape — the #873 defect class) is validated against **real vendor
 output**, not only fixtures.
 
 **What that row does *not* establish**: that the zeros were *truthful*. Leg (c)
-produced a direct counter-example — an all-zero `usage` object on a run that
-genuinely consumed 648 output tokens. Shape validation cannot distinguish a
-truthful zero from a vendor-emitted false zero, and no consumer should treat
-`usage-present-zero` as proof that nothing was consumed.
+produced a direct counter-example on build 2.1.150 — an all-zero `usage` object
+on a run that genuinely consumed 648 output tokens. Shape validation cannot
+distinguish a truthful zero from a vendor-emitted false zero, and no consumer
+should treat `usage-present-zero` as proof that nothing was consumed. (That
+counter-example did not reproduce on 2.1.216; see leg (c) for the scope
+correction. The caution stands regardless, because a reader cannot tell which
+build it is talking to from the payload alone.)
 
 **Latency caveat**: `~2.3 ms` is a **single unrepeated sample**; a re-run measured
 4.24 ms (1.8×). Do not anchor a latency budget on it — and note these are
@@ -287,6 +336,52 @@ records are:
    After it, a single unlabeled glyph appeared, then the input placeholder simply
    reverted to its default. No completion banner, no summary, no turn count, no
    cost line.
+
+### The `goal_status` transcript channel (`observed`) — release is silent on screen, typed on disk
+
+The rendered surface says nothing, but the **session transcript** at
+`~/.claude/projects/{project-slug}/{session-id}.jsonl` carries the full goal
+lifecycle as structured events. The same app session that rendered nothing wrote:
+
+```json
+{"type":"attachment","attachment":{"type":"goal_status","met":false,"sentinel":true,
+ "condition":"<goal text>"},"entrypoint":"claude-desktop","cwd":"...","sessionId":"...","version":"2.1.215"}
+
+{"type":"attachment","attachment":{"type":"goal_status","met":true,"condition":"<goal text>",
+ "reason":"<the evaluator's own written judgment>","iterations":1,"durationMs":12033,"tokens":379}}
+```
+
+A `queue-operation`/`enqueue` event also records the literal `/goal …` text the
+owner submitted, and every `assistant` event carries `message.usage`.
+
+So the interactive surface exposes, machine-readably and without any harness
+instrumentation:
+
+| Signal | Field |
+| --- | --- |
+| goal started | `goal_status.sentinel: true`, `met: false` |
+| goal text | `goal_status.condition` |
+| **release** | `goal_status.met: true` |
+| evaluator's reasoning | `goal_status.reason` |
+| iterations / duration | `iterations`, `durationMs` |
+| goal-scoped token spend | `tokens` |
+| launch surface | `entrypoint` (`claude-desktop` observed) |
+
+**This revises the design consequence recorded in the previous draft.** That
+draft concluded: *"the harness cannot key release detection on any rendered UI
+signal, so it must emit its own typed run-log entry."* The first half is correct;
+the second does not follow. **The platform already emits a typed release event.**
+874-D11's instinct — do not depend on a render — is confirmed, but the harness
+should **consume `goal_status`** rather than build a parallel run-log beside it.
+That is both simpler and better aligned with 874-D1's vendor-native lock: the
+release verdict, and the evaluator's stated reason for it, come from the engine
+rather than from a harness re-derivation.
+
+**Comparison with the headless terminal event**: `result` reports that the
+*process* ended (`terminal_reason`, `subtype`); `goal_status` reports that the
+*goal was judged met*, with the evaluator's reasoning. For release detection these
+are not interchangeable — `goal_status` is the goal-semantic signal, and it exists
+only on the surface that can actually run a goal loop (see leg (h)).
 
 **This resolves the #871 spike's explicit "clean release was never observed" open
 item.** Release happens, and it happens silently.
@@ -332,6 +427,138 @@ ceiling is readable **headlessly and pre-emptively**, carrying current
 This is a second, independent budget constraint — distinct from the per-run
 `--max-budget-usd` cap — and `rate_limit_event` / `rate_limit_info{}` is an
 undocumented platform surface now enumerated in the drift guard below.
+
+## Leg (h) — headless goal-loop start
+
+Added after the original seven legs, because reviewing legs (a)–(g) exposed an
+unexamined assumption: every headless leg had used a **plain prompt**, so
+"arm-H enabling" had never actually been tested against a *goal loop*. Run on
+**2.1.216** from a scratch directory, reusing leg (g)'s **exact goal text** so the
+two surfaces are directly comparable.
+
+```powershell
+claude -p "/goal <same text as leg (g)>" --output-format stream-json --print `
+  --verbose --model sonnet --max-budget-usd 0.50 > leg-h.jsonl 2> leg-h.stderr.log
+```
+
+### Result 1 — `/goal` does not start a goal loop headlessly (`observed`)
+
+**Zero `goal_status` events** in the 152 KB capture, versus two in leg (g)'s
+interactive run of the identical goal. `/goal` was consumed as **literal prompt
+text**: no loop, no evaluator, no release verdict.
+
+**Consequence**: arm-H's "enabling" verdict covers headless **invocation and
+prompting** only. Headless **goal-looping is not supported** through `claude -p`
+on this build. Any harness arm that assumed a background headless goal loop must
+be re-scoped; the goal loop is, on current evidence, an **interactive-only**
+capability.
+
+### Result 2 — headless default permissions deny all writes, and the agent burns the budget discovering it (`observed`)
+
+`system/init` reported `permissionMode: default` with the `Write` tool present in
+the tool list. Every write was nonetheless **denied**: 14 recorded
+`permission_denials` across `Write` (×5), Bash heredoc / `printf` / `tee` /
+`python`, `PowerShell`, and one attempt carrying `dangerouslyDisableSandbox: true`
+— which was denied as well. Read-only Bash succeeded throughout.
+
+Because headless has **no interactive approver**, no approval prompt could ever
+reach a human. The agent iterated **18 turns** and spent **$0.5159808** producing
+no file at all, terminating only when the budget cap fired
+(`terminal_reason: budget_exhausted`). Its closing message was accurate and
+self-aware — *"still blocked on write permissions after 9 attempts … I cannot
+complete this goal right now"* — but the entire cap had already been spent
+reaching that conclusion.
+
+**Consequence**: this is a **budget-burn failure mode**, not a mere
+configuration nit. A headless arm without an explicit permission posture
+(`--permission-mode`, `--allowedTools`, or equivalent) will reliably consume its
+whole budget and produce nothing. The `--max-budget-usd` belt was the only thing
+that bounded the loss — which is itself a point in favour of always setting it.
+
+**Also observed on this run**: `usage` fully populated (contrast leg (c)); a
+second model (`claude-haiku-4-5-20251001`) appeared in `modelUsage` despite
+`--model sonnet`; and `--model sonnet` resolved to `claude-sonnet-5`, where on
+2.1.150 it resolved to `claude-sonnet-4-6`.
+
+**Containment (`observed`)**: product checkout `HEAD` (`8428e06`) and porcelain
+fingerprint (`e3b0c44298fc`, 0 lines) identical before and after.
+
+---
+
+## What the evidence forces the user-facing flow to look like (874-D13 / AC6 input)
+
+This section is **design input, not user documentation** — the harness does not
+exist yet, so nothing here is a usable instruction today. It records the flow the
+probe's constraints permit, so 874-D13's eventual user guide is built on evidence
+rather than assumption.
+
+### The mechanism that decides everything
+
+**`/goal` takes over the session it is typed in.** It spawns nothing; it drives
+*that* conversation's turns until its evaluator judges the goal met (leg g: the
+turns and both `goal_status` events landed in the typing session's own
+transcript). Two consequences follow directly:
+
+- Every iteration re-sends that session's accumulated context, so a goal loop
+  started in a long orchestration conversation pays for that conversation on
+  every turn.
+- The harness is defined as **bookends around** the executor (874-D1). Running the
+  loop in the session doing the orchestration collapses bookends and executor into
+  one context, dissolving the separation the design depends on.
+
+### Option 1 — two sessions, short typed goal (evidence-preferred)
+
+```text
+Session A (orchestration):   /experience 900  →  /design 900  →  /plan 900
+Session B (fresh, in repo):  /goal implement issue #900 per the approved plan comment
+                             …loop runs autonomously; releases silently…
+Session B (same session):    {finish command}   ← reconcile, review, CE Gate, PR
+```
+
+Why this shape is the one the evidence supports:
+
+- **The goal text can be short** because #872 already persists the
+  machine-checkable contract *inside* the plan comment. The executor reads its
+  requirements from the durable artifact, not from what the owner types — which
+  is the stated intent ("point towards the thing we've created for requirements").
+- **Session B starts empty**, so the loop pays no orchestration-context tax.
+- **Finishing happens in Session B**, because release simply hands the prompt back
+  (leg g) — the session stays usable. Cross-session resumption is safe regardless,
+  since phase state lives in durable issue markers, not in a conversation.
+- **Cost: one extra session, one short typed line, one finish step.**
+
+### Option 2 — everything in one session
+
+Type `/goal …` directly in the orchestration session. Mechanically works. Costs
+the context tax on every iteration and forfeits the bookend separation.
+Defensible for a small slice; wasteful and muddy for a real issue.
+
+### Option 3 — headless background worker: **ruled out by leg (h)**
+
+Not "untested" — actively unsuitable on current evidence. `/goal` does not start a
+loop under `claude -p` at all, and default headless permissions deny every write
+while the agent spends its full budget discovering that. Any future headless arm
+needs both a way to start a loop (none known) and an explicit permission posture.
+
+### Open flow question for the harness plan
+
+Whether the finish step can be **automatic**. A hook watching for
+`goal_status.met: true` could trigger reconciliation with no command from the
+owner — and per the decomposition in the open questions below, *observing* does
+not require winning the Stop-hook race that leg (e) never tested. If that holds,
+Option 1 reduces to: type one goal line, walk away. The harness plan should
+settle this rather than assume it.
+
+### What exists today versus what Option 1 needs
+
+| Exists now | Does not exist |
+| --- | --- |
+| `/goal` (vendor-native, interactive) | the finish command (name TBD) |
+| `/experience`, `/design`, `/plan`, `/orchestrate` | contract hand-off, inflight marker, reconciliation, budget advisory |
+| `goal_status` transcript signal (platform-emitted) | any consumer of it |
+
+Typing `/goal` at a plan today yields a vendor goal loop with **no bookends**: no
+markers, no review pipeline, no CE Gate, no PR.
 
 ---
 
@@ -387,24 +614,30 @@ harness behaviour.
    `fast_mode_state`.
 1a. **Terminal result event shape — error path** (`subtype:
    error_max_budget_usd` observed) — **the field set differs and the budget arm
-   lives here**. `api_error_status` and `terminal_reason` are **absent**; an
-   `errors` field is **present** and is the only place the configured cap is
-   echoed back (`"Reached maximum budget ($0.01)"`). Do not assume the
-   success-path field list holds.
+   lives here**. `api_error_status` is absent; an `errors` field is **present**
+   and is the only place the configured cap is echoed back (`"Reached maximum
+   budget ($0.01)"`). `terminal_reason` was **empty on 2.1.150 but populated
+   (`budget_exhausted`) on 2.1.216** — do not assume the success-path field list
+   holds, and do not assume this path's own shape is stable across builds.
 2. **Usage object shape** — `usage.{input_tokens, output_tokens,
    cache_creation_input_tokens, cache_read_input_tokens}` plus nested
    `server_tool_use{}`, `cache_creation{ephemeral_1h_input_tokens,
    ephemeral_5m_input_tokens}`, `service_tier`, `iterations[]`, `speed`,
    `inference_geo`.
-   **⚠ Most dangerous property in this enumeration**: `usage` is **not reliably
-   truthful**. On the observed budget-breach run it reported all four token
-   counts as `0` with `iterations: []` while `modelUsage` and `total_cost_usd`
-   recorded 648 output tokens and real spend. Token accounting must read
-   `modelUsage`/`total_cost_usd`; a well-formed all-zero `usage` object is not
-   evidence that nothing was consumed.
+   **⚠ Treat `usage` as untrusted without a cross-check.** On the 2.1.150
+   budget-breach run it reported all four token counts as `0` with
+   `iterations: []` while `modelUsage` and `total_cost_usd` recorded 648 output
+   tokens and real spend. The same shape on 2.1.216 was populated and correct, so
+   this is **build-specific evidence, not a standing property** — but a payload
+   carries no indication of which behaviour it exhibits, so token accounting
+   should read `modelUsage`/`total_cost_usd` and cross-check rather than trust a
+   well-formed all-zero `usage` object.
 3. **Per-model usage** — `modelUsage{<model-id>{inputTokens, outputTokens,
    cacheReadInputTokens, cacheCreationInputTokens, costUSD, contextWindow,
-   maxOutputTokens}}`.
+   maxOutputTokens}}`. **Keyed by more models than you asked for**: leg (h) pinned
+   `--model sonnet` yet `modelUsage` carried both `claude-sonnet-5` and
+   `claude-haiku-4-5-20251001`. A consumer summing per-model cost must iterate all
+   keys, not read the pinned model's entry.
 4. **CLI argument coupling** — `--print` + `--output-format stream-json`
    *requires* `--verbose`.
 5. **Model resolution** — the unpinned default inherits an ambient model that may
@@ -427,6 +660,32 @@ harness behaviour.
     `surpassedThreshold` (float), `isUsingOverage` (bool), and `resetsAt` (unix
     epoch seconds). This is the machine-readable, pre-emptive form of item 11 and
     the only observed surface that reports budget headroom *during* a run.
+13. **`goal_status` attachment event** *(interactive surface only)* —
+    `{type: goal_status, met, sentinel, condition, reason, iterations,
+    durationMs, tokens}`. The goal loop's own lifecycle and release verdict. Not
+    emitted headlessly, because no goal loop starts there (leg h).
+14. **`queue-operation`** — `{operation: enqueue|dequeue, content}`; the
+    `enqueue` payload carries the literal submitted command text, including
+    `/goal …`.
+15. **Slash-command handling under `-p`** — `/goal` is **not** interpreted as a
+    command; it is passed through as prompt text.
+16. **Headless permission posture** — `permissionMode: default` denies all writes
+    with no reachable approver; tool presence in `system/init.tools` does **not**
+    imply the tool is usable.
+17. **`system/thinking_tokens`** — event type present on 2.1.216, absent from the
+    2.1.150 captures.
+
+### Drift actually observed between 2.1.150 and 2.1.216
+
+This is not a hypothetical guard — the probe caught four changes across its own
+run window, which is the strongest argument for re-verifying the list above:
+
+| Surface | 2.1.150 | 2.1.216 |
+| --- | --- | --- |
+| `terminal_reason` on a budget breach | empty | `budget_exhausted` |
+| `--model sonnet` resolves to | `claude-sonnet-4-6` | `claude-sonnet-5` |
+| `usage` on a budget breach | all zeros (defect) | populated |
+| `system/thinking_tokens` events | absent | present |
 
 ## Instrument dispositions
 
@@ -436,8 +695,9 @@ What the harness inherits versus what it should replace.
 | --- | --- | --- |
 | `goal-probe-streamjson.ps1` (I1) | **promote-candidate** | Parsed real terminal events correctly across every shape encountered (success, 401 error, budget breach), covering 2 of 3 outcome *classifications* — `judged-impossible` was never produced live. Two caveats before promotion: its `<goal-status>` tag convention is a **probe-stage assumption, not a vendor contract**; and it does not surface `errors`/`modelUsage`, which the budget path needs. |
 | `goal-probe-usage-reader.ps1` (I2) | **promote-candidate (conditional)** | Well-formed-zero versus absent/wrong-shape discrimination validated on real vendor output. Two blockers: its headline live-read purpose is unexercised, and leg (c) proved a well-formed zero can be **untruthful**, so its `usage-present-zero` state must not be consumed as "nothing was spent" without a `modelUsage`/`total_cost_usd` cross-check. |
-| `goal-probe-forcehalt-rig.ps1` (I3) | **hold** | Logic Pester-tested, zero live validation. Leg (c) reduces the need for supervisor-side force-halt. Revisit only if the harness needs non-budget hard-halt. |
+| `goal-probe-forcehalt-rig.ps1` (I3) | **hold — but re-prioritise** | Logic Pester-tested, zero live validation. An earlier draft justified the hold on "leg (c) reduces the need for supervisor-side force-halt"; **that reasoning was CLI-scoped and does not survive leg (h)** — `--max-budget-usd` is a command-line flag with no interactive equivalent, and the goal loop only runs interactively. Budget *enforcement* on the surface that can actually run a loop therefore still depends on the untested Stop-hook race. |
 | `goal-probe-forcehalt-hook.ps1` (stub) | **hold** | Block-decision contract never verified live; same rationale as I3. |
+| *(none — new need)* | **gap** | Nothing here reads `goal_status`. That is the interactive surface's release signal and the harness's primary detection channel; a reader for it is net-new work for the harness plan. |
 
 ## Open questions carried to the harness plan
 
@@ -448,26 +708,48 @@ decisions.
    satisfied, but the #871 spike observed the transcript-mediated evaluator
    withholding release on a non-zero exit. Not probed here; the seven legs are
    design-ratified and no leg was added.
-2. **Wall-clock-arm enforceability** — derived from leg (e), which was not run, so
-   this is **fully open**. A wall-clock enforcement hook must also beat the
-   evaluator, and this probe produced no evidence that any Stop hook can.
-   874-D5 makes wall-clock the *enforcing* fallback, so this gap sits directly
-   under a load-bearing design assumption.
-3. **D9 whole-run sub-ceiling amendment** — leg (c)'s observed post-turn overshoot
-   (3.4× a small cap) and the newly-observed account-level weekly ceiling both
-   bear on whether a sub-ceiling is needed. #848 owns the resolution.
-4. **Budget-arm architecture** *(new, raised by leg (c))* — because
-   `--max-budget-usd` reports breaches structurally, the harness may be able to
-   delegate budget enforcement to the vendor flag rather than operating its own
-   token arm at all. This is consistent with 874-D1's vendor-native-engine lock.
-   Flagged for the harness plan to decide.
-5. **874-D5's token-accounting source needs amending** *(new, raised by leg (c)'s
-   silent-zero finding)* — 874-D5 designates the platform `result` event as Arm
-   H's end-of-run token accounting source without naming a field. As written, the
-   obvious reading (`result.usage`) is **wrong**: it reports zeros on the breach
-   path. The harness plan must pin `modelUsage`/`total_cost_usd` explicitly, and
-   #848 should consider whether D5's wording needs correcting at the umbrella
-   level.
+2. **Wall-clock-arm enforceability — now higher priority, not lower** — derived
+   from leg (e), which was not run, so this is **fully open**. Leg (h) raises its
+   stakes: since the goal loop runs only interactively, and `--max-budget-usd` is
+   CLI-only, **no vendor-native budget enforcement exists on the surface that can
+   run a loop**. Enforcement there depends entirely on whether a hook can halt the
+   loop — precisely the untested question. 874-D5 makes wall-clock the *enforcing*
+   fallback, so this gap sits directly under a load-bearing assumption.
+   *(Mitigating decomposition: **observation** does not require winning that race.
+   A hook that watches `goal_status` and writes reports never has to beat the
+   evaluator — only halting does. So reconciliation is buildable today; only
+   enforcement is blocked.)*
+3. **D9 whole-run sub-ceiling amendment** — the corrected overshoot
+   characterisation (≈ one turn's cost absolute, n=2) plus the account-level
+   weekly ceiling both bear on whether a sub-ceiling is needed. #848 owns the
+   resolution.
+4. **Budget-arm architecture** *(revised by leg (h))* — `--max-budget-usd` reports
+   breaches structurally, so a *headless* arm could delegate enforcement to it.
+   But headless cannot run a goal loop at all, so that delegation is unavailable
+   to the interactive arm, which is the one that matters. The harness plan must
+   decide what the interactive arm does about budget given that its only proven
+   capability is *reading* spend (`goal_status.tokens`, per-turn `message.usage`),
+   not bounding it.
+5. **874-D5's token-accounting source needs pinning** *(raised by leg (c))* —
+   874-D5 designates the platform `result` event as Arm H's end-of-run token
+   accounting source without naming a field. The obvious reading (`result.usage`)
+   returned zeros on the 2.1.150 breach run. The harness plan should pin
+   `modelUsage`/`total_cost_usd` with a cross-check, and #848 should consider
+   whether D5's wording needs correcting at the umbrella level. Note D5 is also
+   framed around Arm H, which leg (h) shows cannot host a goal loop — so the
+   decision may need re-siting onto the interactive arm entirely.
+5a. **Release detection should consume `goal_status`, not a parallel run-log**
+   *(new, raised by leg (g)'s transcript finding)* — 874-D11's premise (no
+   rendered signal) is confirmed, but the platform already emits a typed release
+   event carrying the evaluator's own verdict and reasoning. The harness plan
+   should decide whether D11's run-log becomes a consumer of `goal_status` rather
+   than an independent re-derivation.
+5b. **Headless permission posture is mandatory if any headless arm survives**
+   *(new, raised by leg (h))* — default headless permissions deny all writes with
+   no reachable approver, and the agent burns its entire budget discovering this.
+   Any retained headless arm must specify an explicit permission posture, and the
+   harness should treat "many consecutive permission denials" as a halt condition
+   in its own right.
 6. **Pre-emptive headroom via `rate_limit_event`** *(new)* — the weekly-ceiling
    event exposes live `utilization` against a `surpassedThreshold` mid-run. This
    is the only observed mechanism that could support *pre-emptive* budget action
