@@ -2,6 +2,15 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.4.4] — 2026-07-21
+
+### Fixed
+
+- Replaces the sibling/orphan worktree-branch removal reachable-from-origin/main heuristic with an evidence-gated eligibility primitive (issue #889): zero-unique-commit branches now require positive evidence (an OID-checked merged PR, then a closed parent issue) instead of trusting trivially-true git tree-equivalence alone.
+- Fixes the false skipping message that let session-start cleanup silently destroy a mid-task worktree, replacing it with an honest 6-state removal-outcome enum.
+- Adds a shared primary-worktree guard called identically by the detector and executor, closing the gap where the primary checkout could be offered for deletion.
+- Absorbs issue #522: locked worktrees are never force-removed unless Test-Path-confirmed absent (real git never sets the porcelain prunable flag on a locked worktree).
+
 ## [3.4.3] — 2026-07-20
 
 ### Fixed
