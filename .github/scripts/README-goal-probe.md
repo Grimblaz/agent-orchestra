@@ -526,16 +526,32 @@ that "something" may be the account's weekly ceiling. Set it well above one
 turn's cost (see the overshoot characterisation) but low enough that a total loss
 is acceptable.
 
-**Detection**: grep the capture *and* the session transcript under
-`~/.claude/projects/` for `goal_status`.
+**Detection — read this before recording anything**:
+
+> ⚠ **`goal_status` is transcript-only. It is NEVER mirrored to the
+> `--output-format stream-json` stdout stream, on either surface.** Its absence
+> from a stdout capture is therefore *evidence of nothing*. This is not
+> hypothetical: the first pass at this leg searched only the stdout capture,
+> concluded `/goal` does not work headlessly, and was wrong — an error that
+> propagated into roughly a dozen downstream conclusions before an independent
+> audit caught it.
+
+Search the session transcript under
+`~/.claude/projects/{project-slug}/{session-id}.jsonl` for `goal_status`,
+`<command-name>`, and `Goal set:`. Search the stdout capture too, but only to
+confirm the (expected) absence.
 
 **Bar**:
 
-- `observed` (loop started) — one or more `goal_status` events appear.
-- `observed` (loop did **not** start) — zero `goal_status` events while the run
-  otherwise proceeds. This is a genuine, recordable negative result, not a
-  failed leg; `/goal` having been consumed as literal prompt text is itself the
-  finding.
+- `observed` (loop started) — one or more `goal_status` events in the **session
+  transcript**, and/or `<command-name>/goal</command-name>` plus a
+  `Goal set: …` local-command-stdout entry.
+- `observed` (loop did **not** start) — recordable **only** on positive
+  transcript evidence: the transcript exists, was searched, and contains no
+  `goal_status` and no `/goal` command parse. A negative may never be recorded
+  from a stdout capture alone.
+- If the session transcript cannot be located, record **inconclusive**, not a
+  negative.
 - Record `permission_denials`, `num_turns`, `total_cost_usd`, and
   `terminal_reason` regardless of outcome — a headless run's permission posture
   and burn rate are load-bearing evidence in their own right.
@@ -548,9 +564,14 @@ different builds (CLI 2.1.150, desktop app 2.1.215, CLI 2.1.216), the app and CL
 version independently, and an earlier draft of the evidence document had to be
 corrected for attributing all findings to a single build.
 
-For interactive/app legs, the build is recorded **inside the session transcript**
-(`version` field on every event) — prefer that over a separately-typed
-`claude --version`, since it cannot drift from the run it describes.
+**Prefer in-artifact build capture for every leg**, not just interactive ones:
+
+- App / interactive legs: `version` on every session-transcript event.
+- Headless CLI legs: `claude_code_version` inside the `system/init` event of the
+  stdout capture (`2.1.150` in legs a/c, `2.1.216` in leg h).
+
+Both cannot drift from the run they describe, unlike a separately-typed
+`claude --version` that may be recorded before or after the run.
 
 Real drift was observed across this probe's own run window (`terminal_reason`
 population, `--model sonnet` resolution, `usage` truthfulness on the breach path,
