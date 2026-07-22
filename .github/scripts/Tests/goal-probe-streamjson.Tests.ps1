@@ -2,7 +2,7 @@
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 <#
 .SYNOPSIS
-    Coverage for Get-GoalProbeStreamJsonResult (issue #874 plan step 1, leg d).
+    Coverage for Get-GoalProbeStreamJsonResult (issue #874 plan step 1, legs b and c).
 #>
 
 BeforeAll {

@@ -2,7 +2,7 @@
 <#
 .SYNOPSIS
     Parses a headless `claude -p --output-format stream-json` terminal `result`
-    event for the goal-run capability probe (issue #874, plan step 1, leg d).
+    event for the goal-run capability probe (issue #874, plan step 1, legs b and c).
 .DESCRIPTION
     A capability-probe instrument, not the production harness itself (that is
     later #874 scope). Its one job: given a single raw stream-json line that is

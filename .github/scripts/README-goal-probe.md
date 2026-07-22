@@ -596,6 +596,20 @@ one):
 win/loss **detection** logic only (already Pester-tested in step 1) — it
 does not deliver the halt itself.
 
+**Polarity note — read before running (`documented`)**: on the `Stop` event,
+`decision: "block"` **prevents Claude from stopping and continues the
+conversation**, and exit code 2 does the same. Both are the *opposite* of a
+force-halt. The only documented channel by which a hook can terminate is the
+universal `continue` field: exit 0 with `{"continue": false, "stopReason":
+"..."}` on stdout ("Claude stops processing entirely after the hook runs").
+Under `/goal` the evaluator is itself a prompt-based Stop hook whose "keep
+going" verdict becomes `decision: "block"` on the same event, so a supervisor
+hook is racing a sibling blocker — and the vendor reference documents
+cross-hook merge precedence for `PreToolUse` only, not for `Stop`. **Whether
+`continue: false` beats the evaluator's concurrent block is exactly the
+unanswered question this leg exists to ask.** All of this is `documented`
+(vendor hooks reference), never `observed`; leg (e) has not been run.
+
 **Containment note**: `Get-GoalProbeForceHaltSettingsFragment` does **not**
 scope the hook via a `matcher` field — Claude Code's Stop event does not
 support matchers at all (any value there is silently ignored). The only
@@ -609,10 +623,13 @@ scope guard on the scripted-detector side (step 4 below).
 
 1. Review and, if needed, customize
    `.github/scripts/goal-probe-forcehalt-hook.ps1` — a stub Stop hook that
-   delivers an unconditional block decision. Verify it still matches your
-   installed CLI's actual block-decision contract before relying on it
-   (the stub's own header documents its best-effort, unverified-live
-   confidence level and what to check). Register a worktree-local Stop
+   attempts an unconditional force-halt by exiting 0 and writing
+   `{"continue":false,"stopReason":"..."}` to stdout. Verify it still matches
+   your installed CLI's actual contract before relying on it (the stub's own
+   header quotes the vendor wording it was built from and names the part the
+   docs do not answer). Do not add anything else to the stub's stdout — the
+   exit-0 + JSON channel requires stdout to contain only the JSON object.
+   Register a worktree-local Stop
    hook in `$probeWorktree/.claude/settings.json` using the shape from
    `Get-GoalProbeForceHaltSettingsFragment -ArmedProbeMarker $token
    -StopHookCommand '<path to the stub or your customized copy>'`
@@ -623,65 +640,81 @@ scope guard on the scripted-detector side (step 4 below).
    decision is independently recorded (owner observes and notes it — e.g.
    from the visible turn/budget render or an explicit disambiguating
    prompt — at the same turn the Stop hook fires), let the registered Stop
-   hook fire its block decision.
+   hook fire its `continue: false` force-halt attempt.
 4. Feed the observed session end into the rig. **Every field below is a
    placeholder you fill from evidence — none of them may be typed in as a
    literal.** `Test-GoalProbeForceHaltWin` returns `stop-hook-win` only when
-   `EndReason -eq 'stop-hook'` **and** `StopHookDecision -eq 'block'` **and**
-   `GoalEvaluatorContinuationDecision -eq 'continue'`. Pre-filling the first
-   two would pre-answer two-thirds of the exact question this leg exists to
-   ask, and the run-book itself warns (step 1) that the stub's block-decision
-   contract is unverified against the live CLI — so "the loop ended some other
-   way" and "the hook fired but did not block" are both live possibilities:
+   `EndReason -eq 'stop-hook'` **and** `StopHookDecision -eq 'continue-false'`
+   **and** `GoalEvaluatorContinuationDecision -eq 'continue'`. Pre-filling the
+   first two would pre-answer two-thirds of the exact question this leg exists
+   to ask, and the polarity note above records that the stub's contract is
+   `documented` only — so "the loop ended some other way" and "the hook fired
+   but the loop kept running anyway" are both live possibilities:
 
    ```powershell
    . .github/scripts/lib/goal-probe-forcehalt-rig.ps1
    Test-GoalProbeForceHaltWin -ArmedProbeMarker $token -SessionEndDescription @{
      ProbeMarker                        = $token
      EndReason                          = '<stop-hook|natural-completion|wall-clock-cutoff|budget-cutoff|external-kill, per the end evidence in step 4a>'
-     StopHookDecision                   = '<block|allow, per the hook-fired evidence in step 4a -- omit if EndReason is not stop-hook>'
+     StopHookDecision                   = '<continue-false|block|allow, per the hook-fired evidence in step 4a -- omit if EndReason is not stop-hook>'
      GoalEvaluatorContinuationDecision  = '<continue|halt, as independently recorded in step 3>'
    }
    ```
+
+   `StopHookDecision` records **what channel the hook actually used**, not
+   whether you wanted it to work:
+
+   - `continue-false` — the hook exited 0 with `{"continue":false,…}` on
+     stdout. The only channel that can terminate.
+   - `block` — the hook emitted `decision:"block"` or exited 2. On `Stop` this
+     *prevents* stopping, so it cannot have ended the loop; the rig returns
+     `block-does-not-halt`, never a win. If you customized the stub back onto
+     this channel, you have disarmed the leg.
+   - `allow` — the hook fired but expressed no decision.
 
    **4a. Evidence required before filling `EndReason` and `StopHookDecision`.**
    Record at least one positive item for each, and cite it in the write-up:
 
    - *The hook actually fired*: the stub's own stdout/exit code
-     (`{"decision":"block",…}` on stdout, exit 2 with the reason on stderr —
-     see `.github/scripts/goal-probe-forcehalt-hook.ps1`). Hook stdout is
-     consumed by the CLI, so add a one-line append-to-file trace to **your
+     (`{"continue":false,…}` on stdout, exit 0 — see
+     `.github/scripts/goal-probe-forcehalt-hook.ps1`). Hook stdout is consumed
+     by the CLI, so add a one-line **append-to-file** trace to **your
      customized copy** of the stub before step 2 — e.g. a timestamped line to
      `$probeWorktree/leg-e-hook-fired.log` — and treat the presence and
-     timestamp of that line as the fired-evidence. No trace line and no
-     visible block-reason surfaced back into the session means you cannot
-     assert `EndReason = 'stop-hook'`.
-   - *The hook's decision was honored as a block*: the block reason visibly
-     fed back into the session (the turn did not end), or the session
-     transcript's own end record naming the stop-hook block. If the turn ended
-     normally despite the hook firing, that is `StopHookDecision = 'allow'` in
-     effect — a `loss`, and a real result.
+     timestamp of that line as the fired-evidence. Do not write the trace to
+     stdout: the exit-0 + JSON channel requires stdout to contain only the
+     JSON object. No trace line and no user-visible `stopReason` means you
+     cannot assert `EndReason = 'stop-hook'`.
+   - *The force-halt was honored*: the session actually **ended** at that turn
+     with the stub's `stopReason` surfaced to the user, while the goal was
+     still active and unsatisfied. If the turn ended and a *new* turn began,
+     the halt was not honored — that is a `loss` (or, if you had emitted a
+     block, `block-does-not-halt`), and a real result.
    - *How the session actually ended*: the session transcript's terminal
      record under `~/.claude/projects/{project-slug}/{session-id}.jsonl`. If it
      shows natural completion, a budget cutoff, or an external kill, set
      `EndReason` to that value — do not force `'stop-hook'` because the hook
      was registered.
 
-   If the fired/blocked evidence cannot be obtained at all, record the leg as
+   If the fired/honored evidence cannot be obtained at all, record the leg as
    inconclusive rather than typing in the literals; a `stop-hook-win` produced
    from typed-in inputs is not an observation of anything.
 
 **Bar**:
 
 - `observed` (win) — `Outcome -eq 'stop-hook-win'` **from evidence-filled
-  inputs**: positive evidence the hook fired (step 4a), positive evidence its
-  block was honored (step 4a), **and** the evaluator's own `continue` decision
-  at that turn independently recorded — none of the three reconstructed after
-  the fact from the others.
-- `observed` (loss / concurrent-halt-not-a-win) — also a genuine,
-  recordable outcome; do not discard a non-win as a probe failure.
+  inputs**: positive evidence the hook fired on the `continue-false` channel
+  (step 4a), positive evidence the loop actually terminated at that turn
+  (step 4a), **and** the evaluator's own `continue` decision at that turn
+  independently recorded — none of the three reconstructed after the fact
+  from the others.
+- `observed` (loss / block-does-not-halt / concurrent-halt-not-a-win) — also
+  genuine, recordable outcomes; do not discard a non-win as a probe failure.
+  A well-evidenced `loss` here would be a **material finding**: it would
+  settle the wall-clock-arm enforceability question in the negative for the
+  interactive arm.
 - `inferred` — if the evaluator's independent decision could not be
-  directly observed at the same turn (only the hook's block was visible),
+  directly observed at the same turn (only the termination was visible),
   downgrade to `inferred`: the rig's own inputs became an assumption, not
   an observation.
 - If `GoalEvaluatorContinuationDecision` is left blank/omitted (the

@@ -47,7 +47,7 @@ never silently omitted.
 | (b) | terminal-outcome readability | `observed` (2/3 paths) / **partial gap** | Terminal `result` event parses; `judged-impossible` never produced live |
 | (c) | `--max-budget-usd` breach | `observed` | **Report path** — structured terminal event, not silent kill. **Also surfaced a silent-zero `usage` defect — see [leg (c)](#leg-c----max-budget-usd-breach-behavior)** |
 | (d) | `/goal` registration | `observed` | `goal` present in `system/init` `slash_commands` |
-| (e) | supervisor force-halt | **explicit gap** | Not run — see [gaps](#explicit-gaps) |
+| (e) | supervisor force-halt | **explicit gap** (+ `documented` correction) | Not run — see [gaps](#explicit-gaps). Post-run doc review found the instrument's polarity **inverted** (`decision: "block"` *prevents* stopping); corrected onto the `continue: false` channel, feasibility still undetermined — see [leg (e)](#polarity-correction-and-mechanism-feasibility-documented) |
 | (f) | transcript usage-reader | `observed` (parse) / **partial gap** (live) | Reader validated on real data; live pre-termination poll not exercised |
 | (g) | clean release | `observed` | Releases **silently** to the eye, but emits a **typed `goal_status` event** to the transcript |
 | (h) | headless goal-loop start | `observed` | **`/goal` DOES start a goal loop under `claude -p`** — but headless default permissions deny every write |
@@ -296,6 +296,67 @@ found false. Claude Code's `Stop` event does not support matchers — the field 
 silently ignored and the hook fires on every Stop within its registration scope.
 The only real containment is worktree-local `.claude/settings.json` placement.
 This is `documented` (from the vendor hooks reference), not `observed`.
+
+### Polarity correction and mechanism feasibility (`documented`)
+
+Raised by external review of PR #898 (finding C1) and resolved against the
+vendor hooks reference at `https://code.claude.com/docs/en/hooks`. Everything in
+this subsection is `documented`; **nothing here is `observed`** — leg (e) is
+still not run, and no claim below has been exercised against a live CLI.
+
+**1. The instrument had inverted polarity.** As originally committed, the
+`goal-probe-forcehalt-hook.ps1` stub emitted `{"decision":"block"}` on stdout
+*and* exited 2, and `Test-GoalProbeForceHaltWin` scored
+`StopHookDecision = 'block'` as a **win**. Both are wrong in the same direction:
+
+- Stop decision control: `decision: "block"` *"prevents Claude from stopping"*;
+  you *"omit to allow Claude to stop"*.
+- Exit-code-2-per-event, `Stop` row: exit 2 *"Prevents Claude from stopping,
+  continues the conversation"*.
+
+So the input the rig scored as "the hook terminated the loop" in fact means "the
+hook kept the loop running". Nothing false shipped, because leg (e) was never
+run — but the instrument as committed would have produced an **inverted verdict
+on first use**. Fixed: the stub now uses the `continue: false` channel, and the
+rig reports `block-does-not-halt` (never a win) for a `block` input.
+
+**2. Both channels cannot be used at once.** *"You must choose one approach per
+hook, not both: either use exit codes alone for signaling, or exit 0 and print
+JSON for structured control. Claude Code only processes JSON on exit 0. If you
+exit 2, any JSON is ignored."* The old stub's JSON was therefore dead code.
+
+**3. There *is* a documented force-halt channel, and it is not `decision`.** The
+universal `continue` field: *"If `false`, Claude stops processing entirely after
+the hook runs. Takes precedence over any event-specific decision fields"*, paired
+with `stopReason` (*"Message shown to the user when `continue` is `false`"*). The
+reference's worked example is headed *"To stop Claude entirely regardless of
+event type"*, and the decision-control table's TeammateIdle row states that
+`{"continue": false, "stopReason": "..."}` *"stops the teammate entirely,
+matching `Stop` hook behavior"* — a direct statement that this shape halts on
+`Stop`. So the mechanism is **documented as existing**.
+
+**4. What the docs do *not* say — and why leg (e) remains a real question.**
+Under `/goal`, the goal loop continues *because the evaluator is itself a
+session-scoped prompt-based Stop hook* whose `ok: false` result is, per the
+reference, converted into `decision: "block"` on `Stop`. A supervisor hook
+attempting a force-halt is therefore racing a **sibling Stop hook that is
+blocking on the same event**. The reference documents cross-hook merge semantics
+for exactly one event — *"For `PreToolUse` permission decisions, the most
+restrictive answer applies, in the order `deny`, `defer`, `ask`, `allow`"* — and
+documents that `additionalContext` from every hook is concatenated. It states
+**no precedence rule for `Stop`** when one hook returns `continue: false` and a
+sibling returns `decision: "block"`. The `continue` field's own wording ("takes
+precedence over any event-specific decision fields") is not scoped either way
+between same-hook and cross-hook. Per the "do not infer a capability from
+silence" discipline, this is recorded as **undetermined**, not as a capability.
+
+**Net feasibility verdict (`documented`)**: supervisor-side force-halt is
+*plausible and correctly channelled* — not *demonstrated*. Leg (e) is still the
+only way to settle it, and its question is now sharper than before: not "does
+`block` halt the loop" (answered: no, it does the opposite) but "does a
+supervisor hook's `continue: false` beat the `/goal` evaluator's concurrent
+block". This bears directly on open question 2 (wall-clock-arm enforceability),
+which remains fully open.
 
 ## Leg (f) — transcript usage-reader
 
@@ -673,8 +734,12 @@ path for the budget arm. The owner elected to bank the result rather than run th
 highest-effort, most-uncertain leg. This is a scope decision, not a failure.
 
 **Consequence**: the 874-D5 default applies unchanged — **token arm advisory,
-wall-clock enforcing**. No evidence exists either way as to whether *any* Stop
-hook can beat the goal evaluator's continuation decision.
+wall-clock enforcing**. No *observed* evidence exists either way as to whether
+any Stop hook can beat the goal evaluator's continuation decision. Post-run
+review (#898 C1) established `documented` facts that sharpen but do not close
+the question — a force-halt channel exists (`continue: false`), `decision:
+"block"` does the opposite, and cross-hook `Stop` precedence is undocumented.
+See [leg (e)'s polarity-correction subsection](#polarity-correction-and-mechanism-feasibility-documented).
 
 ### Leg (f) — live pre-termination read: not exercised
 
@@ -809,10 +874,10 @@ What the harness inherits versus what it should replace.
 
 | Instrument | Disposition | Rationale |
 | --- | --- | --- |
-| `goal-probe-streamjson.ps1` (I1) | **promote-candidate** | Parsed real terminal events correctly across every shape encountered (success, 401 error, budget breach), covering 2 of 3 outcome *classifications* — `judged-impossible` was never produced live. Two caveats before promotion: its `<goal-status>` tag convention is a **probe-stage assumption, not a vendor contract**; and it does not surface `errors`/`modelUsage`, which the budget path needs. |
-| `goal-probe-usage-reader.ps1` (I2) | **promote-candidate (conditional)** | Well-formed-zero versus absent/wrong-shape discrimination validated on real vendor output. Two blockers: its headline live-read purpose is unexercised, and leg (c) proved a well-formed zero can be **untruthful**, so its `usage-present-zero` state must not be consumed as "nothing was spent" without a `modelUsage`/`total_cost_usd` cross-check. |
-| `goal-probe-forcehalt-rig.ps1` (I3) | **hold** | Logic Pester-tested, zero live validation. Leg (c)'s original rationale stands after all: a **headless** arm can delegate budget enforcement to `--max-budget-usd`, and leg (h) confirms headless can run a goal loop. Force-halt matters only for the **interactive** arm (no budget flag there) or for non-budget hard-halt. *(An intermediate draft escalated this to "re-prioritise" on the mistaken finding that the loop was interactive-only; that escalation is withdrawn.)* |
-| `goal-probe-forcehalt-hook.ps1` (stub) | **hold** | Block-decision contract never verified live; same rationale as I3. |
+| `goal-probe-streamjson.ps1` (I1) | **promote-candidate** | Parsed real terminal events correctly across every shape encountered (success, 401 error, budget breach), covering 2 of 3 outcome *classifications* — `judged-impossible` was never produced live. Two caveats before promotion: its `<goal-status>` tag convention is a **probe-stage assumption, not a vendor contract**; and it does not surface `errors`/`modelUsage`, which the budget path needs. **Promotion-blocker (latent defect, pre-existing, `observed` — reproduced against the in-tree script, not the vendor CLI)**: `ConvertFrom-Json -AsHashtable` pipeline-enumerates a **single-element** JSON array into a bare hashtable *before* the `IDictionary` guard sees it, so the array wrapper is stripped and the guard never sees an array. Repro: `Get-GoalProbeStreamJsonResult -Line '[{"type":"result","subtype":"success","num_turns":2}]'` returns a populated result (`Subtype = success`) instead of `$null`. Multi-element arrays are correctly rejected. Not fixed here; the harness plan must close it before promotion. |
+| `goal-probe-usage-reader.ps1` (I2) | **promote-candidate (conditional)** | Well-formed-zero versus absent/wrong-shape discrimination validated on real vendor output. Two blockers: its headline live-read purpose is unexercised, and leg (c) proved a well-formed zero can be **untruthful**, so its `usage-present-zero` state must not be consumed as "nothing was spent" without a `modelUsage`/`total_cost_usd` cross-check. **Promotion-blocker (latent defect, pre-existing, `observed` — reproduced against the in-tree script, not the vendor CLI)**: the canonical-key guard checks key *existence* (`ContainsKey`) but not value *type*. A payload with all four keys present but a wrong-typed value passes the guard and then throws unhandled inside `Get-EventUsage`'s `[int]` cast — violating the reader's documented **never-throw** contract. Repro: an assistant event whose `usage.input_tokens` is `{"nested": 3}` raises `Cannot convert the "System.Management.Automation.OrderedHashtable" value … to type "System.Int32"` out of `Get-GoalProbeLiveUsageReading` instead of returning a `usage-unavailable` reading. The previous any-key guard had the same hole. Not fixed here; the harness plan must close it before promotion. |
+| `goal-probe-forcehalt-rig.ps1` (I3) | **hold (polarity corrected post-run)** | Logic Pester-tested, zero live validation. Leg (c)'s original rationale stands after all: a **headless** arm can delegate budget enforcement to `--max-budget-usd`, and leg (h) confirms headless can run a goal loop. Force-halt matters only for the **interactive** arm (no budget flag there) or for non-budget hard-halt. *(An intermediate draft escalated this to "re-prioritise" on the mistaken finding that the loop was interactive-only; that escalation is withdrawn.)* **Correction (#898 C1, `documented`)**: as originally committed the rig scored `StopHookDecision = 'block'` as a **win**, but on `Stop` a block *prevents* stopping — the input meant the loop kept running, so the instrument would have returned an **inverted verdict on first use**. Polarity fixed: the win channel is now `continue-false`, and `block` returns the distinct outcome `block-does-not-halt`. Never fired live, so nothing false shipped. |
+| `goal-probe-forcehalt-hook.ps1` (stub) | **hold (rewritten post-run)** | Contract never verified live; same rationale as I3. **Correction (#898 C1, `documented`)**: the stub previously emitted `{"decision":"block"}` *and* exited 2 — two defects at once. Only one channel may be used per hook (JSON is discarded on a non-zero exit), and on `Stop` both `decision: "block"` and exit 2 *prevent* stopping. Rewritten onto the only documented force-halt channel: exit 0 with `{"continue": false, "stopReason": …}`. **Still `hold`, not promote-candidate**: the docs state no cross-hook precedence rule for `Stop`, so whether this beats the `/goal` evaluator's concurrent block is undetermined. |
 | *(none — new need)* | **gap** | Nothing here reads `goal_status`. That is the interactive surface's release signal and the harness's primary detection channel; a reader for it is net-new work for the harness plan. |
 
 ## Open questions carried to the harness plan
@@ -836,6 +901,15 @@ decisions.
    winning the race. A hook that watches `goal_status` and writes reports never
    has to beat the evaluator — only halting does. Reconciliation is buildable on
    either arm today; only interactive *enforcement* is blocked.)*
+   *(What the vendor docs do and do not settle — see
+   [leg (e)'s polarity-correction subsection](#polarity-correction-and-mechanism-feasibility-documented),
+   evidence label `documented`: a force-halt channel **does** exist
+   (`continue: false` + `stopReason` on exit 0), so the mechanism is not
+   ruled out. But `decision: "block"` and exit 2 both do the *opposite* on
+   `Stop`, and the docs state **no cross-hook precedence rule for `Stop`** —
+   so whether a supervisor hook's `continue: false` beats the `/goal`
+   evaluator's concurrent block is undetermined, not merely unmeasured. The
+   question stays fully open and only a live leg (e) can close it.)*
 3. **D9 whole-run sub-ceiling amendment** — the corrected overshoot
    characterisation (bounded by ≈ one turn's cost; magnitude n=2, timing n=1) plus
    the account-level weekly ceiling and the per-turn `budget_usd` feed all bear on
