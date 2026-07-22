@@ -192,35 +192,73 @@ checkout this plan itself lives in.
    ```
 
 3. Capture the product checkout's fingerprint **and** HEAD **before** any
-   leg runs. The porcelain output must be joined into a single string
-   before it is converted to bytes and hashed — piping a byte array through
-   the pipeline auto-enumerates it element-by-element, which silently
-   breaks `ComputeHash` (it ends up hashing one byte at a time instead of
-   the whole buffer). This mirrors the working, tested convention in
+   leg runs. Define this as a **function once**, in the shell session you
+   will run the probe from, and call it at both step 3 and step 5 — never
+   retype the hashing block, because any divergence in CRLF normalization
+   changes the hash and produces a false tamper alarm at step 5. The
+   porcelain output must be joined into a single string before it is
+   converted to bytes and hashed — piping a byte array through the pipeline
+   auto-enumerates it element-by-element, which silently breaks
+   `ComputeHash` (it ends up hashing one byte at a time instead of the whole
+   buffer). This mirrors the working, tested convention in
    `skills/subagent-env-handshake/scripts/New-SubagentDispatchPrompt.ps1`
    (`Get-DirtyTreeFingerprint`):
 
    ```powershell
-   $porcelainRaw = (git -C $productRoot status --porcelain 2>$null) | Out-String
-   $porcelainNormalized = ($porcelainRaw -replace "`r`n", "`n") -replace "`r", "`n"
-   $porcelainBytes = [System.Text.Encoding]::UTF8.GetBytes($porcelainNormalized)
-   $sha256 = [System.Security.Cryptography.SHA256]::Create()
-   $hashBytes = $sha256.ComputeHash($porcelainBytes)
-   $preProbeFingerprint = (-join ($hashBytes | ForEach-Object { $_.ToString('x2') })).Substring(0, 12)
-   $preProbeHead = (git -C $productRoot rev-parse HEAD).Trim()
+   function Get-GoalProbeProductState {
+       param([Parameter(Mandatory)][string]$ProductRoot)
+       $porcelainRaw = (git -C $ProductRoot status --porcelain 2>$null) | Out-String
+       $porcelainNormalized = ($porcelainRaw -replace "`r`n", "`n") -replace "`r", "`n"
+       $porcelainBytes = [System.Text.Encoding]::UTF8.GetBytes($porcelainNormalized)
+       $sha256 = [System.Security.Cryptography.SHA256]::Create()
+       try {
+           $hashBytes = $sha256.ComputeHash($porcelainBytes)
+       }
+       finally {
+           $sha256.Dispose()
+       }
+       [pscustomobject]@{
+           Fingerprint = (-join ($hashBytes | ForEach-Object { $_.ToString('x2') })).Substring(0, 12)
+           Head        = (git -C $ProductRoot rev-parse HEAD).Trim()
+       }
+   }
+
+   $preProbeState = Get-GoalProbeProductState -ProductRoot $productRoot
+   $preProbeState
    ```
 
-   Record `$preProbeFingerprint` as `pre-probe fingerprint` (mirrors the
-   spike's own `git status --porcelain` → SHA-256:12 convention — a clean
-   tree hashes to the well-known empty-string prefix `e3b0c44298fc`) and
-   `$preProbeHead` as `pre-probe HEAD`.
+   Record `$preProbeState.Fingerprint` as `pre-probe fingerprint` (mirrors
+   the spike's own `git status --porcelain` → SHA-256:12 convention — a
+   clean tree hashes to the well-known empty-string prefix `e3b0c44298fc`)
+   and `$preProbeState.Head` as `pre-probe HEAD`. Keep `$preProbeState` and
+   the function definition alive in the same shell session through step 5;
+   if the session is lost, re-source this exact block rather than retyping
+   a variant of it.
 
 4. Run every leg's commands **with a working directory inside
    `$probeWorktree`**, never `$productRoot`.
 
 5. After all legs conclude (including any halted/blocked leg), recompute
-   both the fingerprint and `git -C $productRoot rev-parse HEAD` and
-   compare each against its pre-probe value. **Any change to either is a
+   both values by calling the **same step-3 function** — do not retype the
+   hashing block, and do not substitute an ad-hoc `git status --porcelain |
+   sha256` one-liner; a normalization difference alone would fire the
+   tripwire below:
+
+   ```powershell
+   $postProbeState = Get-GoalProbeProductState -ProductRoot $productRoot
+   if ($postProbeState.Fingerprint -ne $preProbeState.Fingerprint -or
+       $postProbeState.Head -ne $preProbeState.Head) {
+       "TRIPWIRE: pre=$($preProbeState.Fingerprint)@$($preProbeState.Head) " +
+       "post=$($postProbeState.Fingerprint)@$($postProbeState.Head)"
+   }
+   else {
+       "clean: $($postProbeState.Fingerprint)@$($postProbeState.Head)"
+   }
+   ```
+
+   (If the shell session was lost between steps 3 and 5, re-source the
+   step-3 function block verbatim before running this.) **Any change to
+   either is a
    tamper tripwire** — the porcelain fingerprint alone is blind to a
    committed mutation (HEAD advances while the working tree stays clean),
    which is why both checks run together. Neither check detects a write to
@@ -253,6 +291,51 @@ tag `goal-probe-streamjson.ps1` expects — this is a probe-stage convention
 this run-book is asking for, not vendor-default behavior, per that
 instrument's own header comment.
 
+### Capture filenames: attempt-suffixed, and failed captures are kept
+
+Every capturing leg below redirects stdout and stderr to files. **Never
+redirect over a fixed filename.** Several bars in this run-book explicitly
+tell the operator to "fix the invocation and re-run"; with a fixed name, each
+retry destroys the previous attempt's capture — which is exactly what happened
+in this probe's first pass (see
+[`Documents/Design/goal-loop-capability-probe.md`](../../Documents/Design/goal-loop-capability-probe.md)
+§ leg (a), "Artifact-retention caveat": three distinct failure modes were
+observed but their captures were overwritten, so the resulting finding is
+**not independently re-verifiable**).
+
+Set an attempt suffix **before each invocation** and interpolate it into both
+redirect targets:
+
+```powershell
+$attempt = Get-Date -Format 'yyyyMMdd-HHmmss'   # or a simple 1, 2, 3 counter
+```
+
+Then, per leg: `> leg-a-print-$attempt.jsonl 2> leg-a-print-$attempt.stderr.log`,
+`> leg-c-$attempt.jsonl`, `> leg-d-$attempt.jsonl`, `> leg-h-$attempt.jsonl`,
+and so on.
+
+**Keep every failed capture.** A failed attempt is not waste — the failed
+attempts *are* the evidence for the "three hard requirements" (`--verbose`
+mandatory, `--model` pinned, credential exported) finding, and for
+distinguishing "the invocation was rejected" from "the capability is blocked".
+When recording a verdict, name the exact attempt file it came from.
+
+### Matching serialized JSON: use a whitespace-tolerant pattern
+
+Several checks below ask you to confirm a capture contains a particular event
+type. Do **not** match the literal `'"type":"system"'`. The CLI emits
+`{"type": "system", "subtype": "init", …}` with spaces on some builds, and a
+literal match silently returns nothing — a false negative that routes an
+otherwise-successful run into an "inconclusive" or "blocked" branch. Use the
+tolerant pattern (or parse the line as JSON):
+
+```powershell
+$systemInitPattern = '"type"\s*:\s*"system"'
+$resultEventPattern = '"type"\s*:\s*"result"'
+```
+
+This is the same rationale leg (b)'s parse-don't-string-match note gives.
+
 ### Leg (a) — headless launch
 
 **Classification**: owner-executed at a keyboard.
@@ -261,9 +344,12 @@ instrument's own header comment.
 from `$probeWorktree`:
 
 ```powershell
+$attempt = Get-Date -Format 'yyyyMMdd-HHmmss'
 claude -p "<trivial fixture goal, instructing the <goal-status> tag>" `
-  --output-format stream-json --print --verbose --model sonnet > leg-a-print.jsonl 2> leg-a-print.stderr.log
+  --output-format stream-json --print --verbose --model sonnet `
+  > "leg-a-print-$attempt.jsonl" 2> "leg-a-print-$attempt.stderr.log"
 "EXIT:$LASTEXITCODE"
+$legACapture = "leg-a-print-$attempt.jsonl"
 ```
 
 Both `--verbose` and `--model` are mandatory, not optional hedges: `--print`
@@ -289,10 +375,43 @@ of what leg (a) answers).
 - `observed` — either invocation reaches a terminal `result` event (or
   documented equivalent for `claude agents --json`) with `is_error: false`,
   and the raw (redacted) output is retained as the backing artifact.
-- `documented`-blocked — both invocations fail (e.g. 401), matching the
-  spike's own finding; record the raw redacted error and exit code. This is
-  a legitimate leg-(a) outcome, not a probe defect, and it forces the
+- `documented`-blocked — both invocations were **accepted by the CLI and
+  reached the auth layer**, and both then failed *there* (e.g. 401), matching
+  the spike's own finding; record the raw redacted error and exit code. This
+  is a legitimate leg-(a) outcome, not a probe defect, and it forces the
   leg-a cascade on legs (b)/(c).
+
+  **This bar requires positive evidence the invocation was accepted** — the
+  same requirement leg (c)'s bar carries, and for a stronger reason: a
+  `documented`-blocked verdict here cascades legs (b) *and* (c) as well, so a
+  single mis-recorded leg (a) produces **three** false verdicts, one of them
+  the finding arm-H enablement rests on. Positive evidence means at least one
+  of:
+
+  - `leg-a-print-$attempt.jsonl` is non-empty and contains a `system`/`init`
+    event (match with `$systemInitPattern`, above — not a literal
+    `'"type":"system"'`), **or**
+  - `leg-a-print-$attempt.stderr.log` carries an *authentication* error — a
+    401, an expired/rejected OAuth token, a credential-refused message — as
+    opposed to a usage or argument error.
+
+- **Not a leg-(a) outcome — fix and re-run.** A non-zero exit is *not*
+  sufficient, because a flag rejection also exits non-zero. Specifically, do
+  **not** record `documented`-blocked when any of these is what happened:
+
+  - a **zero-byte capture**;
+  - a stderr **usage/argument** error, e.g.
+    `Error: When using --print, --output-format=stream-json requires --verbose`
+    (this exact case occurred in this probe's real history —
+    [`Documents/Design/goal-loop-capability-probe.md`](../../Documents/Design/goal-loop-capability-probe.md)
+    § leg (a), discovery 1: exit 1, zero-byte capture);
+  - a **model-resolution 404** from an unpinned or unavailable `--model`
+    (discovery 2 in the same section).
+
+  Each of these means the invocation never reached the auth layer. Fix the
+  invocation, keep the failed capture as evidence, increment `$attempt`, and
+  re-run. Only exhaust the leg — and only then cascade (b)/(c) — after an
+  *accepted* invocation has failed at the auth layer.
 
 ### Leg (b) — terminal-outcome readability
 
@@ -300,11 +419,14 @@ of what leg (a) answers).
 (a).
 
 **Command**: if leg (a) produced a completing run, take the raw terminal
-`result` line from `leg-a-print.jsonl` and:
+`result` line from **that attempt's** leg (a) capture (`$legACapture`, set by
+leg (a)'s snippet — if you are in a new shell, set it to the specific
+`leg-a-print-{attempt}.jsonl` file the completing run produced) and:
 
 ```powershell
 . .github/scripts/lib/goal-probe-streamjson.ps1
-$result = Get-Content leg-a-print.jsonl |
+$result = $null
+$result = Get-Content $legACapture |
   ForEach-Object { Get-GoalProbeStreamJsonResult -Line $_ } |
   Where-Object { $null -ne $_ } |
   Select-Object -Last 1
@@ -341,10 +463,14 @@ gated by leg (a) (needs the same completing-headless-run infrastructure).
 **Command**:
 
 ```powershell
+$attempt = Get-Date -Format 'yyyyMMdd-HHmmss'
 claude -p "<fixture goal designed to exceed a tiny budget>" `
   --max-budget-usd 0.01 --output-format stream-json --print `
-  --verbose --model sonnet > leg-c.jsonl 2> leg-c.stderr.log
+  --verbose --model sonnet `
+  > "leg-c-$attempt.jsonl" 2> "leg-c-$attempt.stderr.log"
 "EXIT:$LASTEXITCODE"
+$legCCapture = "leg-c-$attempt.jsonl"
+$legCStderr = "leg-c-$attempt.stderr.log"
 ```
 
 `--verbose` and `--model` are mandatory here for the same reasons as legs (a)
@@ -352,7 +478,31 @@ and (h): without `--verbose`, `--print` + `--output-format stream-json` is
 rejected outright, so the run never starts at all; and an unpinned model can
 404 for a headless credential.
 
-then parse the same way as leg (b) if a terminal `result` line exists.
+Then check leg (c)'s **own** capture — not leg (a)'s. Run the acceptance
+checks the bar below requires, and parse for a terminal `result` event with
+the same instrument leg (b) uses:
+
+```powershell
+. .github/scripts/lib/goal-probe-streamjson.ps1
+
+# Acceptance evidence (bar path (ii) depends on these, not on the exit code).
+(Get-Item $legCCapture).Length                                  # must be > 0
+Get-Content $legCCapture | Select-String -Pattern $systemInitPattern | Select-Object -First 1
+Get-Content $legCStderr                                         # must show no usage/argument error
+
+# Terminal result event, if one exists (path (i)).
+$legCResult = $null
+$legCResult = Get-Content $legCCapture |
+  ForEach-Object { Get-GoalProbeStreamJsonResult -Line $_ } |
+  Where-Object { $null -ne $_ } |
+  Select-Object -Last 1
+$legCResult
+```
+
+The `$legCResult = $null` reset and the `Where-Object { $null -ne $_ }` filter
+are both load-bearing for the same reason spelled out under leg (b): without
+them a capture with no parsable `result` line leaves the variable holding an
+earlier leg's verdict, and path (i) gets recorded from stale data.
 
 **Bar**:
 
@@ -362,12 +512,13 @@ then parse the same way as leg (b) if a terminal `result` line exists.
   terminal `result` event (silent-kill path). Path (ii) requires **positive
   evidence that the invocation ran**, because a flag-rejection also exits
   non-zero with no `result` event and must never be recorded as an observed
-  silent kill: `leg-c.jsonl` must be non-empty and contain session events
-  (a `system`/`init` event, and/or `assistant` events) with no terminal
-  `result` event, **and** `leg-c.stderr.log` must show no CLI usage or
+  silent kill: `leg-c-{attempt}.jsonl` must be non-empty and contain session
+  events (a `system`/`init` event matched with `$systemInitPattern`, and/or
+  `assistant` events) with no terminal
+  `result` event, **and** `leg-c-{attempt}.stderr.log` must show no CLI usage or
   argument error. A zero-byte capture, or a stderr usage error, means the
-  invocation itself failed — fix the invocation and re-run; do not record it
-  as a leg-(c) outcome. Both (i) and (ii) are genuine, recordable outcomes;
+  invocation itself failed — fix the invocation, keep the failed capture,
+  increment `$attempt`, and re-run; do not record it as a leg-(c) outcome. Both (i) and (ii) are genuine, recordable outcomes;
   the question this leg answers is *which* of the two happens, not whether a
   breach occurs.
 - `blocked — leg-a cascade` — leg (a) never completed, so no headless
@@ -389,25 +540,54 @@ its first event, or start an interactive session and check the `/`
 command list:
 
 ```powershell
-claude -p "<any trivial prompt>" --output-format stream-json --print --verbose |
-  Select-String -Pattern '"type":"system"' | Select-Object -First 1
+$attempt = Get-Date -Format 'yyyyMMdd-HHmmss'
+claude -p "<any trivial prompt>" --output-format stream-json --print --verbose `
+  > "leg-d-$attempt.jsonl" 2> "leg-d-$attempt.stderr.log"
+"EXIT:$LASTEXITCODE"
+$legDCapture = "leg-d-$attempt.jsonl"
+
+# Whitespace-tolerant match -- '"type":"system"' as a literal misses
+# {"type": "system", ...} and would produce a false "no events at all".
+$initLine = Get-Content $legDCapture |
+  Select-String -Pattern $systemInitPattern |
+  Select-Object -First 1
+$initLine
+
+# Inspect the matched init event's slash_commands array for 'goal'.
+if ($null -ne $initLine) {
+  $initEvent = $initLine.Line | ConvertFrom-Json
+  $initEvent.slash_commands
+  @($initEvent.slash_commands) -contains 'goal'
+}
 ```
+
+Writing the capture to a file (rather than piping straight to the console) is
+required, not stylistic: it is what lets this leg satisfy the run-book's own
+§ Platform version instruction to capture `claude_code_version` from the
+`system/init` event **for every leg**, and it makes the verdict re-verifiable.
 
 `--verbose` is mandatory here too: `--print` combined with `--output-format
 stream-json` is rejected outright without it (see leg (a) above). `--model`
 does not need to be pinned for this leg — goal registration is visible in
 `system.init` even in an unpinned-model run.
 
-Inspect the matched line's `slash_commands` array for `goal`.
+**Bar** (the three branches below are exhaustive — every run lands in exactly
+one):
 
-**Bar**:
-
-- `observed` — a `system.init` event (or the interactive `/` command
-  surface) is captured directly showing `goal` registered.
-- If the process fails before emitting any event at all (distinct from a
-  budget/auth failure on a later turn), record as inconclusive with the
-  raw failure captured — this is not the leg-a cascade, since leg (d)'s own
-  question is answered or not answered before that gate is even reached.
+- `observed` (registered) — a `system.init` event (or the interactive `/`
+  command surface) is captured directly showing `goal` in `slash_commands`.
+  Retain `leg-d-{attempt}.jsonl` as the backing artifact.
+- `observed` (**not** registered) — the leg's own negative answer, and a
+  genuine recordable outcome: a `system.init` event **was** captured and its
+  `slash_commands` array is present and does **not** contain `goal`. Quote the
+  array. This may never be recorded from a failed match alone — a missing
+  match means "no init event was captured", which is the third branch, not
+  this one. Re-check with `$systemInitPattern` before concluding absence.
+- inconclusive — no `system.init` event in the capture at all: the process
+  failed before emitting any event (distinct from a budget/auth failure on a
+  later turn), or the capture is zero-byte. Record the raw failure and stderr.
+  This is not the leg-a cascade, since leg (d)'s own question is answered or
+  not answered before that gate is even reached.
 
 ### Leg (e) — supervisor-side force-halt
 
@@ -444,23 +624,60 @@ scope guard on the scripted-detector side (step 4 below).
    from the visible turn/budget render or an explicit disambiguating
    prompt — at the same turn the Stop hook fires), let the registered Stop
    hook fire its block decision.
-4. Feed the observed session end into the rig:
+4. Feed the observed session end into the rig. **Every field below is a
+   placeholder you fill from evidence — none of them may be typed in as a
+   literal.** `Test-GoalProbeForceHaltWin` returns `stop-hook-win` only when
+   `EndReason -eq 'stop-hook'` **and** `StopHookDecision -eq 'block'` **and**
+   `GoalEvaluatorContinuationDecision -eq 'continue'`. Pre-filling the first
+   two would pre-answer two-thirds of the exact question this leg exists to
+   ask, and the run-book itself warns (step 1) that the stub's block-decision
+   contract is unverified against the live CLI — so "the loop ended some other
+   way" and "the hook fired but did not block" are both live possibilities:
 
    ```powershell
    . .github/scripts/lib/goal-probe-forcehalt-rig.ps1
    Test-GoalProbeForceHaltWin -ArmedProbeMarker $token -SessionEndDescription @{
      ProbeMarker                        = $token
-     EndReason                          = 'stop-hook'
-     StopHookDecision                   = 'block'
+     EndReason                          = '<stop-hook|natural-completion|wall-clock-cutoff|budget-cutoff|external-kill, per the end evidence in step 4a>'
+     StopHookDecision                   = '<block|allow, per the hook-fired evidence in step 4a -- omit if EndReason is not stop-hook>'
      GoalEvaluatorContinuationDecision  = '<continue|halt, as independently recorded in step 3>'
    }
    ```
 
+   **4a. Evidence required before filling `EndReason` and `StopHookDecision`.**
+   Record at least one positive item for each, and cite it in the write-up:
+
+   - *The hook actually fired*: the stub's own stdout/exit code
+     (`{"decision":"block",…}` on stdout, exit 2 with the reason on stderr —
+     see `.github/scripts/goal-probe-forcehalt-hook.ps1`). Hook stdout is
+     consumed by the CLI, so add a one-line append-to-file trace to **your
+     customized copy** of the stub before step 2 — e.g. a timestamped line to
+     `$probeWorktree/leg-e-hook-fired.log` — and treat the presence and
+     timestamp of that line as the fired-evidence. No trace line and no
+     visible block-reason surfaced back into the session means you cannot
+     assert `EndReason = 'stop-hook'`.
+   - *The hook's decision was honored as a block*: the block reason visibly
+     fed back into the session (the turn did not end), or the session
+     transcript's own end record naming the stop-hook block. If the turn ended
+     normally despite the hook firing, that is `StopHookDecision = 'allow'` in
+     effect — a `loss`, and a real result.
+   - *How the session actually ended*: the session transcript's terminal
+     record under `~/.claude/projects/{project-slug}/{session-id}.jsonl`. If it
+     shows natural completion, a budget cutoff, or an external kill, set
+     `EndReason` to that value — do not force `'stop-hook'` because the hook
+     was registered.
+
+   If the fired/blocked evidence cannot be obtained at all, record the leg as
+   inconclusive rather than typing in the literals; a `stop-hook-win` produced
+   from typed-in inputs is not an observation of anything.
+
 **Bar**:
 
-- `observed` (win) — `Outcome -eq 'stop-hook-win'`, **and** the evaluator's
-  own `continue` decision at that turn was independently recorded (not
-  reconstructed after the fact from the block alone).
+- `observed` (win) — `Outcome -eq 'stop-hook-win'` **from evidence-filled
+  inputs**: positive evidence the hook fired (step 4a), positive evidence its
+  block was honored (step 4a), **and** the evaluator's own `continue` decision
+  at that turn independently recorded — none of the three reconstructed after
+  the fact from the others.
 - `observed` (loss / concurrent-halt-not-a-win) — also a genuine,
   recordable outcome; do not discard a non-win as a probe failure.
 - `inferred` — if the evaluator's independent decision could not be
@@ -483,27 +700,95 @@ before it terminates.
 
 **Command**:
 
+> ⚠ **"Confirmed still running" is the whole leg — it must be *measured*, not
+> assumed.** A finished transcript satisfies a bare
+> `Get-GoalProbeLiveUsageReading` call exactly as well as a live one, so
+> pointing the reader at a path proves nothing about liveness. This leg
+> already drifted this way once: what actually got measured were **completed
+> stream-json output captures, not live mid-write session transcripts**, so
+> leg (f)'s real question was recorded as **not answered** — see
+> [`Documents/Design/goal-loop-capability-probe.md`](../../Documents/Design/goal-loop-capability-probe.md)
+> § leg (f), "Partial gap". Every poll must carry its own recorded liveness
+> evidence.
+
+Run this loop **against a session an owner has just started and is watching**,
+in a second shell:
+
 ```powershell
 . .github/scripts/lib/goal-probe-usage-reader.ps1
 $transcriptPath = "<the running session's own JSONL transcript path under ~/.claude/projects/...>"
-Get-GoalProbeLiveUsageReading -TranscriptPath $transcriptPath
+$terminalEventPattern = '"type"\s*:\s*"result"'
+$polls = [System.Collections.Generic.List[object]]::new()
+$previousWrite = $null
+
+for ($i = 1; $i -le 40; $i++) {
+    $item = Get-Item -LiteralPath $transcriptPath -ErrorAction SilentlyContinue
+    $lastWrite = if ($null -ne $item) { $item.LastWriteTimeUtc } else { $null }
+    $claudeAlive = @(Get-Process -Name 'claude' -ErrorAction SilentlyContinue).Count -gt 0
+    $hasTerminalEvent = $false
+    if ($null -ne $item) {
+        $hasTerminalEvent = [bool](
+            Get-Content -LiteralPath $transcriptPath -ErrorAction SilentlyContinue |
+            Select-String -Pattern $terminalEventPattern -Quiet
+        )
+    }
+    $reading = Get-GoalProbeLiveUsageReading -TranscriptPath $transcriptPath
+
+    $polls.Add([pscustomobject]@{
+        Poll                = $i
+        AtUtc               = [datetime]::UtcNow
+        LastWriteUtc        = $lastWrite
+        WriteAdvanced       = ($null -ne $previousWrite -and $null -ne $lastWrite -and $lastWrite -gt $previousWrite)
+        ClaudeProcessAlive  = $claudeAlive
+        TerminalEventSeen   = $hasTerminalEvent
+        State               = $reading.State
+        ReadLatencyMs       = $reading.ReadLatencyMs
+        PartialTailDetected = $reading.PartialTailDetected
+    })
+
+    $previousWrite = $lastWrite
+    if ($hasTerminalEvent -and -not $claudeAlive) { break }
+    Start-Sleep -Seconds 3
+}
+
+$polls | Format-Table -AutoSize
 ```
 
-Poll repeatedly (e.g. every few seconds) while the session is confirmed
-not yet terminated, recording `State`, `ReadLatencyMs`, and
-`PartialTailDetected` each time.
+Notes on the loop: `Get-Item`/`Get-Process`/`Get-Content` all use
+`-ErrorAction SilentlyContinue` with an explicit `$null` check so a
+transcript that does not exist yet leaves `$lastWrite` as `$null` instead of
+throwing or leaking a stale value; `$previousWrite` is reassigned on **every**
+iteration, so `WriteAdvanced` is always a comparison against the immediately
+preceding poll; and `Get-Process` is wrapped in `@(...)` so a zero- or
+one-match result both count correctly.
+
+Record the whole `$polls` table. A single poll's `State`/`ReadLatencyMs`
+without its liveness columns is not usable evidence.
 
 **Bar**:
 
-- `observed` — at least one poll taken while the session is confirmed
-  still running returns `usage-present-nonzero` (or a `usage-present-zero`
+- A poll counts as **taken while the session was live** only if that poll's
+  own row shows at least one of: `WriteAdvanced -eq $true` (the transcript's
+  `LastWriteTime` advanced since the previous poll), `TerminalEventSeen -eq
+  $false` (no terminal event in the transcript at poll time), or
+  `ClaudeProcessAlive -eq $true`. Prefer `WriteAdvanced` — it is the only one
+  of the three that positively demonstrates the file was still being written.
+  State in the write-up **which** column established liveness for the poll you
+  cite.
+- `observed` — at least one such live-qualified poll returns
+  `usage-present-nonzero` (or a `usage-present-zero`
   independently corroborated by knowing the run had genuinely made no
   progress yet), with `ReadLatencyMs` captured.
-- `usage-unavailable` while the session is confirmed running is also a
+- `usage-unavailable` on a live-qualified poll is also a
   genuine `observed` negative result — **unless** a poll taken immediately
   after the same session's termination then returns nonzero usage from the
   same transcript path, which would instead indicate the *reader*, not the
   observable, is broken; record that distinction explicitly if it occurs.
+- **Not `observed`** — every poll ran with `WriteAdvanced -eq $false` and
+  `TerminalEventSeen -eq $true`, or the path pointed at a completed capture.
+  That measures post-hoc file reads, not live polling; record it as such and
+  fall back to the `documented` grade below rather than reporting it as a
+  live-poll result.
 - `documented` — if no session could be kept running long enough to poll
   at all, fall back to the stream-json schema's documented `usage` field
   shape (the spike's own grade for this claim).
@@ -548,8 +833,10 @@ enabling" silently over-claims.
 comparable, and run from a throwaway directory outside the product checkout:
 
 ```powershell
+$attempt = Get-Date -Format 'yyyyMMdd-HHmmss'
 claude -p "/goal <verbatim leg (g) goal text>" --output-format stream-json --print `
-  --verbose --model sonnet --max-budget-usd 0.50 > leg-h.jsonl 2> leg-h.stderr.log
+  --verbose --model sonnet --max-budget-usd 0.50 `
+  > "leg-h-$attempt.jsonl" 2> "leg-h-$attempt.stderr.log"
 "EXIT:$LASTEXITCODE"
 ```
 
