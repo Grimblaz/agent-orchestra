@@ -73,7 +73,11 @@ jobs:
             # design-grounding-discipline contract gate — registered per d-ci-gate-registration (#866)
             '.github/scripts/Tests/design-grounding-discipline.Tests.ps1',
             # grounding-evidence-corpus-check classifier gate — registered per d-ci-gate-registration (#866)
-            '.github/scripts/Tests/grounding-evidence-corpus-check.Tests.ps1'
+            '.github/scripts/Tests/grounding-evidence-corpus-check.Tests.ps1',
+            # goal-run harness capability-probe instruments — issue #874 plan step 1
+            '.github/scripts/Tests/goal-probe-streamjson.Tests.ps1',
+            '.github/scripts/Tests/goal-probe-usage-reader.Tests.ps1',
+            '.github/scripts/Tests/goal-probe-forcehalt-rig.Tests.ps1'
           )
           $config.Run.Exit = $true
           $config.Output.Verbosity = 'Detailed'

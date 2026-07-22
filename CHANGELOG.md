@@ -2,6 +2,15 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.4.5] — 2026-07-21
+
+### Added
+
+- Goal-run capability probe (#874 AC5): three reusable, Pester-tested instruments under `.github/scripts/lib/` — a stream-json terminal-result parser, a live transcript usage reader with absent-vs-zero discrimination, and a force-halt win/loss detection rig — plus an execution, credential, and containment run-book at `.github/scripts/README-goal-probe.md`.
+- Labeled evidence document `Documents/Design/goal-loop-capability-probe.md` recording an eight-leg probe outcome with per-leg build attribution (CLI 2.1.150 / desktop app 2.1.215 / CLI 2.1.216): five legs observed, two partial, one explicit gap.
+- Key findings: headless launch requires `--verbose` and an explicitly pinned `--model`; `--max-budget-usd` reports breaches through a structured `error_max_budget_usd` terminal event, overshooting by roughly one turn's cost; `/goal` does **not** start a goal loop under `claude -p` (it is consumed as literal prompt text), and headless default permissions deny every write with no reachable approver, burning the full budget; and goal release, while rendering no status line, emits a typed `goal_status` transcript event carrying the evaluator's own verdict, reason, iterations, duration, and token count.
+- Registered the `goal-probe-findings-{ID}` handoff-marker head as the deferred goal-run harness plan's deterministic lookup surface.
+
 ## [3.4.4] — 2026-07-21
 
 ### Fixed

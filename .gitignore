@@ -16,6 +16,22 @@ testResults.xml
 memories/
 .memories/
 
+# goal-probe credential backstop (#874 plan step 2) — the primary store is
+# out-of-repo ($HOME/.goal-probe-credentials/); these entries are
+# defense-in-depth against operator error copying a token into a worktree.
+# See .github/scripts/README-goal-probe.md § Credential handling.
+.goal-probe-credentials/
+*-oauth-token.txt
+
+# goal-probe leg-capture backstop (#874 plan step 2 fix batch, M10) — raw
+# credential-adjacent capture files (stdout/stderr transcripts) from the
+# run-book's legs (a)/(c)/(g) are disposable and should never be committed;
+# the probe worktree itself is disposable and should never be `git add`ed,
+# but this is defense-in-depth in case a capture lands somewhere tracked.
+leg-*.jsonl
+leg-*.stderr.log
+leg-*.log
+
 # Agent scratch — keep out of git status
 .tmp/
 /[A-Za-z][A-Za-z]sers*
