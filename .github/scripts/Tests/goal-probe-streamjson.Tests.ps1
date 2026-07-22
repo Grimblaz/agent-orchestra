@@ -63,6 +63,22 @@ Describe 'Get-GoalProbeStreamJsonResult' {
         }
     }
 
+    Context 'is_error non-coercing hostile input' {
+        It 'reports IsError as $null (not $false) and classifies as stopped when is_error is absent entirely' {
+            $line = '{"type":"result","subtype":"success","num_turns":2,"total_cost_usd":0.01,"result":"Done.\n<goal-status>satisfied</goal-status>"}'
+            $result = Get-GoalProbeStreamJsonResult -Line $line
+            $result.IsError | Should -Be $null
+            $result.Outcome | Should -Be 'stopped'
+        }
+
+        It 'reports IsError as $null (not coerced to $true) and classifies as stopped when is_error arrives as the string "false"' {
+            $line = '{"type":"result","subtype":"success","is_error":"false","num_turns":2,"total_cost_usd":0.01,"result":"Done.\n<goal-status>satisfied</goal-status>"}'
+            $result = Get-GoalProbeStreamJsonResult -Line $line
+            $result.IsError | Should -Be $null
+            $result.Outcome | Should -Be 'stopped'
+        }
+    }
+
     Context 'nullable-absent fields' {
         It 'returns $null for both TotalCostUsd and NumTurns when the result event omits them entirely' {
             $line = '{"type":"result","subtype":"success","is_error":false,"result":"Done.\n<goal-status>satisfied</goal-status>"}'
@@ -97,6 +113,38 @@ Describe 'Get-GoalProbeStreamJsonResult' {
         It 'returns $null for a well-formed event of the wrong type' {
             $line = '{"type":"assistant","message":{"content":"not a result event"}}'
             Get-GoalProbeStreamJsonResult -Line $line | Should -BeNullOrEmpty
+        }
+    }
+
+    Context 'non-dictionary parsed line under Set-StrictMode' {
+        # Revert-sensitive coverage for the `$evt -isnot [IDictionary]` guard.
+        # Under DEFAULT PowerShell these inputs are inert: indexing a scalar
+        # ('hello'['type'], (5)['type']) silently yields $null, so the
+        # downstream -ne 'result' check already rejects and removing the guard
+        # changes nothing observable. Under Set-StrictMode -Version Latest the
+        # same expressions THROW ("Cannot convert value \"type\" to type
+        # \"System.Int32\"" / "Unable to index into an object of type ...").
+        # Several repo lib files set StrictMode, so a strict-scope caller is a
+        # real configuration -- and it is the only scope in which this guard is
+        # load-bearing. Set-StrictMode is dynamically scoped, so setting it in
+        # the calling scriptblock applies inside the function under test.
+
+        It 'returns $null without throwing for a top-level JSON string line under StrictMode' {
+            $line = '"hello"'
+            { & { Set-StrictMode -Version Latest; Get-GoalProbeStreamJsonResult -Line $line } } | Should -Not -Throw
+            & { Set-StrictMode -Version Latest; Get-GoalProbeStreamJsonResult -Line $line } | Should -BeNullOrEmpty
+        }
+
+        It 'returns $null without throwing for a top-level JSON number line under StrictMode' {
+            $line = '5'
+            { & { Set-StrictMode -Version Latest; Get-GoalProbeStreamJsonResult -Line $line } } | Should -Not -Throw
+            & { Set-StrictMode -Version Latest; Get-GoalProbeStreamJsonResult -Line $line } | Should -BeNullOrEmpty
+        }
+
+        It 'returns $null without throwing for a top-level JSON array line under StrictMode' {
+            $line = '[1,2,3]'
+            { & { Set-StrictMode -Version Latest; Get-GoalProbeStreamJsonResult -Line $line } } | Should -Not -Throw
+            & { Set-StrictMode -Version Latest; Get-GoalProbeStreamJsonResult -Line $line } | Should -BeNullOrEmpty
         }
     }
 }

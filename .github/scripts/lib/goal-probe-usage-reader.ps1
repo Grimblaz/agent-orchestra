@@ -22,10 +22,18 @@
 
       usage-unavailable    -- the usage field is absent, the transcript's
                                only readable content is a partial/mid-write
-                               tail line, or the located event has the wrong
+                               tail line, the located event has the wrong
                                shape (message/usage present but not the
-                               expected dictionary type). NEVER reported as
-                               zero usage.
+                               expected dictionary type), or the usage object
+                               IS the expected dictionary type but does not
+                               carry all four canonical token-count keys
+                               (input_tokens, output_tokens,
+                               cache_creation_input_tokens,
+                               cache_read_input_tokens) -- an empty {}, a
+                               fully renamed schema, or a partial drift that
+                               keeps only some of the four all report
+                               'wrong-event-shape: usage-keys'. NEVER
+                               reported as zero usage.
       usage-present-zero    -- a well-formed usage object was found and all
                                four token counts are genuinely 0.
       usage-present-nonzero -- a well-formed usage object was found with at
@@ -125,7 +133,7 @@ function Get-GoalProbeLiveUsageReading {
                 if ($i -eq $lastNonEmptyIdx) { $partialTailDetected = $true }
                 continue
             }
-            if ($parsed['type'] -eq 'assistant') {
+            if ($parsed -is [System.Collections.IDictionary] -and $parsed['type'] -eq 'assistant') {
                 $lastGoodEvent = $parsed
                 break
             }
@@ -177,18 +185,21 @@ function Get-GoalProbeLiveUsageReading {
         }
     }
 
-    # A usage dict that is present but has none of the four canonical
-    # token-count keys (e.g. renamed keys, or an empty {}) is a wrong-shape
-    # event, not genuine zero usage -- Get-EventUsage silently defaults any
-    # missing key to 0, so without this guard a renamed-key payload would
-    # collapse into a false 'usage-present-zero' (issue #873 defect class).
+    # A usage dict that is present but is missing ANY of the four canonical
+    # token-count keys (e.g. partial schema drift renaming some but not all
+    # keys, renamed keys entirely, or an empty {}) is a wrong-shape event,
+    # not genuine zero usage -- Get-EventUsage silently defaults any missing
+    # key to 0, so without this all-four guard a partially-renamed payload
+    # (e.g. one surviving canonical key reporting a genuine 0 while the
+    # other three were renamed/absent) would collapse into a false
+    # 'usage-present-zero' (issue #873 defect class).
     $usageDict = $msg['usage']
     $canonicalUsageKeys = @('input_tokens', 'output_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens')
-    $hasAnyCanonicalKey = $false
+    $hasAllCanonicalKeys = $true
     foreach ($key in $canonicalUsageKeys) {
-        if ($usageDict.ContainsKey($key)) { $hasAnyCanonicalKey = $true; break }
+        if (-not $usageDict.ContainsKey($key)) { $hasAllCanonicalKeys = $false; break }
     }
-    if (-not $hasAnyCanonicalKey) {
+    if (-not $hasAllCanonicalKeys) {
         return [pscustomobject]@{
             State               = 'usage-unavailable'
             Reason              = 'wrong-event-shape: usage-keys'

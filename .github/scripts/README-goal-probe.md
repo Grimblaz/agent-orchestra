@@ -63,9 +63,10 @@ Leg (a) is the named gating experiment for headless auth. This section is
 the full protocol; leg (a)'s own entry below just points back here.
 
 **Candidate acquisition strategy**: the owner runs `claude setup-token`
-once, interactively, in a real TTY (it cannot run non-interactively — the
-spike already confirmed this: "produced no output under a non-interactive
-timeout"). This step has never completed in this repo's tooling before, so
+once, interactively, in a real interactive terminal (TTY) — it cannot run
+non-interactively, as the spike already confirmed: "produced no output under
+a non-interactive timeout". This step has never completed in this repo's
+tooling before, so
 capture its output faithfully — including the exact environment-variable
 name it instructs you to export, if it prints one — because that detail is
 itself `observed` evidence, not something this run-book can pin in advance.
@@ -221,8 +222,9 @@ checkout this plan itself lives in.
    both the fingerprint and `git -C $productRoot rev-parse HEAD` and
    compare each against its pre-probe value. **Any change to either is a
    tamper tripwire** — the porcelain fingerprint alone is blind to a
-   committed mutation (HEAD advances while the working tree stays clean)
-   or a write to a gitignored path, so both checks run together. The #871
+   committed mutation (HEAD advances while the working tree stays clean),
+   which is why both checks run together. Neither check detects a write to
+   a gitignored path; that blindspot is not covered by this tripwire. The #871
    spike observed a scope-expanding executor treat a terse goal as
    "execute the whole issue" and start reading/mutating things well
    outside its intended scope; an unexpected fingerprint or HEAD delta
@@ -260,12 +262,15 @@ from `$probeWorktree`:
 
 ```powershell
 claude -p "<trivial fixture goal, instructing the <goal-status> tag>" `
-  --output-format stream-json --print > leg-a-print.jsonl 2> leg-a-print.stderr.log
+  --output-format stream-json --print --verbose --model sonnet > leg-a-print.jsonl 2> leg-a-print.stderr.log
 "EXIT:$LASTEXITCODE"
 ```
 
-If the CLI rejects this combination, add `--verbose` and re-run — some
-headless builds require `--verbose` alongside `--output-format stream-json`.
+Both `--verbose` and `--model` are mandatory, not optional hedges: `--print`
+combined with `--output-format stream-json` is rejected outright without
+`--verbose`, and an unpinned run inherits the ambient session's model, which
+can 404 for a headless credential (see leg (h) below, which pins both the
+same way).
 
 and, separately, attempt the untested candidate surface named in the design
 (874-D9):
@@ -299,14 +304,25 @@ of what leg (a) answers).
 
 ```powershell
 . .github/scripts/lib/goal-probe-streamjson.ps1
-$resultLine = (Get-Content leg-a-print.jsonl | Select-String '"type":"result"' | Select-Object -Last 1).Line
-Get-GoalProbeStreamJsonResult -Line $resultLine
+$result = Get-Content leg-a-print.jsonl |
+  ForEach-Object { Get-GoalProbeStreamJsonResult -Line $_ } |
+  Where-Object { $null -ne $_ } |
+  Select-Object -Last 1
+$result
 ```
 
-(scanning backward for the last line matching `"type":"result"` rather than
-blindly taking the file's last line — a trailing blank line or any output
-that follows the terminal result event would otherwise make
-`Select-Object -Last 1` pick the wrong line.)
+(parsing every line through `Get-GoalProbeStreamJsonResult` rather than
+string-matching for `"type":"result"` first — a string match misses valid
+JSON with different whitespace, e.g. `"type": "result"` with a space.
+Non-matching lines parse to `$null`, and the `Where-Object { $null -ne $_ }`
+filter drops them before the selection — `ForEach-Object` *emits* `$null`
+into the pipeline rather than dropping it, so without that filter a capture
+with anything after the terminal `result` event (a trailing blank line, any
+stray post-result content) would hand `Select-Object -Last 1` a `$null` and
+the assignment would silently fail, leaving `$result` holding a previous
+leg's verdict. With the filter, the selection picks the last
+successfully-parsed `result` event — the terminal one — regardless of what
+trails it in the capture.)
 
 **Bar**:
 
@@ -326,9 +342,15 @@ gated by leg (a) (needs the same completing-headless-run infrastructure).
 
 ```powershell
 claude -p "<fixture goal designed to exceed a tiny budget>" `
-  --max-budget-usd 0.01 --output-format stream-json --print > leg-c.jsonl 2> leg-c.stderr.log
+  --max-budget-usd 0.01 --output-format stream-json --print `
+  --verbose --model sonnet > leg-c.jsonl 2> leg-c.stderr.log
 "EXIT:$LASTEXITCODE"
 ```
+
+`--verbose` and `--model` are mandatory here for the same reasons as legs (a)
+and (h): without `--verbose`, `--print` + `--output-format stream-json` is
+rejected outright, so the run never starts at all; and an unpinned model can
+404 for a headless credential.
 
 then parse the same way as leg (b) if a terminal `result` line exists.
 
@@ -336,10 +358,18 @@ then parse the same way as leg (b) if a terminal `result` line exists.
 
 - `observed` — either (i) a terminal `result` event exists whose
   `subtype`/`is_error`/`result` text names the budget breach (report path),
-  or (ii) the process exits non-zero with **no** `result` event at all
-  (silent-kill path) — both are genuine, recordable outcomes; the question
-  this leg answers is *which* of the two happens, not whether a breach
-  occurs.
+  or (ii) the run demonstrably *started* and was then killed with no
+  terminal `result` event (silent-kill path). Path (ii) requires **positive
+  evidence that the invocation ran**, because a flag-rejection also exits
+  non-zero with no `result` event and must never be recorded as an observed
+  silent kill: `leg-c.jsonl` must be non-empty and contain session events
+  (a `system`/`init` event, and/or `assistant` events) with no terminal
+  `result` event, **and** `leg-c.stderr.log` must show no CLI usage or
+  argument error. A zero-byte capture, or a stderr usage error, means the
+  invocation itself failed — fix the invocation and re-run; do not record it
+  as a leg-(c) outcome. Both (i) and (ii) are genuine, recordable outcomes;
+  the question this leg answers is *which* of the two happens, not whether a
+  breach occurs.
 - `blocked — leg-a cascade` — leg (a) never completed, so no headless
   invocation infrastructure exists to exercise the flag against.
 - `documented` — if never exercised for any reason other than the cascade,
@@ -359,11 +389,14 @@ its first event, or start an interactive session and check the `/`
 command list:
 
 ```powershell
-claude -p "<any trivial prompt>" --output-format stream-json --print |
+claude -p "<any trivial prompt>" --output-format stream-json --print --verbose |
   Select-String -Pattern '"type":"system"' | Select-Object -First 1
 ```
 
-If the CLI rejects this combination, add `--verbose` and re-run.
+`--verbose` is mandatory here too: `--print` combined with `--output-format
+stream-json` is rejected outright without it (see leg (a) above). `--model`
+does not need to be pinned for this leg — goal registration is visible in
+`system.init` even in an unpinned-model run.
 
 Inspect the matched line's `slash_commands` array for `goal`.
 

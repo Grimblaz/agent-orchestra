@@ -14,14 +14,26 @@
                              goal-loop protocol's structured status tag
                              (<goal-status>satisfied</goal-status>) AND the
                              claude CLI itself reported a clean, non-error
-                             success subtype.
-      judged-impossible   -- same tag convention, status=impossible.
+                             success subtype, meaning IsError is EXACTLY
+                             $false. IsError $null (indeterminate) never
+                             reaches this branch.
+      judged-impossible   -- same tag convention, status=impossible; the same
+                             IsError -eq $false requirement applies.
       stopped             -- everything else: a `claude` CLI error subtype
                              (error_max_turns, error_during_execution, ...),
-                             an error result with no goal-status tag, or a
+                             an error result with no goal-status tag, a
                              success result that never emitted the tag at all
                              (protocol violation -- treated as an unclassified
-                             stop rather than guessed as satisfied).
+                             stop rather than guessed as satisfied), or an
+                             event whose is_error could not be determined
+                             (IsError $null -- see .OUTPUTS below).
+
+    IsError is TRI-STATE ($true | $false | $null). $null means "could not
+    determine" (the is_error key was absent, or arrived non-Boolean) and is
+    NOT a synonym for $false. Consumers must test `$r.IsError -eq $false`,
+    never `-not $r.IsError` -- the latter coerces the indeterminate state
+    into "no error", which is exactly the fail-open direction this
+    instrument refuses to take.
 
     A malformed line (unparseable JSON -- including a truncated/mid-write
     partial JSONL tail line) or a well-formed non-`result`-type event is
@@ -45,9 +57,19 @@ function Get-GoalProbeStreamJsonResult {
         Parses one raw stream-json line as a terminal `result` event.
     .OUTPUTS
         [pscustomobject] with TotalCostUsd, NumTurns, Outcome
-        ('satisfied'|'judged-impossible'|'stopped'), Subtype, IsError -- or
-        $null when the line is malformed, a partial/truncated tail line, or
-        not a `result`-type event.
+        ('satisfied'|'judged-impossible'|'stopped'), Subtype, and IsError
+        ($true | $false | $null) -- or $null (the whole object) when the line
+        is malformed, a partial/truncated tail line, or not a `result`-type
+        event.
+
+        IsError is tri-state: $true (CLI reported an error), $false (CLI
+        reported no error), or $null meaning UNDETERMINABLE -- the is_error
+        key was absent, or present with a non-Boolean value (e.g. the string
+        "false"). $null is NOT equivalent to $false. Only IsError -eq $false
+        can produce the 'satisfied' (or 'judged-impossible') outcome; an
+        indeterminate event always classifies as 'stopped'. Test explicitly
+        with `-eq $false`; `if (-not $r.IsError)` treats $null as "no error"
+        and reintroduces the fail-open coercion this contract removes.
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -68,11 +90,22 @@ function Get-GoalProbeStreamJsonResult {
         return $null
     }
 
-    if ($null -eq $evt -or $evt['type'] -ne 'result') { return $null }
+    if ($null -eq $evt -or $evt -isnot [System.Collections.IDictionary] -or $evt['type'] -ne 'result') { return $null }
 
     $subtype = [string]$evt['subtype']
-    $isError = [bool]$evt['is_error']
     $resultText = [string]$evt['result']
+
+    # Hostile input for is_error must not silently default to $false --
+    # that is the dangerous fail-open direction (it would classify an
+    # indeterminate event as non-error and let it flow into the
+    # 'satisfied' branch below). A missing key or a non-Boolean value
+    # (e.g. the string "false") degrades to $null, meaning "could not
+    # determine", mirroring this function's established hostile-input
+    # convention for total_cost_usd/num_turns below.
+    $isError = $null
+    if ($evt.ContainsKey('is_error') -and $evt['is_error'] -is [bool]) {
+        $isError = $evt['is_error']
+    }
 
     # Hostile input (e.g. a wrong-typed field, such as total_cost_usd
     # arriving as a JSON object instead of a number) must degrade to $null
@@ -98,7 +131,7 @@ function Get-GoalProbeStreamJsonResult {
     }
 
     $outcome = 'stopped'
-    if (-not $isError -and $subtype -eq 'success' -and -not [string]::IsNullOrEmpty($resultText)) {
+    if ($isError -eq $false -and $subtype -eq 'success' -and -not [string]::IsNullOrEmpty($resultText)) {
         # The documented convention is that the agent closes its FINAL turn
         # with the authoritative status tag; a result string can carry more
         # than one tag-shaped substring (e.g. quoted/echoed earlier text),

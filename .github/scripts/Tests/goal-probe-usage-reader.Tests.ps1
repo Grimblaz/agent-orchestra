@@ -94,6 +94,15 @@ Describe 'Get-GoalProbeLiveUsageReading' {
             $result.Reason | Should -Be 'wrong-event-shape: usage-keys'
         }
 
+        It 'reports usage-unavailable (not usage-present-zero) when usage has only 1 of the 4 canonical keys (partial schema-drift shape, e.g. 3 keys renamed but one survives as a genuine 0)' {
+            $path = Join-Path $TestDrive 'partial-keys-usage.jsonl'
+            $line = '{"type":"assistant","message":{"content":"hi","usage":{"input_tokens":0}}}'
+            Set-Content -LiteralPath $path -Value $line -Encoding utf8
+            $result = Get-GoalProbeLiveUsageReading -TranscriptPath $path
+            $result.State | Should -Be 'usage-unavailable'
+            $result.Reason | Should -Be 'wrong-event-shape: usage-keys'
+        }
+
         It 'reports usage-unavailable (not usage-present-zero) when usage is an empty dict' {
             $path = Join-Path $TestDrive 'empty-dict-usage.jsonl'
             $line = '{"type":"assistant","message":{"content":"hi","usage":{}}}'
@@ -115,6 +124,41 @@ Describe 'Get-GoalProbeLiveUsageReading' {
             $result = Get-GoalProbeLiveUsageReading -TranscriptPath $path
             $result.State | Should -Be 'usage-unavailable'
             $result.Reason | Should -Be 'no-assistant-event'
+        }
+    }
+
+    Context 'non-dictionary transcript line under Set-StrictMode' {
+        # Revert-sensitive coverage for the `$parsed -is [IDictionary]` guard
+        # in the backward scan. Under DEFAULT PowerShell these lines are inert:
+        # indexing a scalar ('hello'['type'], (5)['type']) silently yields
+        # $null, so the `-eq 'assistant'` check already rejects them and
+        # removing the guard changes nothing observable. Under
+        # Set-StrictMode -Version Latest the same expressions THROW. Several
+        # repo lib files set StrictMode, so a strict-scope caller is a real
+        # configuration -- and the only scope where this guard is load-bearing.
+        # Set-StrictMode is dynamically scoped, so setting it in the calling
+        # scriptblock applies inside the function under test.
+
+        It 'reaches a clean no-assistant-event state without throwing when a transcript line is a top-level JSON scalar' {
+            $path = Join-Path $TestDrive 'scalar-lines.jsonl'
+            $lines = @('"hello"', '5', '{"type":"system","subtype":"init"}')
+            Set-Content -LiteralPath $path -Value $lines -Encoding utf8
+            { & { Set-StrictMode -Version Latest; Get-GoalProbeLiveUsageReading -TranscriptPath $path } } | Should -Not -Throw
+            $result = & { Set-StrictMode -Version Latest; Get-GoalProbeLiveUsageReading -TranscriptPath $path }
+            $result.State | Should -Be 'usage-unavailable'
+            $result.Reason | Should -Be 'no-assistant-event'
+            $result.PartialTailDetected | Should -Be $false
+        }
+
+        It 'still finds the last good assistant event past a scalar tail line without throwing' {
+            $path = Join-Path $TestDrive 'scalar-tail.jsonl'
+            $goodLine = '{"type":"assistant","message":{"content":"hi","usage":{"input_tokens":70,"output_tokens":12,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}'
+            $lines = @($goodLine, '"trailing-scalar"')
+            Set-Content -LiteralPath $path -Value $lines -Encoding utf8
+            { & { Set-StrictMode -Version Latest; Get-GoalProbeLiveUsageReading -TranscriptPath $path } } | Should -Not -Throw
+            $result = & { Set-StrictMode -Version Latest; Get-GoalProbeLiveUsageReading -TranscriptPath $path }
+            $result.State | Should -Be 'usage-present-nonzero'
+            $result.LastTurnUsage.input | Should -Be 70
         }
     }
 

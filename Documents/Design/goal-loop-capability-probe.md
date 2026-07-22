@@ -45,7 +45,7 @@ never silently omitted.
 | --- | --- | --- | --- |
 | (a) | headless launch | `observed` | Works, with three hard requirements (below) |
 | (b) | terminal-outcome readability | `observed` (2/3 paths) / **partial gap** | Terminal `result` event parses; `judged-impossible` never produced live |
-| (c) | `--max-budget-usd` breach | `observed` | **Report path** — structured terminal event, not silent kill. **Also surfaced a silent-zero `usage` defect — see [leg (c)](#leg-c--max-budget-usd-breach-behavior)** |
+| (c) | `--max-budget-usd` breach | `observed` | **Report path** — structured terminal event, not silent kill. **Also surfaced a silent-zero `usage` defect — see [leg (c)](#leg-c----max-budget-usd-breach-behavior)** |
 | (d) | `/goal` registration | `observed` | `goal` present in `system/init` `slash_commands` |
 | (e) | supervisor force-halt | **explicit gap** | Not run — see [gaps](#explicit-gaps) |
 | (f) | transcript usage-reader | `observed` (parse) / **partial gap** (live) | Reader validated on real data; live pre-termination poll not exercised |
@@ -166,7 +166,7 @@ assumption, **not** a vendor contract, and the harness must not treat it as one.
 occurs on breach; the answer is (i), the reporting path. The CLI emitted a
 structured terminal event:
 
-```
+```text
 type: result
 subtype: error_max_budget_usd
 is_error: True
@@ -254,8 +254,9 @@ cache_read 840600 / cache_creation 26718` alongside `modelUsage`, both populated
 and mutually consistent.
 
 **Consequence for the harness** — unchanged by the narrowing, because the safe
-practice is the same either way: token accounting should read `modelUsage` /
-`total_cost_usd` and **cross-check** rather than trust `usage` alone. A
+practice is the same either way: token accounting should read token *quantities*
+from `modelUsage` and use `total_cost_usd` only as an independent spend
+**cross-check**, rather than trust `usage` alone. A
 well-formed all-zero `usage` object cannot be assumed truthful on every build, and
 a reader that silently accepts one has no way to tell a real zero from this
 defect. Whether 2.1.150 was buggy or 2.1.216 fixed it is **not established** —
@@ -728,8 +729,8 @@ harness behaviour.
    tokens and real spend. The same shape on 2.1.216 was populated and correct, so
    this is **build-specific evidence, not a standing property** — but a payload
    carries no indication of which behaviour it exhibits, so token accounting
-   should read `modelUsage`/`total_cost_usd` and cross-check rather than trust a
-   well-formed all-zero `usage` object.
+   should read token quantities from `modelUsage` and cross-check against
+   `total_cost_usd` rather than trust a well-formed all-zero `usage` object.
 3. **Per-model usage** — `modelUsage{<model-id>{inputTokens, outputTokens,
    cacheReadInputTokens, cacheCreationInputTokens, costUSD, contextWindow,
    maxOutputTokens}}`. **Keyed by more models than you asked for**: leg (h) pinned
@@ -850,7 +851,8 @@ decisions.
    874-D5 designates the platform `result` event as Arm H's end-of-run token
    accounting source without naming a field. The obvious reading (`result.usage`)
    returned zeros on the 2.1.150 breach run. The harness plan should pin
-   `modelUsage`/`total_cost_usd` with a cross-check, and #848 should consider
+   `modelUsage` as the token-quantity source, with `total_cost_usd` as a
+   cross-check, and #848 should consider
    whether D5's wording needs correcting at the umbrella level. **D5's siting on
    Arm H is fine** — leg (h) confirms Arm H can host a goal loop. *(An
    intermediate draft proposed re-siting D5 onto the interactive arm; that
