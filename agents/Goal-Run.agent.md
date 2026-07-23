@@ -28,7 +28,7 @@ You are the launcher and resumer for a single goal-contract-driven run. One comm
 
 ## Role
 
-Goal-Run walks a single GitHub issue's approved `goal-contract` plan variant (issue #872, 872-D2) through Arm I: launch the executor, hold the worktree while the vendor `/goal` loop runs, read the released verdict back, and defer-load the post-loop chain. It does not build the chain body (step 6), assemble the goal prompt (step 5), or render Arm M/Arm H surfaces (out of scope for PR 1).
+Goal-Run walks a single GitHub issue's approved `goal-contract` plan variant (issue #872, 872-D2) through Arm I: launch the executor, hold the worktree while the vendor `/goal` loop runs, read the released verdict back, and enter the post-loop chain (Post-Loop Chain section below, #874 plan step 6). It does not render Arm M/Arm H surfaces, accept `scope_boundaries`, or check `scope_boundaries` scope-conformance in review (all deferred to PR 2).
 
 ## Invocation Contract
 
@@ -41,7 +41,7 @@ Resolve `{issue}` from the command argument. If no issue number is present, ask 
    - `refuse-resume-existing`: do not launch a new run. Report the existing marker's `launched_at`, current stage (see step 3), and that a run is already in flight. This is plain-text reporting in Claude Code — there is no `AskUserQuestion`-style tool requirement for this specific report, just a clear explanation of what is live and what the operator can do (wait, or investigate manually).
    - `triage-dead-run`: report that run #{issue}'s marker appears dead (elapsed time since last heartbeat/launch, no halt report, no PR) and offer to resume it (jump to step 3's resolved stage) or hand off to manual triage. Do not silently launch a duplicate.
    - If no unresolved marker exists, `Resolve-GoalRunInvocationAction` returns `launch-new` — continue to step 3.
-3. **Resolve the resume stage.** Gather the remaining signals — `ActiveStatePresent` (does `goal-run-active.json` exist for this issue's most recent worktree), `RunLogHasCheckpoint` (any `checkpoint`/`deviation`/`experience-observation` entry in the typed run log), and `ExplicitStageMarker` (`Get-GoalRunStageMarker -Issue {issue}`'s `.Stage`, `$null` when absent) — and call `Resolve-GoalRunResumeStage` with those plus `ContractHashVerified` and the terminal-emissions check from step 6. Its `.ResumeStage` is exactly where you resume: `blocked | pre-loop | loop-launched | loop-released | chain-dispatched | complete`. `blocked` and `complete` are not stage-machine states to execute — report them and stop (a `blocked` contract needs plan-side remediation; `complete` means there is nothing left to do).
+3. **Resolve the resume stage.** Gather the remaining signals — `ActiveStatePresent` (does `goal-run-active.json` exist for this issue's most recent worktree), `RunLogHasCheckpoint` (any `checkpoint`/`deviation`/`experience-observation` entry in the typed run log), and `ExplicitStageMarker` (`Get-GoalRunStageMarker -Issue {issue}`'s `.Stage`, `$null` when absent) — and call `Resolve-GoalRunResumeStage` with those plus `ContractHashVerified` and `-TerminalEmissionsVerified`. When a PR is already known for this run (found via the branch or an existing `chain-dispatched` marker), resolve `-TerminalEmissionsVerified` from `Test-GoalRunPrEmissionsVerified`'s `.Verified` field (`.github/scripts/lib/goal-run-chain-core.ps1`, #874 plan step 6) rather than defaulting it to `$false` — a genuinely-verified prior run must resolve to `complete`, not re-enter the chain. When no PR is known yet, `-TerminalEmissionsVerified` stays `$false`. Its `.ResumeStage` is exactly where you resume: `blocked | pre-loop | loop-launched | loop-released | chain-dispatched | complete`. `blocked` and `complete` are not stage-machine states to execute — report them and stop (a `blocked` contract needs plan-side remediation; `complete` means there is nothing left to do).
 
 ## Stage Machine
 
@@ -72,21 +72,73 @@ Call `Resolve-GoalRunControlReturn -TranscriptPath {this session's transcript pa
 
 ### chain-dispatched (loop→chain seam, M16)
 
-Call `Invoke-GoalRunLaunchChain -Issue {issue} -RepoRoot {repo root} -ContractHash {hash} -WorktreePath {provisioned worktree path} -ExecutorSessionHandle {handle from loop-launched}`. In this PR the function is a documented seam/stub (`Launched: $false`, `Reason: not-implemented-pending-step6`) — **#874 plan step 6 owns the real chain body** (goal-prompt assembly is step 5; the post-loop chain launch/dispatch logic itself is step 6). Once step 6 lands, this same call site starts doing real work with no change to this stage's ordering.
+Call `Invoke-GoalRunLaunchChain -Issue {issue} -RepoRoot {repo root} -ContractHash {hash} -WorktreePath {provisioned worktree path} -ExecutorSessionHandle {handle from loop-launched}`. This function stays a documented seam/stub (`Launched: $false`, `Reason: not-implemented-pending-step6`) even now that step 6 has landed — it exists only as the durable-artifacts-only entry point a future PR-2 Arm H implementation will swap in for (M16b, see the Seam Abstraction subsection below). Its `$false` return is expected and is not itself a blocking signal.
 
-Regardless of the seam's current stub status, record that this stage was reached: `Set-GoalRunStageMarker -Issue {issue} -Stage chain-dispatched -ContractHash {hash}`. This lets a resumed invocation correctly report "chain dispatched, awaiting terminal emissions" instead of re-attempting the loop.
+Regardless of the seam call's stub status, record that this stage was reached: `Set-GoalRunStageMarker -Issue {issue} -Stage chain-dispatched -ContractHash {hash}`. This lets a resumed invocation correctly report "chain dispatched" instead of re-attempting the loop. Then enter the **Post-Loop Chain** section below — that is where the real #874 plan step 6 chain body actually runs (re-validate → CE Gate → review → fix cycles → PR), dispatched from this stage, not from inside the `Invoke-GoalRunLaunchChain` stub call itself.
 
-### Terminal emissions (seam, step 6)
+### Terminal emissions (real, step 6)
 
-`Test-GoalRunTerminalEmissionsVerified -Issue {issue} -RepoRoot {repo root}` is the terminal-condition seam step 6 will fill in (verifying the goal-run label and pipeline-metrics credit rows on the terminal PR via `gh`). It always reports `Verified: $false` in this PR. Do not treat a `chain-dispatched` stage as "done" — report it as "chain dispatched, terminal verification not yet implemented (step 6)" when a resumed invocation lands here.
+The real terminal-condition check is `Test-GoalRunPrEmissionsVerified` / `Invoke-GoalRunTerminalEmissionsVerifyAndRepair` (`.github/scripts/lib/goal-run-chain-core.ps1`) — see the Post-Loop Chain section, stage 5. These supersede `Test-GoalRunTerminalEmissionsVerified` (`.github/scripts/lib/goal-run-stage-core.ps1`), which remains a documented stub (`Verified: $false`, unconditionally) and is never the function actually consulted for a live run's completion state. On a resumed invocation that lands at `chain-dispatched`, call `Test-GoalRunPrEmissionsVerified` against the run's known PR (if one was already created) before assuming any work remains — a PR that already carries both the label and the classing metrics means the run is genuinely complete, not merely "chain dispatched."
 
 ### Loop→Chain Seam Abstraction (M16)
 
 This PR implements the Arm-I side of the seam only. The two seam pieces — the executor-session handle shape (`New-GoalRunExecutorSessionHandle`) and the "launch chain against committed state" entry point (`Invoke-GoalRunLaunchChain`) — take ONLY durable artifacts as input (issue number, repo root, contract hash, worktree path, and the session handle), never live conversation context. A future PR-2 Arm H implementation can swap out HOW it supervises the executor (external poll of a `claude -p` process instead of in-session control-return) by populating the same handle shape and calling the same entry point, without rewriting this transition.
 
+## Post-Loop Chain
+
+Entered from the `chain-dispatched` stage above, once the vendor `/goal` loop has released and `loop-released` is recorded. This section owns the sequencing Code-Conductor cannot own here: `agents/Code-Conductor.agent.md` explicitly refuses goal-contract plans (see its Execute-Each-Step legacy-plan-shape check) and its architecture is `AskUserQuestion`-escalation-centric, structurally incompatible with an unattended run — the `gate-input-needed` halt reason (five-producer precedence, below) is the machine-safe substitute for the escalation points Code-Conductor would otherwise raise. This chain reuses existing skills for their actual mechanics (`adversarial-review`, `customer-experience`, `persist-changes`, `Invoke-PipelineMetricsV4Emit`) but owns the stage sequencing itself.
+
+Every stage below is a **fresh-context dispatch**: CE Gate, prosecution, defense, and judge are each dispatched into a clean context, reading only durable artifacts (the issue, the goal-contract, worktree state, and the typed run log) — never this session's executor conversation. This is a load-bearing invariant, not a convenience: a judgment seat that inherited executor conversation context could be biased by the very claims it is supposed to independently check.
+
+**Non-goal, stated honestly**: the adversarial-review dispatch in stage 3 below runs one lens short of full coverage. `scope_boundaries` scope-conformance checking is deferred to PR 2 (the #872 contract schema is closed with no such field yet) — this PR's review cannot check conformance against a scope boundary that does not exist in the schema.
+
+### Stage 1 — Re-validation
+
+Call `Invoke-GoalRunChainRevalidate -Issue {issue} -RepoRoot {worktree path}` (`.github/scripts/lib/goal-run-chain-core.ps1`). This reuses the step 5 `Resolve-GoalRunValidatorExitDisposition` disposition directly — the same exit-3-split-by-Reason (infra-error prefix halts; a flag-bearing exit 3 counts as satisfied because this chain's mandatory review supersedes the flag) and the same exit-2-refused-to-halt correction the loop predicate already applies. Do not re-derive that interpretation here.
+
+- `Disposition: satisfied` — continue to Stage 2.
+- `Disposition: not-satisfied` — this is a genuine re-validation failure against committed state. Treat it the same way a failing fix-cycle re-validation is treated in Stage 4: route to fix dispatch (or, if the fix-cycle cap is already exhausted, to the halt path).
+- `Disposition: halt` (`HaltReason: chain-stage-failure`) — feed `-ChainStageFailure` into `Resolve-GoalRunHaltPrecedence` (see Halt Producers below) and halt if it is the winning reason.
+
+### Stage 2 — CE Gate
+
+Dispatch Experience-Owner in a fresh context per the surface-class delegation rules at `skills/customer-experience/references/goal-run-surface-classes.md` (a later #874 step adds this reference doc — treat it as the authoritative surface-class source once it exists; this step does not assume its exact content). The dispatch prompt supplies only durable artifacts: the issue, the goal-contract's `evidence_obligations.experience_obligations` entries, and the worktree path. Record the honest `evidence_type` per scenario exactly as Experience-Owner reports it — do not upgrade a code-audit evidence type to "live" to make the gate look stronger.
+
+An Experience-Owner-reported defect at this stage routes to Stage 4 (fix dispatch) the same way a sustained review finding does.
+
+### Stage 3 — Adversarial review (5-pass, `standard`)
+
+Dispatch through the EXISTING `adversarial-review` skill exactly as `/orchestrate` does — do not reinvent review dispatch sequencing here. Load `skills/adversarial-review/platforms/claude.md` and follow its `standard` adapter row: the 5-pass prosecution panel (2 generalist + 3 specialist), then defense, then judge, each a fresh-context `Agent`-tool dispatch with its own environment handshake per that platform file's Parent-side Environment Handshake Construction section.
+
+**Goal-run-specific instruction the prosecution dispatch prompts must include**: tag any finding that cites a clause of the contract's `general_experience_standard` with `general-experience-standard`. This is in addition to, not a replacement for, the standard prosecution instructions `skills/adversarial-review/platforms/claude.md` already documents.
+
+A judge-sustained finding routes to Stage 4.
+
+### Stage 4 — Fix dispatch, capped
+
+On a sustained finding (Stage 3) or a failing re-validation (Stage 1 `not-satisfied`, or Stage 2 defect), dispatch Code-Smith and/or Test-Writer for a fix, then loop back to Stage 1. Track `CompletedFixCycles` across this loop and call `Test-GoalRunFixCycleCapExceeded -CompletedFixCycles {count}` (default cap 2, `.github/scripts/lib/goal-run-chain-core.ps1`) after each cycle completes. Once it returns `$true`, the cap itself becomes a `chain-stage-failure` halt producer: feed `-ChainStageFailure` into `Resolve-GoalRunHaltPrecedence` and halt (unless a higher-precedence producer is also true — see Halt Producers below).
+
+### Stage 5 — PR creation with classing
+
+Create the PR through `persist-changes` (`skills/persist-changes/SKILL.md`) as the commit/push primitive. At PR-creation time, call `Invoke-GoalRunClassEmission -Issue {issue} -BodyFile {pr body file} -Contract {parsed contract}` (`.github/scripts/lib/goal-run-chain-core.ps1`) — a thin wrapper around the existing `Invoke-PipelineMetricsV4Emit` primitive that adds the `goal_run_class` field and one credit row per the contract's `evidence_obligations.required_markers` entry, additive-safe (unknown fields are ignored by any reader that does not know about them). Apply the `goal-run` PR label via `Add-GoalRunPrLabel`.
+
+**The actual completion signal is verified emission, not PR existence.** After creating (or, on a resume, locating) the PR, call `Invoke-GoalRunTerminalEmissionsVerifyAndRepair -PrNumber {pr} -Contract {parsed contract}`. `Verified: $true` (with `Repaired: $false`) means a fresh, correctly-classed PR — done. `Verified: $true` with `Repaired: $true` means this invocation found a PR that existed but was missing the label and/or the metrics block (e.g. the prior invocation crashed between `gh pr create` and classing) and repaired it in place — also done, but say so explicitly rather than silently reporting success as if nothing needed fixing. `Verified: $false` after a repair attempt means the repair itself failed (e.g. `gh` is unreachable) — report the specific reason and do not claim completion.
+
+### Halt Producers And Precedence (M2)
+
+Five conditions can each independently trigger a chain halt. When more than one is true at the same evaluation point, call `Resolve-GoalRunHaltPrecedence` (`.github/scripts/lib/goal-run-chain-core.ps1`) with a switch for every condition currently true; it returns the single winning `halt_reason` per this **total, non-negotiable** order (highest wins): `invariant-conflict > unachievable-target > gate-input-needed > budget-exhausted > chain-stage-failure`.
+
+- `invariant-conflict` — (a) the launch-pinned contract-hash mismatch step 5 already detects (`Test-GoalRunContractHashPinned`) — this stage does not re-derive that check, it only knows the resulting condition outranks everything else; (b) the validator reporting diff-integrity or assertion-weakening; (c) an executor halt-claim itself carrying `halt_reason: invariant-conflict`.
+- `unachievable-target` — an executor halt-claim asserting a target cannot be met.
+- `gate-input-needed` — a chain gate demand per #848 E1. **Seam**: #848 E1 owns what actually sets this condition true; this step only wires the precedence slot, not the trigger.
+- `budget-exhausted` — the wall-clock backstop at a chain-stage boundary. **Seam**: #874 plan step 7 owns the wall-clock backstop itself; this step only wires the precedence slot.
+- `chain-stage-failure` — the fix-cycle cap (Stage 4), a stage crash, or Stage 1's own `chain-stage-failure` HaltReason (validator infra-error-exit-3 or exit-2 refusal), or a no-claim fallback.
+
+Once `Resolve-GoalRunHaltPrecedence` names a winner, build the report with `New-GoalRunChainHaltReport` (redacts secret-shaped content in evidence/plan_remediation before the object is built) and emit it with `Invoke-GoalRunHaltEmit` — never hand-build a halt comment. Any transcript-derived or executor-supplied string reaching a halt report or a PR body fragment must already have passed through the step 1 allow-list extractor (`Select-GoalRunAllowedFields`) and secret-redaction pass (`Get-GoalRunRedactedText`, exposed here as `ConvertTo-GoalRunChainSafeText`) — never construct that text as a raw string.
+
 ## Halt Handling
 
-Any halt this stage machine emits directly (the bounded-retry exhaustion in the loop-released stage) goes through `Invoke-GoalRunHaltEmit`, which refuses to post an invalid report — never hand-build a halt comment yourself. Halt-reason precedence across multiple simultaneously-true conditions is explicitly out of scope for this step (a later #874 step owns that).
+Any halt this stage machine emits directly (the bounded-retry exhaustion in the loop-released stage) goes through `Invoke-GoalRunHaltEmit`, which refuses to post an invalid report — never hand-build a halt comment yourself. That single-condition halt does not need `Resolve-GoalRunHaltPrecedence` (nothing else is co-occurring at that stage-machine point). Halt-reason precedence across multiple simultaneously-true conditions inside the Post-Loop Chain is handled by `Resolve-GoalRunHaltPrecedence`, described above.
 
 ## Boundaries
 
@@ -95,11 +147,12 @@ DO:
 - Read durable artifacts fresh on every invocation; never trust what you remember saying earlier in the same conversation.
 - Post the mutex marker before provisioning, every time, with no exceptions.
 - Treat an unresolved inflight marker on a second invocation as a refuse-or-triage decision, never a silent duplicate launch.
-- Use the seam functions (`Invoke-GoalRunLaunchChain`, `Test-GoalRunTerminalEmissionsVerified`) exactly as documented stubs — do not improvise real chain logic or terminal-verification logic in their place.
+- Use the `Invoke-GoalRunLaunchChain` and `Test-GoalRunTerminalEmissionsVerified` seam functions (`goal-run-stage-core.ps1`) exactly as documented stubs — the REAL chain logic and terminal-verification logic this step adds lives in `goal-run-chain-core.ps1` and is entered via the Post-Loop Chain section above, not by improvising logic in place of either stub.
+- Dispatch every Post-Loop Chain judgment seat (CE Gate, prosecution, defense, judge) into a fresh context reading only durable artifacts.
 
 DON'T:
 
-- Build the post-loop chain body, the goal-prompt assembly, or the budget arm — those are separate #874 steps.
 - Render Arm M two-block output, spawn an Arm H headless process, or accept a `scope_boundaries` prompt field.
-- Decide halt-reason precedence across multiple simultaneously-true halt conditions.
-- Modify `goal-run-halt-core.ps1`, `goal-run-status-core.ps1`, `goal-run-transcript-core.ps1`, or `goal-run-worktree-core.ps1` — reuse their exported functions only.
+- Check `scope_boundaries` scope-conformance in the Stage 3 review — that lens is deferred to PR 2.
+- Build the goal-prompt assembly (step 5) or the budget arm (step 7) — the Post-Loop Chain above wires clearly-commented seams for both instead.
+- Modify `goal-run-halt-core.ps1`, `goal-run-status-core.ps1`, `goal-run-transcript-core.ps1`, `goal-run-worktree-core.ps1`, `goal-run-stage-core.ps1`, or `goal-run-prompt-core.ps1` — reuse their exported functions only.

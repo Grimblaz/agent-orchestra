@@ -100,7 +100,11 @@ jobs:
             '.github/scripts/Tests/goal-run-stage-core.Tests.ps1',
             # goal-run harness prompt assembly + launch-pinned loop
             # predicate — issue #874 plan step 5
-            '.github/scripts/Tests/goal-run-prompt-core.Tests.ps1'
+            '.github/scripts/Tests/goal-run-prompt-core.Tests.ps1',
+            # goal-run harness post-loop chain: re-validation reuse, the
+            # five-halt-producer total precedence, PR classing, and
+            # verified-emission + repair — issue #874 plan step 6
+            '.github/scripts/Tests/goal-run-chain-core.Tests.ps1'
           )
           $config.Run.Exit = $true
           $config.Output.Verbosity = 'Detailed'
