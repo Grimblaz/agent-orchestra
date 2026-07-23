@@ -168,6 +168,114 @@ Describe 'Resolve-GoalRunValidatorExitDisposition' -Tag 'unit' {
         $result = Resolve-GoalRunValidatorExitDisposition -ExitCode 99 -Reason $null
         $result.Disposition | Should -Be 'halt'
     }
+
+    Context 'M23: exit-3-with-lost-Reason must fail closed, not open' {
+
+        It 'still resolves an exit 3 with no Reason to satisfied when -ParseFailed is NOT set (case a: a legitimate flag-bearing verdict that genuinely omits Reason -- unregressed)' {
+            $result = Resolve-GoalRunValidatorExitDisposition -ExitCode 3 -Reason $null
+            $result.Disposition | Should -Be 'satisfied'
+        }
+
+        It 'resolves an exit 3 with no Reason to halt when -ParseFailed IS set (case b: the subprocess output could not be parsed, Reason was lost -- fails closed instead of open)' {
+            $result = Resolve-GoalRunValidatorExitDisposition -ExitCode 3 -Reason $null -ParseFailed
+            $result.Disposition | Should -Be 'halt'
+            $result.Disposition | Should -Not -Be 'satisfied'
+        }
+
+        It 'does not let -ParseFailed override an infra-error-prefixed Reason (already halts for a different, more specific reason)' {
+            $result = Resolve-GoalRunValidatorExitDisposition -ExitCode 3 -Reason 'infra-error: worktree session threw' -ParseFailed
+            $result.Disposition | Should -Be 'halt'
+            $result.Reason | Should -Match 'infra-error:'
+        }
+
+        It 'does not let -ParseFailed affect a flag-bearing exit 3 that DOES carry a Reason (only the null-Reason ambiguity is in scope)' {
+            $result = Resolve-GoalRunValidatorExitDisposition -ExitCode 3 -Reason 'review-required: mandatory-review flags present (see Flags)' -ParseFailed
+            $result.Disposition | Should -Be 'satisfied'
+        }
+    }
+}
+
+Describe 'Invoke-GoalRunValidatorProcess: ParseFailed signal (M23)' -Tag 'unit' {
+    # These exercise the REAL subprocess-invocation function (dot-sourced
+    # into this test scope, callable without the `script:` prefix once
+    # dot-sourced -- mirrored from the production call sites in this same
+    # file and in goal-run-chain-core.ps1) against small fixture "validator"
+    # scripts, rather than injecting a fake result object -- proving the
+    # ParseFailed signal is actually produced at the source, not merely
+    # plumbed through downstream.
+
+    It 'reports ParseFailed = $true and Reason = $null when the subprocess produces no output at all (exit 3)' {
+        $fakeValidator = Join-Path $TestDrive 'fake-validator-no-output.ps1'
+        Set-Content -LiteralPath $fakeValidator -Value 'exit 3' -Encoding utf8
+
+        $result = Invoke-GoalRunValidatorProcess -Issue 874 -RepoRoot $script:RepoRoot -PwshCliPath 'pwsh' -ValidatorScriptPath $fakeValidator
+
+        $result.ExitCode | Should -Be 3
+        $result.Reason | Should -BeNullOrEmpty
+        $result.ParseFailed | Should -Be $true
+    }
+
+    It 'reports ParseFailed = $true and Reason = $null when the subprocess output cannot be parsed as JSON (exit 3)' {
+        $fakeValidator = Join-Path $TestDrive 'fake-validator-malformed.ps1'
+        Set-Content -LiteralPath $fakeValidator -Value "Write-Output 'not valid json at all {{{'; exit 3" -Encoding utf8
+
+        $result = Invoke-GoalRunValidatorProcess -Issue 874 -RepoRoot $script:RepoRoot -PwshCliPath 'pwsh' -ValidatorScriptPath $fakeValidator
+
+        $result.ExitCode | Should -Be 3
+        $result.Reason | Should -BeNullOrEmpty
+        $result.ParseFailed | Should -Be $true
+    }
+
+    It 'reports ParseFailed = $false when the subprocess output is well-formed JSON that genuinely omits Reason (exit 3, case a -- legitimate flag-bearing verdict)' {
+        $fakeValidator = Join-Path $TestDrive 'fake-validator-wellformed-no-reason.ps1'
+        $fakeContent = @'
+Write-Output '{"Flags":["worktree-dirt"]}'
+exit 3
+'@
+        Set-Content -LiteralPath $fakeValidator -Value $fakeContent -Encoding utf8
+
+        $result = Invoke-GoalRunValidatorProcess -Issue 874 -RepoRoot $script:RepoRoot -PwshCliPath 'pwsh' -ValidatorScriptPath $fakeValidator
+
+        $result.ExitCode | Should -Be 3
+        $result.Reason | Should -BeNullOrEmpty
+        $result.ParseFailed | Should -Be $false
+    }
+
+    It 'reports ParseFailed = $false and the parsed Reason when the subprocess output is well-formed JSON carrying a Reason' {
+        $fakeValidator = Join-Path $TestDrive 'fake-validator-wellformed-with-reason.ps1'
+        $fakeContent = @'
+Write-Output '{"Reason":"review-required: mandatory-review flags present"}'
+exit 3
+'@
+        Set-Content -LiteralPath $fakeValidator -Value $fakeContent -Encoding utf8
+
+        $result = Invoke-GoalRunValidatorProcess -Issue 874 -RepoRoot $script:RepoRoot -PwshCliPath 'pwsh' -ValidatorScriptPath $fakeValidator
+
+        $result.ExitCode | Should -Be 3
+        $result.Reason | Should -Be 'review-required: mandatory-review flags present'
+        $result.ParseFailed | Should -Be $false
+    }
+}
+
+Describe 'Resolve-GoalRunLoopPredicate: M23 ParseFailed pass-through' -Tag 'unit' {
+
+    BeforeAll {
+        $script:M23PinnedHash = ('a' * 64)
+    }
+
+    It 'halts (fails closed) when the validator invoker result carries ParseFailed=$true on an exit-3/null-Reason result' {
+        $pinCheck = { param($Issue, $LaunchPinnedHash, $Marker, $RepoRoot, $Repo, $GhCliPath, $GitCliPath) [pscustomobject]@{ Pinned = $true; Reason = $null; LiveHash = $LaunchPinnedHash } }
+        $invoker = { param($Issue, $RepoRoot, $PwshCliPath, $ValidatorScriptPath) [pscustomobject]@{ ExitCode = 3; Reason = $null; ParseFailed = $true } }
+        $result = Resolve-GoalRunLoopPredicate -Issue 874 -RepoRoot 'C:\gr-874-token' -LaunchPinnedHash $script:M23PinnedHash -PinCheck $pinCheck -ValidatorInvoker $invoker
+        $result.Disposition | Should -Be 'halt'
+    }
+
+    It 'stays satisfied when the validator invoker result carries no ParseFailed property at all (pre-fix test doubles are not regressed)' {
+        $pinCheck = { param($Issue, $LaunchPinnedHash, $Marker, $RepoRoot, $Repo, $GhCliPath, $GitCliPath) [pscustomobject]@{ Pinned = $true; Reason = $null; LiveHash = $LaunchPinnedHash } }
+        $invoker = { param($Issue, $RepoRoot, $PwshCliPath, $ValidatorScriptPath) [pscustomobject]@{ ExitCode = 3; Reason = $null } }
+        $result = Resolve-GoalRunLoopPredicate -Issue 874 -RepoRoot 'C:\gr-874-token' -LaunchPinnedHash $script:M23PinnedHash -PinCheck $pinCheck -ValidatorInvoker $invoker
+        $result.Disposition | Should -Be 'satisfied'
+    }
 }
 
 Describe 'Test-GoalRunContractHashPinned' -Tag 'unit' {

@@ -62,9 +62,9 @@
     the failure mode diagnosable via evidence[]/plan_remediation text that
     names the exact condition ("goal_status verdict did not appear in
     transcript within N retries after loop completion") rather than a
-    generic "chain failed" string -- satisfying the requirement contract's
+    generic "chain failed" string -- satisfying the requirement contract
     "not silently folded into a generic bucket" instruction within the
-    schema's closed-enum constraint.
+    schema closed-enum constraint.
 #>
 
 . (Join-Path $PSScriptRoot 'goal-run-status-core.ps1')
@@ -84,11 +84,11 @@ function Resolve-GoalRunResumeStage {
         /goal-run invocation can observe, returns the first incomplete
         stage to resume at.
     .DESCRIPTION
-        Precedence (highest wins, mirrors the requirement contract's
+        Precedence (highest wins, mirrors the requirement contract
         "durable state it reads, in stage order"):
           1. -ContractHashVerified = $false -> 'blocked' (cannot run at all)
           2. -TerminalEmissionsVerified = $true -> 'complete'
-          3. -ExplicitStageMarker (the goal-run-stage-{Issue} marker's
+          3. -ExplicitStageMarker (the goal-run-stage-{Issue} marker
              latest recorded value) -- authoritative when present
           4. -RunLogHasCheckpoint -- a checkpoint/deviation/experience-
              observation entry proves the loop ran even without an
@@ -214,8 +214,8 @@ function Get-GoalRunIssueComments {
     <#
     .SYNOPSIS
         Raw `gh issue view --json comments` wrapper, mirroring the list step
-        inside find-or-upsert-comment.ps1's Find-OrUpsertComment but exposed
-        standalone so goal-run-stage-core.ps1's readers do not have to POST
+        inside find-or-upsert-comment.ps1 Find-OrUpsertComment but exposed
+        standalone so goal-run-stage-core.ps1 readers do not have to POST
         or PATCH just to list. Fail-open: returns an empty array (never
         throws) on any gh/parse failure.
     #>
@@ -288,7 +288,7 @@ function Set-GoalRunStageMarker {
         [string]$Repo
     )
 
-    # Dot-sourced lazily -- mirrors goal-run-halt-core.ps1's
+    # Dot-sourced lazily -- mirrors the goal-run-halt-core.ps1
     # Invoke-GoalRunHaltEmit convention -- so pure-decision callers/tests in
     # this file never need the comment-posting lib loaded.
     . (Join-Path $PSScriptRoot 'find-or-upsert-comment.ps1')
@@ -582,8 +582,8 @@ function Test-GoalRunInflightAppearsDead {
     <#
     .SYNOPSIS
         An inflight marker with no terminal outcome (no halt report, no PR)
-        is a first-class detectable state. Pure given the caller's already-
-        fetched evidence -- no gh/git calls here.
+        is a first-class detectable state. Pure given the already-fetched
+        evidence the caller supplies -- no gh/git calls here.
     .OUTPUTS
         [pscustomobject]@{ AppearsDead; Reason; ElapsedMinutes; LastSeenAt }
     #>
@@ -683,11 +683,16 @@ function Invoke-GoalRunAwaitStatusVerdict {
         [Parameter(Mandatory)][string]$TranscriptPath,
         [int]$MaxRetries = 5,
         [int]$RetryDelayMs = 2000,
-        [scriptblock]$StatusReader = { param($Path) Get-GoalRunStatusEvent -TranscriptPath $Path }
+        # M15 fix: threaded through to Get-GoalRunStatusEvent so a stale
+        # met:true event left over from an earlier goal in the same
+        # transcript file cannot falsely release THIS run. Optional --
+        # omitted, this preserves pre-fix behavior (no binding).
+        [string]$LaunchedAt,
+        [scriptblock]$StatusReader = { param($Path, $LaunchedAtArg) Get-GoalRunStatusEvent -TranscriptPath $Path -LaunchedAt $LaunchedAtArg }
     )
 
     for ($attempt = 1; $attempt -le $MaxRetries; $attempt++) {
-        $evt = & $StatusReader $TranscriptPath
+        $evt = & $StatusReader $TranscriptPath $LaunchedAt
         if ($evt -and $evt.State -eq 'present-met-true') {
             return [pscustomobject]@{ Outcome = 'released'; Event = $evt.Event; Attempts = $attempt }
         }
@@ -706,7 +711,7 @@ function Resolve-GoalRunControlReturn {
         goal_status verdict -> caller launches the chain. On retry
         exhaustion, emits a distinct diagnostic halt via
         Invoke-GoalRunHaltEmit rather than a generic chain-stage-failure --
-        see this file's header .NOTES on the closed halt_reason enum.
+        see this file header .NOTES on the closed halt_reason enum.
     .OUTPUTS
         [pscustomobject]@{ Outcome; Event; Attempts; HaltResult }
         Outcome is one of: 'released' | 'halted-verdict-not-flushed'.
@@ -719,12 +724,18 @@ function Resolve-GoalRunControlReturn {
         [Parameter(Mandatory)][string]$RepoRoot,
         [int]$MaxRetries = 5,
         [int]$RetryDelayMs = 2000,
-        [scriptblock]$StatusReader = { param($Path) Get-GoalRunStatusEvent -TranscriptPath $Path },
+        # M15 fix: pass-through to Invoke-GoalRunAwaitStatusVerdict/
+        # Get-GoalRunStatusEvent -- the current run launch timestamp,
+        # available from the goal-run-active.json launched_at field via
+        # Get-GoalRunActiveState. Optional -- omitted, this preserves
+        # pre-fix behavior (no stale-release binding).
+        [string]$LaunchedAt,
+        [scriptblock]$StatusReader = { param($Path, $LaunchedAtArg) Get-GoalRunStatusEvent -TranscriptPath $Path -LaunchedAt $LaunchedAtArg },
         [string]$Owner,
         [string]$Repo
     )
 
-    $await = Invoke-GoalRunAwaitStatusVerdict -TranscriptPath $TranscriptPath -MaxRetries $MaxRetries -RetryDelayMs $RetryDelayMs -StatusReader $StatusReader
+    $await = Invoke-GoalRunAwaitStatusVerdict -TranscriptPath $TranscriptPath -MaxRetries $MaxRetries -RetryDelayMs $RetryDelayMs -LaunchedAt $LaunchedAt -StatusReader $StatusReader
 
     if ($await.Outcome -eq 'released') {
         return [pscustomobject]@{ Outcome = 'released'; Event = $await.Event; Attempts = $await.Attempts; HaltResult = $null }
@@ -766,7 +777,7 @@ function New-GoalRunExecutorSessionHandle {
     <#
     .SYNOPSIS
         The executor-session handle shape (M16a): whatever session identity
-        data is needed to poll/read that session's transcript. Arm I
+        data is needed to poll/read that session transcript. Arm I
         populates this from the current in-session executor; a future PR-2
         Arm H implementation can populate the SAME shape from an externally
         polled `claude -p` process instead, without changing any consumer

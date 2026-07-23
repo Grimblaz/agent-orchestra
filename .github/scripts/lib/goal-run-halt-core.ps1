@@ -13,7 +13,7 @@
       Test-GoalRunHaltReport -Report <object> -RepoRoot <string>
         Never throws. Validates -Report against
         skills/goal-run/schemas/goal-halt-report.schema.json (closed schema)
-        via Test-Json, mirroring goal-contract-core.ps1's
+        via Test-Json, mirroring the goal-contract-core.ps1
         ConvertFrom-GCContractBlock validation step. Returns
         [pscustomobject]@{ IsValid; Violations }.
 
@@ -28,6 +28,18 @@
         backtick-wrapping ALONE does not neutralize a raw-text marker scan --
         the delimiter substrings must actually be removed, which is what this
         function does.
+
+        M2 fix: a single, non-re-scanning strip pass is exploitable by a
+        constructed reassembly input -- e.g. `<!<!----plan-issue-1---->>`
+        reassembles into a fully-formed `<!-- plan-issue-1 -->` after one
+        pass strips the interior `<!--`/`-->` occurrence and the leftover
+        prefix/suffix characters rejoin into a fresh marker. This function
+        now loops the strip to a fixpoint (re-scanning the output of the
+        previous pass until it stops changing), bounded by a max-iteration
+        safety cap so a pathological nested input cannot spin forever. If
+        the text still looks like it carries a live marker after the cap is
+        reached, this fails SAFE and returns a fixed placeholder rather than
+        ever handing back unstripped/partially-stripped content.
 
       New-GoalRunHaltCommentBody -Report <object> -Issue <int>
         Renders the halt-report as a GitHub comment body headed by a
@@ -96,6 +108,9 @@ function Test-GoalRunHaltReport {
     return [pscustomobject]@{ IsValid = $true; Violations = @() }
 }
 
+$script:GoalRunInertRenderMaxIterations = 10
+$script:GoalRunInertRenderFailSafePlaceholder = '[INERT-RENDER-FAILED: residual marker delimiter after strip cap]'
+
 function ConvertTo-GoalRunInertEvidenceText {
     [CmdletBinding()]
     [OutputType([string])]
@@ -103,7 +118,29 @@ function ConvertTo-GoalRunInertEvidenceText {
         [Parameter(Mandatory)][AllowEmptyString()][string]$Text
     )
 
-    return ($Text -replace '<!--\s*', '' -replace '\s*-->', '')
+    # M2 fix: loop the strip to a fixpoint instead of a single pass. A
+    # single pass is exploitable by a reassembly input (see the function
+    # header .DESCRIPTION note above) where the leftover prefix/suffix
+    # characters left behind by removing ONE match rejoin into a fresh,
+    # fully-formed marker. Re-scanning the previous pass output until it
+    # stops changing closes that gap. The iteration count is bounded so a
+    # pathological, deeply-nested adversarial input cannot spin forever.
+    $current = $Text
+    for ($i = 0; $i -lt $script:GoalRunInertRenderMaxIterations; $i++) {
+        $stripped = ($current -replace '<!--\s*', '') -replace '\s*-->', ''
+        if ($stripped -eq $current) {
+            return $stripped
+        }
+        $current = $stripped
+    }
+
+    # Cap reached without converging. Fail SAFE: never hand back content
+    # that still looks like it carries a live marker delimiter.
+    if (($current -match '<!--') -or ($current -match '-->')) {
+        return $script:GoalRunInertRenderFailSafePlaceholder
+    }
+
+    return $current
 }
 
 function New-GoalRunHaltCommentBody {
@@ -121,6 +158,12 @@ function New-GoalRunHaltCommentBody {
         }
     }
     $inertRemediation = ConvertTo-GoalRunInertEvidenceText -Text ([string]$Report.plan_remediation)
+    # M3 fix: target_ref and recommended_next_owner are contract/executor-
+    # sourced (untrusted) exactly like evidence/plan_remediation, but were
+    # previously rendered raw below with no inert-render call at all --
+    # route them through the SAME barrier the other fields already use.
+    $inertTargetRef = ConvertTo-GoalRunInertEvidenceText -Text ([string]$Report.target_ref)
+    $inertRecommendedNextOwner = ConvertTo-GoalRunInertEvidenceText -Text ([string]$Report.recommended_next_owner)
 
     $evidenceBlock = if ($inertEvidence.Count -gt 0) {
         (($inertEvidence | ForEach-Object { "- $_" })) -join "`n"
@@ -137,8 +180,8 @@ function New-GoalRunHaltCommentBody {
         "- **stage**: $($Report.stage)",
         "- **arm**: $($Report.arm)",
         "- **claim_provenance**: $($Report.claim_provenance)",
-        "- **target_ref**: $($Report.target_ref)",
-        "- **recommended_next_owner**: $($Report.recommended_next_owner)",
+        "- **target_ref**: $inertTargetRef",
+        "- **recommended_next_owner**: $inertRecommendedNextOwner",
         '',
         "**Plan remediation**: $inertRemediation",
         '',

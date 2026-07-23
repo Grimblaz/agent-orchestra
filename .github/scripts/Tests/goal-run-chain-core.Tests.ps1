@@ -119,6 +119,23 @@ Describe 'Invoke-GoalRunChainRevalidate: reuses the step 5 disposition function'
         $result.Disposition | Should -Be 'satisfied'
         $script:chainInvokerCallCount2 | Should -Be 1
     }
+
+    # -----------------------------------------------------------------------
+    # M23 fix: ParseFailed pass-through -- lost-Reason-on-exit-3 fails closed
+    # -----------------------------------------------------------------------
+
+    It 'M23: halts (fails closed) when the validator invoker result carries ParseFailed=$true on an exit-3/null-Reason result' {
+        $invoker = { param($Issue, $RepoRoot, $PwshCliPath, $ValidatorScriptPath) [pscustomobject]@{ ExitCode = 3; Reason = $null; ParseFailed = $true } }
+        $result = Invoke-GoalRunChainRevalidate -Issue 874 -RepoRoot 'C:\gr-874-token' -LaunchPinnedHash $script:PinnedHash -PinCheck $script:MatchingPinCheck -ValidatorInvoker $invoker
+        $result.Disposition | Should -Be 'halt'
+        $result.HaltReason | Should -Be 'chain-stage-failure'
+    }
+
+    It 'M23: stays satisfied when the validator invoker result carries no ParseFailed property at all (pre-fix test doubles are not regressed)' {
+        $invoker = { param($Issue, $RepoRoot, $PwshCliPath, $ValidatorScriptPath) [pscustomobject]@{ ExitCode = 3; Reason = $null } }
+        $result = Invoke-GoalRunChainRevalidate -Issue 874 -RepoRoot 'C:\gr-874-token' -LaunchPinnedHash $script:PinnedHash -PinCheck $script:MatchingPinCheck -ValidatorInvoker $invoker
+        $result.Disposition | Should -Be 'satisfied'
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -279,6 +296,25 @@ Describe 'New-GoalRunChainHaltReport' -Tag 'unit' {
         $report = New-GoalRunChainHaltReport -Issue 874 -HaltReason 'invariant-conflict' -Stage 'validate' -PlanRemediation 'token: LiveSecretValue987654 leaked in the executor claim' -Evidence @('api_key: LiveSecretValue987654 appeared in the transcript')
         $report.plan_remediation | Should -Not -Match 'LiveSecretValue987654'
         $report.evidence[0] | Should -Not -Match 'LiveSecretValue987654'
+    }
+
+    It 'M3: redacts secret-shaped content in target_ref before the report object is built' {
+        $report = New-GoalRunChainHaltReport -Issue 874 -HaltReason 'unachievable-target' -Stage 'validate' -PlanRemediation 'Escalate to a human reviewer.' -TargetRef 'token: LiveSecretValue987654 was the target id'
+        $report.target_ref | Should -Not -Match 'LiveSecretValue987654'
+        $report.target_ref | Should -Match '\[REDACTED:kv-secret-assignment\]'
+    }
+
+    It 'M3: redacts secret-shaped content in recommended_next_owner before the report object is built' {
+        $report = New-GoalRunChainHaltReport -Issue 874 -HaltReason 'unachievable-target' -Stage 'validate' -PlanRemediation 'Escalate to a human reviewer.' -RecommendedNextOwner 'token: LiveSecretValue987654 owns this'
+        $report.recommended_next_owner | Should -Not -Match 'LiveSecretValue987654'
+        $report.recommended_next_owner | Should -Match '\[REDACTED:kv-secret-assignment\]'
+    }
+
+    It 'M3: preserves a $null target_ref (schema-legal for halt reasons with no single target) rather than coercing it to an empty/redacted string' {
+        $report = New-GoalRunChainHaltReport -Issue 874 -HaltReason 'budget-exhausted' -Stage 'loop' -PlanRemediation 'Increase the wall-clock budget.' -Evidence @('ceiling reached')
+        $report.target_ref | Should -BeNullOrEmpty
+        $validation = Test-GoalRunHaltReport -Report $report -RepoRoot $script:RepoRoot
+        $validation.IsValid | Should -Be $true -Because ($validation.Violations -join '; ')
     }
 }
 

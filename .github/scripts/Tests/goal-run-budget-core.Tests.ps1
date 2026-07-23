@@ -300,6 +300,21 @@ Describe 'Get-GoalRunSessionTokenAccounting' -Tag 'unit' {
         $result.TotalCostUsd | Should -Be 0.0335877
     }
 
+    It 'M20: redacts a secret-shaped modelUsage key before returning it in ModelUsageKeys' {
+        $path = Join-Path $TestDrive 'secret-shaped-model-key-result.jsonl'
+        # modelUsage keys are free-form transcript-derived strings read
+        # straight off the terminal result event, with no allow-list
+        # filtering upstream (unlike goal_status.condition/reason) -- a
+        # secret-shaped key must still be redacted before it is ever
+        # returned.
+        $line = '{"type":"result","subtype":"success","total_cost_usd":0.01,"usage":{"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0},"modelUsage":{"api_key: LiveSecretValue987654":{"inputTokens":5,"outputTokens":5,"cacheReadInputTokens":0,"cacheCreationInputTokens":0}}}'
+        Set-Content -LiteralPath $path -Value $line -Encoding utf8
+
+        $result = Get-GoalRunSessionTokenAccounting -TranscriptPath $path
+        ($result.ModelUsageKeys -join '|') | Should -Not -Match 'LiveSecretValue987654'
+        ($result.ModelUsageKeys -join '|') | Should -Match '\[REDACTED:kv-secret-assignment\]'
+    }
+
     It 'sums ALL modelUsage keys, including an unrequested secondary model, dropping neither' {
         $path = Join-Path $TestDrive 'multi-model-result.jsonl'
         $line = '{"type":"result","subtype":"success","total_cost_usd":0.5159808,"usage":{"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0},"modelUsage":{"claude-sonnet-5":{"inputTokens":100,"outputTokens":200,"cacheReadInputTokens":10,"cacheCreationInputTokens":5},"claude-haiku-4-5-20251001":{"inputTokens":7,"outputTokens":13,"cacheReadInputTokens":1,"cacheCreationInputTokens":0}}}'

@@ -43,7 +43,25 @@
                              met: true -- release.
 
     Malformed/partial-tail JSONL lines are silently skipped (never thrown),
-    mirroring goal-probe-usage-reader.ps1's established tolerance.
+    mirroring the established tolerance of goal-probe-usage-reader.ps1.
+
+    M15 fix (stale-release contamination): Get-GoalRunStatusEvent used to
+    return present-met-true on ANY evaluator-verdict event with met: true
+    found anywhere in the transcript, with no binding to the CURRENT run --
+    a met: true verdict left over from an earlier goal in the same
+    long-lived transcript file would falsely release a fresh run. The
+    optional -LaunchedAt parameter binds the release check to the current
+    run: when supplied, an evaluator-verdict met: true event only counts
+    toward release when its own top-level `timestamp` field (the same field
+    cost-walker.ps1 already reads off real Claude Code transcript JSONL
+    events -- not a field inside the nested `attachment` object) parses to
+    a value at or after -LaunchedAt. An event with a missing or unparseable
+    timestamp, or an unparseable -LaunchedAt value itself, is treated
+    conservatively as NOT the current run release (fail closed against a
+    false release) rather than silently falling back to the pre-fix
+    unbounded acceptance. When -LaunchedAt is omitted entirely, behavior is
+    unchanged from before this fix (no binding applied) -- existing callers
+    that do not yet thread a launch timestamp through are not regressed.
 #>
 
 . (Join-Path $PSScriptRoot 'goal-run-transcript-core.ps1')
@@ -57,7 +75,8 @@ function Get-GoalRunStatusEvent {
     [CmdletBinding()]
     [OutputType([pscustomobject])]
     param(
-        [Parameter(Mandatory)][string]$TranscriptPath
+        [Parameter(Mandatory)][string]$TranscriptPath,
+        [string]$LaunchedAt
     )
 
     if (-not (Test-Path -LiteralPath $TranscriptPath -PathType Leaf)) {
@@ -73,6 +92,21 @@ function Get-GoalRunStatusEvent {
 
     if ($rawLines.Count -eq 0) {
         return [pscustomobject]@{ State = 'status-absent'; Reason = 'transcript-empty'; ShapeKind = $null; Event = $null }
+    }
+
+    # M15 fix: when -LaunchedAt is supplied, bind the release check to the
+    # CURRENT run by its launch timestamp. An unparseable -LaunchedAt value
+    # still activates the binding (fail closed -- see below) rather than
+    # silently degrading to the pre-fix unbounded behavior.
+    $launchedAtBindingActive = -not [string]::IsNullOrWhiteSpace($LaunchedAt)
+    $launchedAtParsed = $null
+    if ($launchedAtBindingActive) {
+        try {
+            $launchedAtParsed = ([datetime]$LaunchedAt).ToUniversalTime()
+        }
+        catch {
+            $launchedAtParsed = $null
+        }
     }
 
     $lastClassified = $null
@@ -103,7 +137,27 @@ function Get-GoalRunStatusEvent {
         $lastClassified = $classified
 
         if ($classified.ShapeKind -eq 'evaluator-verdict' -and $classified.Event.Fields.PSObject.Properties['met'] -and $classified.Event.Fields.met -eq $true) {
-            $releasedEvent = $classified
+            $countsAsCurrentRunRelease = $true
+            if ($launchedAtBindingActive) {
+                # M15: only a met:true event whose OWN top-level timestamp
+                # (not nested under `attachment`) is at or after the current
+                # run launch counts as this run release. A missing/
+                # unparseable event timestamp, or an unparseable
+                # -LaunchedAt, is treated as NOT verifiably current -- fail
+                # closed against a stale-release false positive rather than
+                # trusting an unverifiable event.
+                $eventTimestamp = $null
+                if ($evt.ContainsKey('timestamp') -and $evt['timestamp']) {
+                    try { $eventTimestamp = ([datetime]$evt['timestamp']).ToUniversalTime() } catch { $eventTimestamp = $null }
+                }
+                if ($null -eq $launchedAtParsed -or $null -eq $eventTimestamp -or $eventTimestamp -lt $launchedAtParsed) {
+                    $countsAsCurrentRunRelease = $false
+                }
+            }
+
+            if ($countsAsCurrentRunRelease) {
+                $releasedEvent = $classified
+            }
         }
     }
 

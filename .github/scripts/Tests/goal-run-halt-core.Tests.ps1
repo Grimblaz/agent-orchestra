@@ -112,6 +112,61 @@ Describe 'ConvertTo-GoalRunInertEvidenceText' -Tag 'unit' {
     It 'handles empty string without throwing' {
         { ConvertTo-GoalRunInertEvidenceText -Text '' } | Should -Not -Throw
     }
+
+    Context 'M2: fixpoint re-scan closes the single-pass reassembly exploit' {
+
+        It 'neutralizes the exact reassembly-attack input from the review findings (a doubled-delimiter nesting around plan-issue-1), which a single-pass strip reassembles into a live marker' {
+            # Note: this It description deliberately avoids the literal
+            # '<!--'/'-->' substrings for the same Pester 6.0.0 mis-parse
+            # reason documented on the ConvertTo-GoalRunInertEvidenceText
+            # "strips HTML-comment marker delimiter substrings" test above.
+            # The literal attack string lives in the test BODY, unaffected.
+            # Decoded: "<!" + "<!" + "----" + "plan-issue-1" + "----" + ">" + ">"
+            # A single non-re-scanning strip pass removes the interior
+            # "<!--" once, whose leftover prefix/suffix characters rejoin
+            # into a fresh "<!--plan-issue-1-->" -- a fully-formed,
+            # zero-whitespace-tolerant live marker. The fixpoint loop must
+            # keep re-scanning until no marker delimiter survives.
+            $attack = '<!<!----plan-issue-1---->>'
+            $inert = ConvertTo-GoalRunInertEvidenceText -Text $attack
+            $inert | Should -Not -Match '<!--'
+            $inert | Should -Not -Match '-->'
+            [regex]::Matches($inert, '<!--\s*plan-issue-\d+\s*-->').Count | Should -Be 0
+        }
+
+        It 'neutralizes a second, differently-shaped reassembly pattern (nested design-issue marker, three levels deep)' {
+            # A different constructed nesting: three "<!" prefixes / three
+            # ">" suffixes around a design-issue-shaped payload, exercising
+            # more than one fixpoint iteration beyond the M2 finding own
+            # example.
+            $attack = '<!<!<!------design-issue-42------>>>'
+            $inert = ConvertTo-GoalRunInertEvidenceText -Text $attack
+            $inert | Should -Not -Match '<!--'
+            $inert | Should -Not -Match '-->'
+            [regex]::Matches($inert, '<!--\s*design-issue-\d+\s*-->').Count | Should -Be 0
+        }
+
+        It 'fails safe with the fixed placeholder (never returns residual marker delimiters) on a pathologically deep nesting that exceeds the iteration cap' {
+            # 15 nesting levels -- deliberately deeper than the documented
+            # 10-iteration cap, to exercise the fail-safe path itself.
+            $attack = ('<!' * 15) + '----' + 'plan-issue-99' + '----' + ('>' * 15)
+            $inert = ConvertTo-GoalRunInertEvidenceText -Text $attack
+            $inert | Should -Not -Match '<!--'
+            $inert | Should -Not -Match '-->'
+            [regex]::Matches($inert, '<!--\s*plan-issue-\d+\s*-->').Count | Should -Be 0
+        }
+
+        It 'converges to a clean fixpoint (idempotent) for ordinary non-adversarial text with a single marker' {
+            $text = 'plain evidence with a <!-- plan-issue-1 --> marker in it'
+            $inert = ConvertTo-GoalRunInertEvidenceText -Text $text
+            $inert | Should -Not -Match '<!--'
+            $inert | Should -Not -Match '-->'
+            $inert | Should -Match 'plan-issue-1'
+            # Re-running the function on its own output must be a no-op --
+            # confirms the fixpoint, not just a single extra pass.
+            (ConvertTo-GoalRunInertEvidenceText -Text $inert) | Should -Be $inert
+        }
+    }
 }
 
 Describe 'New-GoalRunHaltCommentBody: executor-evidence inert-render fixture' -Tag 'unit' {
@@ -145,6 +200,22 @@ Describe 'New-GoalRunHaltCommentBody: executor-evidence inert-render fixture' -T
         $report.plan_remediation = 'See <!-- design-issue-1 --> for the original decision.'
         $body = New-GoalRunHaltCommentBody -Report $report -Issue 874
         [regex]::Matches($body, '<!--\s*design-issue-\d+\s*-->').Count | Should -Be 0
+    }
+
+    It 'M3: inert-renders a marker-shaped target_ref, not just evidence/plan_remediation' {
+        $report = script:New-WellFormedHaltReport
+        $report.target_ref = 'T1 <!-- plan-issue-999 -->'
+        $body = New-GoalRunHaltCommentBody -Report $report -Issue 874
+        [regex]::Matches($body, '<!--\s*plan-issue-\d+\s*-->').Count | Should -Be 0
+        $body | Should -Match 'plan-issue-999'
+    }
+
+    It 'M3: inert-renders a marker-shaped recommended_next_owner, not just evidence/plan_remediation' {
+        $report = script:New-WellFormedHaltReport
+        $report.recommended_next_owner = 'maintainer <!-- design-issue-7 -->'
+        $body = New-GoalRunHaltCommentBody -Report $report -Issue 874
+        [regex]::Matches($body, '<!--\s*design-issue-\d+\s*-->').Count | Should -Be 0
+        $body | Should -Match 'design-issue-7'
     }
 }
 

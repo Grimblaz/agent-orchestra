@@ -547,7 +547,15 @@ function Get-GoalRunSessionTokenAccounting {
 
         $modelUsage = $lastResultEvent['modelUsage']
         $modelUsageIsDict = ($modelUsage -is [System.Collections.IDictionary])
-        $modelUsageKeys = if ($modelUsageIsDict) { @($modelUsage.Keys) } else { @() }
+        # M20 fix: modelUsage keys are free-form, transcript-derived strings
+        # (model ids) read straight off the terminal 'result' event -- they
+        # never passed through Select-GoalRunAllowedFields/
+        # Get-GoalRunRedactedText the way goal_status.condition/reason do
+        # (goal-run-transcript-core.ps1). Route them through the same
+        # secret-redaction pass before they are ever returned, so a
+        # secret-shaped model-id string cannot reach a durable artifact
+        # unredacted.
+        $modelUsageKeys = if ($modelUsageIsDict) { @($modelUsage.Keys | ForEach-Object { Get-GoalRunRedactedText -Text ([string]$_) }) } else { @() }
 
         $modelUsageTokens = @{ input = 0; output = 0; cache_creation = 0; cache_read = 0 }
         if ($modelUsageIsDict) {

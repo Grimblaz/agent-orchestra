@@ -178,7 +178,9 @@ function Invoke-GoalRunChainRevalidate {
     # exit-3-Reason-prefix split (infra-error vs flag-bearing pass-review-
     # required) or the exit-2-refused correction. Both live in
     # Resolve-GoalRunValidatorExitDisposition (goal-run-prompt-core.ps1) only.
-    $disposition = Resolve-GoalRunValidatorExitDisposition -ExitCode $result.ExitCode -Reason $result.Reason
+    # M23 fix: pass through ParseFailed exactly as Resolve-GoalRunLoopPredicate
+    # does, so a lost Reason on an exit-3 chain re-validation fails closed too.
+    $disposition = Resolve-GoalRunValidatorExitDisposition -ExitCode $result.ExitCode -Reason $result.Reason -ParseFailed:([bool]$result.ParseFailed)
 
     $haltReason = $null
     if ($disposition.Disposition -eq 'halt') {
@@ -338,15 +340,28 @@ function New-GoalRunChainHaltReport {
 
     $safeEvidence = @($Evidence | ForEach-Object { ConvertTo-GoalRunChainSafeText -Text ([string]$_) })
     $safeRemediation = ConvertTo-GoalRunChainSafeText -Text $PlanRemediation
+    # M3 fix: target_ref and recommended_next_owner are documented as
+    # contract/executor-sourced (untrusted) exactly like evidence/
+    # plan_remediation above, but were previously assigned raw with no
+    # redaction at all. Route them through the SAME secret-redaction leg
+    # the other free-text fields already use (the inert-render leg is
+    # applied separately, at comment-render time, by
+    # New-GoalRunHaltCommentBody -- mirroring the existing two-layer split
+    # for evidence/plan_remediation). TargetRef is nullable per the schema
+    # (halt reasons like budget-exhausted/chain-stage-failure may have no
+    # single target); a $null value is passed through as $null rather than
+    # redacted-into-empty-string.
+    $safeTargetRef = if ($null -eq $TargetRef) { $null } else { ConvertTo-GoalRunChainSafeText -Text $TargetRef }
+    $safeRecommendedNextOwner = ConvertTo-GoalRunChainSafeText -Text ([string]$RecommendedNextOwner)
 
     return [pscustomobject]@{
         schema_version          = 1
         issue                   = $Issue
         halt_reason             = $HaltReason
-        target_ref              = $TargetRef
+        target_ref              = $safeTargetRef
         plan_remediation        = $safeRemediation
         evidence                = $safeEvidence
-        recommended_next_owner  = $RecommendedNextOwner
+        recommended_next_owner  = $safeRecommendedNextOwner
         arm                     = $Arm
         stage                   = $Stage
         claim_provenance        = $ClaimProvenance

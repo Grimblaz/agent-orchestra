@@ -2,7 +2,7 @@
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 <#
 .SYNOPSIS
-    Coverage for .github/scripts/lib/goal-run-status-core.ps1's
+    Coverage for the .github/scripts/lib/goal-run-status-core.ps1
     Get-GoalRunStatusEvent (issue #874, plan step 1, AC2 foundation for AC1).
 #>
 
@@ -106,6 +106,53 @@ Describe 'Get-GoalRunStatusEvent' -Tag 'unit' {
             $result = Get-GoalRunStatusEvent -TranscriptPath $path
             $result.Event.Fields.reason | Should -Not -Match 'SuperSecretValue123'
             $result.Event.Fields.reason | Should -Match '\[REDACTED:kv-secret-assignment\]'
+        }
+    }
+
+    Context 'M15: -LaunchedAt binds the release check to the CURRENT run (stale-release contamination fix)' {
+
+        It 'does NOT report released when the only met:true event predates -LaunchedAt, even though a later start-marker for the current run follows it' {
+            $path = Join-Path $TestDrive 'stale-release-then-current-start.jsonl'
+            $staleVerdictLine = '{"type":"attachment","timestamp":"2026-07-20T10:00:00Z","attachment":{"type":"goal_status","met":true,"condition":"an earlier goal in this same transcript","reason":"stale release from a previous run","iterations":1,"durationMs":100,"tokens":10}}'
+            $currentStartLine = '{"type":"attachment","timestamp":"2026-07-22T10:00:00Z","attachment":{"type":"goal_status","met":false,"sentinel":true,"condition":"the current run goal text"}}'
+            Set-Content -LiteralPath $path -Value @($staleVerdictLine, $currentStartLine) -Encoding utf8
+
+            $result = Get-GoalRunStatusEvent -TranscriptPath $path -LaunchedAt '2026-07-22T09:00:00Z'
+
+            $result.State | Should -Not -Be 'present-met-true'
+            $result.State | Should -Be 'present-met-false'
+            $result.ShapeKind | Should -Be 'start-marker'
+        }
+
+        It 'still reports released when a genuinely later met:true event is at or after -LaunchedAt (binding does not suppress a real current-run release)' {
+            $path = Join-Path $TestDrive 'stale-then-genuine-current-release.jsonl'
+            $staleVerdictLine = '{"type":"attachment","timestamp":"2026-07-20T10:00:00Z","attachment":{"type":"goal_status","met":true,"condition":"an earlier goal","reason":"stale","iterations":1,"durationMs":100,"tokens":10}}'
+            $currentVerdictLine = '{"type":"attachment","timestamp":"2026-07-22T10:00:00Z","attachment":{"type":"goal_status","met":true,"condition":"the current run goal text","reason":"confirmed via read-back","iterations":1,"durationMs":900,"tokens":42}}'
+            Set-Content -LiteralPath $path -Value @($staleVerdictLine, $currentVerdictLine) -Encoding utf8
+
+            $result = Get-GoalRunStatusEvent -TranscriptPath $path -LaunchedAt '2026-07-22T09:00:00Z'
+
+            $result.State | Should -Be 'present-met-true'
+            $result.Event.Fields.reason | Should -Be 'confirmed via read-back'
+        }
+
+        It 'does NOT report released when the met:true event carries no top-level timestamp at all and -LaunchedAt is bound (fails closed, never trusts an unverifiable event)' {
+            $path = Join-Path $TestDrive 'no-timestamp-met-true.jsonl'
+            $line = '{"type":"attachment","attachment":{"type":"goal_status","met":true,"condition":"c","reason":"r","iterations":1,"durationMs":1,"tokens":1}}'
+            Set-Content -LiteralPath $path -Value $line -Encoding utf8
+
+            $result = Get-GoalRunStatusEvent -TranscriptPath $path -LaunchedAt '2026-07-22T09:00:00Z'
+
+            $result.State | Should -Not -Be 'present-met-true'
+        }
+
+        It 'preserves pre-fix behavior (unbounded acceptance) when -LaunchedAt is omitted entirely' {
+            $path = Join-Path $TestDrive 'no-launchedat-unbound.jsonl'
+            $line = '{"type":"attachment","timestamp":"2020-01-01T00:00:00Z","attachment":{"type":"goal_status","met":true,"condition":"c","reason":"r","iterations":1,"durationMs":1,"tokens":1}}'
+            Set-Content -LiteralPath $path -Value $line -Encoding utf8
+
+            $result = Get-GoalRunStatusEvent -TranscriptPath $path
+            $result.State | Should -Be 'present-met-true'
         }
     }
 

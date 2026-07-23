@@ -65,6 +65,25 @@
         tell the two halt causes apart even though they carry the same
         halt_reason.
 
+        M23 fix: an exit-3 subprocess result with `Reason: $null` is
+        AMBIGUOUS between two genuinely different cases -- (a) the
+        subprocess returned well-formed JSON that simply omits `Reason` (a
+        legitimate flag-bearing verdict shape, correctly `satisfied`) and
+        (b) the subprocess stdout could not be parsed as JSON at all, so
+        `Reason` is null because there was no verdict object, not because
+        the verdict object omitted the field. Before this fix both
+        collapsed to the same `Reason: $null` shape and case (b) silently
+        resolved to `satisfied` -- a signal-loss failure that fails OPEN
+        (merge-permitting) instead of closed. `Invoke-GoalRunValidatorProcess`
+        now also returns `ParseFailed` (`$true` only for case (b): the
+        subprocess produced no output at all, or its output could not be
+        parsed as JSON) and `Resolve-GoalRunValidatorExitDisposition` takes
+        an optional `-ParseFailed` switch: an exit-3 result with `Reason:
+        $null` (no infra-error prefix possible on a null Reason) now
+        resolves to `halt` when `-ParseFailed` is set, and stays `satisfied`
+        exactly as before when it is not -- the legitimate flag-bearing-
+        with-no-Reason path is unregressed.
+
       Test-GoalRunContractHashPinned -Issue <int> -LaunchPinnedHash <string>
                                       [-Marker <string>] [-RepoRoot <string>]
                                       [-Repo <string>] [-GhCliPath <string>]
@@ -188,7 +207,13 @@ function Resolve-GoalRunValidatorExitDisposition {
     [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory)][int]$ExitCode,
-        [Parameter(Mandatory = $false)][AllowNull()][AllowEmptyString()][string]$Reason
+        [Parameter(Mandatory = $false)][AllowNull()][AllowEmptyString()][string]$Reason,
+        # M23 fix: distinguishes a genuinely-omitted Reason on a well-formed
+        # verdict (case a, unaffected) from a Reason lost to a subprocess
+        # JSON-parse failure (case b, must fail closed). Defaults to $false
+        # so every existing call site that does not yet pass it keeps its
+        # current behavior.
+        [switch]$ParseFailed
     )
 
     if ($ExitCode -eq 0) {
@@ -223,9 +248,21 @@ function Resolve-GoalRunValidatorExitDisposition {
             # halt condition.
             return [pscustomobject]@{ Disposition = 'halt'; Reason = $Reason }
         }
+        if ([string]::IsNullOrEmpty($Reason) -and $ParseFailed) {
+            # M23 fix, case (b): the subprocess stdout could not be
+            # parsed as JSON at all, so Reason is null because there was no
+            # verdict object -- not because a well-formed verdict object
+            # genuinely omitted the field (case a, handled by the plain
+            # `satisfied` return below). Signal loss here must fail CLOSED,
+            # not open: a lost Reason on an ambiguous exit 3 must not be
+            # silently treated as a passing/flag-bearing verdict.
+            return [pscustomobject]@{ Disposition = 'halt'; Reason = 'parse-failed: exit 3 subprocess output could not be parsed as JSON; Reason was lost, failing closed' }
+        }
         # A flag-bearing exit 3 (worktree-dirt / diff-integrity /
         # target-budget flags) means targets were met; the mandatory
-        # downstream review in a later step supersedes the flag.
+        # downstream review in a later step supersedes the flag. This also
+        # covers case (a): a well-formed JSON verdict that genuinely omits
+        # Reason -- unaffected by the M23 fix above.
         return [pscustomobject]@{ Disposition = 'satisfied'; Reason = $Reason }
     }
 
@@ -309,7 +346,16 @@ function script:Invoke-GoalRunValidatorProcess {
     $raw = & $PwshCliPath -NoProfile -NoLogo -NonInteractive -File $ValidatorScriptPath -Issue $Issue -RepoRoot $RepoRoot 2>$null
     $exitCode = $LASTEXITCODE
 
+    # M23 fix: distinguish "no output at all" / "output could not be parsed
+    # as JSON" (ParseFailed = $true -- there was never a verdict object, so
+    # a null Reason here means signal LOSS, not a legitimate omitted field)
+    # from "well-formed JSON parsed cleanly, Reason just was not present on
+    # it" (ParseFailed = $false -- a genuine, trustworthy omitted-Reason
+    # verdict shape). Resolve-GoalRunValidatorExitDisposition cannot make
+    # this distinction on its own from Reason alone, which is exactly the
+    # ambiguity this fix closes.
     $reason = $null
+    $parseFailed = $false
     if ($raw) {
         try {
             $parsed = ($raw | Out-String) | ConvertFrom-Json -ErrorAction Stop
@@ -317,10 +363,17 @@ function script:Invoke-GoalRunValidatorProcess {
         }
         catch {
             $reason = $null
+            $parseFailed = $true
         }
     }
+    else {
+        # No subprocess output at all: there is no verdict object of any
+        # shape to read Reason from -- same signal-loss class as a parse
+        # exception, not a legitimate omitted field.
+        $parseFailed = $true
+    }
 
-    return [pscustomobject]@{ ExitCode = $exitCode; Reason = $reason }
+    return [pscustomobject]@{ ExitCode = $exitCode; Reason = $reason; ParseFailed = $parseFailed }
 }
 
 function Resolve-GoalRunLoopPredicate {
@@ -368,7 +421,11 @@ function Resolve-GoalRunLoopPredicate {
     }
 
     $result = & $ValidatorInvoker $Issue $RepoRoot $PwshCliPath $ValidatorScriptPath
-    $exitDisposition = Resolve-GoalRunValidatorExitDisposition -ExitCode $result.ExitCode -Reason $result.Reason
+    # M23 fix: pass through ParseFailed when the invoker result carries it
+    # (a default -ValidatorInvoker call, or a test double that opts in). A
+    # test double result object with no ParseFailed property reads as $null
+    # here, which [switch] coerces to $false -- unchanged pre-fix behavior.
+    $exitDisposition = Resolve-GoalRunValidatorExitDisposition -ExitCode $result.ExitCode -Reason $result.Reason -ParseFailed:([bool]$result.ParseFailed)
 
     $haltReason = $null
     if ($exitDisposition.Disposition -eq 'halt') {

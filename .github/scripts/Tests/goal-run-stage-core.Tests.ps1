@@ -375,6 +375,17 @@ Describe 'Invoke-GoalRunAwaitStatusVerdict (bounded retry)' -Tag 'unit' {
         $result.Outcome | Should -Be 'retry-exhausted'
         $result.Attempts | Should -Be 3
     }
+
+    It 'M15: threads -LaunchedAt through to the StatusReader as its second positional argument' {
+        $script:GRSCapturedLaunchedAt = $null
+        $reader = {
+            param($Path, $LaunchedAtArg)
+            $script:GRSCapturedLaunchedAt = $LaunchedAtArg
+            [pscustomobject]@{ State = 'present-met-true'; Event = [pscustomobject]@{ Fields = [pscustomobject]@{ met = $true } } }
+        }
+        Invoke-GoalRunAwaitStatusVerdict -TranscriptPath 'fake.jsonl' -MaxRetries 1 -RetryDelayMs 1 -LaunchedAt '2026-07-22T09:00:00Z' -StatusReader $reader | Out-Null
+        $script:GRSCapturedLaunchedAt | Should -Be '2026-07-22T09:00:00Z'
+    }
 }
 
 Describe 'Resolve-GoalRunControlReturn (M13: control-return-then-read, distinct diagnostic halt)' -Tag 'unit' {
