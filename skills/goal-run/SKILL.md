@@ -12,7 +12,7 @@ Reference methodology for the goal-run harness: a launcher/resumer that walks a 
 ## When to Use
 
 - When extending, debugging, or reviewing a change to the goal-run harness's stage machine, halt model, worktree lifecycle, or untrusted-content barriers.
-- When writing or reviewing the `agents/Goal-Run.agent.md` / `agents/goal-run.md` shared body and shell, or the customer-experience (CE) surface-class doc and dual-flow guide that reference this skill.
+- When writing or reviewing the `agents/Goal-Run.agent.md` / `agents/goal-run.md` shared body and shell, or the customer-experience (CE) surface-class doc ([skills/customer-experience/references/goal-run-surface-classes.md](../customer-experience/references/goal-run-surface-classes.md), 874-D8) and dual-flow guide that reference this skill.
 - When building the escape-rate segmentation query described in `## Label-To-Ledger Join`.
 - When a reader needs to know what a `goal-run-stage-{issue}`, `goal-run-inflight-{issue}`, or `goal-halt-report-{issue}` marker means.
 

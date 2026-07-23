@@ -2,6 +2,12 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.4.8] — 2026-07-23
+
+### Added
+
+- Added the CE Gate goal-run surface-class delegation doc (skills/customer-experience/references/goal-run-surface-classes.md, 874-D8), classifying read-safe vs mutating goal-run harness surfaces for CE Gate exercise (issue #874 plan step 9).
+
 ## [3.4.7] — 2026-07-23
 
 ### Added
