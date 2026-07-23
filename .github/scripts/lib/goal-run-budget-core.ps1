@@ -508,7 +508,7 @@ function Get-GoalRunSessionTokenAccounting {
             }
         }
         else {
-            $emptyTokens.Clone()
+            @{ input = 0; output = 0; cache_creation = 0; cache_read = 0 }
         }
 
         $resultUsageAllZero = ($resultTokens.input -eq 0 -and $resultTokens.output -eq 0 -and $resultTokens.cache_creation -eq 0 -and $resultTokens.cache_read -eq 0)
