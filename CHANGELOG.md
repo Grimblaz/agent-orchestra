@@ -2,6 +2,12 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.4.7] — 2026-07-23
+
+### Added
+
+Goal-run harness methodology skill (issue #874, plan step 8): skills/goal-run/SKILL.md documents the stage-machine contract, the five-value halt-precedence model, the Arm I launch sequence (with brief Arm H/Arm M forward-pointers), the worktree provision/state-file/teardown lifecycle, the goal_run_class label-to-ledger join key for escape-rate segmentation, and the untrusted-content discipline (contract-hash pin, transcript allow-list plus secret-redaction, executor-evidence inert-rendering).
+
 ## [3.4.6] — 2026-07-22
 
 ### Added

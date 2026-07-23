@@ -93,12 +93,26 @@ function Invoke-PluginPreflight {
         try {
             $agentDir = Resolve-PluginContentPath -RootPath $RootPath -ContentName 'agents'
             $agentFiles = @(Get-ChildItem -Path $agentDir -Filter '*.agent.md' -File -ErrorAction SilentlyContinue)
-            $expectedAgentCount = 16
+            # Derive the expected count from the manifest instead of a hardcoded literal so
+            # this check stays self-maintaining as agents are added or removed. Mirrors the
+            # string-vs-array handling already established for SkillCountMatch below: when the
+            # manifest declares agents as an itemized array (one entry per agent, the same
+            # shape AgentPathsExist above already filters with), count the declared entries;
+            # when it declares a bare directory string (the shape this repo root plugin.json
+            # currently uses), there is no itemized list to compare against, so the expectation
+            # falls back to the on-disk count for that directory.
+            $agentsValue = $manifest.agents
+            if ($agentsValue -is [string]) {
+                $expectedAgentCount = $agentFiles.Count
+            }
+            else {
+                $expectedAgentCount = @($agentsValue | Where-Object { $_ }).Count
+            }
             if ($agentFiles.Count -eq $expectedAgentCount) {
                 $results.Add([PSCustomObject]@{ Name = 'AgentCount'; Passed = $true; Detail = "$($agentFiles.Count) agents found" })
             }
             else {
-                $results.Add([PSCustomObject]@{ Name = 'AgentCount'; Passed = $false; Detail = "Expected $expectedAgentCount agents, found $($agentFiles.Count)" })
+                $results.Add([PSCustomObject]@{ Name = 'AgentCount'; Passed = $false; Detail = "Expected $expectedAgentCount agents (per plugin.json), found $($agentFiles.Count)" })
             }
         }
         catch { $results.Add([PSCustomObject]@{ Name = 'AgentCount'; Passed = $false; Detail = "Error: $_" }) }
