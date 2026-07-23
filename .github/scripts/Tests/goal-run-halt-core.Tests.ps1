@@ -217,6 +217,22 @@ Describe 'New-GoalRunHaltCommentBody: executor-evidence inert-render fixture' -T
         [regex]::Matches($body, '<!--\s*design-issue-\d+\s*-->').Count | Should -Be 0
         $body | Should -Match 'design-issue-7'
     }
+
+    It 'CE Gate S2: renders a null target_ref as (not applicable), not a blank line' {
+        $report = script:New-WellFormedHaltReport
+        $report.target_ref = $null
+        $body = New-GoalRunHaltCommentBody -Report $report -Issue 874
+        $body | Should -Match '(?m)^- \*\*target_ref\*\*: \(not applicable\)$'
+        $body | Should -Not -Match '(?m)^- \*\*target_ref\*\*: $'
+    }
+
+    It 'CE Gate S2: still renders a populated target_ref verbatim (no (not applicable) substitution)' {
+        $report = script:New-WellFormedHaltReport
+        $report.target_ref = 'ac-3'
+        $body = New-GoalRunHaltCommentBody -Report $report -Issue 874
+        $body | Should -Match '(?m)^- \*\*target_ref\*\*: ac-3$'
+        $body | Should -Not -Match 'not applicable'
+    }
 }
 
 Describe 'goal-run-halt-core.ps1: transcript-content-barrier invariant end to end' -Tag 'unit' {

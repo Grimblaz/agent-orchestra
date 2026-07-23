@@ -165,6 +165,14 @@ function New-GoalRunHaltCommentBody {
     $inertTargetRef = ConvertTo-GoalRunInertEvidenceText -Text ([string]$Report.target_ref)
     $inertRecommendedNextOwner = ConvertTo-GoalRunInertEvidenceText -Text ([string]$Report.recommended_next_owner)
 
+    # CE Gate S2 nit: target_ref is legitimately null for the halt reasons
+    # not tied to a single target (invariant-conflict, budget-exhausted,
+    # gate-input-needed, chain-stage-failure). Render a plain "(not
+    # applicable)" for the empty case so a maintainer reads it as
+    # deliberately-not-applicable rather than a possibly-missing value on a
+    # blank line.
+    $displayTargetRef = if ([string]::IsNullOrWhiteSpace($inertTargetRef)) { '(not applicable)' } else { $inertTargetRef }
+
     $evidenceBlock = if ($inertEvidence.Count -gt 0) {
         (($inertEvidence | ForEach-Object { "- $_" })) -join "`n"
     }
@@ -180,7 +188,7 @@ function New-GoalRunHaltCommentBody {
         "- **stage**: $($Report.stage)",
         "- **arm**: $($Report.arm)",
         "- **claim_provenance**: $($Report.claim_provenance)",
-        "- **target_ref**: $inertTargetRef",
+        "- **target_ref**: $displayTargetRef",
         "- **recommended_next_owner**: $inertRecommendedNextOwner",
         '',
         "**Plan remediation**: $inertRemediation",
