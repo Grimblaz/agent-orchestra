@@ -185,6 +185,76 @@ Describe 'Resolve-GoalRunInflightMutexOutcome (marker-first ordering + reconcile
     }
 }
 
+Describe 'Get-GoalRunIssueComments' -Tag 'unit' {
+
+    It 'M19 fix: flattens a multi-page paginated response into a single flat array normalized to id/url/body' {
+        $mockGhPath = Join-Path $TestDrive 'gh-comments-paginated.ps1'
+        @'
+param()
+if ($args[0] -eq 'api') {
+    Write-Output '[[{"id":1,"html_url":"https://github.com/o/r/issues/9#issuecomment-1","body":"c1"}],[{"id":101,"html_url":"https://github.com/o/r/issues/9#issuecomment-101","body":"c101 (past the 100-comment page cap)"}]]'
+    exit 0
+}
+exit 1
+'@ | Set-Content $mockGhPath -Encoding UTF8
+
+        $result = Get-GoalRunIssueComments -Issue 9 -Owner 'o' -Repo 'r' -GhCliPath $mockGhPath
+
+        $result.Count | Should -Be 2
+        $result[0].id | Should -Be 1
+        $result[0].url | Should -Be 'https://github.com/o/r/issues/9#issuecomment-1'
+        $result[0].body | Should -Be 'c1'
+        $result[1].id | Should -Be 101
+        $result[1].body | Should -Match 'past the 100-comment page cap'
+    }
+
+    It 'resolves owner/repo via gh repo view when -Owner/-Repo are not supplied' {
+        $mockGhPath = Join-Path $TestDrive 'gh-comments-resolve-repo.ps1'
+        @'
+param()
+if ($args[0] -eq 'repo') {
+    Write-Output 'ambient-owner/ambient-repo'
+    exit 0
+}
+if ($args[0] -eq 'api') {
+    if ($args[1] -notmatch 'repos/ambient-owner/ambient-repo/issues/9/comments') { exit 1 }
+    Write-Output '[[{"id":5,"html_url":"https://github.com/ambient-owner/ambient-repo/issues/9#issuecomment-5","body":"resolved-repo comment"}]]'
+    exit 0
+}
+exit 1
+'@ | Set-Content $mockGhPath -Encoding UTF8
+
+        $result = Get-GoalRunIssueComments -Issue 9 -GhCliPath $mockGhPath
+
+        $result.Count | Should -Be 1
+        $result[0].body | Should -Be 'resolved-repo comment'
+    }
+
+    It 'fails open to an empty array (never throws) when the paginated gh api call fails' {
+        $mockGhPath = Join-Path $TestDrive 'gh-comments-fail.ps1'
+        @'
+param()
+exit 1
+'@ | Set-Content $mockGhPath -Encoding UTF8
+
+        $result = Get-GoalRunIssueComments -Issue 9 -Owner 'o' -Repo 'r' -GhCliPath $mockGhPath
+
+        $result.Count | Should -Be 0
+    }
+
+    It 'uses an injected -CommentsReader directly for testability, bypassing gh entirely' {
+        $reader = {
+            param($Issue, $Owner, $Repo, $GhCliPath)
+            @([pscustomobject]@{ id = 7; url = 'https://example/7'; body = 'injected' })
+        }
+
+        $result = Get-GoalRunIssueComments -Issue 9 -CommentsReader $reader
+
+        $result.Count | Should -Be 1
+        $result[0].body | Should -Be 'injected'
+    }
+}
+
 Describe 'Invoke-GoalRunMutexLaunch' -Tag 'unit' {
 
     It 'aborts before provisioning when the marker post itself fails' {
@@ -192,7 +262,7 @@ Describe 'Invoke-GoalRunMutexLaunch' -Tag 'unit' {
         Mock -CommandName Get-GoalRunInflightMarkers -MockWith { @() }
         Mock -CommandName New-GoalRunWorktree -MockWith { throw 'New-GoalRunWorktree must not be called on marker-post failure' }
 
-        $result = Invoke-GoalRunMutexLaunch -Issue 874 -RepoRoot 'C:\fake\repo' -ContractHash ('c' * 64)
+        $result = Invoke-GoalRunMutexLaunch -Issue 874 -RepoRoot 'C:\fake\repo' -ContractHash ('c' * 64) -ReconfirmDelayMs 0
 
         $result.Outcome | Should -Be 'abort-marker-post-failed'
         Should -Invoke -CommandName New-GoalRunWorktree -Times 0
@@ -209,7 +279,7 @@ Describe 'Invoke-GoalRunMutexLaunch' -Tag 'unit' {
         Mock -CommandName Set-GoalRunInflightMarkerResolved -MockWith { $true }
         Mock -CommandName New-GoalRunWorktree -MockWith { throw 'New-GoalRunWorktree must not be called when yielding' }
 
-        $result = Invoke-GoalRunMutexLaunch -Issue 874 -RepoRoot 'C:\fake\repo' -ContractHash ('c' * 64) -Owner 'Grimblaz' -Repo 'agent-orchestra'
+        $result = Invoke-GoalRunMutexLaunch -Issue 874 -RepoRoot 'C:\fake\repo' -ContractHash ('c' * 64) -Owner 'Grimblaz' -Repo 'agent-orchestra' -ReconfirmDelayMs 0
 
         $result.Outcome | Should -Be 'yielded'
         Should -Invoke -CommandName New-GoalRunWorktree -Times 0
@@ -229,7 +299,7 @@ Describe 'Invoke-GoalRunMutexLaunch' -Tag 'unit' {
 
         # Deliberately no -Owner/-Repo -- before the M12 fix, the yield
         # branch only attempted the resolve call when both were supplied.
-        $result = Invoke-GoalRunMutexLaunch -Issue 874 -RepoRoot 'C:\fake\repo' -ContractHash ('c' * 64)
+        $result = Invoke-GoalRunMutexLaunch -Issue 874 -RepoRoot 'C:\fake\repo' -ContractHash ('c' * 64) -ReconfirmDelayMs 0
 
         $result.Outcome | Should -Be 'yielded'
         Should -Invoke -CommandName Set-GoalRunInflightMarkerResolved -Times 1
@@ -242,11 +312,14 @@ Describe 'Invoke-GoalRunMutexLaunch' -Tag 'unit' {
         }
         Mock -CommandName New-GoalRunWorktree -MockWith { [pscustomobject]@{ Success = $true; RefusalReason = $null; Path = 'C:\fake\gr-874'; BranchName = 'goal-run/issue-874-token' } }
 
-        $result = Invoke-GoalRunMutexLaunch -Issue 874 -RepoRoot 'C:\fake\repo' -ContractHash ('c' * 64)
+        $result = Invoke-GoalRunMutexLaunch -Issue 874 -RepoRoot 'C:\fake\repo' -ContractHash ('c' * 64) -ReconfirmDelayMs 0
 
         $result.Outcome | Should -Be 'launched'
         $result.Worktree.Path | Should -Be 'C:\fake\gr-874'
         Should -Invoke -CommandName New-GoalRunWorktree -Times 1
+        # M16 fix: the reconfirm read is a SECOND call into Get-GoalRunInflightMarkers
+        # (the first is the original reconcile read) -- one extra read, not a poll loop.
+        Should -Invoke -CommandName Get-GoalRunInflightMarkers -Times 2
     }
 
     It 'surfaces a provisioning failure distinctly from a marker-post failure' {
@@ -256,9 +329,50 @@ Describe 'Invoke-GoalRunMutexLaunch' -Tag 'unit' {
         }
         Mock -CommandName New-GoalRunWorktree -MockWith { [pscustomobject]@{ Success = $false; RefusalReason = 'refused: uncommitted-changes'; Path = $null; BranchName = $null } }
 
-        $result = Invoke-GoalRunMutexLaunch -Issue 874 -RepoRoot 'C:\fake\repo' -ContractHash ('c' * 64)
+        $result = Invoke-GoalRunMutexLaunch -Issue 874 -RepoRoot 'C:\fake\repo' -ContractHash ('c' * 64) -ReconfirmDelayMs 0
 
         $result.Outcome | Should -Be 'launch-failed-provisioning'
+    }
+
+    It 'M16 fix: yields on the reconfirm read when a lower-id marker appears only after the first reconcile read' {
+        Mock -CommandName New-GoalRunInflightMarker -MockWith { [pscustomobject]@{ Success = $true; CommentId = 100; Url = 'https://example/100'; LaunchedAt = '2026-07-23T00:00:00.0000000Z' } }
+        $script:GRMLCallCount = 0
+        Mock -CommandName Get-GoalRunInflightMarkers -MockWith {
+            $script:GRMLCallCount++
+            if ($script:GRMLCallCount -eq 1) {
+                # First read: this run appears to be the sole/lowest live marker.
+                return @([pscustomobject]@{ CommentId = 100; Status = 'unresolved'; ContractHash = ('c' * 64); LaunchedAt = '2026-07-23T00:00:00.0000000Z'; ResolvedReason = $null })
+            }
+            # Reconfirm read: a genuinely earlier concurrent marker has now propagated.
+            return @(
+                [pscustomobject]@{ CommentId = 50; Status = 'unresolved'; ContractHash = ('c' * 64); LaunchedAt = '2026-07-23T00:00:00.0000000Z'; ResolvedReason = $null },
+                [pscustomobject]@{ CommentId = 100; Status = 'unresolved'; ContractHash = ('c' * 64); LaunchedAt = '2026-07-23T00:00:00.0000000Z'; ResolvedReason = $null }
+            )
+        }
+        Mock -CommandName Set-GoalRunInflightMarkerResolved -MockWith { $true }
+        Mock -CommandName New-GoalRunWorktree -MockWith { throw 'New-GoalRunWorktree must not be called when the reconfirm read flips the outcome to yield' }
+
+        $result = Invoke-GoalRunMutexLaunch -Issue 874 -RepoRoot 'C:\fake\repo' -ContractHash ('c' * 64) -ReconfirmDelayMs 0
+
+        $result.Outcome | Should -Be 'yielded'
+        Should -Invoke -CommandName New-GoalRunWorktree -Times 0
+        Should -Invoke -CommandName Set-GoalRunInflightMarkerResolved -Times 1
+        Should -Invoke -CommandName Get-GoalRunInflightMarkers -Times 2
+    }
+
+    It 'M16 fix: -ReconfirmDelayMs is honored as an actual delay before the reconfirm read (production default path)' {
+        Mock -CommandName New-GoalRunInflightMarker -MockWith { [pscustomobject]@{ Success = $true; CommentId = 100; Url = 'https://example/100'; LaunchedAt = '2026-07-23T00:00:00.0000000Z' } }
+        Mock -CommandName Get-GoalRunInflightMarkers -MockWith {
+            @([pscustomobject]@{ CommentId = 100; Status = 'unresolved'; ContractHash = ('c' * 64); LaunchedAt = '2026-07-23T00:00:00.0000000Z'; ResolvedReason = $null })
+        }
+        Mock -CommandName New-GoalRunWorktree -MockWith { [pscustomobject]@{ Success = $true; RefusalReason = $null; Path = 'C:\fake\gr-874'; BranchName = 'goal-run/issue-874-token' } }
+
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        $result = Invoke-GoalRunMutexLaunch -Issue 874 -RepoRoot 'C:\fake\repo' -ContractHash ('c' * 64) -ReconfirmDelayMs 50
+        $sw.Stop()
+
+        $result.Outcome | Should -Be 'launched'
+        $sw.ElapsedMilliseconds | Should -BeGreaterOrEqual 40
     }
 }
 

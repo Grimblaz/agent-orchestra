@@ -458,6 +458,19 @@ Describe 'Test-GoalRunPrEmissionsVerified' -Tag 'unit' {
         $result.Verified | Should -Be $false
         $result.Reason | Should -Be 'pr-unreadable'
     }
+
+    It 'M14 fix: the DEFAULT (non-injected) gh reader path -- which pins console UTF-8 before the gh call -- reads body/labels correctly end to end' {
+        $mockGhPath = Join-Path $TestDrive 'gh-pr-view-utf8.ps1'
+        @'
+param()
+Write-Output '{"body":"PR body with a non-ASCII em-dash — and ellipsis …","labels":[{"name":"goal-run"}]}'
+exit 0
+'@ | Set-Content $mockGhPath -Encoding UTF8
+
+        $result = Test-GoalRunPrEmissionsVerified -PrNumber 42 -GhCliPath $mockGhPath
+        $result.LabelPresent | Should -Be $true
+        $result.Body | Should -Match 'em-dash'
+    }
 }
 
 Describe 'Invoke-GoalRunTerminalEmissionsVerifyAndRepair' -Tag 'unit' {
@@ -522,5 +535,37 @@ Describe 'Invoke-GoalRunTerminalEmissionsVerifyAndRepair' -Tag 'unit' {
         $result.MetricsRepaired | Should -Be $true
         $result.Verified | Should -Be $true
         $labelApplierCalled | Should -Be $false
+    }
+
+    It 'M14 fix: re-reads the live body immediately before writing instead of reusing the entry-time snapshot, so a concurrent edit in between is not clobbered' {
+        # Simulates a concurrent writer appending content to the PR body in the
+        # narrow window between the initial Test-GoalRunPrEmissionsVerified read
+        # (inside this function) and the write this function composes. Before
+        # the M14 fix, the write payload was built from the stale entry-time
+        # $state.Body captured once at the top of the function; after the fix,
+        # it re-reads immediately before composing the write payload.
+        $script:CallCount = 0
+        $script:LiveBody = 'Original PR body, no metrics block yet.'
+        $reader = {
+            param($PrNumber, $Owner, $Repo, $GhCliPath)
+            $script:CallCount++
+            if ($script:CallCount -eq 2) {
+                # A concurrent writer touched the PR body between the first
+                # (entry-time) read and this second (pre-write) reconfirm read.
+                $script:LiveBody = 'Original PR body, no metrics block yet. CONCURRENT-EDIT-MARKER.'
+            }
+            [pscustomobject]@{ body = $script:LiveBody; labels = @([pscustomobject]@{ name = 'goal-run' }) }
+        }
+        $writtenBody = $null
+        $bodyWriter = {
+            param($PrNumber, $Owner, $Repo, $GhCliPath, $BodyFile)
+            $script:WrittenBody = Get-Content -LiteralPath $BodyFile -Raw
+            $true
+        }
+
+        $result = Invoke-GoalRunTerminalEmissionsVerifyAndRepair -PrNumber 42 -Contract (script:New-WellFormedGoalContract) -PrReader $reader -BodyWriter $bodyWriter
+        $result.MetricsRepaired | Should -Be $true
+        $script:CallCount | Should -Be 2
+        $script:WrittenBody | Should -Match 'CONCURRENT-EDIT-MARKER'
     }
 }

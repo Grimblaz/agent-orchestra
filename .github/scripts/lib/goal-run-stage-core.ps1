@@ -213,31 +213,116 @@ function ConvertFrom-GoalRunStageMarkerBody {
 function Get-GoalRunIssueComments {
     <#
     .SYNOPSIS
-        Raw `gh issue view --json comments` wrapper, mirroring the list step
-        inside find-or-upsert-comment.ps1 Find-OrUpsertComment but exposed
-        standalone so goal-run-stage-core.ps1 readers do not have to POST
-        or PATCH just to list. Fail-open: returns an empty array (never
-        throws) on any gh/parse failure.
+        Paginated issue-comments reader for every mutex/stage/inflight
+        marker lookup in this file. Fail-open: returns an empty array
+        (never throws) on any gh/parse failure.
+    .DESCRIPTION
+        M19 fix: `gh issue view --json comments` -- the call this function
+        used before this fix -- caps at the first 100 comments (a known
+        gh/GraphQL page-size limit; this repo own established gotcha class,
+        see frame-credit-ledger-core.ps1 own Get-IssueComments for the prior
+        fix of the exact same bug shape, issue #794 Bug 1). On a comment-
+        heavy goal-run issue, a mutex/stage/inflight marker posted past
+        comment 100 would silently vanish from every reader built on this
+        function. `gh issue view --json comments --paginate` is not valid
+        (--paginate is a `gh api`-only flag), so the default path here
+        switches to `gh api repos/{owner}/{repo}/issues/{Issue}/comments
+        --paginate --slurp`, which walks every page and returns an array-
+        of-page-arrays that this function flattens -- mirroring the
+        exemplar at frame-credit-ledger-core.ps1 lines ~2739-2757.
+
+        The REST shape differs from the GraphQL shape `gh issue view --json
+        comments` used to return (`html_url` vs `url`; a real numeric `id`
+        instead of a GraphQL node-id string) -- every comment is normalized
+        to the same `{ id; url; body }` shape this file own callers
+        (Get-GoalRunStageMarker, Get-GoalRunInflightMarkers) already expect,
+        so neither needed to change.
+
+        `gh api` requires an explicit owner/repo in the URL path (unlike
+        `gh issue view`, which infers the ambient repo without -R); when
+        -Owner/-Repo are not supplied, this resolves them via `gh repo
+        view` first and a `git remote get-url origin` parse as a fallback,
+        mirroring emit-pipeline-metrics-v4-core.ps1 own Resolve-EmitV4Repo.
+    .PARAMETER CommentsReader
+        Injectable for testability -- defaults to the real paginated-gh
+        implementation described above. A test-supplied scriptblock returns
+        the already-flattened, already-normalized comment array directly
+        (receiving $Issue, $Owner, $Repo, $GhCliPath), mirroring the
+        -PrReader convention Test-GoalRunPrEmissionsVerified already uses,
+        so tests never need gh on PATH or a live network call.
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject[]])]
     param(
         [Parameter(Mandatory)][int]$Issue,
         [string]$Owner,
-        [string]$Repo
+        [string]$Repo,
+        [string]$GhCliPath = 'gh',
+        [scriptblock]$CommentsReader
     )
 
-    $listArgs = @('issue', 'view', $Issue, '--json', 'comments')
-    if ($Owner -and $Repo) { $listArgs += @('-R', "$Owner/$Repo") }
-    $listJson = & gh @listArgs 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        [Console]::Error.WriteLine("Get-GoalRunIssueComments: gh issue view $Issue failed (exit $LASTEXITCODE)")
+    if ($CommentsReader) {
+        return @(& $CommentsReader $Issue $Owner $Repo $GhCliPath)
+    }
+
+    $ownerRepo = $null
+    if ($Owner -and $Repo) {
+        $ownerRepo = "$Owner/$Repo"
+    }
+    else {
+        try {
+            $viewed = & $GhCliPath repo view --json nameWithOwner --jq '.nameWithOwner' 2>$null
+            if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($viewed)) {
+                $ownerRepo = $viewed.Trim()
+            }
+        }
+        catch {
+            # Falls through to the git-remote parse below.
+        }
+        if (-not $ownerRepo) {
+            try {
+                $remoteUrl = git remote get-url origin 2>$null
+                if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($remoteUrl)) {
+                    $match = [regex]::Match($remoteUrl, 'github\.com[:/](.+?)(?:\.git)?/?$')
+                    if ($match.Success) { $ownerRepo = $match.Groups[1].Value.Trim() }
+                }
+            }
+            catch {
+                # No fallback left -- reported below via the empty-array return.
+            }
+        }
+    }
+
+    if (-not $ownerRepo) {
+        [Console]::Error.WriteLine("Get-GoalRunIssueComments: could not resolve owner/repo for issue $Issue")
         return @()
     }
-    if (-not $listJson) { return @() }
+
+    $raw = & $GhCliPath api "repos/$ownerRepo/issues/$Issue/comments" --paginate --slurp 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        [Console]::Error.WriteLine("Get-GoalRunIssueComments: gh api repos/$ownerRepo/issues/$Issue/comments failed (exit $LASTEXITCODE)")
+        return @()
+    }
+    if (-not $raw) { return @() }
+
     try {
-        $parsed = $listJson | ConvertFrom-Json -ErrorAction Stop
-        if ($parsed -and $parsed.comments) { return @($parsed.comments) }
+        $pages = $raw | ConvertFrom-Json -ErrorAction Stop
+        # --paginate --slurp returns an array-of-page-arrays; flatten it into
+        # a flat array of comment objects before normalizing (mirroring
+        # frame-credit-ledger-core.ps1 own flatten step).
+        $flat = if ($pages -is [array] -and $pages.Count -gt 0 -and $pages[0] -is [array]) {
+            @($pages | ForEach-Object { $_ })
+        }
+        else {
+            @($pages)
+        }
+        return @($flat | ForEach-Object {
+                [pscustomobject]@{
+                    id   = $_.id
+                    url  = $_.html_url
+                    body = $_.body
+                }
+            })
     }
     catch {
         [Console]::Error.WriteLine("Get-GoalRunIssueComments: failed to parse comments JSON: $($_.Exception.Message)")
@@ -529,7 +614,24 @@ function Invoke-GoalRunMutexLaunch {
            via Resolve-GoalRunInflightMutexOutcome. The higher comment-id
            yields: it withdraws (marks resolved) its own marker and aborts
            without provisioning.
-        3. Only the reconcile winner calls New-GoalRunWorktree.
+        3. M16 fix: a single reconcile read is vulnerable to GitHub
+           comment-list eventual consistency -- two near-simultaneous
+           launches can each miss the other own just-posted marker in that
+           one read, and both would otherwise proceed to provision. Before
+           finalizing a 'proceed' outcome, this does ONE brief, cheap
+           re-confirmation read after -ReconfirmDelayMs and re-runs the
+           SAME tiebreak against the newly observed set -- a narrow-window
+           mitigation, not a full distributed-lock replacement. When the
+           reconfirmed set changes the outcome to yield, the later read
+           wins and this run withdraws its own marker instead of
+           provisioning.
+        4. Only a reconcile winner that also survives reconfirmation calls
+           New-GoalRunWorktree.
+    .PARAMETER ReconfirmDelayMs
+        Delay before the reconfirmation read in step 3. Injectable to 0 for
+        tests; production callers should leave the default so the
+        reconfirm read has a real chance to observe a just-posted marker
+        that had not yet propagated on the first read.
     .OUTPUTS
         [pscustomobject]@{ Outcome; CommentId; Worktree }
         Outcome is one of: 'abort-marker-post-failed' | 'yielded' |
@@ -543,7 +645,8 @@ function Invoke-GoalRunMutexLaunch {
         [Parameter(Mandatory)][string]$ContractHash,
         [string]$WorktreeRoot,
         [string]$Owner,
-        [string]$Repo
+        [string]$Repo,
+        [int]$ReconfirmDelayMs = 1500
     )
 
     $posted = New-GoalRunInflightMarker -Issue $Issue -ContractHash $ContractHash -Owner $Owner -Repo $Repo
@@ -563,6 +666,20 @@ function Invoke-GoalRunMutexLaunch {
         # posting already works fine via ambient `gh` context.
         Set-GoalRunInflightMarkerResolved -CommentId $posted.CommentId -Issue $Issue -ContractHash $ContractHash `
             -LaunchedAt $posted.LaunchedAt -ResolvedReason 'yielded-to-lower-comment-id' -Owner $Owner -Repo $Repo | Out-Null
+        return [pscustomobject]@{ Outcome = 'yielded'; CommentId = $posted.CommentId; Worktree = $null }
+    }
+
+    # M16 fix: brief re-confirmation before trusting a 'proceed' verdict.
+    if ($ReconfirmDelayMs -gt 0) {
+        Start-Sleep -Milliseconds $ReconfirmDelayMs
+    }
+    $reconfirmMarkers = Get-GoalRunInflightMarkers -Issue $Issue -Owner $Owner -Repo $Repo
+    $reconfirmLiveIds = @($reconfirmMarkers | Where-Object { $_.Status -eq 'unresolved' } | ForEach-Object { $_.CommentId } | Where-Object { $null -ne $_ })
+    $reconfirmTiebreak = Resolve-GoalRunInflightMutexOutcome -OwnCommentId $posted.CommentId -LiveMarkerCommentIds $reconfirmLiveIds
+
+    if ($reconfirmTiebreak.Outcome -eq 'yield') {
+        Set-GoalRunInflightMarkerResolved -CommentId $posted.CommentId -Issue $Issue -ContractHash $ContractHash `
+            -LaunchedAt $posted.LaunchedAt -ResolvedReason 'yielded-to-lower-comment-id-on-reconfirm' -Owner $Owner -Repo $Repo | Out-Null
         return [pscustomobject]@{ Outcome = 'yielded'; CommentId = $posted.CommentId; Worktree = $null }
     }
 

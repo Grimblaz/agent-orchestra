@@ -46,7 +46,7 @@ function Invoke-PluginPreflight {
                 return _PreflightSummary $results
             }
             $manifest = Get-Content -Path $PluginJsonPath -Raw | ConvertFrom-Json
-            # VS Code resolves paths in plugin.json relative to the manifest's directory.
+            # VS Code resolves paths in plugin.json relative to the manifest own directory.
             # The manifest sits at the plugin/repo root (relocated from .github/plugin.json
             # in v2.0.0 per issue #367 D10), so manifest-relative and plugin-root-relative
             # resolution are equivalent — paths read as `./agents/` and `./skills/{name}/`.
@@ -103,6 +103,21 @@ function Invoke-PluginPreflight {
             # falls back to the on-disk count for that directory.
             $agentsValue = $manifest.agents
             if ($agentsValue -is [string]) {
+                # M18 (verified, not further fixable without a manifest-shape change):
+                # this repo root plugin.json currently declares "agents": "agents/" --
+                # a bare directory reference, not an itemized list -- so there is no
+                # itemized-array count to drift-check the on-disk *.agent.md files
+                # against in this branch. Setting expected = actual here is
+                # structurally a no-op check (always Passed=true) for that shape, by
+                # design (see the corresponding Pester test own comment). This is
+                # NOT fixable by cross-checking .claude-plugin/plugin.json own itemized
+                # agents array instead: that array enumerates the lowercase Claude-
+                # native shells (agents/{name}.md, e.g. agents/code-smith.md), a
+                # DIFFERENT file set than the capitalized shared bodies this check
+                # counts (agents/*.agent.md). The two sets happen to pair 1:1 today
+                # by repo convention, but nothing in this validator enforces that
+                # pairing, so treating the shell count as ground truth for the body
+                # count would assume an invariant this check does not actually own.
                 $expectedAgentCount = $agentFiles.Count
             }
             else {

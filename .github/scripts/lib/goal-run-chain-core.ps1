@@ -72,11 +72,15 @@
     Explicitly out of scope for this step (commented seams only, no
     function bodies here):
 
-      - budget-exhausted producer wiring: the wall-clock backstop is #874
-        plan step 7. Resolve-GoalRunHaltPrecedence accepts a
-        -BudgetExhausted switch today so its precedence slot exists, but
-        nothing in this file currently sets that switch true -- step 7
-        owns the trigger.
+      - budget-exhausted producer wiring: the wall-clock backstop was #874
+        plan step 7, and it is now live, not a remaining seam. The step 7
+        arm shipped as Invoke-GoalRunChainStageBoundaryHousekeeping
+        (goal-run-budget-core.ps1), wired into Goal-Run.agent.md at every
+        chain-stage boundary; it composes the -BudgetExhausted switch
+        Resolve-GoalRunHaltPrecedence accepts and passes it through when
+        the wall-clock check trips. In-loop budget enforcement (a Stop
+        hook, an interactive-surface turn ceiling) remains out of scope --
+        only the chain-stage-boundary check exists.
       - gate-input-needed producer wiring: chain gate demands are #848 E1.
         Resolve-GoalRunHaltPrecedence accepts a -GateInputNeeded switch for
         the same reason; #848 E1 owns what sets it.
@@ -547,6 +551,22 @@ function Test-GoalRunPrEmissionsVerified {
     if (-not $PrReader) {
         $PrReader = {
             param($PrNumber, $Owner, $Repo, $GhCliPath)
+            # M14 fix (mojibake round-trip): pin the console output encoding
+            # to UTF-8 (no BOM) before the gh call, mirroring the read-side
+            # pin frame-credit-ledger.ps1 sets. Native gh stdout otherwise
+            # decodes with the OS-default console code page on Windows, and
+            # a whole-body gh pr edit write later composed from that stdout
+            # can permanently mangle non-ASCII prose (em-dashes, section
+            # signs, emoji) already present in the PR body. This is a
+            # process-wide static, so setting it here -- before this
+            # function own earliest gh stdout read -- is enough for every
+            # gh call this process makes afterward too.
+            try {
+                [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+            }
+            catch {
+                Write-Warning "Test-GoalRunPrEmissionsVerified: console UTF-8 pin failed: $($_.Exception.Message)"
+            }
             $prArgs = @('pr', 'view', [string]$PrNumber, '--json', 'body,labels')
             if ($Owner -and $Repo) { $prArgs += @('--repo', "$Owner/$Repo") }
             $raw = & $GhCliPath @prArgs 2>$null
@@ -644,9 +664,23 @@ function Invoke-GoalRunTerminalEmissionsVerifyAndRepair {
             }
         }
 
+        # M14 fix (read-modify-write race, minimized not eliminated): re-read
+        # the live PR body immediately before composing the write payload
+        # instead of reusing $state, which was captured back at function
+        # entry and could already be stale if a concurrent writer touched
+        # the PR body in the interim. This narrows the window but does not
+        # close it -- gh has no conditional/ETag-guarded edit, so a smaller
+        # race remains between this re-read and the actual gh pr edit call
+        # below. Honest and accepted, matching the M21 pattern (the
+        # validator subprocess own second independent contract re-fetch,
+        # agents/Goal-Run.agent.md loop-launched section): a residual race
+        # in a narrow window is a known risk, not eliminated here.
+        $reReadState = Test-GoalRunPrEmissionsVerified -PrNumber $PrNumber -LabelName $LabelName -Owner $Owner -Repo $Repo -GhCliPath $GhCliPath -PrReader $PrReader
+        $richBodySource = if ($null -ne $reReadState -and $null -ne $reReadState.Body) { [string]$reReadState.Body } else { [string]$state.Body }
+
         $tempBodyFile = [System.IO.Path]::GetTempFileName()
         try {
-            $emitResult = Invoke-GoalRunClassEmission -Issue $Contract.issue -BodyFile $tempBodyFile -Contract $Contract -GoalRunClass $GoalRunClass -Credits $Credits -RichBody ([string]$state.Body) -Repo $Repo -GhCliPath $GhCliPath -SkipMarkerHarvest
+            $emitResult = Invoke-GoalRunClassEmission -Issue $Contract.issue -BodyFile $tempBodyFile -Contract $Contract -GoalRunClass $GoalRunClass -Credits $Credits -RichBody $richBodySource -Repo $Repo -GhCliPath $GhCliPath -SkipMarkerHarvest
             if ($emitResult.ExitCode -eq 0) {
                 $metricsOk = [bool](& $BodyWriter $PrNumber $Owner $Repo $GhCliPath $tempBodyFile)
             }
