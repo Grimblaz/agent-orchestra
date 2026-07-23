@@ -2,6 +2,12 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.4.6] — 2026-07-22
+
+### Added
+
+Goal-run harness stage machine (issue #874, plan step 4): the `/goal-run {issue}` command, the shared `agents/Goal-Run.agent.md` body, and the Claude Code `goal-run` subagent shell — a minimal top-level stage vocabulary (pre-loop | loop-launched | loop-released | chain-dispatched) that resumes at the first incomplete stage from durable artifacts only, a marker-first-then-provision mutex with reconcile tiebreak, crash-atomicity detection for dead in-flight runs, and a bounded-retry control-return-then-read sequence for the vendor goal-loop verdict. Arm I only; the post-loop chain body and terminal-emissions verification are explicit seams for a later step.
+
 ## [3.4.5] — 2026-07-21
 
 ### Added

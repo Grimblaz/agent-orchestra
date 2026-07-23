@@ -39,12 +39,19 @@ Describe 'Per-agent model + effort routing contract' {
         # research-agent / specification are the #785 upstream-shell opus+high floor
         # (f13-upstream-shell-floor) binding the subagent-delegation path. All use Levenshtein on
         # mismatch for diagnostics.
+        # agents/goal-run.md (issue #874, plan step 4): D2-style redundant
+        # declaration, same rationale as agents/code-conductor.md — a
+        # single-issue orchestrator entry point that is also directly
+        # dispatchable as `subagent_type: goal-run` (bypassing the
+        # commands/goal-run.md front-end), so the shell must pin its own
+        # tier rather than rely solely on the command override.
         $script:ExpectedRouting = @{
             'agents/code-critic.md'          = @{ model = 'opus'; effort = 'high' }
             'agents/code-review-response.md' = @{ model = 'fable'; effort = 'xhigh' }
             'agents/refactor-specialist.md'  = @{ model = 'sonnet'; effort = 'high' }
             'agents/process-review.md'       = @{ model = 'sonnet'; effort = 'high' }
             'agents/code-conductor.md'       = @{ model = 'sonnet'; effort = 'high' }
+            'agents/goal-run.md'             = @{ model = 'sonnet'; effort = 'high' }
             'agents/experience-owner.md'     = @{ model = 'opus'; effort = 'high' }
             'agents/solution-designer.md'    = @{ model = 'opus'; effort = 'high' }
             'agents/issue-planner.md'        = @{ model = 'opus'; effort = 'high' }
@@ -63,6 +70,7 @@ Describe 'Per-agent model + effort routing contract' {
             'commands/orchestrate.md'     = @{ model = 'sonnet'; effort = 'high' }
             'commands/code-conductor.md'  = @{ model = 'sonnet'; effort = 'high' }
             'commands/review-github.md'   = @{ model = 'sonnet'; effort = 'high' }
+            'commands/goal-run.md'        = @{ model = 'sonnet'; effort = 'high' }
         }
 
         # D3: upstream commands that MUST NOT declare model/effort

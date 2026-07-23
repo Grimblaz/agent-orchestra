@@ -15,7 +15,7 @@
 
       New-GoalRunWorktree -RepoRoot <string> -IssueNumber <int>
                            [-WorktreeRoot <string>] [-GitCliPath <string>]
-        Provisioner. Modeled on New-GCDisposableWorktree's discipline
+        Provisioner. Modeled on the New-GCDisposableWorktree discipline
         (.github/scripts/lib/goal-contract-validate-core.ps1:972) -- clean-
         tree refusal first, structured [pscustomobject] return, `| Out-Null`
         stdout discipline -- but this is NOT a parameterization of that
@@ -23,7 +23,7 @@
         creates a NAMED branch `goal-run/issue-{N}-{token}` at a configurable
         short root outside the checkout (default `{repo-parent}/gr-{issue}-
         {token}`) and sets `core.longpaths` at `worktree add`. `{token}` is a
-        GUID-style collision-proof suffix (mirrors New-GCDisposableWorktree's
+        GUID-style collision-proof suffix (mirrors the New-GCDisposableWorktree
         `[Guid]::NewGuid().ToString('N')` precedent) so two concurrent runs
         for the same issue never collide on branch name or directory.
 
@@ -59,13 +59,13 @@
         Remove-GCDisposableWorktree (goal-contract-validate-core.ps1:1032,
         same `-RetryDelayMs` naming). On exhausting retries, defers and
         flags: sets `teardown_deferred: true` on the state file (best-effort;
-        never throws) -- a durable "note on the run's terminal comment"
+        never throws) -- a durable "note on the terminal comment for the run"
         happens in a later step once the halt-comment machinery has a live
         call-site, not here. After every removal attempt, the actual
         post-attempt state is diagnosed honestly through the SAME six-value
-        outcome vocabulary as
-        skills/session-startup/scripts/session-startup-git-helpers.ps1's
-        Get-WorktreeRemovalOutcome -- 'removed', 'removed-partial-root-held',
+        outcome vocabulary as the Get-WorktreeRemovalOutcome function in
+        skills/session-startup/scripts/session-startup-git-helpers.ps1 --
+        'removed', 'removed-partial-root-held',
         'removed-partial-content-remains', 'stale-registration', 'failed',
         'verification-indeterminate' -- so a later step-3 detector
         integration can consume the same literal strings. This file does
@@ -97,7 +97,7 @@ function script:Save-GoalRunActiveState {
 
     # Explicit -Depth: the ConvertTo-Json default of 2 would silently flatten
     # nested ceilings/baseline objects, mirroring the same rationale already
-    # documented at goal-run-halt-core.ps1's Test-GoalRunHaltReport.
+    # documented at the Test-GoalRunHaltReport function in goal-run-halt-core.ps1.
     $json = $State | ConvertTo-Json -Depth 20
     Set-Content -LiteralPath $StatePath -Value $json -Encoding utf8 -NoNewline
 }
@@ -147,7 +147,7 @@ function Get-GoalRunActiveState {
     $raw = Get-Content -LiteralPath $statePath -Raw
     # -DateKind String: ConvertFrom-Json otherwise auto-coerces any
     # ISO-8601-shaped string (launched_at/heartbeat_at) into a [datetime]
-    # object, silently changing the field's type on every read and breaking
+    # object, silently changing the field type on every read and breaking
     # equality against the plain string this lib always writes.
     return ($raw | ConvertFrom-Json -DateKind String)
 }
@@ -193,12 +193,12 @@ function Set-GoalRunActiveStateTeardownDeferred {
 # Provisioner
 # ---------------------------------------------------------------------------
 
-# Private: clean-tree refusal check. Duplicated (not dot-sourced) from
-# Test-GCTreeClean's fail-closed shape rather than importing
+# Private: clean-tree refusal check. Duplicated (not dot-sourced) from the
+# fail-closed shape of Test-GCTreeClean rather than importing
 # goal-contract-validate-core.ps1 wholesale -- that file is a large,
 # unrelated contract-validation surface, and this lib is meant to stay
-# standalone/independently testable per the requirement contract's
-# non-goals. Same fail-closed discipline: a failed `git status --porcelain`
+# standalone/independently testable per the requirement contract
+# non-goals section. Same fail-closed discipline: a failed `git status --porcelain`
 # invocation is treated as NOT clean, never as an empty-output false "clean".
 function script:Test-GoalRunTreeClean {
     [CmdletBinding()]
@@ -233,8 +233,8 @@ function New-GoalRunWorktree {
         [Parameter(Mandatory = $false)][string]$GitCliPath = 'git'
     )
 
-    # Clean-tree refusal FIRST -- before any worktree exists (mirrors
-    # New-GCDisposableWorktree's AC2 ordering).
+    # Clean-tree refusal FIRST -- before any worktree exists (mirrors the
+    # New-GCDisposableWorktree AC2 ordering).
     $cleanliness = script:Test-GoalRunTreeClean -Path $RepoRoot -GitCliPath $GitCliPath
     if (-not $cleanliness.IsClean) {
         return [pscustomobject]@{
@@ -250,7 +250,7 @@ function New-GoalRunWorktree {
     }
 
     # GUID-suffixed unique token -- collision is structurally impossible,
-    # mirroring New-GCDisposableWorktree's `[Guid]::NewGuid().ToString('N')`
+    # mirroring the New-GCDisposableWorktree `[Guid]::NewGuid().ToString('N')`
     # precedent, so two concurrent goal-run provisions for the same issue
     # never collide on branch name or directory.
     $token = [Guid]::NewGuid().ToString('N')
@@ -258,8 +258,8 @@ function New-GoalRunWorktree {
     $worktreePath = Join-Path $WorktreeRoot "gr-$IssueNumber-$token"
 
     # R18-equivalent stdout discipline: native `git worktree add` stdout is
-    # discarded via Out-Null, not just stderr, since this function's return
-    # value is structurally consumed by callers.
+    # discarded via Out-Null, not just stderr, since the return value of
+    # this function is structurally consumed by callers.
     & $GitCliPath -C $RepoRoot worktree add -b $branchName $worktreePath 2>$null | Out-Null
     if ($LASTEXITCODE -ne 0) {
         return [pscustomobject]@{
@@ -287,8 +287,8 @@ function New-GoalRunWorktree {
 # ---------------------------------------------------------------------------
 
 # Private: path normalization for the porcelain worktree-path comparison
-# (mirrors session-startup-git-helpers.ps1's ConvertTo-SCDPathForComparison
-# shape -- duplicated, not imported, for the same standalone-lib reason as
+# (mirrors the ConvertTo-SCDPathForComparison shape in
+# session-startup-git-helpers.ps1 -- duplicated, not imported, for the same standalone-lib reason as
 # Test-GoalRunTreeClean above).
 function script:ConvertTo-GoalRunPathForComparison {
     [CmdletBinding()]
@@ -361,7 +361,7 @@ function script:Resolve-GoalRunWorktreeFsState {
 
 # Private: pure post-removal-attempt diagnosis over the registered x
 # {absent,empty,non-empty} matrix. Returns the SAME six-value closed enum as
-# session-startup-git-helpers.ps1's Get-WorktreeRemovalOutcome (literal
+# the Get-WorktreeRemovalOutcome function in session-startup-git-helpers.ps1 (literal
 # vocabulary reused; the function itself is a deliberate parallel
 # implementation, not a shared call -- see file header).
 function script:Get-GoalRunWorktreeRemovalOutcome {
@@ -413,14 +413,15 @@ function script:Get-GoalRunWorktreeRemovalOutcome {
 # this file behind as untracked content, which makes a plain `git worktree
 # remove` refuse even though there is nothing genuinely unsaved to protect.
 # Fails CLOSED ($false) on any probe error, a clean-looking porcelain (0
-# lines -- that case should never reach here since a clean tree's plain
-# remove would already have succeeded), or any line that doesn't exactly
-# match the expected shape -- callers must treat "cannot confirm" as "not
-# known-safe to force", mirroring the file's existing never-force-on-a-flag-
-# alone philosophy (see the locked-worktree clause below). Scoped to the
-# worktree itself (`git -C $WorktreePath`), NOT $RepoRoot -- the worktree
-# lives on its own freshly branched HEAD and `-C $RepoRoot` would not
-# reflect the worktree's own local dirty state at all.
+# lines -- that case should never reach here since a plain remove on a
+# clean tree would already have succeeded), or any line that does not
+# exactly match the expected shape -- callers must treat "cannot confirm"
+# as "not known-safe to force", mirroring the never-force-on-a-flag-alone
+# philosophy already used elsewhere in this file (see the locked-worktree
+# clause below). Scoped to the worktree itself (`git -C $WorktreePath`),
+# NOT $RepoRoot -- the worktree lives on its own freshly branched HEAD and
+# `-C $RepoRoot` would not reflect local dirty state scoped to the
+# worktree at all.
 function script:Test-GoalRunWorktreeOnlyExpectedContent {
     [CmdletBinding()]
     [OutputType([bool])]
@@ -451,14 +452,14 @@ function script:Test-GoalRunWorktreeOnlyExpectedContent {
     return $true
 }
 
-# Private: one removal attempt, decision tree mirroring
-# post-merge-cleanup.ps1's corrected D5/#522 clause -- locked+absent gets a
+# Private: one removal attempt, decision tree mirroring the corrected
+# D5/#522 clause in post-merge-cleanup.ps1 -- locked+absent gets a
 # double-force removal (nothing left to lock), locked+present is never
 # force-removed here (caller skips the attempt entirely), prunable+absent
 # clears the stale registration, and the default path tries a plain removal
 # before escalating to --force when independently known prunable OR when
 # Test-GoalRunWorktreeOnlyExpectedContent confirms the only dirty content is
-# the goal-run's own state file (issue #874, PR1 fix -- a routine, healthy
+# the state file the goal-run itself writes (issue #874, PR1 fix -- a routine, healthy
 # run always leaves that file behind as untracked, which otherwise makes the
 # plain remove refuse on essentially every mainline teardown). Any OTHER
 # dirty content is never force-removed here -- it falls through to the
@@ -566,7 +567,7 @@ function Remove-GoalRunWorktree {
 # ---------------------------------------------------------------------------
 # Deferred-teardown retry (issue #874, plan step 3, AC3 detector-protection
 # half). Standalone entry point -- deliberately not buried inside
-# session-cleanup-detector-core.ps1's own report-generation flow, so a
+# the report-generation flow of session-cleanup-detector-core.ps1 itself, so a
 # future /goal-run agent-body invocation can call this same function
 # directly, in addition to the owner-confirmed composite command the
 # detector renders in its report.

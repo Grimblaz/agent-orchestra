@@ -22,11 +22,12 @@
 # Set-GoalRunActiveStateTeardownDeferred / Remove-GoalRunWorktree from
 # .github/scripts/lib/goal-run-worktree-core.ps1 (plan step 2) — never
 # reimplemented here. That lib is dev/CI tooling and is NOT part of the
-# distributed plugin bundle (.claude-plugin/plugin.json's `agents`/no `.github`
-# entry), so it only resolves inside the agent-orchestra repo's own checkout;
-# Import-SCDGoalRunLibIfAvailable below is a best-effort, never-throws import,
-# and every accessor that depends on it fails open (treats the branch as
-# "unbacked") when the lib could not be loaded.
+# distributed plugin bundle (no `agents`/`.github` entry in
+# .claude-plugin/plugin.json), so it only resolves inside the agent-orchestra
+# repo checkout itself; Import-SCDGoalRunLibIfAvailable below is a
+# best-effort, never-throws import, and every accessor that depends on it
+# fails open (treats the branch as "unbacked") when the lib could not be
+# loaded.
 # ===========================================================================
 
 $script:GoalRunBranchPrefix = 'goal-run/'
@@ -34,15 +35,15 @@ $script:GoalRunBranchPrefix = 'goal-run/'
 # Single threshold, deliberately shared between "recent enough to render as a
 # plain informational line" (point 2 of the requirement contract: "recent
 # heartbeat") and "stale enough to render the aging-escalation nudge" (point
-# 4). A goal-run's heartbeat_at is updated at each chain-stage boundary (see
-# goal-run-worktree-core.ps1's header); every #874 capability-probe leg to
-# date completed a chain stage in well under an hour, so 60 minutes with no
+# 4). A goal-run heartbeat_at field is updated at each chain-stage boundary
+# (see the header of goal-run-worktree-core.ps1); every #874 capability-probe
+# leg to date completed a chain stage in well under an hour, so 60 minutes with no
 # heartbeat update is treated as "the run likely crashed or was abandoned" —
 # while staying well above normal inter-heartbeat gaps so a merely-slow-but-
 # live run does not spuriously trip the nudge.
 $script:GoalRunHeartbeatStaleThresholdMinutes = 60
 
-# Point 2's required wording for an unbacked (missing/unreadable) goal-run-
+# Required wording per requirement-contract point 2 for an unbacked (missing/unreadable) goal-run-
 # named branch/worktree — single authoritative string so both the sibling and
 # orphan call sites render identical text.
 $script:GoalRunUnbackedNote = 'looks like a goal-run name but has no run state.'
@@ -195,7 +196,7 @@ function Get-SCDGoalRunProtectedLines {
     $needsRetryItems = @($Items | Where-Object { $_.IsStale -or $_.TeardownDeferred })
     if ($needsRetryItems.Count -gt 0) {
         $out += ''
-        $out += "Heartbeat stale beyond $($script:GoalRunHeartbeatStaleThresholdMinutes) min (or teardown previously deferred) for the run(s) above — terminal-comment escalation is not yet available (TODO for a later #874 step); this nudge is heartbeat/deferred-flag only. Nothing above ran automatically. If you've confirmed a run is dead, retry teardown:"
+        $out += "Heartbeat stale beyond $($script:GoalRunHeartbeatStaleThresholdMinutes) min (or teardown previously deferred) for the run(s) above — terminal-comment escalation is not yet available (TODO for a later #874 step); this nudge is heartbeat/deferred-flag only. Nothing above ran automatically. If you have confirmed a run is dead, retry teardown:"
         $out += '```powershell'
         $out += '# Run in a PowerShell (pwsh) terminal:'
         $safeRoot = ConvertTo-SCDPowerShellSingleQuoteEscapedText -Value $RepoRoot
@@ -210,7 +211,7 @@ function Get-SCDGoalRunProtectedLines {
 }
 
 # ===========================================================================
-# Issue #889 s4 — eligibility-gating helpers for the detector's candidate-
+# Issue #889 s4 — eligibility-gating helpers for the detector candidate-
 # append sites. These wrap the shared Test-WorktreeBranchRemovalEligible
 # primitive (session-startup-git-helpers.ps1, s1) with a detector-only
 # degraded-CWD short-circuit and a collection-time gh budget, neither of
@@ -220,26 +221,28 @@ function Get-SCDGoalRunProtectedLines {
 # Detector-only manual-review reason for the degraded-CWD downgrade (D6/AC7).
 # Not part of $script:WorktreeEligibilityReasons in session-startup-git-helpers.ps1:
 # that dictionary enumerates reasons the PRIMITIVE itself produces; this reason
-# is produced by the detector's own structural guard and never by the primitive.
-$script:SCDDegradedCwdManualReviewReason = "couldn't verify: current worktree location not registered"
+# is produced by the detector itself as a structural guard and never by the primitive.
+$script:SCDDegradedCwdManualReviewReason = "could not verify: current worktree location not registered"
 
 # Detector-only manual-review reason for the collection-time gh budget cap
 # (finding D, #889 fix cycle). Test-SCDCollectionGhBudgetExceeded trips on EITHER
-# a per-category candidate COUNT cap or the run's elapsed-time cap — neither of
-# which means a gh subprocess was actually invoked and hung. Previously both
-# cases were reported via $script:WorktreeEligibilityReasons.GhTimeout (the
-# PRIMITIVE's own reason for a genuine per-call gh timeout inside
-# Invoke-SCDGhWithTimeout), which conflated "we deliberately declined to spend
-# more of this run's gh budget" with "a gh call actually hung". This reason is
-# used only for the collection-budget short-circuit; GhTimeout is reserved for
-# genuine per-call timeouts surfaced by the primitive itself.
-$script:SCDCollectionBudgetExceededManualReviewReason = "couldn't verify: too many candidates this run"
+# a per-category candidate COUNT cap or the elapsed-time cap for the run --
+# neither of which means a gh subprocess was actually invoked and hung.
+# Previously both cases were reported via
+# $script:WorktreeEligibilityReasons.GhTimeout (the reason the PRIMITIVE
+# itself uses for a genuine per-call gh timeout inside
+# Invoke-SCDGhWithTimeout), which conflated "we deliberately declined to
+# spend more of the gh budget for this run" with "a gh call actually hung".
+# This reason is used only for the collection-budget short-circuit;
+# GhTimeout is reserved for genuine per-call timeouts surfaced by the
+# primitive itself.
+$script:SCDCollectionBudgetExceededManualReviewReason = "could not verify: too many candidates this run"
 
 function Test-SCDCurrentLocationMatchesWorktreeRecord {
     <#
     .SYNOPSIS
         Issue #889 s4: returns $true when $CurrentPath matches (normalized,
-        case-insensitive) any record's WorktreePath in $WorktreeRecords.
+        case-insensitive) the WorktreePath of any record in $WorktreeRecords.
         Used to detect the degraded-CWD condition — the current location
         does not correspond to any worktree `git worktree list --porcelain`
         knows about (e.g. a wiped/relocated linked worktree whose directory
@@ -276,7 +279,7 @@ function Test-SCDCurrentLocationMatchesWorktreeRecord {
 function New-SCDCollectionGhBudget {
     <#
     .SYNOPSIS
-        Issue #889 s4: collection-time gh budget for the detector's
+        Issue #889 s4: collection-time gh budget for the detector
         eligibility-gating calls. Distinct from the render-time
         $claudeCleanupLimit further down this file, which only truncates
         already-collected output and never bounds gh calls.
@@ -335,7 +338,7 @@ function Get-SCDGatedEligibility {
         unit before delegating to the primitive.
     .OUTPUTS
         Hashtable: @{ Eligible = <bool>; Evidence = <string|$null>; ManualReviewReason = <string|$null> }
-        (same shape as Test-WorktreeBranchRemovalEligible's own output).
+        (same shape as the output of Test-WorktreeBranchRemovalEligible itself).
     #>
     [CmdletBinding()]
     param(
@@ -446,16 +449,16 @@ function Get-SCDRemoteDefaultRef {
         <branch>@{upstream}`), falling back to `origin/<DefaultBranch>` —
         instead of maintaining a second, independently-diverging config-first
         strategy (`git config --get branch.<X>.remote`, falling back to
-        parsing `origin/HEAD`'s symbolic-ref) here. The two strategies agree
-        in the overwhelming majority of real repos (a branch's `@{upstream}`
-        resolution is itself derived from the same `branch.<X>.remote` /
+        parsing the symbolic-ref of `origin/HEAD`) here. The two strategies agree
+        in the overwhelming majority of real repos (the `@{upstream}`
+        resolution for a branch is itself derived from the same `branch.<X>.remote` /
         `branch.<X>.merge` config this function used to read directly), so
-        this file's own resolver was pure duplicated logic that could
+        the resolver that used to live in this file was pure duplicated logic that could
         silently drift from the shared one. Only the RETURN SHAPE
-        (RemoteName/BranchName/RefName hashtable, vs. the shared helper's
-        bare "remote/branch" string) remains detector-specific — this
-        wrapper derives that shape from the shared helper's single string
-        result so every detector call site keeps working unchanged.
+        (RemoteName/BranchName/RefName hashtable, vs. the bare
+        "remote/branch" string the shared helper returns) remains detector-specific — this
+        wrapper derives that shape from the single string result the shared helper returns
+        so every detector call site keeps working unchanged.
     #>
     param(
         [Parameter(Mandatory)]
@@ -864,7 +867,7 @@ function Get-SCDSiblingWorktreeCleanups {
                 # Issue #874 s3: goal-run/* branches get their own detection path —
                 # excluded from ordinary candidacy when backed by a resolvable state
                 # file (point 2), reported as an ordinary manual-review candidate with
-                # a note otherwise (point 2's "no run state" fail-open case). Neither
+                # a note otherwise (the "no run state" fail-open case from point 2). Neither
                 # branch touches the merge-evidence machinery below.
                 if (Test-SCDGoalRunBranchName -BranchName $branchName) {
                     $goalRunStatus = Get-SCDGoalRunWorktreeStatus -BranchName $branchName -WorktreePath $record.WorktreePath
@@ -1316,8 +1319,8 @@ function Invoke-SessionCleanupDetector {
     $fetchLookup = New-SCDStringLookup
     $ghBudget = New-SCDCollectionGhBudget
 
-    # Issue #874 s3: best-effort — see Import-SCDGoalRunLibIfAvailable's own
-    # doc comment for why this never halts the detector on failure.
+    # Issue #874 s3: best-effort — see the doc comment on
+    # Import-SCDGoalRunLibIfAvailable for why this never halts the detector on failure.
     Import-SCDGoalRunLibIfAvailable -RepoRoot $RepoRoot
 
     # ============================================================
@@ -1386,9 +1389,10 @@ function Invoke-SessionCleanupDetector {
                     # site never routed through Get-SCDGatedEligibility — the other
                     # five (sibling x2, orphan x2, current-no-upstream) all gate
                     # through the shared primitive before being reported as
-                    # cleanup-ready. This site's -FeatureBranch composite command is
-                    # still independently re-verified by post-merge-cleanup.ps1's own
-                    # eligibility check before any deletion occurs (M9/AC3), so
+                    # cleanup-ready. The -FeatureBranch composite command at this
+                    # site is still independently re-verified by the eligibility
+                    # check in post-merge-cleanup.ps1 before any deletion occurs
+                    # (M9/AC3), so
                     # gating here is a reporting-honesty fix, not a new safety net —
                     # but the manual-review reason is now surfaced so an ineligible
                     # stale branch is visibly flagged rather than silently presented
@@ -1875,7 +1879,7 @@ function Invoke-SessionCleanupDetector {
         $lines += ''
     }
     # else: none of the pre-existing five signals fired — reachable only when
-    # $goalRunProtectedCandidates is the sole reason STEP 3's early-return gate
+    # $goalRunProtectedCandidates is the sole reason the STEP 3 early-return gate
     # above did not fire (Issue #874 s3). Nothing to render here; the
     # dedicated block below always reports it.
 

@@ -93,7 +93,11 @@ jobs:
             '.github/scripts/Tests/session-cleanup-detector.Tests.ps1',
             # goal-run/* detector protection + reporting + aging escalation +
             # deferred-teardown retry — issue #874 plan step 3
-            '.github/scripts/Tests/session-cleanup-detector-goal-run.Tests.ps1'
+            '.github/scripts/Tests/session-cleanup-detector-goal-run.Tests.ps1',
+            # goal-run harness stage machine, mutex, crash-atomicity,
+            # control-return-then-read, and loop->chain seam — issue #874
+            # plan step 4
+            '.github/scripts/Tests/goal-run-stage-core.Tests.ps1'
           )
           $config.Run.Exit = $true
           $config.Output.Verbosity = 'Detailed'
