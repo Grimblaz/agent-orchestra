@@ -105,6 +105,11 @@ jobs:
             # five-halt-producer total precedence, PR classing, and
             # verified-emission + repair — issue #874 plan step 6
             '.github/scripts/Tests/goal-run-chain-core.Tests.ps1',
+            # goal-run harness vendor loop predicate wrapper: wires the
+            # launch-pinned contract-hash check into the live predicate
+            # command and self-emits a halt report on a halt disposition
+            # — issue #874 fix M1
+            '.github/scripts/Tests/goal-run-predicate-core.Tests.ps1',
             # goal-run harness advisory wall-clock budget arm, session-
             # identity arming, and end-of-run token accounting — issue #874
             # plan step 7

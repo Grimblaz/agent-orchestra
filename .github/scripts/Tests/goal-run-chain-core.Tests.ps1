@@ -37,6 +37,11 @@ Describe 'goal-run-chain-core.ps1: lib resolves' -Tag 'unit' {
 
 Describe 'Invoke-GoalRunChainRevalidate: reuses the step 5 disposition function' -Tag 'unit' {
 
+    BeforeAll {
+        $script:PinnedHash = ('a' * 64)
+        $script:MatchingPinCheck = { param($Issue, $LaunchPinnedHash, $Marker, $RepoRoot, $Repo, $GhCliPath, $GitCliPath) [pscustomobject]@{ Pinned = $true; Reason = $null; LiveHash = $LaunchPinnedHash } }
+    }
+
     $cases = @(
         @{ ExitCode = 0; Reason = $null; Description = 'exit 0 satisfied' }
         @{ ExitCode = 1; Reason = $null; Description = 'exit 1 not-satisfied' }
@@ -54,7 +59,7 @@ Describe 'Invoke-GoalRunChainRevalidate: reuses the step 5 disposition function'
         $expected = Resolve-GoalRunValidatorExitDisposition -ExitCode $ExitCode -Reason $Reason
 
         $invoker = { param($Issue, $RepoRoot, $PwshCliPath, $ValidatorScriptPath) [pscustomobject]@{ ExitCode = $ExitCode; Reason = $Reason } }
-        $actual = Invoke-GoalRunChainRevalidate -Issue 874 -RepoRoot 'C:\gr-874-token' -ValidatorInvoker $invoker
+        $actual = Invoke-GoalRunChainRevalidate -Issue 874 -RepoRoot 'C:\gr-874-token' -LaunchPinnedHash $script:PinnedHash -PinCheck $script:MatchingPinCheck -ValidatorInvoker $invoker
 
         $actual.Disposition | Should -Be $expected.Disposition
         $actual.Reason | Should -Be $expected.Reason
@@ -63,21 +68,56 @@ Describe 'Invoke-GoalRunChainRevalidate: reuses the step 5 disposition function'
 
     It 'maps a halt Disposition to HaltReason chain-stage-failure -- the same bucket the step 5 composed predicate uses for exit-2/exit-3-infra-error' {
         $invoker = { param($Issue, $RepoRoot, $PwshCliPath, $ValidatorScriptPath) [pscustomobject]@{ ExitCode = 2; Reason = $null } }
-        $result = Invoke-GoalRunChainRevalidate -Issue 874 -RepoRoot 'C:\gr-874-token' -ValidatorInvoker $invoker
+        $result = Invoke-GoalRunChainRevalidate -Issue 874 -RepoRoot 'C:\gr-874-token' -LaunchPinnedHash $script:PinnedHash -PinCheck $script:MatchingPinCheck -ValidatorInvoker $invoker
         $result.Disposition | Should -Be 'halt'
         $result.HaltReason | Should -Be 'chain-stage-failure'
     }
 
     It 'leaves HaltReason null when Disposition is satisfied' {
         $invoker = { param($Issue, $RepoRoot, $PwshCliPath, $ValidatorScriptPath) [pscustomobject]@{ ExitCode = 0; Reason = $null } }
-        $result = Invoke-GoalRunChainRevalidate -Issue 874 -RepoRoot 'C:\gr-874-token' -ValidatorInvoker $invoker
+        $result = Invoke-GoalRunChainRevalidate -Issue 874 -RepoRoot 'C:\gr-874-token' -LaunchPinnedHash $script:PinnedHash -PinCheck $script:MatchingPinCheck -ValidatorInvoker $invoker
         $result.HaltReason | Should -BeNullOrEmpty
     }
 
     It 'leaves HaltReason null when Disposition is not-satisfied' {
         $invoker = { param($Issue, $RepoRoot, $PwshCliPath, $ValidatorScriptPath) [pscustomobject]@{ ExitCode = 1; Reason = $null } }
-        $result = Invoke-GoalRunChainRevalidate -Issue 874 -RepoRoot 'C:\gr-874-token' -ValidatorInvoker $invoker
+        $result = Invoke-GoalRunChainRevalidate -Issue 874 -RepoRoot 'C:\gr-874-token' -LaunchPinnedHash $script:PinnedHash -PinCheck $script:MatchingPinCheck -ValidatorInvoker $invoker
         $result.HaltReason | Should -BeNullOrEmpty
+    }
+
+    # -----------------------------------------------------------------------
+    # M1 fix: launch-pinned contract-hash check wired into chain re-validation
+    # -----------------------------------------------------------------------
+
+    It 'halts with invariant-conflict on a launch-pinned-hash mismatch BEFORE invoking the validator (mismatch short-circuits -- validator is never invoked)' {
+        $mismatchPinCheck = { param($Issue, $LaunchPinnedHash, $Marker, $RepoRoot, $Repo, $GhCliPath, $GitCliPath) [pscustomobject]@{ Pinned = $false; Reason = 'contract-hash-mismatch-since-launch'; LiveHash = 'deadbeef' } }
+        $script:chainInvokerCallCount = 0
+        $invoker = {
+            param($Issue, $RepoRoot, $PwshCliPath, $ValidatorScriptPath)
+            $script:chainInvokerCallCount++
+            [pscustomobject]@{ ExitCode = 0; Reason = $null }
+        }
+
+        $result = Invoke-GoalRunChainRevalidate -Issue 874 -RepoRoot 'C:\gr-874-token' -LaunchPinnedHash $script:PinnedHash -PinCheck $mismatchPinCheck -ValidatorInvoker $invoker
+
+        $result.Disposition | Should -Be 'halt'
+        $result.HaltReason | Should -Be 'invariant-conflict'
+        $result.Reason | Should -Be 'contract-hash-mismatch-since-launch'
+        $script:chainInvokerCallCount | Should -Be 0 -Because 'a launch-pinned-hash mismatch must short-circuit before the validator is ever invoked'
+    }
+
+    It 'proceeds to invoke the validator normally when the launch-pinned hash matches' {
+        $script:chainInvokerCallCount2 = 0
+        $invoker = {
+            param($Issue, $RepoRoot, $PwshCliPath, $ValidatorScriptPath)
+            $script:chainInvokerCallCount2++
+            [pscustomobject]@{ ExitCode = 0; Reason = $null }
+        }
+
+        $result = Invoke-GoalRunChainRevalidate -Issue 874 -RepoRoot 'C:\gr-874-token' -LaunchPinnedHash $script:PinnedHash -PinCheck $script:MatchingPinCheck -ValidatorInvoker $invoker
+
+        $result.Disposition | Should -Be 'satisfied'
+        $script:chainInvokerCallCount2 | Should -Be 1
     }
 }
 

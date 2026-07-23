@@ -7,7 +7,7 @@
     Two concerns, both scoped to this step:
 
       New-GoalRunPromptText -Contract <object> -Issue <int> -WorktreePath <string>
-                             [-ValidatorScriptRelativePath <string>]
+                             [-PredicateScriptRelativePath <string>]
         Renders the executor prompt text from a parsed #872 contract object
         (the -Contract output ConvertFrom-GCContractBlock returns) plus the issue
         number and worktree path passed in as parameters (874-D2 Arm I):
@@ -21,6 +21,16 @@
         assembled prompt text can never accidentally satisfy a
         marker-substring-containment read the way an embedded live marker
         literal would.
+
+        M1 fix: the rendered predicate command now points at the thin CLI
+        wrapper goal-run-predicate.ps1 (goal-run-predicate-core.ps1,
+        Invoke-GoalRunPredicateEvaluate) instead of the raw validator
+        script. The wrapper runs the launch-pinned contract-hash check
+        (Test-GoalRunContractHashPinned, below) BEFORE the validator on
+        every vendor-loop iteration and self-emits a halt report on a halt
+        disposition, since the vendor loop itself has no halt-reporting
+        mechanism -- rendering the raw validator directly, as this
+        function did before this fix, never ran that check at all.
 
       Resolve-GoalRunValidatorExitDisposition -ExitCode <int> [-Reason <string>]
         Pure exit-code/Reason disambiguation (M1, the sharpest plan
@@ -113,7 +123,7 @@ function New-GoalRunPromptText {
         [Parameter(Mandatory)]$Contract,
         [Parameter(Mandatory)][int]$Issue,
         [Parameter(Mandatory)][string]$WorktreePath,
-        [string]$ValidatorScriptRelativePath = '.github/scripts/goal-contract-validate.ps1'
+        [string]$PredicateScriptRelativePath = '.github/scripts/goal-run-predicate.ps1'
     )
 
     $invariantLines = @(@($Contract.invariants) | ForEach-Object { "- $_" })
@@ -133,7 +143,11 @@ function New-GoalRunPromptText {
     $budget = $Contract.budget
     $budgetLine = "tokens=$($budget.tokens), wall_clock=$($budget.wall_clock), chain_sub_ceiling=$($budget.chain_sub_ceiling), non_convergence=$($budget.non_convergence)"
 
-    $predicateCommand = "pwsh -NoProfile -File $ValidatorScriptRelativePath -Issue $Issue -RepoRoot $WorktreePath"
+    # M1 fix: the predicate command points at the launch-pin-checking
+    # wrapper (goal-run-predicate.ps1), not the raw validator script --
+    # see the file header doc comment for why the raw validator alone was
+    # never sufficient here.
+    $predicateCommand = "pwsh -NoProfile -File $PredicateScriptRelativePath -Issue $Issue -RepoRoot $WorktreePath"
     $fencedPredicateCommand = '`' + $predicateCommand + '`'
 
     $lines = [System.Collections.Generic.List[string]]::new()

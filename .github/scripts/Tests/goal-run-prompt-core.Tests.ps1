@@ -94,8 +94,9 @@ Describe 'New-GoalRunPromptText' -Tag 'unit' {
         $script:Rendered | Should -Match 'non_convergence=halt-report'
     }
 
-    It 'renders a predicate command that invokes the validator against the supplied issue and worktree path' {
-        $script:Rendered | Should -Match ([regex]::Escape('goal-contract-validate.ps1 -Issue 874 -RepoRoot C:\gr-874-token'))
+    It 'renders a predicate command that invokes the launch-pin-checking wrapper (M1 fix), not the raw validator directly, against the supplied issue and worktree path' {
+        $script:Rendered | Should -Match ([regex]::Escape('goal-run-predicate.ps1 -Issue 874 -RepoRoot C:\gr-874-token'))
+        $script:Rendered | Should -Not -Match ([regex]::Escape('goal-contract-validate.ps1'))
     }
 
     It 'never renders a live plan-issue marker literal (marker-substring-containment self-match guard)' {

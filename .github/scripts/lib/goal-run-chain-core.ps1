@@ -112,6 +112,17 @@ function Invoke-GoalRunChainRevalidate {
         infra-error-prefixed exit 3), this wraps it with HaltReason
         'chain-stage-failure' -- the same bucket Resolve-GoalRunLoopPredicate
         assigns those same two halt cases to.
+
+        M1 fix: before any of that, this function also runs the SAME
+        launch-pinned contract-hash check the step 5 loop predicate runs
+        first (Test-GoalRunContractHashPinned, goal-run-prompt-core.ps1),
+        via -LaunchPinnedHash. Chain re-validation must not run the
+        validator against a contract that changed after this run own launch
+        was pinned any more than the in-loop predicate should. A mismatch
+        here short-circuits BEFORE the validator is invoked and produces
+        Disposition 'halt' / HaltReason 'invariant-conflict' -- a distinct
+        condition from a genuine re-validation failure, and the
+        highest-precedence halt producer per Resolve-GoalRunHaltPrecedence.
     .OUTPUTS
         [pscustomobject]@{ Disposition; HaltReason; Reason; ExitCode }
         Disposition is 'satisfied' | 'not-satisfied' | 'halt'. HaltReason is
@@ -122,10 +133,37 @@ function Invoke-GoalRunChainRevalidate {
     param(
         [Parameter(Mandatory)][int]$Issue,
         [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][string]$LaunchPinnedHash,
+        [string]$Marker,
+        [string]$Repo,
+        [string]$GhCliPath = 'gh',
+        [string]$GitCliPath = 'git',
         [string]$PwshCliPath = 'pwsh',
         [string]$ValidatorScriptPath,
+        [scriptblock]$PinCheck,
         [scriptblock]$ValidatorInvoker
     )
+
+    if (-not $PinCheck) {
+        $PinCheck = {
+            param($Issue, $LaunchPinnedHash, $Marker, $RepoRoot, $Repo, $GhCliPath, $GitCliPath)
+            Test-GoalRunContractHashPinned -Issue $Issue -LaunchPinnedHash $LaunchPinnedHash -Marker $Marker -RepoRoot $RepoRoot -Repo $Repo -GhCliPath $GhCliPath -GitCliPath $GitCliPath
+        }
+    }
+
+    # Launch-pinned hash check runs FIRST, mirroring
+    # Resolve-GoalRunLoopPredicate (goal-run-prompt-core.ps1). A mismatch
+    # short-circuits before the validator is ever invoked, so the checks of
+    # a contract that changed after launch are never executed here either.
+    $pin = & $PinCheck $Issue $LaunchPinnedHash $Marker $RepoRoot $Repo $GhCliPath $GitCliPath
+    if (-not $pin.Pinned) {
+        return [pscustomobject]@{
+            Disposition = 'halt'
+            HaltReason  = 'invariant-conflict'
+            Reason      = $pin.Reason
+            ExitCode    = $null
+        }
+    }
 
     if (-not $ValidatorInvoker) {
         $ValidatorInvoker = {

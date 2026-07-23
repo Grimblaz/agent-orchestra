@@ -35,6 +35,8 @@ Goal-Run walks a single GitHub issue's approved `goal-contract` plan variant (is
 Resolve `{issue}` from the command argument. If no issue number is present, ask for one via the platform's structured-question tool — do not guess an issue from conversation context.
 
 1. **Load and hash-verify the contract.** Fetch the issue body and comments, locate the `<!-- plan-issue-{issue} -->` comment carrying the `goal-contract` block, extract it with `Get-GCContractBlock`, parse and validate it with `ConvertFrom-GCContractBlock`, and verify its `contract_hash` field with `Test-GCContractHash` (`.github/scripts/lib/goal-contract-core.ps1`). If no contract block is found, or the hash does not verify, treat `ContractHashVerified` as `$false` for the stage-resolution call below and stop — report the specific failure (no block found vs. parse violations vs. hash mismatch) rather than a generic "not ready" message.
+
+   **Resume-time launch-pin check (M1 fix).** The self-consistency check above only proves the live contract is internally consistent with its own `contract_hash` field — it does not catch a post-launch edit that kept that field consistent. When this is a resume (a worktree from an earlier launch of this issue already exists), also read `goal-run-active.json` for that worktree via `Get-GoalRunActiveState` and, if it returns a state object, call `Test-GoalRunContractHashPinned -Issue {issue} -LaunchPinnedHash {state.contract_hash} -RepoRoot {repo root} [-Owner -Repo]` (`.github/scripts/lib/goal-run-prompt-core.ps1`). On `Pinned: $false`, this is an `invariant-conflict` halt, not a plain `ContractHashVerified: $false`: build the report with `New-GoalRunChainHaltReport -Issue {issue} -HaltReason invariant-conflict -Stage pre-loop -PlanRemediation {...}` and emit it with `Invoke-GoalRunHaltEmit`, then stop — do not proceed to `Resolve-GoalRunResumeStage`. On a fresh launch (no prior worktree, so no `goal-run-active.json` yet), there is nothing pinned yet and this check does not apply.
 2. **Check for an existing unresolved inflight marker first.** Call `Get-GoalRunInflightMarkers -Issue {issue} [-Owner -Repo]` (`.github/scripts/lib/goal-run-stage-core.ps1`). If any marker has `Status: unresolved`:
    - Read `goal-run-active.json` for that run's worktree (if provisioning got that far) via `Get-GoalRunActiveState`, and check for a `goal-halt-report-{issue}` comment and an open/merged PR tied to the run's branch.
    - Call `Test-GoalRunInflightAppearsDead` with those observations, then `Resolve-GoalRunInvocationAction` with the unresolved marker and the appears-dead verdict.
@@ -57,7 +59,9 @@ Call `Invoke-GoalRunMutexLaunch -Issue {issue} -RepoRoot {repo root} -ContractHa
 
 ### loop-launched (Arm I executor)
 
-Set the contract's goal on yourself in the provisioned worktree and become the executor — this is the vendor `/goal` loop launch itself, not a lib call. Once the loop is genuinely running (the platform has accepted the goal and is iterating), call `Set-GoalRunStageMarker -Issue {issue} -Stage loop-launched -ContractHash {hash}` to record that this stage completed.
+Build the prompt text with `New-GoalRunPromptText -Contract {parsed contract} -Issue {issue} -WorktreePath {provisioned worktree path}` (`.github/scripts/lib/goal-run-prompt-core.ps1`) — this is the actual goal text handed to the vendor `/goal` loop, not undefined content. The rendered prompt's predicate command invokes `.github/scripts/goal-run-predicate.ps1` (M1 fix), a thin wrapper that reads the launch-pinned `contract_hash` back out of `goal-run-active.json` and runs `Test-GoalRunContractHashPinned`/`Resolve-GoalRunLoopPredicate` BEFORE the validator on every iteration, self-emitting a `goal-halt-report-{issue}` comment on a halt disposition since the vendor loop has no halt-reporting mechanism of its own. (M21, honest and accepted: the validator subprocess this wrapper invokes independently re-fetches the live contract a second time after the pin check passes, so a race in that narrow window is a known residual risk, not eliminated here.)
+
+Set the contract's goal on yourself in the provisioned worktree using this rendered prompt text and become the executor — this is the vendor `/goal` loop launch itself, not a lib call. Once the loop is genuinely running (the platform has accepted the goal and is iterating), call `Set-GoalRunStageMarker -Issue {issue} -Stage loop-launched -ContractHash {hash}` to record that this stage completed.
 
 Build the executor-session handle for the next stage with `New-GoalRunExecutorSessionHandle -SessionId {your session id} -TranscriptPath {this session's transcript path} -Arm in-session`.
 
@@ -94,11 +98,12 @@ Every stage below is a **fresh-context dispatch**: CE Gate, prosecution, defense
 
 ### Stage 1 — Re-validation
 
-Call `Invoke-GoalRunChainRevalidate -Issue {issue} -RepoRoot {worktree path}` (`.github/scripts/lib/goal-run-chain-core.ps1`). This reuses the step 5 `Resolve-GoalRunValidatorExitDisposition` disposition directly — the same exit-3-split-by-Reason (infra-error prefix halts; a flag-bearing exit 3 counts as satisfied because this chain's mandatory review supersedes the flag) and the same exit-2-refused-to-halt correction the loop predicate already applies. Do not re-derive that interpretation here.
+Call `Invoke-GoalRunChainRevalidate -Issue {issue} -RepoRoot {worktree path} -LaunchPinnedHash {launch-pinned hash from goal-run-active.json}` (`.github/scripts/lib/goal-run-chain-core.ps1`). This reuses the step 5 `Resolve-GoalRunValidatorExitDisposition` disposition directly — the same exit-3-split-by-Reason (infra-error prefix halts; a flag-bearing exit 3 counts as satisfied because this chain's mandatory review supersedes the flag) and the same exit-2-refused-to-halt correction the loop predicate already applies. Do not re-derive that interpretation here. M1 fix: this call also runs the SAME launch-pinned contract-hash check (`Test-GoalRunContractHashPinned`) the loop predicate runs, before the validator, so chain re-validation cannot run against a contract that changed after this run's launch either.
 
 - `Disposition: satisfied` — continue to Stage 2.
 - `Disposition: not-satisfied` — this is a genuine re-validation failure against committed state. Treat it the same way a failing fix-cycle re-validation is treated in Stage 4: route to fix dispatch (or, if the fix-cycle cap is already exhausted, to the halt path).
-- `Disposition: halt` (`HaltReason: chain-stage-failure`) — feed `-ChainStageFailure` into `Resolve-GoalRunHaltPrecedence` (see Halt Producers below) and halt if it is the winning reason.
+- `Disposition: halt`, `HaltReason: chain-stage-failure` (validator infra-error/refused) — feed `-ChainStageFailure` into `Resolve-GoalRunHaltPrecedence` (see Halt Producers below) and halt if it is the winning reason.
+- `Disposition: halt`, `HaltReason: invariant-conflict` (launch-pinned hash mismatch) — feed `-InvariantConflict` into `Resolve-GoalRunHaltPrecedence` instead; this is the highest-precedence halt producer and wins over every other co-occurring condition.
 
 ### Stage 2 — CE Gate
 
@@ -154,5 +159,5 @@ DON'T:
 
 - Render Arm M two-block output, spawn an Arm H headless process, or accept a `scope_boundaries` prompt field.
 - Check `scope_boundaries` scope-conformance in the Stage 3 review — that lens is deferred to PR 2.
-- Build the goal-prompt assembly (step 5) or the budget arm (step 7) — the Post-Loop Chain above wires clearly-commented seams for both instead.
-- Modify `goal-run-halt-core.ps1`, `goal-run-status-core.ps1`, `goal-run-transcript-core.ps1`, `goal-run-worktree-core.ps1`, `goal-run-stage-core.ps1`, or `goal-run-prompt-core.ps1` — reuse their exported functions only.
+- Build the budget arm (step 7) — that wiring is separate #874 fix scope, not this section.
+- Modify `goal-run-halt-core.ps1`, `goal-run-status-core.ps1`, `goal-run-transcript-core.ps1`, `goal-run-worktree-core.ps1`, or `goal-run-stage-core.ps1` — reuse their exported functions only. (`goal-run-prompt-core.ps1` is deliberately not on this list: the M1/M7 fix wires its `New-GoalRunPromptText` predicate-command rendering and its `Test-GoalRunContractHashPinned` check into live call sites above, which requires editing that file; its other exported functions are still reused, not reimplemented.)
