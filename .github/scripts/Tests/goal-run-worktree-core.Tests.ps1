@@ -251,9 +251,15 @@ Describe 'Remove-GoalRunWorktree' -Tag 'unit' {
 
         $mockGitPath = Join-Path $TestDrive 'mock-git-teardown-defer.ps1'
         $counterFile = Join-Path $TestDrive 'mock-git-teardown-defer.counter'
-        # FailCount = 2 covers both bounded attempts (MaxAttempts default 2)
-        # -- removal never succeeds within the function's retry budget.
-        script:New-GRMockGitTeardownFailure -Path $mockGitPath -CounterFile $counterFile -FailCount 2
+        # FailCount = 10: with the issue #874 PR1 fix, a dirty-only-state-file
+        # worktree now issues up to TWO `worktree remove` invocations per
+        # bounded attempt (the plain remove, then the state-file-only force
+        # escalation) instead of one -- across MaxAttempts=2 that is up to 4
+        # real invocations. FailCount must comfortably exceed that so the
+        # mock keeps forcing every one of them to fail, proving removal
+        # genuinely never succeeds within the retry budget (not just that the
+        # mock ran out of forced failures before the budget did).
+        script:New-GRMockGitTeardownFailure -Path $mockGitPath -CounterFile $counterFile -FailCount 10
 
         try {
             $result = Remove-GoalRunWorktree -RepoRoot $repo -WorktreePath $provisioned.Path -GitCliPath $mockGitPath -RetryDelayMs 10 -WarningAction SilentlyContinue
@@ -263,7 +269,7 @@ Describe 'Remove-GoalRunWorktree' -Tag 'unit' {
             $result.Outcome | Should -Not -BeIn @('removed', 'stale-registration')
 
             $counterValue = [int](Get-Content -LiteralPath $counterFile -Raw)
-            $counterValue | Should -Be 2 -Because 'exactly two removal attempts must occur before deferring'
+            $counterValue | Should -Be 4 -Because 'two bounded attempts, each issuing a plain remove plus the state-file-only force escalation (both fail persistently)'
 
             $state = Get-GoalRunActiveState -WorktreePath $provisioned.Path
             $state.teardown_deferred | Should -Be $true
@@ -311,5 +317,164 @@ Describe 'Remove-GoalRunWorktree' -Tag 'unit' {
             & git -C $repo worktree unlock $provisioned.Path 2>&1 | Out-Null
             script:Remove-GRTestWorktree -RepoRoot $repo -WorktreePath $provisioned.Path
         }
+    }
+
+    It 'removes a routine worktree on the first attempt when the ONLY dirty content is the goal-run state file (issue #874 PR1 fix)' {
+        $repo = script:New-GRTestRepo -Path (Join-Path $TestDrive 'teardown-only-state-file-repo')
+        $provisioned = New-GoalRunWorktree -RepoRoot $repo -IssueNumber 700
+        New-GoalRunActiveState -WorktreePath $provisioned.Path -Ceilings @{ turns = 10 } -Baseline @{ commit = 'x' } `
+            -Arm 'in-session' -ExecutorSessionId 'sid-only-state-file' -ContractHash ('1' * 64) | Out-Null
+
+        try {
+            $result = Remove-GoalRunWorktree -RepoRoot $repo -WorktreePath $provisioned.Path
+
+            $result.Outcome | Should -Be 'removed' `
+                -Because 'goal-run-active.json is the only untracked content, so a plain-remove refusal must now escalate to --force'
+            $result.TeardownDeferred | Should -Be $false
+            $result.Attempts | Should -Be 1
+            (Test-Path -LiteralPath $provisioned.Path) | Should -Be $false
+        }
+        finally {
+            script:Remove-GRTestWorktree -RepoRoot $repo -WorktreePath $provisioned.Path
+        }
+    }
+
+    It 'never force-removes -- and defers as before -- a worktree with EXTRA untracked content beyond the state file' {
+        $repo = script:New-GRTestRepo -Path (Join-Path $TestDrive 'teardown-extra-content-repo')
+        $provisioned = New-GoalRunWorktree -RepoRoot $repo -IssueNumber 701
+        New-GoalRunActiveState -WorktreePath $provisioned.Path -Ceilings @{ turns = 10 } -Baseline @{ commit = 'x' } `
+            -Arm 'in-session' -ExecutorSessionId 'sid-extra-content' -ContractHash ('2' * 64) | Out-Null
+
+        # Simulates the goal loop leaving real, genuine unsaved work behind --
+        # this file must never be force-removed, even though the state file
+        # alone would now be known-safe.
+        $extraFilePath = Join-Path $provisioned.Path 'unsaved-work.txt'
+        [System.IO.File]::WriteAllText($extraFilePath, "real work, not yet committed`n", [System.Text.UTF8Encoding]::new($false))
+
+        try {
+            $result = Remove-GoalRunWorktree -RepoRoot $repo -WorktreePath $provisioned.Path -RetryDelayMs 10 -MaxAttempts 1
+
+            $result.Outcome | Should -Not -BeIn @('removed', 'stale-registration') `
+                -Because 'unexpected untracked content must never be force-removed -- it is not known-safe'
+            $result.TeardownDeferred | Should -Be $true
+            (Test-Path -LiteralPath $provisioned.Path) | Should -Be $true -Because 'the worktree itself must remain untouched when content is unexpected'
+            (Test-Path -LiteralPath $extraFilePath) | Should -Be $true -Because 'the extra untracked file must survive -- proof of non-destruction'
+        }
+        finally {
+            script:Remove-GRTestWorktree -RepoRoot $repo -WorktreePath $provisioned.Path
+        }
+    }
+}
+
+Describe 'Invoke-GoalRunDeferredTeardownRetry' -Tag 'unit' {
+    <#
+    .SYNOPSIS
+        Issue #874, plan step 3 -- standalone deferred-teardown retry entry
+        point. session-cleanup-detector-core.ps1 renders a call to this same
+        function; these tests exercise it directly, independent of the
+        detector.
+    #>
+
+    It 'no-ops with Attempted=$false when no state file exists' {
+        $repo = script:New-GRTestRepo -Path (Join-Path $TestDrive 'retry-no-state-repo')
+        $bareWorktreeDir = Join-Path $TestDrive 'retry-no-state-worktree'
+        New-Item -ItemType Directory -Path $bareWorktreeDir -Force | Out-Null
+
+        $result = Invoke-GoalRunDeferredTeardownRetry -RepoRoot $repo -WorktreePath $bareWorktreeDir
+
+        $result.Attempted | Should -Be $false
+        $result.Reason | Should -Be 'no-state-file'
+        $result.Outcome | Should -BeNullOrEmpty
+    }
+
+    It 'no-ops with Attempted=$false when the state file exists but teardown_deferred is false' {
+        $repo = script:New-GRTestRepo -Path (Join-Path $TestDrive 'retry-not-deferred-repo')
+        $provisioned = New-GoalRunWorktree -RepoRoot $repo -IssueNumber 500
+        New-GoalRunActiveState -WorktreePath $provisioned.Path -Ceilings @{ turns = 10 } -Baseline @{ commit = 'x' } `
+            -Arm 'in-session' -ExecutorSessionId 'sid-not-deferred' -ContractHash ('e' * 64) | Out-Null
+
+        try {
+            $result = Invoke-GoalRunDeferredTeardownRetry -RepoRoot $repo -WorktreePath $provisioned.Path
+
+            $result.Attempted | Should -Be $false
+            $result.Reason | Should -Be 'not-deferred'
+            (Test-Path -LiteralPath $provisioned.Path) | Should -Be $true -Because 'a non-deferred state must never be torn down by this entry point'
+        }
+        finally {
+            script:Remove-GRTestWorktree -RepoRoot $repo -WorktreePath $provisioned.Path
+        }
+    }
+
+    It 'retries Remove-GoalRunWorktree and succeeds on first attempt once the mainline untracked-state-file gap is fixed' {
+        <#
+        Originally discovered while writing this test (issue #874 s3): a real
+        `git worktree remove` (without --force) refuses to remove a worktree
+        that still has ANY untracked content -- and goal-run-active.json
+        itself, sitting inside the worktree it describes, is always untracked
+        at teardown time. That made Invoke-GoalRunWorktreeRemovalAttempt's
+        default branch (which only escalated to --force when IsPrunable was
+        true -- a directory-missing signal, unrelated to "has untracked
+        content") come back 'failed'/deferred on essentially every routine,
+        healthy teardown. Fixed in issue #874 PR1 by
+        Test-GoalRunWorktreeOnlyExpectedContent: when the plain remove fails
+        and the ONLY dirty content is the known state file, the removal now
+        escalates to --force just as it already did for the prunable case.
+        This assertion now proves the mainline case removes cleanly on the
+        first attempt; the "extra untracked content is never force-removed"
+        half of the fix is covered separately below.
+        #>
+        $repo = script:New-GRTestRepo -Path (Join-Path $TestDrive 'retry-deferred-repo')
+        $provisioned = New-GoalRunWorktree -RepoRoot $repo -IssueNumber 600
+        New-GoalRunActiveState -WorktreePath $provisioned.Path -Ceilings @{ turns = 10 } -Baseline @{ commit = 'x' } `
+            -Arm 'in-session' -ExecutorSessionId 'sid-retry-succeeds' -ContractHash ('f' * 64) | Out-Null
+        Set-GoalRunActiveStateTeardownDeferred -WorktreePath $provisioned.Path -Value $true | Out-Null
+
+        try {
+            $result = Invoke-GoalRunDeferredTeardownRetry -RepoRoot $repo -WorktreePath $provisioned.Path -WarningAction SilentlyContinue
+
+            $result.Attempted | Should -Be $true
+            $result.Reason | Should -BeNullOrEmpty
+            $result.Outcome | Should -Be 'removed' `
+                -Because 'goal-run-active.json is the ONLY untracked content, which is now known-safe to force-remove (issue #874 PR1 fix)'
+            $result.TeardownDeferred | Should -Be $false
+            $result.Attempts | Should -Be 1
+            (Test-Path -LiteralPath $provisioned.Path) | Should -Be $false
+        }
+        finally {
+            script:Remove-GRTestWorktree -RepoRoot $repo -WorktreePath $provisioned.Path
+        }
+    }
+
+    It 'succeeds when the worktree tree is clean (state file committed, no untracked content)' {
+        # Isolates Invoke-GoalRunDeferredTeardownRetry's own dispatch logic
+        # from the git worktree removal/force gap documented above -- proves
+        # this function's success path DOES work end to end once nothing
+        # blocks the underlying git worktree remove.
+        $repo = script:New-GRTestRepo -Path (Join-Path $TestDrive 'retry-deferred-clean-repo')
+        $provisioned = New-GoalRunWorktree -RepoRoot $repo -IssueNumber 601
+        New-GoalRunActiveState -WorktreePath $provisioned.Path -Ceilings @{ turns = 10 } -Baseline @{ commit = 'x' } `
+            -Arm 'in-session' -ExecutorSessionId 'sid-retry-clean' -ContractHash ('9' * 64) | Out-Null
+        Set-GoalRunActiveStateTeardownDeferred -WorktreePath $provisioned.Path -Value $true | Out-Null
+        & git -C $provisioned.Path add -A 2>&1 | Out-Null
+        & git -C $provisioned.Path commit -q -m 'test-only: commit state file so the tree is clean' 2>&1 | Out-Null
+
+        try {
+            $result = Invoke-GoalRunDeferredTeardownRetry -RepoRoot $repo -WorktreePath $provisioned.Path
+
+            $result.Attempted | Should -Be $true
+            $result.Outcome | Should -Be 'removed'
+            $result.TeardownDeferred | Should -Be $false
+            (Test-Path -LiteralPath $provisioned.Path) | Should -Be $false
+        }
+        finally {
+            script:Remove-GRTestWorktree -RepoRoot $repo -WorktreePath $provisioned.Path
+        }
+    }
+
+    It 'never throws when Get-GoalRunActiveState itself would fail (unreadable state path)' {
+        $repo = script:New-GRTestRepo -Path (Join-Path $TestDrive 'retry-unreadable-repo')
+        $bogusWorktreeDir = Join-Path $TestDrive 'retry-unreadable-does-not-exist'
+
+        { Invoke-GoalRunDeferredTeardownRetry -RepoRoot $repo -WorktreePath $bogusWorktreeDir } | Should -Not -Throw
     }
 }

@@ -3,9 +3,15 @@
 .SYNOPSIS
     Goal-run worktree lifecycle primitives -- provisioner, active-state file,
     and teardown (issue #874, plan step 2, AC3 provisioning + teardown half).
+    Also carries Invoke-GoalRunDeferredTeardownRetry (plan step 3), the
+    standalone deferred-teardown-retry entry point session-cleanup-detector-
+    core.ps1 renders a call to and a future /goal-run agent body can call
+    directly.
 .DESCRIPTION
     Standalone and independently testable: no cleanup-detector integration
-    lives here (that is a later, separate step). What ships here:
+    lives here beyond the one standalone retry entry point noted above (the
+    exclusion/reporting/aging-nudge logic itself lives in
+    session-cleanup-detector-core.ps1, plan step 3). What ships here:
 
       New-GoalRunWorktree -RepoRoot <string> -IssueNumber <int>
                            [-WorktreeRoot <string>] [-GitCliPath <string>]
@@ -400,12 +406,64 @@ function script:Get-GoalRunWorktreeRemovalOutcome {
     }
 }
 
+# Private: determines whether the ONLY untracked/uncommitted content in the
+# worktree is the known goal-run state file itself -- i.e. every porcelain
+# line is an untracked ('??') entry naming exactly
+# $script:GoalRunActiveStateFileName. A routine, healthy run always leaves
+# this file behind as untracked content, which makes a plain `git worktree
+# remove` refuse even though there is nothing genuinely unsaved to protect.
+# Fails CLOSED ($false) on any probe error, a clean-looking porcelain (0
+# lines -- that case should never reach here since a clean tree's plain
+# remove would already have succeeded), or any line that doesn't exactly
+# match the expected shape -- callers must treat "cannot confirm" as "not
+# known-safe to force", mirroring the file's existing never-force-on-a-flag-
+# alone philosophy (see the locked-worktree clause below). Scoped to the
+# worktree itself (`git -C $WorktreePath`), NOT $RepoRoot -- the worktree
+# lives on its own freshly branched HEAD and `-C $RepoRoot` would not
+# reflect the worktree's own local dirty state at all.
+function script:Test-GoalRunWorktreeOnlyExpectedContent {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)][string]$WorktreePath,
+        [Parameter(Mandatory = $false)][string]$GitCliPath = 'git'
+    )
+
+    if (-not (Test-Path -LiteralPath $WorktreePath)) { return $false }
+
+    $porcelain = & $GitCliPath -C $WorktreePath status --porcelain --ignored=no 2>$null
+    if ($LASTEXITCODE -ne 0) { return $false }
+
+    $lines = @($porcelain | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($lines.Count -eq 0) { return $false }
+
+    foreach ($line in $lines) {
+        # Short porcelain format is "XY PATH": 2-char status + one space.
+        # Anything other than an untracked ('??') entry naming exactly the
+        # known state file fails closed.
+        if ($line.Length -lt 4) { return $false }
+        $status = $line.Substring(0, 2)
+        $path = $line.Substring(3).Trim().Trim('"')
+        if ($status -ne '??') { return $false }
+        if ($path -ne $script:GoalRunActiveStateFileName) { return $false }
+    }
+
+    return $true
+}
+
 # Private: one removal attempt, decision tree mirroring
 # post-merge-cleanup.ps1's corrected D5/#522 clause -- locked+absent gets a
 # double-force removal (nothing left to lock), locked+present is never
 # force-removed here (caller skips the attempt entirely), prunable+absent
 # clears the stale registration, and the default path tries a plain removal
-# before escalating to --force only when independently known prunable.
+# before escalating to --force when independently known prunable OR when
+# Test-GoalRunWorktreeOnlyExpectedContent confirms the only dirty content is
+# the goal-run's own state file (issue #874, PR1 fix -- a routine, healthy
+# run always leaves that file behind as untracked, which otherwise makes the
+# plain remove refuse on essentially every mainline teardown). Any OTHER
+# dirty content is never force-removed here -- it falls through to the
+# existing retry/defer path unchanged, so unexpected/genuine unsaved work is
+# never destroyed.
 function script:Invoke-GoalRunWorktreeRemovalAttempt {
     [CmdletBinding()]
     param(
@@ -425,8 +483,12 @@ function script:Invoke-GoalRunWorktreeRemovalAttempt {
     }
     else {
         & $GitCliPath -C $RepoRoot worktree remove $WorktreePath 2>$null | Out-Null
-        if ($LASTEXITCODE -ne 0 -and $IsPrunable) {
-            & $GitCliPath -C $RepoRoot worktree remove --force $WorktreePath 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            $onlyExpectedContent = -not $IsPrunable -and -not $DirAbsent -and
+                (script:Test-GoalRunWorktreeOnlyExpectedContent -WorktreePath $WorktreePath -GitCliPath $GitCliPath)
+            if ($IsPrunable -or $onlyExpectedContent) {
+                & $GitCliPath -C $RepoRoot worktree remove --force $WorktreePath 2>$null | Out-Null
+            }
         }
     }
     # Prune runs regardless of the remove outcome (best-effort admin-file
@@ -498,5 +560,80 @@ function Remove-GoalRunWorktree {
         TeardownDeferred = $deferred
         Attempts         = $attempts
         WorktreePath     = $WorktreePath
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Deferred-teardown retry (issue #874, plan step 3, AC3 detector-protection
+# half). Standalone entry point -- deliberately not buried inside
+# session-cleanup-detector-core.ps1's own report-generation flow, so a
+# future /goal-run agent-body invocation can call this same function
+# directly, in addition to the owner-confirmed composite command the
+# detector renders in its report.
+# ---------------------------------------------------------------------------
+
+function Invoke-GoalRunDeferredTeardownRetry {
+    <#
+    .SYNOPSIS
+        Retries teardown for a goal-run worktree whose state file previously
+        recorded teardown_deferred: true (Remove-GoalRunWorktree exhausted
+        its retries and deferred). No-ops (never throws) when the state file
+        is absent/unreadable or does not carry teardown_deferred: true --
+        callers should treat Attempted=$false as "nothing to do here", not
+        as an error.
+    .OUTPUTS
+        [pscustomobject]@{ Attempted; Reason; Outcome; TeardownDeferred; Attempts; WorktreePath }
+        Reason is $null when Attempted=$true; otherwise one of
+        'no-state-file' | 'not-deferred'.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][string]$WorktreePath,
+        [Parameter(Mandatory = $false)][string]$GitCliPath = 'git',
+        [Parameter(Mandatory = $false)][int]$RetryDelayMs = 1000,
+        [Parameter(Mandatory = $false)][int]$MaxAttempts = 2
+    )
+
+    $state = $null
+    try {
+        $state = Get-GoalRunActiveState -WorktreePath $WorktreePath
+    }
+    catch {
+        $state = $null
+    }
+
+    if ($null -eq $state) {
+        return [pscustomobject]@{
+            Attempted        = $false
+            Reason           = 'no-state-file'
+            Outcome          = $null
+            TeardownDeferred = $null
+            Attempts         = 0
+            WorktreePath     = $WorktreePath
+        }
+    }
+
+    if (-not [bool]$state.teardown_deferred) {
+        return [pscustomobject]@{
+            Attempted        = $false
+            Reason           = 'not-deferred'
+            Outcome          = $null
+            TeardownDeferred = $false
+            Attempts         = 0
+            WorktreePath     = $WorktreePath
+        }
+    }
+
+    $removal = Remove-GoalRunWorktree -RepoRoot $RepoRoot -WorktreePath $WorktreePath -GitCliPath $GitCliPath -RetryDelayMs $RetryDelayMs -MaxAttempts $MaxAttempts
+
+    return [pscustomobject]@{
+        Attempted        = $true
+        Reason           = $null
+        Outcome          = $removal.Outcome
+        TeardownDeferred = $removal.TeardownDeferred
+        Attempts         = $removal.Attempts
+        WorktreePath     = $removal.WorktreePath
     }
 }

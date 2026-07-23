@@ -17,6 +17,199 @@
 . "$PSScriptRoot/session-startup-git-helpers.ps1"
 
 # ===========================================================================
+# Issue #874 s3 — goal-run/* protection + reporting + aging escalation +
+# deferred-teardown retry. Reuses Get-GoalRunActiveState /
+# Set-GoalRunActiveStateTeardownDeferred / Remove-GoalRunWorktree from
+# .github/scripts/lib/goal-run-worktree-core.ps1 (plan step 2) — never
+# reimplemented here. That lib is dev/CI tooling and is NOT part of the
+# distributed plugin bundle (.claude-plugin/plugin.json's `agents`/no `.github`
+# entry), so it only resolves inside the agent-orchestra repo's own checkout;
+# Import-SCDGoalRunLibIfAvailable below is a best-effort, never-throws import,
+# and every accessor that depends on it fails open (treats the branch as
+# "unbacked") when the lib could not be loaded.
+# ===========================================================================
+
+$script:GoalRunBranchPrefix = 'goal-run/'
+
+# Single threshold, deliberately shared between "recent enough to render as a
+# plain informational line" (point 2 of the requirement contract: "recent
+# heartbeat") and "stale enough to render the aging-escalation nudge" (point
+# 4). A goal-run's heartbeat_at is updated at each chain-stage boundary (see
+# goal-run-worktree-core.ps1's header); every #874 capability-probe leg to
+# date completed a chain stage in well under an hour, so 60 minutes with no
+# heartbeat update is treated as "the run likely crashed or was abandoned" —
+# while staying well above normal inter-heartbeat gaps so a merely-slow-but-
+# live run does not spuriously trip the nudge.
+$script:GoalRunHeartbeatStaleThresholdMinutes = 60
+
+# Point 2's required wording for an unbacked (missing/unreadable) goal-run-
+# named branch/worktree — single authoritative string so both the sibling and
+# orphan call sites render identical text.
+$script:GoalRunUnbackedNote = 'looks like a goal-run name but has no run state.'
+
+function Test-SCDGoalRunBranchName {
+    <#
+    .SYNOPSIS
+        Issue #874 s3: returns $true when $BranchName carries the goal-run/
+        prefix New-GoalRunWorktree assigns (goal-run/issue-{N}-{token}).
+    #>
+    [CmdletBinding()]
+    param([AllowNull()][string]$BranchName)
+
+    if ([string]::IsNullOrWhiteSpace($BranchName)) {
+        return $false
+    }
+
+    return $BranchName.StartsWith($script:GoalRunBranchPrefix, [System.StringComparison]::Ordinal)
+}
+
+function Import-SCDGoalRunLibIfAvailable {
+    <#
+    .SYNOPSIS
+        Issue #874 s3: best-effort dot-source of goal-run-worktree-core.ps1.
+        Never throws. When the lib cannot be found or fails to load, every
+        goal-run accessor below fails open via its own Get-Command guard —
+        goal-run branches are then treated the same as any other unbacked
+        candidate (point 6: fail open, never crash, never exclude forever).
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$RepoRoot)
+
+    if (Get-Command Get-GoalRunActiveState -ErrorAction SilentlyContinue) {
+        return
+    }
+
+    $libPath = Join-Path $RepoRoot '.github/scripts/lib/goal-run-worktree-core.ps1'
+    if (-not (Test-Path -LiteralPath $libPath)) {
+        return
+    }
+
+    try {
+        . $libPath
+    }
+    catch {
+        $null = $_
+    }
+}
+
+function Get-SCDGoalRunWorktreeStatus {
+    <#
+    .SYNOPSIS
+        Issue #874 s3: resolves the goal-run protection status for a
+        goal-run/* branch/worktree. Fails open on any missing/unreadable/
+        corrupt state file — returns IsProtected=$false with
+        $script:GoalRunUnbackedNote set, which routes the caller into the
+        ordinary candidate-reporting path (point 2/6) instead of crashing or
+        excluding forever.
+    .OUTPUTS
+        Hashtable: @{ IsProtected; IsStale; AgeMinutes; HeartbeatAt; TeardownDeferred; Note }
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$BranchName,
+
+        [string]$WorktreePath = ''
+    )
+
+    $result = @{
+        IsProtected      = $false
+        IsStale          = $false
+        AgeMinutes       = $null
+        HeartbeatAt      = $null
+        TeardownDeferred = $false
+        Note             = $script:GoalRunUnbackedNote
+    }
+
+    if ([string]::IsNullOrWhiteSpace($WorktreePath) -or -not (Get-Command Get-GoalRunActiveState -ErrorAction SilentlyContinue)) {
+        return $result
+    }
+
+    $state = $null
+    try {
+        $state = Get-GoalRunActiveState -WorktreePath $WorktreePath
+    }
+    catch {
+        $state = $null
+    }
+
+    if ($null -eq $state -or [string]::IsNullOrWhiteSpace("$($state.heartbeat_at)")) {
+        return $result
+    }
+
+    $heartbeat = [datetime]::MinValue
+    $parsedOk = [datetime]::TryParse(
+        "$($state.heartbeat_at)",
+        [System.Globalization.CultureInfo]::InvariantCulture,
+        [System.Globalization.DateTimeStyles]::RoundtripKind,
+        [ref]$heartbeat)
+    if (-not $parsedOk) {
+        return $result
+    }
+
+    $ageMinutes = ((Get-Date).ToUniversalTime() - $heartbeat.ToUniversalTime()).TotalMinutes
+    $result.IsProtected     = $true
+    $result.Note             = $null
+    $result.HeartbeatAt      = "$($state.heartbeat_at)"
+    $result.AgeMinutes       = $ageMinutes
+    $result.IsStale          = ($ageMinutes -gt $script:GoalRunHeartbeatStaleThresholdMinutes)
+    $result.TeardownDeferred = [bool]$state.teardown_deferred
+    return $result
+}
+
+function Get-SCDGoalRunProtectedLines {
+    <#
+    .SYNOPSIS
+        Issue #874 s3: renders informational lines for goal-run/* worktrees
+        protected from ordinary cleanup candidacy (prefix-matched AND backed
+        by a resolvable, heartbeat-bearing state file). Always rendered when
+        present (point 3: never silently dropped). Items whose heartbeat has
+        gone stale beyond $script:GoalRunHeartbeatStaleThresholdMinutes, or
+        whose state file already carries teardown_deferred: true, get an
+        additional escalating, owner-confirmed teardown-retry command (point
+        4/5) — the detector itself never tears anything down.
+    .NOTES
+        TODO (#874 later step): also escalate on a terminal run comment once
+        that reader lands — this step only has stale-heartbeat/deferred-flag
+        evidence available (documented gap, not invented here).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$RepoRoot,
+
+        [Parameter(Mandatory)]
+        [array]$Items
+    )
+
+    $out = @()
+    $out += '**Goal-run worktrees detected** — excluded from ordinary cleanup, reported for visibility:'
+    $out += ''
+    foreach ($item in $Items) {
+        $ageText = if ($null -ne $item.AgeMinutes) { '{0:N0} min ago' -f $item.AgeMinutes } else { 'unknown' }
+        $statusText = if ($item.IsStale) { 'stale heartbeat — may be crashed/abandoned' } else { 'inflight' }
+        $deferredSuffix = if ($item.TeardownDeferred) { ' (teardown previously deferred)' } else { '' }
+        $out += "- Goal-run worktree branch ``$($item.BranchName)`` at ``$($item.WorktreePath)`` — heartbeat $ageText ($statusText)$deferredSuffix."
+    }
+
+    $needsRetryItems = @($Items | Where-Object { $_.IsStale -or $_.TeardownDeferred })
+    if ($needsRetryItems.Count -gt 0) {
+        $out += ''
+        $out += "Heartbeat stale beyond $($script:GoalRunHeartbeatStaleThresholdMinutes) min (or teardown previously deferred) for the run(s) above — terminal-comment escalation is not yet available (TODO for a later #874 step); this nudge is heartbeat/deferred-flag only. Nothing above ran automatically. If you've confirmed a run is dead, retry teardown:"
+        $out += '```powershell'
+        $out += '# Run in a PowerShell (pwsh) terminal:'
+        $safeRoot = ConvertTo-SCDPowerShellSingleQuoteEscapedText -Value $RepoRoot
+        foreach ($item in $needsRetryItems) {
+            $safeWorktreePath = ConvertTo-SCDPowerShellSingleQuoteEscapedText -Value $item.WorktreePath
+            $out += "pwsh -NoProfile -Command `"& { . '$safeRoot/.github/scripts/lib/goal-run-worktree-core.ps1'; Invoke-GoalRunDeferredTeardownRetry -RepoRoot '$safeRoot' -WorktreePath '$safeWorktreePath' }`""
+        }
+        $out += '```'
+    }
+    $out += ''
+    return $out
+}
+
+# ===========================================================================
 # Issue #889 s4 — eligibility-gating helpers for the detector's candidate-
 # append sites. These wrap the shared Test-WorktreeBranchRemovalEligible
 # primitive (session-startup-git-helpers.ps1, s1) with a detector-only
@@ -668,6 +861,39 @@ function Get-SCDSiblingWorktreeCleanups {
                     continue
                 }
 
+                # Issue #874 s3: goal-run/* branches get their own detection path —
+                # excluded from ordinary candidacy when backed by a resolvable state
+                # file (point 2), reported as an ordinary manual-review candidate with
+                # a note otherwise (point 2's "no run state" fail-open case). Neither
+                # branch touches the merge-evidence machinery below.
+                if (Test-SCDGoalRunBranchName -BranchName $branchName) {
+                    $goalRunStatus = Get-SCDGoalRunWorktreeStatus -BranchName $branchName -WorktreePath $record.WorktreePath
+                    if ($goalRunStatus.IsProtected) {
+                        $cleanups += @{
+                            BranchName         = $branchName
+                            WorktreePath       = $normalizedPath
+                            IsGoalRunProtected = $true
+                            IsStale            = $goalRunStatus.IsStale
+                            AgeMinutes         = $goalRunStatus.AgeMinutes
+                            HeartbeatAt        = $goalRunStatus.HeartbeatAt
+                            TeardownDeferred   = $goalRunStatus.TeardownDeferred
+                        }
+                    }
+                    else {
+                        $cleanups += @{
+                            BranchName         = $branchName
+                            WorktreePath       = $normalizedPath
+                            Reason             = $null
+                            Eligible           = $false
+                            ManualReviewReason = $goalRunStatus.Note
+                            IsLocked           = $record.IsLocked
+                            LockReason         = $record.LockReason
+                            IsPrunable         = $record.IsPrunable
+                        }
+                    }
+                    continue
+                }
+
                 $upstreamBranch = $null
                 if ($record.IsPrunable) {
                     $upstreamBranch = Get-SCDConfiguredUpstreamBranch -BranchName $branchName
@@ -1004,6 +1230,30 @@ function Get-SCDOrphanBranchCleanups {
         }
     }
 
+    # Issue #874 s3: orphaned goal-run/* branches (no linked worktree — the
+    # worktree that would have carried goal-run-active.json is already gone
+    # or was never registered) can never be "backed" in this context, so they
+    # are always reported as an ordinary manual-review candidate with the
+    # point-2 note. They never enter the two loops above (neither matches the
+    # goal-run/ prefix), so this is an independent, unconditional pass.
+    foreach ($branchName in @(Get-SCDLocalBranchNames -RefPrefix "refs/heads/$($script:GoalRunBranchPrefix)")) {
+        if (
+            $branchName -eq $DefaultBranch -or
+            $attachedBranchLookup.ContainsKey($branchName) -or
+            $evaluatedNoUpstreamBranches.ContainsKey($branchName)
+        ) {
+            continue
+        }
+
+        $cleanups += @{
+            BranchName         = $branchName
+            Reason             = $null
+            Eligible           = $false
+            ManualReviewReason = $script:GoalRunUnbackedNote
+            Kind               = 'goal-run-orphan'
+        }
+    }
+
     return $cleanups
 }
 
@@ -1065,6 +1315,10 @@ function Invoke-SessionCleanupDetector {
     $upstreamDeletedBranchPrefixes = @('feature/issue-')
     $fetchLookup = New-SCDStringLookup
     $ghBudget = New-SCDCollectionGhBudget
+
+    # Issue #874 s3: best-effort — see Import-SCDGoalRunLibIfAvailable's own
+    # doc comment for why this never halts the detector on failure.
+    Import-SCDGoalRunLibIfAvailable -RepoRoot $RepoRoot
 
     # ============================================================
     # STEP 0: WORKTREE REGISTRY + DEGRADED-CWD DETECTION (Issue #889 s4)
@@ -1184,6 +1438,13 @@ function Invoke-SessionCleanupDetector {
     $siblingWorktreeCleanups = @(Get-SCDSiblingWorktreeCleanups -CurrentWorktreePath $currentLocationPath -DefaultBranch $defaultBranch -NoUpstreamBranchPrefixes $noUpstreamBranchPrefixes -UpstreamDeletedBranchPrefixes $upstreamDeletedBranchPrefixes -FetchLookup $fetchLookup -WorktreeRecords $worktreeRecords -GhBudget $ghBudget -IsDegradedCwd $isDegradedCwd)
     $orphanBranchCleanups = @(Get-SCDOrphanBranchCleanups -CurrentBranch $currentBranch -DefaultBranch $defaultBranch -NoUpstreamBranchPrefixes $noUpstreamBranchPrefixes -UpstreamDeletedBranchPrefixes $upstreamDeletedBranchPrefixes -FetchLookup $fetchLookup -WorktreeRecords $worktreeRecords -GhBudget $ghBudget -IsDegradedCwd $isDegradedCwd)
 
+    # Issue #874 s3: protected goal-run/* candidates never flow through the
+    # ordinary Eligible/ManualReview split below (they carry neither key) —
+    # split them out here so they render via their own dedicated,
+    # always-visible report block instead of the generic sibling renderer.
+    $goalRunProtectedCandidates = @($siblingWorktreeCleanups | Where-Object { $_.IsGoalRunProtected })
+    $siblingWorktreeCleanups = @($siblingWorktreeCleanups | Where-Object { -not $_.IsGoalRunProtected })
+
     # ============================================================
     # STEP 2: TRACKING FILE CHECK (existing logic, intact)
     # ============================================================
@@ -1247,7 +1508,7 @@ function Invoke-SessionCleanupDetector {
     # ============================================================
     # STEP 3: MERGE & OUTPUT
     # ============================================================
-    if ($null -eq $staleBranch -and $cleanupNeeded.Count -eq 0 -and $null -eq $currentNoUpstreamWorktree -and $siblingWorktreeCleanups.Count -eq 0 -and $orphanBranchCleanups.Count -eq 0) {
+    if ($null -eq $staleBranch -and $cleanupNeeded.Count -eq 0 -and $null -eq $currentNoUpstreamWorktree -and $siblingWorktreeCleanups.Count -eq 0 -and $orphanBranchCleanups.Count -eq 0 -and $goalRunProtectedCandidates.Count -eq 0) {
         return @{ ExitCode = 0; Output = '{}'; Error = '' }
     }
 
@@ -1592,7 +1853,7 @@ function Invoke-SessionCleanupDetector {
         $lines += '```'
         $lines += ''
     }
-    else {
+    elseif ($cleanupNeeded.Count -gt 0 -or $null -ne $currentNoUpstreamWorktree) {
         # ── Tracking-files-only signal (existing behaviour) ───────────────────────
         if ($null -ne $currentNoUpstreamWorktree) {
             $lines += '**Post-merge cleanup detected** — stale tracking artifacts and current Claude worktree branch found:'
@@ -1612,6 +1873,17 @@ function Invoke-SessionCleanupDetector {
         $lines += (Get-TrackingCommands -Items $cleanupNeeded)
         $lines += '```'
         $lines += ''
+    }
+    # else: none of the pre-existing five signals fired — reachable only when
+    # $goalRunProtectedCandidates is the sole reason STEP 3's early-return gate
+    # above did not fire (Issue #874 s3). Nothing to render here; the
+    # dedicated block below always reports it.
+
+    # Issue #874 s3: always reported (point 3), independent of every branch
+    # above — appended once, whether or not any pre-existing signal also fired.
+    if ($goalRunProtectedCandidates.Count -gt 0) {
+        if ($lines.Count -gt 0) { $lines += '' }
+        $lines += (Get-SCDGoalRunProtectedLines -RepoRoot $RepoRoot -Items $goalRunProtectedCandidates)
     }
 
     $additionalContext = $lines -join "`n"
