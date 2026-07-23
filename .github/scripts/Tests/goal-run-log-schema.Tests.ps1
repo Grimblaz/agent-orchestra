@@ -10,14 +10,30 @@
 Describe 'goal-run-log.schema.json' -Tag 'unit' {
 
     BeforeAll {
+        # F3 test-hygiene fix: names below are deliberately prefixed
+        # GoalRunLogSchemaTest* (never the generic SchemaPath/SchemaRaw
+        # this file used before) so this file own script-scoped state can
+        # never collide with an overlapping name defined in another test
+        # file own BeforeAll/BeforeDiscovery block, however unlikely. The
+        # helper also re-reads the schema text fresh on every call
+        # (Get-GoalRunLogSchemaTestRaw) rather than closing over a single
+        # BeforeAll-computed value, so a stale or reassigned reference
+        # cannot silently persist across It blocks -- this also defends
+        # against Test-Json own internal schema-resolution caching being
+        # the root cause rather than variable shadowing, since each call
+        # now passes a freshly-read string regardless of which theory is
+        # correct.
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:SchemaPath = Join-Path $script:RepoRoot 'skills/goal-run/schemas/goal-run-log.schema.json'
-        $script:SchemaRaw = Get-Content -LiteralPath $script:SchemaPath -Raw
+        $script:GoalRunLogSchemaTestPath = Join-Path $script:RepoRoot 'skills/goal-run/schemas/goal-run-log.schema.json'
+
+        function script:Get-GoalRunLogSchemaTestRaw {
+            return (Get-Content -LiteralPath $script:GoalRunLogSchemaTestPath -Raw)
+        }
 
         function script:Test-GoalRunLogEntry {
             param([Parameter(Mandatory)][hashtable]$Entry)
             $json = $Entry | ConvertTo-Json -Depth 10
-            return Test-Json -Json $json -Schema $script:SchemaRaw
+            return Test-Json -Json $json -Schema (script:Get-GoalRunLogSchemaTestRaw)
         }
     }
 

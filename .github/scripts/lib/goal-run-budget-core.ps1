@@ -131,6 +131,25 @@ function Get-GoalRunBudgetRegistryPath {
     return (Join-Path $base '.claude' 'goal-run' 'session-registry.json')
 }
 
+# Private: resolves the registry path, honoring a caller override when
+# present and falling back to Get-GoalRunBudgetRegistryPath otherwise.
+# Extracted (F2 fix) so the attempt-marker functions below use the exact
+# same resolution Register-GoalRunBudgetSession and
+# Test-GoalRunBudgetSessionRegistered already use -- a marker written at
+# registration time and a marker looked up at arm time must always land
+# at the same path.
+function script:Resolve-GoalRunBudgetRegistryPath {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [string]$RegistryPath
+    )
+    if ([string]::IsNullOrWhiteSpace($RegistryPath)) {
+        return Get-GoalRunBudgetRegistryPath
+    }
+    return $RegistryPath
+}
+
 # Private: reads the registry file, tolerant of a missing file (Status
 # 'missing', empty Sessions map, never an error) but distinguishing that
 # from an unreadable or malformed file (Status 'unreadable') and a clean
@@ -164,6 +183,71 @@ function script:Get-GoalRunBudgetRegistry {
     }
 }
 
+# Private: resolves where a per-session registration-ATTEMPT marker lives
+# (F2 fix). This is a companion write, separate from the shared registry
+# file, so an attempt can still be proven even when the shared registry
+# write itself fails or its result is later lost/overwritten -- closing
+# the "readable-but-stale registry" gap where a prior session own entry
+# survives in the file but this session own write never landed there.
+# Derived from the SAME (already-resolved) registry path a caller passes
+# in, so registration-time and arm-time always agree on where to look.
+function script:Get-GoalRunBudgetAttemptMarkerPath {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)][string]$RegistryPath,
+        [Parameter(Mandatory)][string]$SessionId
+    )
+    $dir = Split-Path -Parent $RegistryPath
+    $safeId = $SessionId -replace '[^a-zA-Z0-9_.-]', '_'
+    return (Join-Path $dir 'attempts' "$safeId.json")
+}
+
+# Private: best-effort write of the attempt marker described above.
+# Failure here is swallowed -- if even this small, independent write
+# cannot land, there is nothing further this function can do to close the
+# gap, and Register-GoalRunBudgetSession own existing registry-write path
+# and warning still run normally, unaffected by this marker attempt.
+function script:Set-GoalRunBudgetAttemptMarker {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RegistryPath,
+        [Parameter(Mandatory)][string]$SessionId,
+        [Parameter(Mandatory)][int]$Issue
+    )
+    try {
+        $markerPath = script:Get-GoalRunBudgetAttemptMarkerPath -RegistryPath $RegistryPath -SessionId $SessionId
+        $dir = Split-Path -Parent $markerPath
+        if ($dir -and -not (Test-Path -LiteralPath $dir)) {
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        }
+        $json = [pscustomobject]@{
+            session_id   = $SessionId
+            issue        = $Issue
+            attempted_at = (Get-Date).ToUniversalTime().ToString('o')
+        } | ConvertTo-Json -Depth 5
+        Set-Content -LiteralPath $markerPath -Value $json -Encoding utf8 -NoNewline
+    }
+    catch {
+        # Best effort only -- see synopsis above.
+    }
+}
+
+# Private: whether SessionId has an attempt marker on disk -- proof that
+# THIS session called Register-GoalRunBudgetSession at some point,
+# independent of whether that registration own registry write actually
+# landed or is still present in the current registry contents.
+function script:Test-GoalRunBudgetAttemptMarker {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)][string]$RegistryPath,
+        [Parameter(Mandatory)][string]$SessionId
+    )
+    $markerPath = script:Get-GoalRunBudgetAttemptMarkerPath -RegistryPath $RegistryPath -SessionId $SessionId
+    return (Test-Path -LiteralPath $markerPath -PathType Leaf)
+}
+
 function Register-GoalRunBudgetSession {
     <#
     .SYNOPSIS
@@ -178,8 +262,14 @@ function Register-GoalRunBudgetSession {
         Best-effort, never throws: a write failure (e.g. an unwritable
         registry directory) reports Success = $false with a warning, since
         registration failing is not itself a chain-boundary condition --
-        it surfaces later as a fail-loud "registry-unverifiable" state at
-        the actual wall-clock check.
+        it surfaces later as a fail-loud state at the actual wall-clock
+        check. F2 fix: BEFORE attempting the shared registry write below,
+        this also writes a small, independent per-session attempt marker
+        (Set-GoalRunBudgetAttemptMarker) so the wall-clock check can tell
+        "this session genuinely never tried to register" apart from "this
+        session tried, but its registry entry is missing or was lost" --
+        the latter previously produced the identical silent
+        'session-not-registered' result as the former.
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -189,9 +279,9 @@ function Register-GoalRunBudgetSession {
         [string]$RegistryPath
     )
 
-    if ([string]::IsNullOrWhiteSpace($RegistryPath)) {
-        $RegistryPath = Get-GoalRunBudgetRegistryPath
-    }
+    $RegistryPath = script:Resolve-GoalRunBudgetRegistryPath -RegistryPath $RegistryPath
+
+    script:Set-GoalRunBudgetAttemptMarker -RegistryPath $RegistryPath -SessionId $SessionId -Issue $Issue
 
     $existing = script:Get-GoalRunBudgetRegistry -RegistryPath $RegistryPath
     $sessions = @{}
@@ -241,9 +331,7 @@ function Test-GoalRunBudgetSessionRegistered {
         [string]$RegistryPath
     )
 
-    if ([string]::IsNullOrWhiteSpace($RegistryPath)) {
-        $RegistryPath = Get-GoalRunBudgetRegistryPath
-    }
+    $RegistryPath = script:Resolve-GoalRunBudgetRegistryPath -RegistryPath $RegistryPath
 
     $registry = script:Get-GoalRunBudgetRegistry -RegistryPath $RegistryPath
 
@@ -283,6 +371,17 @@ function Resolve-GoalRunBudgetArmState {
         budget-exhausted forever. A readable registry that genuinely does
         not list CurrentSessionId is the deliberate bystander case and
         stays silently unarmed -- that is correct behavior, not a failure.
+
+        F2 fix: that bystander case previously covered two genuinely
+        different situations with the identical silent result -- (1) this
+        session truly never called Register-GoalRunBudgetSession (correct
+        to stay silent), and (2) this session DID call it, but its
+        registry entry is missing or was lost (e.g. a registration write
+        that failed, or a later overwrite that dropped it), which
+        deserves the same fail-loud-and-arm treatment as an unreadable
+        registry. This function now consults the attempt marker
+        Register-GoalRunBudgetSession writes independently of the shared
+        registry write to tell the two apart.
     .OUTPUTS
         [pscustomobject]@{ Armed; ArmReason; ElapsedMinutes; CeilingMinutes;
         BudgetExhausted }
@@ -301,7 +400,8 @@ function Resolve-GoalRunBudgetArmState {
     if ($Now -eq [datetime]::MinValue) { $Now = (Get-Date).ToUniversalTime() }
     if (-not $WarningEmitter) { $WarningEmitter = { param($Message) Write-Warning $Message } }
 
-    $check = Test-GoalRunBudgetSessionRegistered -SessionId $CurrentSessionId -RegistryPath $RegistryPath
+    $resolvedRegistryPath = script:Resolve-GoalRunBudgetRegistryPath -RegistryPath $RegistryPath
+    $check = Test-GoalRunBudgetSessionRegistered -SessionId $CurrentSessionId -RegistryPath $resolvedRegistryPath
 
     $armed = $false
     $armReason = $null
@@ -311,8 +411,20 @@ function Resolve-GoalRunBudgetArmState {
             $armReason = 'session-registered'
         }
         'not-registered' {
-            $armed = $false
-            $armReason = 'session-not-registered'
+            if (script:Test-GoalRunBudgetAttemptMarker -RegistryPath $resolvedRegistryPath -SessionId $CurrentSessionId) {
+                # F2 fix: an attempt marker for THIS session exists, but the
+                # readable registry does not list it -- the earlier
+                # registration write likely failed silently or its entry
+                # was lost. Never silently treat this as an intentional
+                # bystander session.
+                & $WarningEmitter "Resolve-GoalRunBudgetArmState: session '$CurrentSessionId' attempted registration (an attempt marker exists) but is not present in the readable registry -- the earlier registration write likely failed or its entry was lost; arming on wall-clock alone rather than treating this as an intentional bystander session."
+                $armed = $true
+                $armReason = 'session-registration-attempted-but-missing'
+            }
+            else {
+                $armed = $false
+                $armReason = 'session-not-registered'
+            }
         }
         default {
             # 'registry-missing' or 'registry-unreadable': identity cannot
@@ -557,9 +669,18 @@ function Get-GoalRunSessionTokenAccounting {
         # unredacted.
         $modelUsageKeys = if ($modelUsageIsDict) { @($modelUsage.Keys | ForEach-Object { Get-GoalRunRedactedText -Text ([string]$_) }) } else { @() }
 
+        # F1 fix: the summation loop below must iterate the ORIGINAL
+        # $modelUsage.Keys, never $modelUsageKeys. $modelUsageKeys above is
+        # redacted for the RETURNED ModelUsageKeys field only; a redacted
+        # string is not a key in the original $modelUsage dictionary, so a
+        # loop keyed off $modelUsageKeys would silently drop that model
+        # tokens whenever a key happened to match a secret-redaction
+        # pattern ($modelUsage[$redactedKey] resolves to $null, adding
+        # nothing to the total). Summation correctness must never depend on
+        # what a key looks like -- only the returned key LIST is redacted.
         $modelUsageTokens = @{ input = 0; output = 0; cache_creation = 0; cache_read = 0 }
         if ($modelUsageIsDict) {
-            foreach ($modelKey in $modelUsageKeys) {
+            foreach ($modelKey in $modelUsage.Keys) {
                 $perModel = $modelUsage[$modelKey]
                 if ($perModel -isnot [System.Collections.IDictionary]) { continue }
                 $modelUsageTokens.input += [int]($perModel['inputTokens'] ?? 0)

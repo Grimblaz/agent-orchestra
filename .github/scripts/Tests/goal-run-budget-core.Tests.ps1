@@ -160,6 +160,55 @@ Describe 'Resolve-GoalRunBudgetArmState' -Tag 'unit' {
         $warnings.Count | Should -BeGreaterThan 0
     }
 
+    It 'F2 regression: warns and arms when a session own attempt marker exists but the readable registry no longer lists it (a registration write that landed the marker but lost/never-landed the shared registry entry)' {
+        $registryPath = Join-Path $TestDrive 'arm-attempted-but-missing.json'
+        Register-GoalRunBudgetSession -SessionId 'session-with-lost-entry' -Issue 874 -RegistryPath $registryPath | Out-Null
+
+        # Simulate the shared registry entry for THIS session being lost
+        # after the fact (a later overwrite, a partial write, etc.) by
+        # replacing the registry contents with a different session own
+        # entry. The attempt marker Register-GoalRunBudgetSession wrote
+        # above lives in a sibling 'attempts' directory, independent of
+        # this registry overwrite, and must survive it.
+        $staleRegistry = [pscustomobject]@{
+            sessions = @{ 'some-other-session' = @{ issue = 1; registered_at = (Get-Date).ToUniversalTime().ToString('o') } }
+        } | ConvertTo-Json -Depth 10
+        Set-Content -LiteralPath $registryPath -Value $staleRegistry -Encoding utf8 -NoNewline
+
+        $warnings = [System.Collections.Generic.List[string]]::new()
+        $warningEmitter = { param($Message) $warnings.Add($Message) }
+
+        $launchedAt = [datetime]::new(2026, 7, 23, 0, 0, 0, [System.DateTimeKind]::Utc)
+        $now = $launchedAt.AddMinutes(90)
+
+        $result = Resolve-GoalRunBudgetArmState -CurrentSessionId 'session-with-lost-entry' -LaunchedAt $launchedAt `
+            -CeilingMinutes 60 -Now $now -RegistryPath $registryPath -WarningEmitter $warningEmitter
+
+        $result.Armed | Should -Be $true
+        $result.ArmReason | Should -Be 'session-registration-attempted-but-missing'
+        $result.BudgetExhausted | Should -Be $true
+        $warnings.Count | Should -BeGreaterThan 0
+    }
+
+    It 'F2: stays a silent bystander (no warning, unarmed) when no attempt marker exists at all -- a session that genuinely never called Register-GoalRunBudgetSession' {
+        $registryPath = Join-Path $TestDrive 'arm-genuine-bystander-f2.json'
+        Register-GoalRunBudgetSession -SessionId 'the-real-executor-session' -Issue 874 -RegistryPath $registryPath | Out-Null
+
+        $warnings = [System.Collections.Generic.List[string]]::new()
+        $warningEmitter = { param($Message) $warnings.Add($Message) }
+
+        $launchedAt = [datetime]::new(2026, 7, 23, 0, 0, 0, [System.DateTimeKind]::Utc)
+        $now = $launchedAt.AddHours(50)
+
+        $result = Resolve-GoalRunBudgetArmState -CurrentSessionId 'a-diagnostic-session-that-never-registered' -LaunchedAt $launchedAt `
+            -CeilingMinutes 60 -Now $now -RegistryPath $registryPath -WarningEmitter $warningEmitter
+
+        $result.Armed | Should -Be $false
+        $result.ArmReason | Should -Be 'session-not-registered'
+        $result.BudgetExhausted | Should -Be $false
+        $warnings.Count | Should -Be 0
+    }
+
     It 'M6 regression: a UTC Z-suffixed LaunchedAt string cast to [datetime] alongside a genuinely UTC -Now reports near-zero elapsed, not a multi-hour skew' {
         $registryPath = Join-Path $TestDrive 'arm-m6-regression.json'
         Register-GoalRunBudgetSession -SessionId 'armed-session' -Issue 874 -RegistryPath $registryPath | Out-Null
@@ -328,6 +377,23 @@ Describe 'Get-GoalRunSessionTokenAccounting' -Tag 'unit' {
         $result.Tokens.output | Should -Be 213
         $result.Tokens.cache_read | Should -Be 11
         $result.Tokens.cache_creation | Should -Be 5
+    }
+
+    It 'F1 regression: sums BOTH models tokens when one modelUsage key is secret-shaped, instead of dropping that model tokens after redaction (a prior fix redacted keys for the RETURNED ModelUsageKeys field, then wrongly looked the redacted string up in the ORIGINAL modelUsage dict, which silently dropped that model own tokens from the total)' {
+        $path = Join-Path $TestDrive 'f1-secret-plus-normal-model-result.jsonl'
+        $line = '{"type":"result","subtype":"success","total_cost_usd":0.02,"usage":{"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0},"modelUsage":{"api_key: LiveSecretValue123456":{"inputTokens":500,"outputTokens":0,"cacheReadInputTokens":0,"cacheCreationInputTokens":0},"claude-sonnet-5":{"inputTokens":100,"outputTokens":0,"cacheReadInputTokens":0,"cacheCreationInputTokens":0}}}'
+        Set-Content -LiteralPath $path -Value $line -Encoding utf8
+
+        $result = Get-GoalRunSessionTokenAccounting -TranscriptPath $path
+        $result.Provenance | Should -Be 'result-event-modelusage-crosscheck'
+        # Before the F1 fix this totaled 100 (the secret-shaped key own 500
+        # tokens were dropped because the summation loop looked the
+        # REDACTED key string up in the original, unredacted dictionary).
+        $result.Tokens.input | Should -Be 600
+        # The RETURNED key list must still show the secret-shaped key
+        # redacted -- only the summation itself must use the original keys.
+        ($result.ModelUsageKeys -join '|') | Should -Not -Match 'LiveSecretValue123456'
+        $result.ModelUsageKeys | Should -Contain 'claude-sonnet-5'
     }
 
     It 'reports a genuine zero when usage, modelUsage, and total_cost_usd all agree on zero' {
