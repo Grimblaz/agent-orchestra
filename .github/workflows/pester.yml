@@ -84,7 +84,10 @@ jobs:
             '.github/scripts/Tests/goal-run-log-schema.Tests.ps1',
             '.github/scripts/Tests/goal-run-transcript-core.Tests.ps1',
             '.github/scripts/Tests/goal-run-status-core.Tests.ps1',
-            '.github/scripts/Tests/goal-run-halt-core.Tests.ps1'
+            '.github/scripts/Tests/goal-run-halt-core.Tests.ps1',
+            # goal-run harness worktree lifecycle (provision, state file,
+            # teardown) — issue #874 plan step 2
+            '.github/scripts/Tests/goal-run-worktree-core.Tests.ps1'
           )
           $config.Run.Exit = $true
           $config.Output.Verbosity = 'Detailed'
