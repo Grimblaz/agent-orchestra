@@ -77,7 +77,14 @@ jobs:
             # goal-run harness capability-probe instruments — issue #874 plan step 1
             '.github/scripts/Tests/goal-probe-streamjson.Tests.ps1',
             '.github/scripts/Tests/goal-probe-usage-reader.Tests.ps1',
-            '.github/scripts/Tests/goal-probe-forcehalt-rig.Tests.ps1'
+            '.github/scripts/Tests/goal-probe-forcehalt-rig.Tests.ps1',
+            # goal-run harness durable-state layer (halt schema/emitter, run-log
+            # schema, goal_status reader) — issue #874 plan step 1
+            '.github/scripts/Tests/goal-run-schemas.Tests.ps1',
+            '.github/scripts/Tests/goal-run-log-schema.Tests.ps1',
+            '.github/scripts/Tests/goal-run-transcript-core.Tests.ps1',
+            '.github/scripts/Tests/goal-run-status-core.Tests.ps1',
+            '.github/scripts/Tests/goal-run-halt-core.Tests.ps1'
           )
           $config.Run.Exit = $true
           $config.Output.Verbosity = 'Detailed'

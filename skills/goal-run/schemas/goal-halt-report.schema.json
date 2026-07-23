@@ -1,0 +1,95 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "goal-halt-report",
+  "description": "Schema for the goal-run harness halt-report object (issue #874, plan step 1, AC2). One object per halt: posted as a durable `<!-- goal-halt-report-{ID} -->` GitHub issue comment by the schema-validating emitter in .github/scripts/lib/goal-run-halt-core.ps1 (Invoke-GoalRunHaltEmit), which refuses to post any object that fails this schema. Closed schema (additionalProperties: false) so the emitter cannot silently pass through an unnamed field -- this is part of the transcript-content barrier (#874 plan step 1 item 3): every field an executor or the harness can populate here is named and typed by this file. This schema defines the emit primitive's shape only; it does NOT encode halt-reason precedence (a later #874 step decides which halt_reason wins when multiple conditions are true at once).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "issue",
+    "halt_reason",
+    "target_ref",
+    "plan_remediation",
+    "evidence",
+    "recommended_next_owner",
+    "arm",
+    "stage",
+    "claim_provenance",
+    "budget_snapshot"
+  ],
+  "properties": {
+    "schema_version": {
+      "description": "The accepted schema_version set. Callers read this enum rather than hard-coding accepted versions.",
+      "enum": [1]
+    },
+    "issue": {
+      "type": "integer",
+      "description": "The GitHub issue number the goal-run harness invocation belongs to."
+    },
+    "halt_reason": {
+      "description": "The five-value halt-condition enum, reused verbatim from skills/plan-authoring/schemas/goal-contract.schema.json's halt_conditions items enum (872-D2) -- this is the single literal on this report identifying WHY the run halted.",
+      "enum": [
+        "unachievable-target",
+        "invariant-conflict",
+        "budget-exhausted",
+        "gate-input-needed",
+        "chain-stage-failure"
+      ]
+    },
+    "target_ref": {
+      "description": "Identifier of the goal-contract target (targets[].id or ac_ref) this halt relates to, or null when the halt is not tied to a single target (e.g. budget-exhausted or chain-stage-failure may have no single target).",
+      "type": ["string", "null"]
+    },
+    "plan_remediation": {
+      "type": "string",
+      "description": "Free-text guidance on how the plan or a human should respond to this halt. Executor/harness-authored, not raw transcript passthrough; still inert-rendered (marker literals neutralized) by the emitter before posting."
+    },
+    "evidence": {
+      "type": "array",
+      "description": "Evidence strings supporting the halt claim. Each item is inert-rendered by the emitter (marker-literal delimiters stripped) before posting, and any transcript-derived string reaching this array must already have passed through the allow-list extractor and secret-redaction pass in goal-run-transcript-core.ps1 -- this schema cannot itself enforce that upstream discipline, only the closed shape.",
+      "items": { "type": "string" },
+      "minItems": 0
+    },
+    "recommended_next_owner": {
+      "type": "string",
+      "description": "Who or what should act on this halt next (e.g. a role name, 'maintainer', 'Code-Conductor')."
+    },
+    "arm": {
+      "description": "Which execution arm produced this halt.",
+      "enum": ["in-session", "manual", "headless"]
+    },
+    "stage": {
+      "description": "Which pipeline stage was in progress when the halt occurred.",
+      "enum": ["pre-loop", "loop", "validate", "ce-gate", "review", "fix-cycle", "pr"]
+    },
+    "claim_provenance": {
+      "description": "Who is asserting this halt claim -- the executor's own self-report, an independent validator, or the harness itself (e.g. a budget-ceiling trip the harness observed directly).",
+      "enum": ["executor-reported", "validator", "harness"]
+    },
+    "budget_snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Typed/numeric budget fields only (transcript-content barrier: no free-text transcript passthrough here). Which fields are populated depends on halt_reason -- e.g. budget-exhausted typically populates tokens_used/tokens_budget, a wall-clock halt populates the wall_clock_* pair -- so no field is individually required.",
+      "properties": {
+        "tokens_used": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tokens_budget": {
+          "type": ["integer", "string"],
+          "description": "Token ceiling, or an advisory string, mirroring goal-contract.schema.json's budget.tokens flexibility (#871 finding)."
+        },
+        "wall_clock_elapsed": {
+          "type": "string"
+        },
+        "wall_clock_budget": {
+          "type": "string"
+        },
+        "iterations": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}
