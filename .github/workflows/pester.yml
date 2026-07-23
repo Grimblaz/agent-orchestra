@@ -97,7 +97,10 @@ jobs:
             # goal-run harness stage machine, mutex, crash-atomicity,
             # control-return-then-read, and loop->chain seam — issue #874
             # plan step 4
-            '.github/scripts/Tests/goal-run-stage-core.Tests.ps1'
+            '.github/scripts/Tests/goal-run-stage-core.Tests.ps1',
+            # goal-run harness prompt assembly + launch-pinned loop
+            # predicate — issue #874 plan step 5
+            '.github/scripts/Tests/goal-run-prompt-core.Tests.ps1'
           )
           $config.Run.Exit = $true
           $config.Output.Verbosity = 'Detailed'
