@@ -11,6 +11,12 @@
     core.ps1, goal-run-chain-core.ps1). It reuses Resolve-GoalRunHaltPrecedence
     (step 6) and Get-EventUsage (cost-attribution.ps1, step 1 leg f own
     seam) by dot-source and call only -- never copy-pasted or re-derived.
+    Fix M4/M5/M9 additionally dot-sources Update-GoalRunActiveStateHeartbeat
+    (goal-run-worktree-core.ps1) and Add-GoalRunLogEntry (goal-run-log-
+    core.ps1, new in this fix) for the same reuse-only reason -- section 5
+    below composes them, it does not reimplement them. Neither of those two
+    files dot-sources this file or goal-run-chain-core.ps1, so this stays a
+    one-directional dependency graph with no circular dot-source.
 
     ## In-loop enforcement gap -- a disclosed, deliberate non-feature
 
@@ -70,12 +76,29 @@
          Sums ALL `modelUsage` keys, not just a pinned/requested model.
          Get-GoalRunSessionTokenAccounting
 
+      5. Chain-stage-boundary composite (M4/M5/M9, new in this fix) -- the
+         ONE live call site the agents/Goal-Run.agent.md Post-Loop Chain
+         prose names at every chain-stage transition point, composing the
+         heartbeat update, the run-log checkpoint write, and this file own
+         wall-clock/precedence composite into a single call rather than
+         three separate near-identical prose passes over the same
+         transition points.
+         Invoke-GoalRunChainStageBoundaryHousekeeping
+
     Non-goals: no Stop-hook enforcement; no `--max-budget-usd` delegation;
     no hard per-turn or in-loop enforcement of any kind.
 #>
 
 . (Join-Path $PSScriptRoot 'goal-run-chain-core.ps1')
 . (Join-Path $PSScriptRoot 'cost-attribution.ps1')
+# M4/M5/M9 fix: the chain-stage-boundary composite (section 5 below) also
+# needs the heartbeat updater (goal-run-worktree-core.ps1) and the run-log
+# writer (goal-run-log-core.ps1). Neither of those two files dot-sources
+# this one or goal-run-chain-core.ps1, so adding them here does not create
+# the circular dot-source goal-run-chain-core.ps1 itself must avoid (it
+# already gets dot-sourced BY this file, above).
+. (Join-Path $PSScriptRoot 'goal-run-worktree-core.ps1')
+. (Join-Path $PSScriptRoot 'goal-run-log-core.ps1')
 
 # ---------------------------------------------------------------------------
 # 1. Session-identity registry (874-D5)
@@ -302,7 +325,16 @@ function Resolve-GoalRunBudgetArmState {
         }
     }
 
-    $elapsedMinutes = ($Now - $LaunchedAt).TotalMinutes
+    # M6 fix: same Kind-unaware datetime bug as
+    # Test-GoalRunInflightAppearsDead (goal-run-stage-core.ps1) -- a
+    # Z-suffixed UTC string cast to [datetime] lands Kind=Local (a correct
+    # local-wall-clock conversion, but raw Ticks subtraction against a
+    # genuinely Utc -Now does not itself account for that offset).
+    # .ToUniversalTime() is a correct no-op on an already-Utc value and a
+    # correct reverse-conversion on a Local-tagged one, so normalizing both
+    # operands through it here fixes the skew regardless of which Kind
+    # either side arrived with.
+    $elapsedMinutes = ($Now.ToUniversalTime() - $LaunchedAt.ToUniversalTime()).TotalMinutes
     $budgetExhausted = $armed -and ($elapsedMinutes -ge $CeilingMinutes)
 
     return [pscustomobject]@{
@@ -616,5 +648,93 @@ function Get-GoalRunSessionTokenAccounting {
         UsageWasAllZero   = $false
         UsageCrossChecked = $false
         CrossCheckReason  = $null
+    }
+}
+
+# ---------------------------------------------------------------------------
+# 5. Chain-stage-boundary composite (M4/M5/M9): the ONE live call site the
+#    agents/Goal-Run.agent.md Post-Loop Chain prose names at every
+#    chain-stage transition point.
+# ---------------------------------------------------------------------------
+
+function Invoke-GoalRunChainStageBoundaryHousekeeping {
+    <#
+    .SYNOPSIS
+        The single, real, directly-named call site the Post-Loop Chain
+        prose invokes at every chain-stage boundary (re-validate, CE Gate,
+        review, fix-cycle, and PR-creation transitions) and at the
+        loop-release point. Composes THREE previously-unwired mechanics
+        into one call rather than three separate near-identical prose
+        passes over the same transition points:
+
+          1. Update-GoalRunActiveStateHeartbeat (goal-run-worktree-core.ps1,
+             M5) -- refreshes heartbeat_at so Test-GoalRunInflightAppearsDead
+             and the cleanup detector Get-SCDGoalRunWorktreeStatus function
+             both see a live run as live.
+          2. Add-GoalRunLogEntry -EntryType checkpoint (goal-run-log-core.ps1,
+             M9) -- records that this stage boundary was actually reached,
+             feeding the Resolve-GoalRunResumeStage -RunLogHasCheckpoint
+             signal via Test-GoalRunLogHasCheckpoint.
+          3. Invoke-GoalRunBudgetChainBoundaryCheck (this file, M4) --
+             resolves the wall-clock arm state and composes it with the
+             other four halt-precedence conditions via
+             Resolve-GoalRunHaltPrecedence (goal-run-chain-core.ps1),
+             wiring -BudgetExhausted from the REAL arm-state result rather
+             than leaving that precedence slot permanently unset.
+
+        A heartbeat-update failure is caught and warned, not fatal --
+        housekeeping failing must never itself abort a chain-stage
+        transition the way a genuine halt producer would. A run-log write
+        refusal (schema-invalid or unwritable) is likewise surfaced on the
+        return object rather than thrown, for the same reason.
+    .OUTPUTS
+        [pscustomobject]@{ Heartbeat; HeartbeatError; LogEntry; ArmState; Precedence }
+        Precedence is the Resolve-GoalRunHaltPrecedence output -- callers
+        check .Precedence.HasHalt / .Precedence.HaltReason exactly as any
+        other chain-stage-boundary halt-precedence call already does.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$WorktreePath,
+        [Parameter(Mandatory)][int]$Issue,
+        [Parameter(Mandatory)][string]$CurrentSessionId,
+        [Parameter(Mandatory)][datetime]$LaunchedAt,
+        [Parameter(Mandatory)][double]$CeilingMinutes,
+        [Parameter(Mandatory)][string]$CommitSha,
+        [Parameter(Mandatory)][string]$CheckpointSummary,
+        [string]$RepoRoot,
+        [datetime]$Now = [datetime]::MinValue,
+        [string]$RegistryPath,
+        [scriptblock]$WarningEmitter,
+        [switch]$InvariantConflict,
+        [switch]$UnachievableTarget,
+        [switch]$GateInputNeeded,
+        [switch]$ChainStageFailure
+    )
+
+    $heartbeat = $null
+    $heartbeatError = $null
+    try {
+        $heartbeat = Update-GoalRunActiveStateHeartbeat -WorktreePath $WorktreePath
+    }
+    catch {
+        $heartbeatError = $_.Exception.Message
+        Write-Warning "Invoke-GoalRunChainStageBoundaryHousekeeping: heartbeat update failed at '$WorktreePath' -- $heartbeatError"
+    }
+
+    $logEntry = Add-GoalRunLogEntry -WorktreePath $WorktreePath -Issue $Issue -EntryType 'checkpoint' `
+        -Data @{ commit_sha = $CommitSha; summary = $CheckpointSummary } -RepoRoot $RepoRoot
+
+    $budget = Invoke-GoalRunBudgetChainBoundaryCheck -CurrentSessionId $CurrentSessionId -LaunchedAt $LaunchedAt `
+        -CeilingMinutes $CeilingMinutes -Now $Now -RegistryPath $RegistryPath -WarningEmitter $WarningEmitter `
+        -InvariantConflict:$InvariantConflict -UnachievableTarget:$UnachievableTarget -GateInputNeeded:$GateInputNeeded -ChainStageFailure:$ChainStageFailure
+
+    return [pscustomobject]@{
+        Heartbeat      = $heartbeat
+        HeartbeatError = $heartbeatError
+        LogEntry       = $logEntry
+        ArmState       = $budget.ArmState
+        Precedence     = $budget.Precedence
     }
 }

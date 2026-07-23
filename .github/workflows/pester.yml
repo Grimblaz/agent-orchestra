@@ -113,7 +113,10 @@ jobs:
             # goal-run harness advisory wall-clock budget arm, session-
             # identity arming, and end-of-run token accounting — issue #874
             # plan step 7
-            '.github/scripts/Tests/goal-run-budget-core.Tests.ps1'
+            '.github/scripts/Tests/goal-run-budget-core.Tests.ps1',
+            # goal-run harness typed run-log writer/reader (location, schema-
+            # validated writer, checkpoint reader) — issue #874 fix M9
+            '.github/scripts/Tests/goal-run-log-core.Tests.ps1'
           )
           $config.Run.Exit = $true
           $config.Output.Verbosity = 'Detailed'

@@ -2,6 +2,12 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.4.9] — 2026-07-23
+
+### Fixed
+
+- Wired the goal-run harness's budget arm, heartbeat, and run-log primitives into the live orchestration path (issue #874 review-gate fix cycle A2): the wall-clock budget arm and heartbeat updates now fire at real chain-stage-boundary call sites instead of having zero live callers; fixed a Kind-unaware datetime subtraction that skewed dead-run detection by the machine's UTC offset; gave the run log a real file location, schema-validating writer, and checkpoint reader; recorded the run's worktree path on the inflight marker so resume no longer depends on an undefined filesystem glob; fixed the mutex yield path to always resolve its own inflight marker; reconciled the stage-marker write/read vocabulary.
+
 ## [3.4.8] — 2026-07-23
 
 ### Added

@@ -159,6 +159,27 @@ Describe 'Resolve-GoalRunBudgetArmState' -Tag 'unit' {
         $result.BudgetExhausted | Should -Be $false
         $warnings.Count | Should -BeGreaterThan 0
     }
+
+    It 'M6 regression: a UTC Z-suffixed LaunchedAt string cast to [datetime] alongside a genuinely UTC -Now reports near-zero elapsed, not a multi-hour skew' {
+        $registryPath = Join-Path $TestDrive 'arm-m6-regression.json'
+        Register-GoalRunBudgetSession -SessionId 'armed-session' -Issue 874 -RegistryPath $registryPath | Out-Null
+
+        # Same Kind-unaware bug as Test-GoalRunInflightAppearsDead
+        # (goal-run-stage-core.ps1): a 'Z'-suffixed string cast to
+        # [datetime] lands Kind=Local. Before the M6 fix, subtracting that
+        # directly against a genuinely-Utc -Now skewed the elapsed-minutes
+        # result by the local UTC offset of the running machine.
+        $nowUtc = (Get-Date).ToUniversalTime()
+        $launchedAtZString = $nowUtc.ToString('yyyy-MM-ddTHH:mm:ssZ')
+        $launchedAtCastFromZString = [datetime]$launchedAtZString
+
+        $result = Resolve-GoalRunBudgetArmState -CurrentSessionId 'armed-session' -LaunchedAt $launchedAtCastFromZString `
+            -CeilingMinutes 60 -Now $nowUtc -RegistryPath $registryPath
+
+        $result.Armed | Should -Be $true
+        $result.BudgetExhausted | Should -Be $false
+        [math]::Abs($result.ElapsedMinutes) | Should -BeLessThan 2
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -325,5 +346,82 @@ Describe 'Get-GoalRunSessionTokenAccounting' -Tag 'unit' {
         { Get-GoalRunSessionTokenAccounting -TranscriptPath $path } | Should -Not -Throw
         $result = Get-GoalRunSessionTokenAccounting -TranscriptPath $path
         $result.Tokens.input | Should -Be 50
+    }
+}
+
+# ---------------------------------------------------------------------------
+# 5. Chain-stage-boundary composite (M4/M5/M9, M8 reachability)
+# ---------------------------------------------------------------------------
+
+Describe 'Invoke-GoalRunChainStageBoundaryHousekeeping' -Tag 'unit' {
+
+    BeforeEach {
+        $script:HkWorktreePath = Join-Path $TestDrive "housekeeping-$([Guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $script:HkWorktreePath -Force | Out-Null
+        New-GoalRunActiveState -WorktreePath $script:HkWorktreePath -Ceilings @{} -Baseline @{} -Arm 'in-session' `
+            -ExecutorSessionId 'armed-session' -ContractHash ('d' * 64) | Out-Null
+
+        $script:HkRegistryPath = Join-Path $TestDrive "housekeeping-registry-$([Guid]::NewGuid().ToString('N')).json"
+        Register-GoalRunBudgetSession -SessionId 'armed-session' -Issue 874 -RegistryPath $script:HkRegistryPath | Out-Null
+        $script:HkLaunchedAt = [datetime]::new(2026, 7, 23, 0, 0, 0, [System.DateTimeKind]::Utc)
+    }
+
+    It 'M8 reachability: one call genuinely refreshes the heartbeat on disk, writes a readable run-log checkpoint, and resolves the wall-clock arm state -- proving the seam actually composes, not just each side in isolation' {
+        $before = Get-GoalRunActiveState -WorktreePath $script:HkWorktreePath
+        Start-Sleep -Milliseconds 50
+
+        $result = Invoke-GoalRunChainStageBoundaryHousekeeping -WorktreePath $script:HkWorktreePath -Issue 874 `
+            -CurrentSessionId 'armed-session' -LaunchedAt $script:HkLaunchedAt -CeilingMinutes 60 `
+            -CommitSha 'abc1234' -CheckpointSummary 'stage 1: entering' -RegistryPath $script:HkRegistryPath `
+            -Now $script:HkLaunchedAt.AddMinutes(10) -RepoRoot $script:RepoRoot
+
+        # 1. Heartbeat genuinely refreshed on disk, not merely returned.
+        $after = Get-GoalRunActiveState -WorktreePath $script:HkWorktreePath
+        ([datetime]$after.heartbeat_at) | Should -BeGreaterThan ([datetime]$before.heartbeat_at)
+
+        # 2. Run-log checkpoint genuinely written and readable back through
+        # the actual reader Resolve-GoalRunResumeStage consumes.
+        (Test-GoalRunLogHasCheckpoint -WorktreePath $script:HkWorktreePath) | Should -Be $true
+
+        # 3. Budget-arm state genuinely resolved (armed + not yet exhausted
+        # at 10 of 60 minutes).
+        $result.ArmState.Armed | Should -Be $true
+        $result.ArmState.BudgetExhausted | Should -Be $false
+        $result.Precedence.HasHalt | Should -Be $false
+        $result.HeartbeatError | Should -BeNullOrEmpty
+    }
+
+    It 'wires -BudgetExhausted from the real arm-state result into the winning halt reason once the ceiling has passed' {
+        $result = Invoke-GoalRunChainStageBoundaryHousekeeping -WorktreePath $script:HkWorktreePath -Issue 874 `
+            -CurrentSessionId 'armed-session' -LaunchedAt $script:HkLaunchedAt -CeilingMinutes 60 `
+            -CommitSha 'abc1234' -CheckpointSummary 'stage 1: entering' -RegistryPath $script:HkRegistryPath `
+            -Now $script:HkLaunchedAt.AddHours(3) -RepoRoot $script:RepoRoot
+
+        $result.Precedence.HasHalt | Should -Be $true
+        $result.Precedence.HaltReason | Should -Be 'budget-exhausted'
+    }
+
+    It 'passes a co-occurring -ChainStageFailure through correctly (budget-exhausted still wins per the total precedence order)' {
+        $result = Invoke-GoalRunChainStageBoundaryHousekeeping -WorktreePath $script:HkWorktreePath -Issue 874 `
+            -CurrentSessionId 'armed-session' -LaunchedAt $script:HkLaunchedAt -CeilingMinutes 60 `
+            -CommitSha 'abc1234' -CheckpointSummary 'stage 1: entering' -RegistryPath $script:HkRegistryPath `
+            -Now $script:HkLaunchedAt.AddHours(3) -RepoRoot $script:RepoRoot -ChainStageFailure
+
+        $result.Precedence.HaltReason | Should -Be 'budget-exhausted'
+        $result.Precedence.TrueConditions | Should -Be @('budget-exhausted', 'chain-stage-failure')
+    }
+
+    It 'catches a heartbeat-update failure, surfaces it on HeartbeatError, and still resolves the budget-arm state (housekeeping failure is never fatal to the chain-stage transition)' {
+        $missingWorktree = Join-Path $TestDrive "missing-worktree-$([Guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $missingWorktree -Force | Out-Null
+
+        $result = Invoke-GoalRunChainStageBoundaryHousekeeping -WorktreePath $missingWorktree -Issue 874 `
+            -CurrentSessionId 'armed-session' -LaunchedAt $script:HkLaunchedAt -CeilingMinutes 60 `
+            -CommitSha 'abc1234' -CheckpointSummary 'stage 1: entering' -RegistryPath $script:HkRegistryPath `
+            -Now $script:HkLaunchedAt.AddMinutes(5) -RepoRoot $script:RepoRoot -WarningAction SilentlyContinue
+
+        $result.HeartbeatError | Should -Not -BeNullOrEmpty
+        $result.ArmState | Should -Not -BeNullOrEmpty
+        $result.ArmState.Armed | Should -Be $true
     }
 }

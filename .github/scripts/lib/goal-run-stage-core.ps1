@@ -150,10 +150,26 @@ function New-GoalRunStageMarkerBody {
     [OutputType([string])]
     param(
         [Parameter(Mandatory)][int]$Issue,
-        [Parameter(Mandatory)][ValidateSet('pre-loop', 'loop-launched', 'loop-released', 'chain-dispatched')]
+        # M17 fix: 'pre-loop' is deliberately EXCLUDED from this writer own
+        # allowed set -- the Goal-Run.agent.md pre-loop stage-machine section
+        # already documents that pre-loop is the implicit starting state
+        # and no marker is ever posted for it on its own (Set-GoalRunStageMarker
+        # is first called once the loop actually launches). Dropping it here
+        # (rather than adding it to the reader ExplicitStageMarker
+        # ValidateSet in Resolve-GoalRunResumeStage) reconciles the two
+        # ValidateSets against the vocabulary that is actually ever written,
+        # touching less surrounding logic than adding a new resume branch.
+        [Parameter(Mandatory)][ValidateSet('loop-launched', 'loop-released', 'chain-dispatched')]
         [string]$Stage,
         [Parameter(Mandatory)][string]$ContractHash,
-        [Parameter(Mandatory)][string]$UpdatedAt
+        [Parameter(Mandatory)][string]$UpdatedAt,
+        # M10 fix: the provisioned worktree path, so a resuming invocation
+        # can read it directly from this durable marker instead of an
+        # undefined "most recent worktree" filesystem glob. Optional so a
+        # caller that genuinely does not have a worktree path yet (there is
+        # none -- every stage this marker is ever written for happens after
+        # provisioning) is not forced to pass an empty placeholder string.
+        [string]$WorktreePath
     )
 
     $lines = @(
@@ -166,6 +182,9 @@ function New-GoalRunStageMarkerBody {
         "- **contract_hash**: $ContractHash",
         "- **updated_at**: $UpdatedAt"
     )
+    if ($WorktreePath) {
+        $lines += "- **worktree_path**: $WorktreePath"
+    }
     return ($lines -join "`n")
 }
 
@@ -177,15 +196,18 @@ function ConvertFrom-GoalRunStageMarkerBody {
     )
 
     if ($Body -notmatch '<!-- goal-run-stage-(\d+) -->') {
-        return [pscustomobject]@{ Parsed = $false; Issue = $null; Stage = $null; ContractHash = $null; UpdatedAt = $null }
+        return [pscustomobject]@{ Parsed = $false; Issue = $null; Stage = $null; ContractHash = $null; UpdatedAt = $null; WorktreePath = $null }
     }
 
     $issue = [int]$Matches[1]
     $stage = if ($Body -match '(?m)^-\s+\*\*stage\*\*:\s*(\S+)') { $Matches[1] } else { $null }
     $contractHash = if ($Body -match '(?m)^-\s+\*\*contract_hash\*\*:\s*(\S+)') { $Matches[1] } else { $null }
     $updatedAt = if ($Body -match '(?m)^-\s+\*\*updated_at\*\*:\s*(\S+)') { $Matches[1] } else { $null }
+    # M10 fix: optional worktree_path field -- absent on any marker written
+    # before this fix, or by a caller that genuinely had none.
+    $worktreePath = if ($Body -match '(?m)^-\s+\*\*worktree_path\*\*:\s*(.+)$') { $Matches[1].Trim() } else { $null }
 
-    return [pscustomobject]@{ Parsed = $true; Issue = $issue; Stage = $stage; ContractHash = $contractHash; UpdatedAt = $updatedAt }
+    return [pscustomobject]@{ Parsed = $true; Issue = $issue; Stage = $stage; ContractHash = $contractHash; UpdatedAt = $updatedAt; WorktreePath = $worktreePath }
 }
 
 function Get-GoalRunIssueComments {
@@ -236,7 +258,7 @@ function Get-GoalRunStageMarker {
     $comments = Get-GoalRunIssueComments -Issue $Issue -Owner $Owner -Repo $Repo
     $matched = @($comments | Where-Object { $_.body -and ($_.body -like "*$marker*") })
     if ($matched.Count -eq 0) {
-        return [pscustomobject]@{ Found = $false; Stage = $null; ContractHash = $null; UpdatedAt = $null }
+        return [pscustomobject]@{ Found = $false; Stage = $null; ContractHash = $null; UpdatedAt = $null; WorktreePath = $null }
     }
 
     # This marker is always upserted in place (Set-GoalRunStageMarker below
@@ -244,7 +266,7 @@ function Get-GoalRunStageMarker {
     # match -- Select-Object -Last defends against a legacy duplicate.
     $latest = $matched | Select-Object -Last 1
     $parsed = ConvertFrom-GoalRunStageMarkerBody -Body $latest.body
-    return [pscustomobject]@{ Found = $parsed.Parsed; Stage = $parsed.Stage; ContractHash = $parsed.ContractHash; UpdatedAt = $parsed.UpdatedAt }
+    return [pscustomobject]@{ Found = $parsed.Parsed; Stage = $parsed.Stage; ContractHash = $parsed.ContractHash; UpdatedAt = $parsed.UpdatedAt; WorktreePath = $parsed.WorktreePath }
 }
 
 function Set-GoalRunStageMarker {
@@ -252,9 +274,16 @@ function Set-GoalRunStageMarker {
     [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory)][int]$Issue,
-        [Parameter(Mandatory)][ValidateSet('pre-loop', 'loop-launched', 'loop-released', 'chain-dispatched')]
+        # M17 fix: see the matching ValidateSet comment on
+        # New-GoalRunStageMarkerBody above -- 'pre-loop' is deliberately
+        # excluded here too, for the same reason.
+        [Parameter(Mandatory)][ValidateSet('loop-launched', 'loop-released', 'chain-dispatched')]
         [string]$Stage,
         [Parameter(Mandatory)][string]$ContractHash,
+        # M10 fix: threaded through to New-GoalRunStageMarkerBody so a
+        # resuming invocation can read the worktree path back from this
+        # marker directly.
+        [string]$WorktreePath,
         [string]$Owner,
         [string]$Repo
     )
@@ -266,7 +295,7 @@ function Set-GoalRunStageMarker {
 
     $marker = "<!-- goal-run-stage-$Issue -->"
     $updatedAt = (Get-Date).ToUniversalTime().ToString('o')
-    $body = New-GoalRunStageMarkerBody -Issue $Issue -Stage $Stage -ContractHash $ContractHash -UpdatedAt $updatedAt
+    $body = New-GoalRunStageMarkerBody -Issue $Issue -Stage $Stage -ContractHash $ContractHash -UpdatedAt $updatedAt -WorktreePath $WorktreePath
 
     $upsertParams = @{ Type = 'issue'; Number = $Issue; Marker = $marker; Body = $body }
     if ($Owner -and $Repo) {
@@ -275,7 +304,7 @@ function Set-GoalRunStageMarker {
     }
 
     $url = Find-OrUpsertComment @upsertParams
-    return [pscustomobject]@{ Success = [bool]$url; Url = $url; Stage = $Stage; UpdatedAt = $updatedAt }
+    return [pscustomobject]@{ Success = [bool]$url; Url = $url; Stage = $Stage; UpdatedAt = $updatedAt; WorktreePath = $WorktreePath }
 }
 
 # ---------------------------------------------------------------------------
@@ -413,6 +442,14 @@ function Get-GoalRunInflightMarkers {
 }
 
 function Set-GoalRunInflightMarkerResolved {
+    <#
+    .SYNOPSIS
+        M12 fix: -Owner/-Repo are now optional. When omitted, the PATCH
+        path uses the gh api own {owner}/{repo} template placeholders, which
+        gh resolves from the ambient repo context the same way
+        New-GoalRunIssueComment already falls back to ambient `gh` context
+        when -Owner/-Repo are not supplied for posting.
+    #>
     [CmdletBinding()]
     [OutputType([bool])]
     param(
@@ -421,12 +458,14 @@ function Set-GoalRunInflightMarkerResolved {
         [Parameter(Mandatory)][string]$ContractHash,
         [Parameter(Mandatory)][string]$LaunchedAt,
         [string]$ResolvedReason = 'yielded-to-lower-comment-id',
-        [Parameter(Mandatory)][string]$Owner,
-        [Parameter(Mandatory)][string]$Repo
+        [string]$Owner,
+        [string]$Repo
     )
 
     $body = New-GoalRunInflightMarkerBody -Issue $Issue -ContractHash $ContractHash -LaunchedAt $LaunchedAt -Status 'resolved' -ResolvedReason $ResolvedReason
-    $patchPath = "repos/$Owner/$Repo/issues/comments/$CommentId"
+    $ownerSegment = if ($Owner) { $Owner } else { '{owner}' }
+    $repoSegment = if ($Repo) { $Repo } else { '{repo}' }
+    $patchPath = "repos/$ownerSegment/$repoSegment/issues/comments/$CommentId"
 
     $tempFile = $null
     try {
@@ -517,10 +556,13 @@ function Invoke-GoalRunMutexLaunch {
     $tiebreak = Resolve-GoalRunInflightMutexOutcome -OwnCommentId $posted.CommentId -LiveMarkerCommentIds $liveIds
 
     if ($tiebreak.Outcome -eq 'yield') {
-        if ($Owner -and $Repo) {
-            Set-GoalRunInflightMarkerResolved -CommentId $posted.CommentId -Issue $Issue -ContractHash $ContractHash `
-                -LaunchedAt $posted.LaunchedAt -ResolvedReason 'yielded-to-lower-comment-id' -Owner $Owner -Repo $Repo | Out-Null
-        }
+        # M12 fix: always attempt to resolve the own marker on yield,
+        # regardless of whether -Owner/-Repo were explicitly supplied.
+        # Set-GoalRunInflightMarkerResolved falls back to the gh api ambient
+        # {owner}/{repo} placeholders when they are omitted, the same way
+        # posting already works fine via ambient `gh` context.
+        Set-GoalRunInflightMarkerResolved -CommentId $posted.CommentId -Issue $Issue -ContractHash $ContractHash `
+            -LaunchedAt $posted.LaunchedAt -ResolvedReason 'yielded-to-lower-comment-id' -Owner $Owner -Repo $Repo | Out-Null
         return [pscustomobject]@{ Outcome = 'yielded'; CommentId = $posted.CommentId; Worktree = $null }
     }
 
@@ -565,7 +607,21 @@ function Test-GoalRunInflightAppearsDead {
     }
 
     $lastSeen = if ($HeartbeatAt) { [datetime]$HeartbeatAt } else { $LaunchedAt }
-    $elapsed = ($Now - $lastSeen).TotalMinutes
+
+    # M6 fix: a Z-suffixed UTC string cast to [datetime] (either via the
+    # [datetime]$HeartbeatAt cast above or via the PowerShell parameter-
+    # binding coercion of -LaunchedAt/-Now) lands with Kind=Local -- the
+    # .NET default parse of a 'Z' string converts it to local wall-clock
+    # time and tags it Local, it does not keep it Utc. Subtracting that
+    # directly against a genuinely Utc -Now (raw Ticks arithmetic, no
+    # Kind-aware conversion happens automatically) then skews the result by
+    # the local UTC offset of the running machine -- empirically a freshly
+    # launched run reported ElapsedMinutes=240 on a UTC-4 host.
+    # .ToUniversalTime() is Kind-aware: it is a correct no-op on an
+    # already-Utc value and a correct reverse-conversion on a Local-tagged
+    # value, so normalizing both operands through it here makes the
+    # subtraction correct regardless of which Kind either side arrived with.
+    $elapsed = ($Now.ToUniversalTime() - $lastSeen.ToUniversalTime()).TotalMinutes
     $appearsDead = $elapsed -ge $StaleThresholdMinutes
 
     return [pscustomobject]@{

@@ -116,6 +116,27 @@ Describe 'Goal-run stage marker body round-trip' -Tag 'unit' {
         $parsed = ConvertFrom-GoalRunStageMarkerBody -Body 'not a marker at all'
         $parsed.Parsed | Should -Be $false
     }
+
+    It 'M10 fix: round-trips an optional WorktreePath field' {
+        $body = New-GoalRunStageMarkerBody -Issue 874 -Stage 'loop-launched' -ContractHash ('a' * 64) -UpdatedAt '2026-07-23T00:00:00.0000000Z' -WorktreePath 'C:\fake\gr-874-abc123'
+        $parsed = ConvertFrom-GoalRunStageMarkerBody -Body $body
+        $parsed.WorktreePath | Should -Be 'C:\fake\gr-874-abc123'
+    }
+
+    It 'M10 fix: WorktreePath is $null when omitted, never an empty-string placeholder' {
+        $body = New-GoalRunStageMarkerBody -Issue 874 -Stage 'loop-launched' -ContractHash ('a' * 64) -UpdatedAt '2026-07-23T00:00:00.0000000Z'
+        $parsed = ConvertFrom-GoalRunStageMarkerBody -Body $body
+        $parsed.WorktreePath | Should -BeNullOrEmpty
+        $body | Should -Not -Match 'worktree_path'
+    }
+
+    It 'M17 fix: the writer ValidateSet rejects pre-loop -- no marker is ever posted for the implicit starting stage' {
+        { New-GoalRunStageMarkerBody -Issue 874 -Stage 'pre-loop' -ContractHash ('a' * 64) -UpdatedAt '2026-07-23T00:00:00.0000000Z' } | Should -Throw
+    }
+
+    It 'M17 fix: the Set-GoalRunStageMarker ValidateSet also rejects pre-loop' {
+        { Set-GoalRunStageMarker -Issue 874 -Stage 'pre-loop' -ContractHash ('a' * 64) } | Should -Throw
+    }
 }
 
 Describe 'Goal-run inflight marker body round-trip' -Tag 'unit' {
@@ -195,6 +216,25 @@ Describe 'Invoke-GoalRunMutexLaunch' -Tag 'unit' {
         Should -Invoke -CommandName Set-GoalRunInflightMarkerResolved -Times 1
     }
 
+    It 'M12 fix: still attempts to resolve its own marker on yield even when -Owner/-Repo are NOT supplied' {
+        Mock -CommandName New-GoalRunInflightMarker -MockWith { [pscustomobject]@{ Success = $true; CommentId = 105; Url = 'https://example/105'; LaunchedAt = '2026-07-23T00:00:00.0000000Z' } }
+        Mock -CommandName Get-GoalRunInflightMarkers -MockWith {
+            @(
+                [pscustomobject]@{ CommentId = 100; Status = 'unresolved'; ContractHash = ('c' * 64); LaunchedAt = '2026-07-23T00:00:00.0000000Z'; ResolvedReason = $null },
+                [pscustomobject]@{ CommentId = 105; Status = 'unresolved'; ContractHash = ('c' * 64); LaunchedAt = '2026-07-23T00:00:00.0000000Z'; ResolvedReason = $null }
+            )
+        }
+        Mock -CommandName Set-GoalRunInflightMarkerResolved -MockWith { $true }
+        Mock -CommandName New-GoalRunWorktree -MockWith { throw 'New-GoalRunWorktree must not be called when yielding' }
+
+        # Deliberately no -Owner/-Repo -- before the M12 fix, the yield
+        # branch only attempted the resolve call when both were supplied.
+        $result = Invoke-GoalRunMutexLaunch -Issue 874 -RepoRoot 'C:\fake\repo' -ContractHash ('c' * 64)
+
+        $result.Outcome | Should -Be 'yielded'
+        Should -Invoke -CommandName Set-GoalRunInflightMarkerResolved -Times 1
+    }
+
     It 'provisions exactly once when reconcile confirms this run is the sole/lowest live marker' {
         Mock -CommandName New-GoalRunInflightMarker -MockWith { [pscustomobject]@{ Success = $true; CommentId = 100; Url = 'https://example/100'; LaunchedAt = '2026-07-23T00:00:00.0000000Z' } }
         Mock -CommandName Get-GoalRunInflightMarkers -MockWith {
@@ -260,6 +300,28 @@ Describe 'Test-GoalRunInflightAppearsDead (crash-atomicity)' -Tag 'unit' {
         $result = Test-GoalRunInflightAppearsDead -MarkerStatus 'unresolved' -LaunchedAt $now.AddHours(-5) -HeartbeatAt $now.AddMinutes(-5) -HaltReportExists $false -PrExists $false -Now $now -StaleThresholdMinutes 60
         $result.AppearsDead | Should -Be $false
         $result.LastSeenAt | Should -Be $now.AddMinutes(-5)
+    }
+
+    It 'M6 regression: a UTC Z-suffixed LaunchedAt string cast to [datetime] alongside a genuinely UTC -Now reports near-zero elapsed, not a multi-hour skew' {
+        # Casting a 'Z'-suffixed string to [datetime] lands Kind=Local (a
+        # correct local-wall-clock conversion of the same instant, but Kind
+        # is tagged Local, not Utc). Before the M6 fix, subtracting that
+        # directly against a genuinely-Utc -Now skewed the result by the
+        # local UTC offset of the machine running this test -- reproduced
+        # live as ElapsedMinutes=240 on a UTC-4 machine for a run launched
+        # moments earlier.
+        $nowUtc = (Get-Date).ToUniversalTime()
+        $launchedAtZString = $nowUtc.ToString('yyyy-MM-ddTHH:mm:ssZ')
+        $launchedAtCastFromZString = [datetime]$launchedAtZString
+
+        $result = Test-GoalRunInflightAppearsDead -MarkerStatus 'unresolved' -LaunchedAt $launchedAtCastFromZString `
+            -HaltReportExists $false -PrExists $false -Now $nowUtc -StaleThresholdMinutes 60
+
+        $result.AppearsDead | Should -Be $false
+        # Near-zero, not off by anywhere near a machine UTC-offset worth
+        # of minutes (60, 240, etc.) -- allow a couple of minutes of test
+        # execution slack only.
+        [math]::Abs($result.ElapsedMinutes) | Should -BeLessThan 2
     }
 }
 
