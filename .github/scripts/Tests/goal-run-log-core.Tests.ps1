@@ -22,8 +22,8 @@ Describe 'goal-run-log-core.ps1: lib resolves' -Tag 'unit' {
 
 Describe 'Get-GoalRunLogPath' -Tag 'unit' {
     It 'resolves goal-run-log.jsonl at the worktree root, alongside goal-run-active.json' {
-        $path = Get-GoalRunLogPath -WorktreePath 'C:\fake\gr-874'
-        $path | Should -Be (Join-Path 'C:\fake\gr-874' 'goal-run-log.jsonl')
+        $path = Get-GoalRunLogPath -WorktreePath 'fake/gr-874'
+        $path | Should -Be (Join-Path 'fake/gr-874' 'goal-run-log.jsonl')
     }
 }
 
