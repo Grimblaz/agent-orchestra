@@ -55,6 +55,7 @@ Code-Conductor orchestration is available in Claude Code.
 
 - `/orchestrate` runs Code-Conductor inline in the parent conversation for the full pipeline from smart resume and plan handoff through implementation, validation, CE Gate, and PR readiness.
 - `/spine-run` runs Spine-Runner as the minimal frame-walking conductor once a v2 plan exists.
+- `/goal-run {issue}` launches or resumes the unattended vendor-goal-loop harness (Arm I) for a single issue carrying an approved goal-contract plan — one command is both launcher and resumer, and any non-happy path produces a typed halt report instead of an in-conversation question. See [HOW-IT-WORKS.md § Goal-run: the unattended pipeline](HOW-IT-WORKS.md#3-goal-run-the-unattended-pipeline) and [skills/goal-run/SKILL.md](skills/goal-run/SKILL.md).
 
 For paused Code-Conductor work, `/orchestrate` is also the Claude resume entry point. The shared workflow still uses `/implement` language in Copilot-specific paths, but Claude does not ship a `/implement` command.
 

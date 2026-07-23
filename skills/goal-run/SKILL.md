@@ -7,7 +7,7 @@ description: "Methodology home for the goal-run harness (issue #874): the stage-
 
 # Goal-Run Harness
 
-Reference methodology for the goal-run harness: a launcher/resumer that walks a single GitHub issue's approved goal-contract (a structured, machine-checkable target the vendor's own `/goal` loop runs against) through to a reviewed, classed pull request, without a human answering `AskUserQuestion` prompts mid-run. This file documents the mechanics; the runnable prose lives in [agents/Goal-Run.agent.md](../../agents/Goal-Run.agent.md).
+Reference methodology for the goal-run harness: a launcher/resumer that walks a single GitHub issue's approved goal-contract (a structured, machine-checkable target the vendor's own `/goal` loop runs against) through to a reviewed, classed pull request, without a human answering `AskUserQuestion` prompts mid-run. This file documents the mechanics; the runnable prose lives in [agents/Goal-Run.agent.md](../../agents/Goal-Run.agent.md). For the invocation entry point and the reader-facing dual-flow orientation (conducted vs. goal-run, launch, resume, halt-reason reading guide, honest budget expectations), see [CLAUDE.md § Orchestration](../../CLAUDE.md#orchestration) and [HOW-IT-WORKS.md § Goal-run: the unattended pipeline](../../HOW-IT-WORKS.md#3-goal-run-the-unattended-pipeline).
 
 ## When to Use
 

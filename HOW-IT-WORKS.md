@@ -44,7 +44,96 @@ Work moves through up to eight beats. Steps 2 and 3 (customer framing and techni
 
 8. **Merged PR.** The validated, reviewed, CE-Gate-passed implementation lands on the main branch as a merged pull request.
 
-## 3. How to read an issue or PR
+## 3. Goal-run: the unattended pipeline
+
+Section 2 above is the conducted pipeline: `/orchestrate` walks a plan slice by slice, pausing at engagement gates whenever a decision genuinely needs a human answer. Goal-run is a second, unattended pipeline for a narrower job — one that starts from an approved goal-contract (a structured, machine-checkable target the vendor's own `/goal` loop runs against) and runs to a reviewed, classed pull request without a human answering questions mid-run. The only launch arm this PR builds is **Arm I** (in-session — the harness becomes the executor inside its own conversation and waits for control to return); a headless arm ("Arm H") and a manual hand-off arm ("Arm M") are named placeholders that ship later — see [Arm M and Arm H](#arm-m-and-arm-h-ship-in-pr-2) below. Full mechanics live in [skills/goal-run/SKILL.md](skills/goal-run/SKILL.md); this section is the reader-facing orientation.
+
+### Which pipeline to choose
+
+| | Conducted (`/orchestrate`) | Goal-run (`/goal-run`, Arm I) |
+| --- | --- | --- |
+| Interaction model | Interactive — engagement gates (scope classification, plan approval, standards checks) fire live and wait for an answer | Unattended — no `AskUserQuestion` mid-run; any point that would otherwise need a live answer produces a typed halt instead |
+| What it walks | Any approved implementation plan (frame-spine format) | Only an approved goal-contract plan variant (872-D2) |
+| Entry point | One command per session turn, resumable across sessions via durable markers | One command is both launcher and resumer — re-entering re-inspects durable state and continues from there |
+| Non-happy-path behavior | Pauses and asks | Halts with one of five typed `halt_reason` values (below) and reports back |
+| When to choose it | Default choice for most work — full methodology, live judgment calls, human in the loop | A single issue with a goal-contract already approved, where an unattended run is the point (e.g. overnight, or freeing up a session) |
+
+```mermaid
+flowchart LR
+    subgraph Conducted["Conducted pipeline (/orchestrate)"]
+        direction TB
+        C1["Smart resume<br/>reads plan-issue marker"] --> C2["Scope classification gate<br/>(cannot be skipped)"]
+        C2 --> C3["Slice-by-slice dispatch<br/>engagement gates fire live"]
+        C3 --> C4["Adversarial review<br/>prosecution -> defense -> judge"]
+        C4 --> C5["CE Gate"]
+        C5 --> C6["PR ready"]
+    end
+
+    subgraph GoalRun["Goal-run pipeline (/goal-run, Arm I)"]
+        direction TB
+        G1["pre-loop<br/>mutex marker + worktree"] --> G2["loop-launched<br/>vendor /goal loop runs unattended"]
+        G2 --> G3["loop-released<br/>control returns, verdict read"]
+        G3 --> G4["chain-dispatched<br/>re-validate -> CE Gate -> review -> fix cycles"]
+        G4 --> G5["PR created + classed<br/>goal-run label + metrics"]
+    end
+```
+
+### Launching Arm I
+
+`/goal-run {issue}` takes a single GitHub issue number carrying an approved goal-contract. It is both launcher and resumer: on every invocation it inspects only durable artifacts (GitHub issue comments, the goal-contract block, `goal-run-active.json`, and the typed run log) — never conversation memory — and enters at the first incomplete stage. Arm I is in-session: the harness verifies the contract hash, posts a mutex marker before provisioning a worktree, then sets the goal-contract's target on itself and becomes the executor inside that freshly provisioned worktree. This is the only launch arm this PR implements — see [Arm M and Arm H](#arm-m-and-arm-h-ship-in-pr-2) below.
+
+### The resume story
+
+Re-entering `/goal-run {issue}` on an in-flight run first checks for an unresolved `goal-run-inflight-{issue}` marker. If one exists and the run still looks alive, the harness refuses to launch a duplicate and reports what is already in flight; if the marker looks dead (no recent heartbeat, no halt report, no PR), it offers to resume or hand off to manual triage rather than silently launching a second run.
+
+Once it is clear no run is already live, the harness resolves exactly where to resume by checking a fixed precedence of signals — highest-precedence check first:
+
+```mermaid
+flowchart TD
+    R0["/goal-run {issue} invoked"] --> R1{Contract hash still verifies?}
+    R1 -- no --> RB["blocked -- report and stop.<br/>The contract needs plan-side remediation"]
+    R1 -- yes --> R2{Terminal emissions already verified on a known PR?}
+    R2 -- yes --> RC["complete -- nothing left to do"]
+    R2 -- no --> R3{Explicit stage marker present?}
+    R3 -- yes --> RS["Resume from the named stage"]
+    R3 -- no --> R4{Run log has a checkpoint/deviation entry?}
+    R4 -- yes --> RS
+    R4 -- no --> R5{goal-run-active.json exists?}
+    R5 -- yes --> RS2["Resume at loop-launched<br/>(worktree provisioned, loop never launched)"]
+    R5 -- no --> R6{Mutex marker exists?}
+    R6 -- yes --> RS3["Resume at pre-loop<br/>(crash mid pre-loop)"]
+    R6 -- no --> RF["Fresh launch"]
+```
+
+`blocked` and `complete` are reports, not stages the resumer executes — a `blocked` contract needs plan-side remediation (typically a `/plan` re-approval) before any resume can proceed, and `complete` means the run already produced a verified, correctly-classed PR.
+
+### Reading a halt report
+
+Every non-happy path in goal-run ends the same way: a typed `<!-- goal-halt-report-{issue} -->` comment with one of five `halt_reason` values. When more than one condition is true at once, this precedence decides the reported reason (highest wins): `invariant-conflict > unachievable-target > gate-input-needed > budget-exhausted > chain-stage-failure`.
+
+| `halt_reason` | Plain language | Typically triggered by | Who acts next |
+| --- | --- | --- | --- |
+| `invariant-conflict` | Something the run depends on drifted out of sync mid-run | A post-approval edit to the issue's goal-contract that changes its live hash away from the value pinned at launch; a validator reporting diff-integrity or assertion-weakening; or an executor self-reporting this reason directly | Plan-side remediation — the contract needs re-approval (re-run `/plan`) or a maintainer needs to reconcile the drift before any resume can proceed |
+| `unachievable-target` | The executor itself concluded a target in the contract cannot be met as written | An executor halt-claim asserting a specific target is unreachable | Whoever can revise the target — usually the maintainer, via a `/plan`/`/design` pass on the contract |
+| `gate-input-needed` | The run hit a decision that genuinely needs a human answer — the machine-safe substitute for the `AskUserQuestion` escalation the conducted pipeline would raise, since goal-run cannot ask mid-run | A chain-gate demand (the trigger itself is separate follow-on work, #848 E1) at a point the harness cannot safely resolve alone | The human operator — read the halt report's `plan_remediation` field, answer directly, then re-invoke `/goal-run {issue}` to resume |
+| `budget-exhausted` | The run's wall-clock allowance ran out at a chain-stage boundary — never mid-loop; see [Budget expectations](#budget-expectations-stated-honestly) below | The wall-clock backstop tripping when a chain-stage checkpoint is reached after the ceiling has passed | The maintainer — decide whether to extend the budget and resume, or accept the work completed so far |
+| `chain-stage-failure` | A stage in the post-loop chain itself failed and did not recover — most commonly, the capped fix-then-re-validate cycles were not enough | The fix-cycle cap (2 cycles) being exceeded, a stage crashing outright, or re-validation reporting a validator infra error or an outright refusal | A developer or maintainer — investigate the specific failing stage named in the halt report's `stage` and `evidence` fields, the same way a failing CI run would be triaged |
+
+The schema's `recommended_next_owner` field is free text the harness populates at emit time — today's emission primitive defaults it to `Code-Conductor` unless a call site overrides it, so treat the "who acts next" column above as the honest per-reason answer rather than assuming the literal field value names a specific role.
+
+### Budget expectations, stated honestly
+
+Arm I has no native budget flag (`--max-budget-usd` is headless-only, an Arm H capability out of scope for this PR) and no Stop hook in this PR. **No budget enforcement of any kind fires during the goal loop itself in PR 1** — while the vendor `/goal` loop is actually running, in-loop spend is bounded only by the vendor loop's own defaults, because the interactive surface exposes no settable iteration or turn ceiling for the harness to record and enforce. Nothing tracks or bounds spend of any kind while the loop is in flight; the honest description stops there rather than implying a softer, partial mechanism exists.
+
+The wall-clock arm only checks at chain-stage boundaries — the post-loop checkpoints the Post-Loop Chain already treats as stage transitions — never inside the loop. Read `budget-exhausted` in the table above accordingly: it can only fire once the loop has released, not while it is mid-flight. Session-level token and cost accounting is likewise computed post hoc, after the whole session, from the transcript — never split into a loop-phase share versus a chain-phase share in this PR.
+
+### Arm M and Arm H (ship in PR 2)
+
+**Arm H (headless)** — ships in PR 2.
+
+**Arm M (manual hand-off)** — ships in PR 2.
+
+## 4. How to read an issue or PR
 
 GitHub renders certain structured elements that Agent Orchestra writes during each pipeline phase. This section explains what those elements mean in plain language.
 
@@ -69,7 +158,7 @@ PR comments from the review pipeline use a small set of terms that have specific
 - `CE Gate passed` — the Customer Experience Gate check confirmed that the shipped feature satisfies the customer scenarios.
 - Adversarial review score lines — numeric summaries from the judge that indicate the overall verdict quality and whether the PR is ready to merge.
 
-## 4. Want more detail?
+## 5. Want more detail?
 
 The spine in sections 1–3 covers most of what you need to orient yourself. If you want to go deeper into a specific subsystem, expand one of the sections below.
 
@@ -159,7 +248,7 @@ The adversarial review pipeline runs after implementation to find defects before
 
 <a id="vocab"></a>
 
-## 5. Plain-language vocabulary
+## 6. Plain-language vocabulary
 
 <!-- vocab-seed:begin -->
 
