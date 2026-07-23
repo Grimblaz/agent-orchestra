@@ -10,7 +10,7 @@
     The canonical directive text is defined once as a here-string fixture.
     Tests discover in-scope bodies dynamically (Glob agents/*.agent.md minus the
     pinned exclusion set) and assert:
-      1. The count of in-scope bodies is exactly 11 and excluded bodies is exactly 5.
+      1. The count of in-scope bodies is exactly 12 and excluded bodies is exactly 5.
       2. Each in-scope body contains the directive as the terminal "- " bullet of
          its ## Core Principles section (not merely a substring anywhere in the file).
 
@@ -110,7 +110,7 @@ Describe 'Reporting-economy directive in specialist agent bodies' {
 - **Reporting economy.** Do not echo your tool-call transcript — the mechanical replay of reads and commands you ran (e.g., your platform's tool-call markers such as `[Tool: read]` / `[Tool: bash]`) — in your response; it costs the parent return-trip tokens with no value. Lead with the smallest advancing signal (file paths touched, pass/fail counts where applicable) and keep free narration to roughly 150 words or fewer. This cap is subordinate to any role-mandated structured output your role emits: when your role requires a structured artifact (for example a findings ledger, a `judge-rulings` block, a research document, a specification, a defect-analysis block), that artifact governs in full and the cap applies only to free narration around it — the named examples are illustrative, not exhaustive. The cap never suppresses required fixed-form output such as a Step 0 environment-handshake or divergence (ND-2) emission, a contract-locked tool-gap announcement, or a mandated report prefix. Evidence citations (`file:line`, quoted load-bearing snippets) are encouraged, not transcript noise. The parent may always request full detail.
 '@
 
-        $script:ExpectedInScopeCount  = 11
+        $script:ExpectedInScopeCount  = 12
         $script:ExpectedExcludedCount = 5
     }
 

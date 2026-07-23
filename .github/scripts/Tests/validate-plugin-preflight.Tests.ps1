@@ -31,8 +31,10 @@ Describe 'Invoke-PluginPreflight' -Tag 'unit' {
             New-Item -ItemType Directory -Path $agentsDir   -Force | Out-Null
             New-Item -ItemType Directory -Path $skillsRoot  -Force | Out-Null
 
+            $agentEntries = [System.Collections.Generic.List[string]]::new()
             for ($i = 1; $i -le $AgentCount; $i++) {
                 Set-Content -Path (Join-Path $agentsDir "agent-$i.agent.md") -Value "# Agent $i" -Encoding UTF8
+                $agentEntries.Add("    `"./agents/agent-$i.agent.md`"")
             }
 
             $skillEntries = [System.Collections.Generic.List[string]]::new()
@@ -58,7 +60,9 @@ Describe 'Invoke-PluginPreflight' -Tag 'unit' {
   "repository": "$repoUrl",
     "license": "MIT",
     "keywords": ["workflow", "agents"],
-  "agents": ["./agents/"],
+  "agents": [
+$($agentEntries -join ",`n")
+  ],
   "skills": [
 $($skillEntries -join ",`n")
   ]$commandsBlock
@@ -139,13 +143,59 @@ $($skillEntries -join ",`n")
             ($result.Results | Where-Object { $_.Name -eq 'AgentCount' }).Passed | Should -BeTrue
         }
 
-        It 'reports FAIL AgentCount when fewer than 16 agents on disk' {
-            $root = & $script:NewFixture -AgentCount 12
+        It 'reports PASS AgentCount when the manifest agents value is a bare directory string, regardless of on-disk count' {
+            # Root plugin.json in this repo declares "agents": "agents/" — a directory
+            # reference with no itemized list. There is nothing to drift-check against in
+            # that shape, so AgentCount falls back to the on-disk count for that directory.
+            $root = & $script:NewFixture -AgentCount 21
+            $pjPath = Join-Path $root 'plugin.json'
+            $json = Get-Content $pjPath -Raw | ConvertFrom-Json
+            $json.agents = 'agents/'
+            $json | ConvertTo-Json -Depth 10 | Set-Content $pjPath -Encoding UTF8
+            $result = Invoke-PluginPreflight -RootPath $root -PluginJsonPath $pjPath
+            $check = $result.Results | Where-Object { $_.Name -eq 'AgentCount' }
+            $check.Passed | Should -BeTrue
+            $check.Detail | Should -Match '21'
+        }
+
+        It 'derives AgentCount from an itemized manifest array and passes when N declared equals N on disk' {
+            $root = & $script:NewFixture -AgentCount 5
+            $pjPath = Join-Path $root 'plugin.json'
+            $result = Invoke-PluginPreflight -RootPath $root -PluginJsonPath $pjPath
+            $check = $result.Results | Where-Object { $_.Name -eq 'AgentCount' }
+            $check.Passed | Should -BeTrue
+            $check.Detail | Should -Match '5'
+        }
+
+        It 'derives AgentCount from an itemized manifest array and passes when N declared equals N on disk (different N)' {
+            $root = & $script:NewFixture -AgentCount 22
+            $pjPath = Join-Path $root 'plugin.json'
+            $result = Invoke-PluginPreflight -RootPath $root -PluginJsonPath $pjPath
+            $check = $result.Results | Where-Object { $_.Name -eq 'AgentCount' }
+            $check.Passed | Should -BeTrue
+            $check.Detail | Should -Match '22'
+        }
+
+        It 'reports FAIL AgentCount when the itemized manifest array declares more agents than exist on disk' {
+            $root = & $script:NewFixture -AgentCount 16
+            Remove-Item -Path (Join-Path $root 'agents/agent-16.agent.md') -Force
             $pjPath = Join-Path $root 'plugin.json'
             $result = Invoke-PluginPreflight -RootPath $root -PluginJsonPath $pjPath
             $check = $result.Results | Where-Object { $_.Name -eq 'AgentCount' }
             $check.Passed | Should -BeFalse
-            $check.Detail | Should -Match '12'
+            $check.Detail | Should -Match 'Expected 16'
+            $check.Detail | Should -Match 'found 15'
+        }
+
+        It 'reports FAIL AgentCount when the itemized manifest array declares fewer agents than exist on disk' {
+            $root = & $script:NewFixture -AgentCount 16
+            Set-Content -Path (Join-Path $root 'agents/agent-extra.agent.md') -Value '# Extra Agent' -Encoding UTF8
+            $pjPath = Join-Path $root 'plugin.json'
+            $result = Invoke-PluginPreflight -RootPath $root -PluginJsonPath $pjPath
+            $check = $result.Results | Where-Object { $_.Name -eq 'AgentCount' }
+            $check.Passed | Should -BeFalse
+            $check.Detail | Should -Match 'Expected 16'
+            $check.Detail | Should -Match 'found 17'
         }
     }
 

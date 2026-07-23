@@ -169,7 +169,9 @@ Each Claude subagent shell in `agents/*.md` may declare `model:` and `effort:` i
 | `commands/review-github.md` | `sonnet` | `high` | sonnet + high | D1: command front-end sets the primary dispatch tier |
 | `commands/spine-run.md` | `inherit` | `inherit` | dispatcher | D7: minimal frame walker inherits dispatcher tier |
 | `commands/orchestra-spine.md` | `inherit` | `inherit` | dispatcher | D4: routine inspection |
+| `commands/goal-run.md` | `sonnet` | `high` | sonnet + high | D1: command front-end sets the primary dispatch tier (#874 plan step 4) |
 | `agents/code-conductor.md` | `sonnet` | `high` | sonnet + high | D2: redundant declaration; ensures orchestrator tier even without command override |
+| `agents/goal-run.md` | `sonnet` | `high` | sonnet + high | D2: redundant declaration, same rationale as `agents/code-conductor.md` — a single-issue orchestrator entry point also directly dispatchable as `subagent_type: goal-run` (#874 plan step 4) |
 | `agents/spine-runner.md` | `inherit` | `inherit` | dispatcher | D7: minimal frame walker inherits dispatcher tier |
 | `agents/senior-engineer.md` | `inherit` | `inherit` | dispatcher | D4: routine skill-as-adapter execution; inherits dispatcher |
 | `agents/code-critic.md` | `opus` | `high` | opus + high | D5: adversarial review requires maximum reasoning depth |

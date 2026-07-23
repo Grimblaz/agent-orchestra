@@ -1,6 +1,6 @@
 {
   "name": "agent-orchestra",
-  "version": "3.4.5",
+  "version": "3.4.9",
   "agents": [
     "./agents/code-conductor.md",
     "./agents/code-critic.md",
@@ -8,6 +8,7 @@
     "./agents/code-smith.md",
     "./agents/doc-keeper.md",
     "./agents/experience-owner.md",
+    "./agents/goal-run.md",
     "./agents/issue-planner.md",
     "./agents/process-review.md",
     "./agents/refactor-specialist.md",

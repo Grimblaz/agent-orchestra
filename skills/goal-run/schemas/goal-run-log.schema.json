@@ -1,0 +1,76 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "goal-run-log-entry",
+  "description": "Schema for ONE JSON Lines (JSONL) entry in a goal-run harness's durable run log (issue #874, plan step 1, AC2). The run log itself is a JSONL file -- each line is validated independently against this schema, not the file as a whole. Entry types are deliberately checkpoint | deviation | experience-observation | halt-claim -- NOT 'terminal': release detection consumes the platform's own goal_status transcript event (see goal-run-status-core.ps1) instead of a run-log terminal entry, per the goal-loop-capability-probe finding recorded in Documents/Design/goal-loop-capability-probe.md. Closed schema (additionalProperties: false) at the top level; per-type required fields are enforced via allOf/if/then rather than a oneOf split so every legal field is declared once in one flat properties block.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "issue", "type", "timestamp"],
+  "properties": {
+    "schema_version": {
+      "description": "The accepted schema_version set. Callers read this enum rather than hard-coding accepted versions.",
+      "enum": [1]
+    },
+    "issue": {
+      "type": "integer",
+      "description": "The GitHub issue number the goal-run harness invocation belongs to."
+    },
+    "type": {
+      "description": "The four legal run-log entry types. 'terminal' is deliberately absent -- see this schema's top-level description.",
+      "enum": ["checkpoint", "deviation", "experience-observation", "halt-claim"]
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 timestamp of when this entry was written."
+    },
+    "commit_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{7,40}$",
+      "description": "Required on checkpoint entries: the commit this checkpoint corresponds to."
+    },
+    "summary": {
+      "type": "string",
+      "description": "Short human-readable summary. Required on checkpoint, deviation, and halt-claim entries."
+    },
+    "rationale": {
+      "type": "string",
+      "description": "Required on deviation entries: why the executor deviated from the plan."
+    },
+    "scenario": {
+      "type": "string",
+      "description": "Required on experience-observation entries: which CE Gate scenario this observation belongs to."
+    },
+    "observation": {
+      "type": "string",
+      "description": "Required on experience-observation entries: what was observed."
+    },
+    "halt_reason": {
+      "description": "Optional; only meaningful on halt-claim entries. Lets the executor distinguish, e.g., a genuine invariant-conflict from an unachievable-target claim before the harness's own halt-reason precedence logic (a later #874 step, not implemented here) runs. Reuses the same five-value enum as goal-halt-report.schema.json's halt_reason.",
+      "enum": [
+        "unachievable-target",
+        "invariant-conflict",
+        "budget-exhausted",
+        "gate-input-needed",
+        "chain-stage-failure"
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "type": { "const": "checkpoint" } } },
+      "then": { "required": ["commit_sha", "summary"] }
+    },
+    {
+      "if": { "properties": { "type": { "const": "deviation" } } },
+      "then": { "required": ["summary", "rationale"] }
+    },
+    {
+      "if": { "properties": { "type": { "const": "experience-observation" } } },
+      "then": { "required": ["scenario", "observation"] }
+    },
+    {
+      "if": { "properties": { "type": { "const": "halt-claim" } } },
+      "then": { "required": ["summary"] }
+    }
+  ]
+}

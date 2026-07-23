@@ -77,7 +77,46 @@ jobs:
             # goal-run harness capability-probe instruments — issue #874 plan step 1
             '.github/scripts/Tests/goal-probe-streamjson.Tests.ps1',
             '.github/scripts/Tests/goal-probe-usage-reader.Tests.ps1',
-            '.github/scripts/Tests/goal-probe-forcehalt-rig.Tests.ps1'
+            '.github/scripts/Tests/goal-probe-forcehalt-rig.Tests.ps1',
+            # goal-run harness durable-state layer (halt schema/emitter, run-log
+            # schema, goal_status reader) — issue #874 plan step 1
+            '.github/scripts/Tests/goal-run-schemas.Tests.ps1',
+            '.github/scripts/Tests/goal-run-log-schema.Tests.ps1',
+            '.github/scripts/Tests/goal-run-transcript-core.Tests.ps1',
+            '.github/scripts/Tests/goal-run-status-core.Tests.ps1',
+            '.github/scripts/Tests/goal-run-halt-core.Tests.ps1',
+            # goal-run harness worktree lifecycle (provision, state file,
+            # teardown, deferred-teardown retry) — issue #874 plan steps 2-3
+            '.github/scripts/Tests/goal-run-worktree-core.Tests.ps1',
+            # session-cleanup-detector.ps1 — previously unlisted; registered
+            # alongside its goal-run integration coverage (issue #874 plan step 3)
+            '.github/scripts/Tests/session-cleanup-detector.Tests.ps1',
+            # goal-run/* detector protection + reporting + aging escalation +
+            # deferred-teardown retry — issue #874 plan step 3
+            '.github/scripts/Tests/session-cleanup-detector-goal-run.Tests.ps1',
+            # goal-run harness stage machine, mutex, crash-atomicity,
+            # control-return-then-read, and loop->chain seam — issue #874
+            # plan step 4
+            '.github/scripts/Tests/goal-run-stage-core.Tests.ps1',
+            # goal-run harness prompt assembly + launch-pinned loop
+            # predicate — issue #874 plan step 5
+            '.github/scripts/Tests/goal-run-prompt-core.Tests.ps1',
+            # goal-run harness post-loop chain: re-validation reuse, the
+            # five-halt-producer total precedence, PR classing, and
+            # verified-emission + repair — issue #874 plan step 6
+            '.github/scripts/Tests/goal-run-chain-core.Tests.ps1',
+            # goal-run harness vendor loop predicate wrapper: wires the
+            # launch-pinned contract-hash check into the live predicate
+            # command and self-emits a halt report on a halt disposition
+            # — issue #874 fix M1
+            '.github/scripts/Tests/goal-run-predicate-core.Tests.ps1',
+            # goal-run harness advisory wall-clock budget arm, session-
+            # identity arming, and end-of-run token accounting — issue #874
+            # plan step 7
+            '.github/scripts/Tests/goal-run-budget-core.Tests.ps1',
+            # goal-run harness typed run-log writer/reader (location, schema-
+            # validated writer, checkpoint reader) — issue #874 fix M9
+            '.github/scripts/Tests/goal-run-log-core.Tests.ps1'
           )
           $config.Run.Exit = $true
           $config.Output.Verbosity = 'Detailed'
