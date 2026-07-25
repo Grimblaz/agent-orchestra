@@ -469,7 +469,7 @@ function Resolve-GoalRunBudgetArmState {
     param(
         [Parameter(Mandatory)][string]$CurrentSessionId,
         [Parameter(Mandatory)][datetime]$LaunchedAt,
-        [Parameter(Mandatory)][double]$CeilingMinutes,
+        [Nullable[double]]$CeilingMinutes = $null,
         [datetime]$Now = [datetime]::MinValue,
         [string]$RegistryPath,
         [scriptblock]$WarningEmitter
@@ -525,14 +525,36 @@ function Resolve-GoalRunBudgetArmState {
     # operands through it here fixes the skew regardless of which Kind
     # either side arrived with.
     $elapsedMinutes = ($Now.ToUniversalTime() - $LaunchedAt.ToUniversalTime()).TotalMinutes
-    $budgetExhausted = $armed -and ($elapsedMinutes -ge $CeilingMinutes)
 
+    # PF1 fix: a null OR non-positive ceiling means "no wall-clock ceiling
+    # applies" and must NEVER trip budget-exhausted. The goal-contract schema
+    # types budget.wall_clock as a free string with no pattern, and the
+    # contract validator deliberately tolerates an unparseable wall_clock as
+    # advisory-only (no ceiling). ConvertTo-GoalRunCeilingMinutes returns
+    # $null for such a value, so a schema-valid, validation-passing contract
+    # can legitimately arrive here with a null ceiling. Previously that $null
+    # coerced through the [double] Mandatory param to 0, and elapsed >= 0 is
+    # always true, so the very first chain-stage boundary produced a FALSE
+    # budget-exhausted halt -- inverting "no ceiling" into "0-minute ceiling
+    # that halts immediately". The $hasCeiling guard restores the contract:
+    # no ceiling set => never exhausted.
+    $hasCeiling = ($null -ne $CeilingMinutes) -and ($CeilingMinutes -gt 0)
+    $budgetExhausted = $armed -and $hasCeiling -and ($elapsedMinutes -ge $CeilingMinutes)
+
+    # Arming is about SESSION IDENTITY (is this the registered executor
+    # session?) and is deliberately independent of whether a ceiling is set,
+    # so $hasCeiling is NOT folded into $armed/$armReason -- those keep their
+    # exact existing values. The no-ceiling condition is surfaced only as the
+    # additive WallClockCeilingApplied field below, letting a consumer tell
+    # "armed but no wall-clock ceiling to enforce" apart from "armed within an
+    # active ceiling" without changing any field an existing caller reads.
     return [pscustomobject]@{
-        Armed           = $armed
-        ArmReason       = $armReason
-        ElapsedMinutes  = $elapsedMinutes
-        CeilingMinutes  = $CeilingMinutes
-        BudgetExhausted = $budgetExhausted
+        Armed                    = $armed
+        ArmReason                = $armReason
+        ElapsedMinutes           = $elapsedMinutes
+        CeilingMinutes           = $CeilingMinutes
+        BudgetExhausted          = $budgetExhausted
+        WallClockCeilingApplied  = $hasCeiling
     }
 }
 
@@ -563,7 +585,7 @@ function Invoke-GoalRunBudgetChainBoundaryCheck {
     param(
         [Parameter(Mandatory)][string]$CurrentSessionId,
         [Parameter(Mandatory)][datetime]$LaunchedAt,
-        [Parameter(Mandatory)][double]$CeilingMinutes,
+        [Nullable[double]]$CeilingMinutes = $null,
         [datetime]$Now = [datetime]::MinValue,
         [string]$RegistryPath,
         [scriptblock]$WarningEmitter,
@@ -907,7 +929,7 @@ function Invoke-GoalRunChainStageBoundaryHousekeeping {
         [Parameter(Mandatory)][int]$Issue,
         [Parameter(Mandatory)][string]$CurrentSessionId,
         [Parameter(Mandatory)][datetime]$LaunchedAt,
-        [Parameter(Mandatory)][double]$CeilingMinutes,
+        [Nullable[double]]$CeilingMinutes = $null,
         [Parameter(Mandatory)][string]$CommitSha,
         [Parameter(Mandatory)][string]$CheckpointSummary,
         [string]$RepoRoot,

@@ -279,6 +279,69 @@ Describe 'Resolve-GoalRunBudgetArmState' -Tag 'unit' {
         $result.BudgetExhausted | Should -Be $false
         [math]::Abs($result.ElapsedMinutes) | Should -BeLessThan 2
     }
+
+    It 'PF1 regression (a): a null ceiling with elapsed well past zero never trips BudgetExhausted -- a schema-valid contract whose wall_clock parsed to $null means no ceiling applies, not a 0-minute ceiling' {
+        $registryPath = Join-Path $TestDrive 'arm-pf1-null-ceiling.json'
+        Register-GoalRunBudgetSession -SessionId 'armed-session' -Issue 874 -RegistryPath $registryPath | Out-Null
+
+        $launchedAt = [datetime]::new(2026, 7, 23, 0, 0, 0, [System.DateTimeKind]::Utc)
+        # Elapsed far beyond any plausible ceiling; with a null ceiling this
+        # must still report not-exhausted, because "no ceiling" can never be
+        # exceeded. Before the fix, $null coerced to 0 through the [double]
+        # Mandatory param and elapsed >= 0 falsely tripped exhaustion.
+        $now = $launchedAt.AddHours(50)
+
+        $result = Resolve-GoalRunBudgetArmState -CurrentSessionId 'armed-session' -LaunchedAt $launchedAt `
+            -CeilingMinutes $null -Now $now -RegistryPath $registryPath
+
+        $result.Armed | Should -Be $true
+        $result.ArmReason | Should -Be 'session-registered'
+        $result.BudgetExhausted | Should -Be $false
+        $result.CeilingMinutes | Should -BeNullOrEmpty
+        $result.WallClockCeilingApplied | Should -Be $false
+        $result.ElapsedMinutes | Should -BeGreaterThan 0
+    }
+
+    It 'PF1 regression (b): a zero ceiling with elapsed past zero never trips BudgetExhausted -- non-positive means no ceiling applies' {
+        $registryPath = Join-Path $TestDrive 'arm-pf1-zero-ceiling.json'
+        Register-GoalRunBudgetSession -SessionId 'armed-session' -Issue 874 -RegistryPath $registryPath | Out-Null
+
+        $launchedAt = [datetime]::new(2026, 7, 23, 0, 0, 0, [System.DateTimeKind]::Utc)
+        $now = $launchedAt.AddMinutes(90)
+
+        $result = Resolve-GoalRunBudgetArmState -CurrentSessionId 'armed-session' -LaunchedAt $launchedAt `
+            -CeilingMinutes 0 -Now $now -RegistryPath $registryPath
+
+        $result.Armed | Should -Be $true
+        $result.BudgetExhausted | Should -Be $false
+        $result.WallClockCeilingApplied | Should -Be $false
+    }
+
+    It 'PF1 regression (c): a genuine positive ceiling with elapsed >= ceiling still trips BudgetExhausted -- the real-ceiling behavior is preserved' {
+        $registryPath = Join-Path $TestDrive 'arm-pf1-positive-ceiling.json'
+        Register-GoalRunBudgetSession -SessionId 'armed-session' -Issue 874 -RegistryPath $registryPath | Out-Null
+
+        $launchedAt = [datetime]::new(2026, 7, 23, 0, 0, 0, [System.DateTimeKind]::Utc)
+        $now = $launchedAt.AddMinutes(90)
+
+        $result = Resolve-GoalRunBudgetArmState -CurrentSessionId 'armed-session' -LaunchedAt $launchedAt `
+            -CeilingMinutes 60 -Now $now -RegistryPath $registryPath
+
+        $result.Armed | Should -Be $true
+        $result.BudgetExhausted | Should -Be $true
+        $result.WallClockCeilingApplied | Should -Be $true
+    }
+
+    It 'PF1 regression (d): passing a null ceiling does NOT throw at the parameter boundary (the param is no longer a Mandatory [double])' {
+        $registryPath = Join-Path $TestDrive 'arm-pf1-no-throw.json'
+        Register-GoalRunBudgetSession -SessionId 'armed-session' -Issue 874 -RegistryPath $registryPath | Out-Null
+
+        $launchedAt = [datetime]::new(2026, 7, 23, 0, 0, 0, [System.DateTimeKind]::Utc)
+        $now = $launchedAt.AddMinutes(10)
+
+        { Resolve-GoalRunBudgetArmState -CurrentSessionId 'armed-session' -LaunchedAt $launchedAt `
+                -CeilingMinutes $null -Now $now -RegistryPath $registryPath } | Should -Not -Throw
+    }
 }
 
 # ---------------------------------------------------------------------------
