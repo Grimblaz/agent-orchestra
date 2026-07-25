@@ -166,7 +166,14 @@ function New-GoalRunPromptText {
     # wrapper (goal-run-predicate.ps1), not the raw validator script --
     # see the file header doc comment for why the raw validator alone was
     # never sufficient here.
-    $predicateCommand = "pwsh -NoProfile -File $PredicateScriptRelativePath -Issue $Issue -RepoRoot $WorktreePath"
+    # F3 fix: single-quote-wrap both the script path and the worktree path in
+    # the rendered predicate command. An unquoted worktree path containing a
+    # space (common on Windows, e.g. C:\Users\First Last\...) otherwise splits
+    # on the space and -RepoRoot receives only the first segment. Embedded
+    # single quotes are doubled per the pwsh single-quoted-string escape rule.
+    $quotedPredicateScript = "'" + ($PredicateScriptRelativePath -replace "'", "''") + "'"
+    $quotedWorktreePath = "'" + ($WorktreePath -replace "'", "''") + "'"
+    $predicateCommand = "pwsh -NoProfile -File $quotedPredicateScript -Issue $Issue -RepoRoot $quotedWorktreePath"
     $fencedPredicateCommand = '`' + $predicateCommand + '`'
 
     $lines = [System.Collections.Generic.List[string]]::new()

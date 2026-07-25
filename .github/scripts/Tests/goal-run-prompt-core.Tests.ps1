@@ -95,8 +95,14 @@ Describe 'New-GoalRunPromptText' -Tag 'unit' {
     }
 
     It 'renders a predicate command that invokes the launch-pin-checking wrapper (M1 fix), not the raw validator directly, against the supplied issue and worktree path' {
-        $script:Rendered | Should -Match ([regex]::Escape('goal-run-predicate.ps1 -Issue 874 -RepoRoot C:\gr-874-token'))
+        # F3 fix: the script path and worktree path are now single-quote-wrapped.
+        $script:Rendered | Should -Match ([regex]::Escape("goal-run-predicate.ps1' -Issue 874 -RepoRoot 'C:\gr-874-token'"))
         $script:Rendered | Should -Not -Match ([regex]::Escape('goal-contract-validate.ps1'))
+    }
+
+    It 'single-quotes the worktree path so a space-containing path is not split by -RepoRoot (F3)' {
+        $renderedWithSpace = New-GoalRunPromptText -Contract (script:New-WellFormedGoalContract) -Issue 874 -WorktreePath 'C:\Users\First Last\gr-874-token'
+        $renderedWithSpace | Should -Match ([regex]::Escape("-RepoRoot 'C:\Users\First Last\gr-874-token'"))
     }
 
     It 'never renders a live plan-issue marker literal (marker-substring-containment self-match guard)' {

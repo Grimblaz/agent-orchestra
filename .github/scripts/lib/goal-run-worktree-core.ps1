@@ -145,11 +145,34 @@ function Get-GoalRunActiveState {
     }
 
     $raw = Get-Content -LiteralPath $statePath -Raw
-    # -DateKind String: ConvertFrom-Json otherwise auto-coerces any
+    # F7 fix: keep the 7.0 floor. ConvertFrom-Json otherwise auto-coerces any
     # ISO-8601-shaped string (launched_at/heartbeat_at) into a [datetime]
     # object, silently changing the field type on every read and breaking
-    # equality against the plain string this lib always writes.
-    return ($raw | ConvertFrom-Json -DateKind String)
+    # equality against the plain string this lib always writes. The -DateKind
+    # String switch that used to suppress that coercion is a PowerShell 7.5-only
+    # parameter, and this file pins #Requires -Version 7.0, so on a 7.0-7.4 host
+    # it throws an unknown-parameter error and breaks every state read. Instead:
+    # take the plain ConvertFrom-Json result, then re-read the two timestamp
+    # fields verbatim from the raw JSON via System.Text.Json.JsonDocument (which
+    # never coerces a string into a date) and overlay them back as their exact
+    # original strings, so both fields round-trip as round-trippable strings.
+    $state = $raw | ConvertFrom-Json
+    $doc = [System.Text.Json.JsonDocument]::Parse($raw)
+    try {
+        if ($doc.RootElement.ValueKind -eq [System.Text.Json.JsonValueKind]::Object) {
+            foreach ($prop in $doc.RootElement.EnumerateObject()) {
+                if (($prop.Name -in @('launched_at', 'heartbeat_at')) -and
+                    ($prop.Value.ValueKind -eq [System.Text.Json.JsonValueKind]::String) -and
+                    ($state.PSObject.Properties.Name -contains $prop.Name)) {
+                    $state.$($prop.Name) = $prop.Value.GetString()
+                }
+            }
+        }
+    }
+    finally {
+        $doc.Dispose()
+    }
+    return $state
 }
 
 function Update-GoalRunActiveStateHeartbeat {

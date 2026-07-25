@@ -24,6 +24,7 @@
     },
     "issue": {
       "type": "integer",
+      "minimum": 1,
       "description": "The GitHub issue number the goal-run harness invocation belongs to."
     },
     "halt_reason": {

@@ -353,6 +353,84 @@ function Test-GoalRunBudgetSessionRegistered {
 # 2. Wall-clock arm resolution (chain-boundary only)
 # ---------------------------------------------------------------------------
 
+function ConvertTo-GoalRunCeilingMinutes {
+    <#
+    .SYNOPSIS
+        F1 fix. Parse a goal-contract budget.wall_clock value into a numeric
+        ceiling in MINUTES (double), the unit the chain-stage-boundary
+        housekeeping call and Resolve-GoalRunBudgetArmState both consume as
+        -CeilingMinutes.
+    .DESCRIPTION
+        goal-contract.schema.json types budget.wall_clock as a STRING (e.g.
+        "4h"), but Invoke-GoalRunChainStageBoundaryHousekeeping declares
+        [double]$CeilingMinutes. Passing the raw contract string straight in
+        makes [double]"4h" throw and breaks every post-loop housekeeping call.
+        This parser sits in front of that call site.
+
+        Accepted shapes (case-insensitive on the unit):
+          "4h"     -> 240   (hours to minutes)
+          "30m"    -> 30    (minutes, verbatim)
+          "90s"    -> 1.5   (seconds to minutes)
+          "90"/90  -> 90    (a bare number is minutes, matching the
+                             -CeilingMinutes unit)
+          "1h30m"  -> 90    (trivial compound of one h and one m term)
+
+        A null, empty, or unparseable value returns $null so the caller can
+        decide how to degrade (the wall-clock arm is advisory-only). This is
+        deliberately a MINUTES parser and is NOT ConvertTo-GCWallClockSeconds
+        (goal-contract-validate-core.ps1), which returns SECONDS -- reusing
+        that value here unconverted would reintroduce a 60x error.
+    #>
+    [CmdletBinding()]
+    [OutputType([Nullable[double]])]
+    param(
+        [Parameter(Mandatory = $false)][AllowNull()][object]$Value
+    )
+
+    if ($null -eq $Value) { return $null }
+
+    # A bare numeric value (int or double) is already minutes.
+    if ($Value -is [int] -or $Value -is [long] -or $Value -is [double] -or $Value -is [decimal]) {
+        return [double]$Value
+    }
+
+    $text = ([string]$Value).Trim()
+    if ([string]::IsNullOrWhiteSpace($text)) { return $null }
+
+    # A bare number string is minutes.
+    $bare = [double]0
+    if ([double]::TryParse($text, [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$bare)) {
+        return $bare
+    }
+
+    # One-or-more h/m/s terms, e.g. "4h", "30m", "1h30m". Each unit may appear
+    # at most once; any leftover text after consuming the terms is unparseable.
+    $totalMinutes = [double]0
+    $matched = $false
+    $seen = @{}
+    $remainder = $text
+    $termPattern = '^\s*(\d+(?:\.\d+)?)\s*([hHmMsS])\s*'
+    while ($remainder -match $termPattern) {
+        $magnitude = [double]$Matches[1]
+        $unit = ([string]$Matches[2]).ToLowerInvariant()
+        if ($seen.ContainsKey($unit)) { return $null }
+        $seen[$unit] = $true
+        switch ($unit) {
+            'h' { $totalMinutes += $magnitude * 60 }
+            'm' { $totalMinutes += $magnitude }
+            's' { $totalMinutes += $magnitude / 60 }
+        }
+        $matched = $true
+        $remainder = $remainder.Substring($Matches[0].Length)
+    }
+
+    if ($matched -and [string]::IsNullOrWhiteSpace($remainder)) {
+        return $totalMinutes
+    }
+
+    return $null
+}
+
 function Resolve-GoalRunBudgetArmState {
     <#
     .SYNOPSIS

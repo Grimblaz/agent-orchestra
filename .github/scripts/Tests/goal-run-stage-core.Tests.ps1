@@ -322,16 +322,22 @@ Describe 'Invoke-GoalRunMutexLaunch' -Tag 'unit' {
         Should -Invoke -CommandName Get-GoalRunInflightMarkers -Times 2
     }
 
-    It 'surfaces a provisioning failure distinctly from a marker-post failure' {
+    It 'surfaces a provisioning failure distinctly from a marker-post failure, and self-resolves its own inflight marker (F2)' {
         Mock -CommandName New-GoalRunInflightMarker -MockWith { [pscustomobject]@{ Success = $true; CommentId = 100; Url = 'https://example/100'; LaunchedAt = '2026-07-23T00:00:00.0000000Z' } }
         Mock -CommandName Get-GoalRunInflightMarkers -MockWith {
             @([pscustomobject]@{ CommentId = 100; Status = 'unresolved'; ContractHash = ('c' * 64); LaunchedAt = '2026-07-23T00:00:00.0000000Z'; ResolvedReason = $null })
         }
         Mock -CommandName New-GoalRunWorktree -MockWith { [pscustomobject]@{ Success = $false; RefusalReason = 'refused: uncommitted-changes'; Path = $null; BranchName = $null } }
+        Mock -CommandName Set-GoalRunInflightMarkerResolved -MockWith { $true }
 
         $result = Invoke-GoalRunMutexLaunch -Issue 874 -RepoRoot 'C:\fake\repo' -ContractHash ('c' * 64) -ReconfirmDelayMs 0
 
         $result.Outcome | Should -Be 'launch-failed-provisioning'
+        # F2 fix: the run must resolve its own just-posted mutex marker before
+        # returning, so an immediate retry is not blocked by an orphan marker.
+        Should -Invoke -CommandName Set-GoalRunInflightMarkerResolved -Times 1 -ParameterFilter {
+            $CommentId -eq 100 -and $ResolvedReason -eq 'launch-failed-provisioning'
+        }
     }
 
     It 'M16 fix: yields on the reconfirm read when a lower-id marker appears only after the first reconcile read' {

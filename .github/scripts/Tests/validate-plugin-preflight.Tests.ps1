@@ -197,6 +197,27 @@ $($skillEntries -join ",`n")
             $check.Detail | Should -Match 'Expected 16'
             $check.Detail | Should -Match 'found 17'
         }
+
+        It 'F9: dedups declared paths so a duplicated declared path cannot mask an undeclared on-disk file' {
+            $root = & $script:NewFixture -AgentCount 16
+            $pjPath = Join-Path $root 'plugin.json'
+            # Duplicate one already-declared path: the array now has 17 entries
+            # but still only 16 UNIQUE declared paths.
+            $json = Get-Content -Path $pjPath -Raw | ConvertFrom-Json
+            $json.agents = @($json.agents) + './agents/agent-1.agent.md'
+            $json | ConvertTo-Json -Depth 20 | Set-Content -Path $pjPath -Encoding UTF8
+            # Add an undeclared on-disk agent, so on-disk count is 17.
+            Set-Content -Path (Join-Path $root 'agents/agent-undeclared.agent.md') -Value '# Undeclared' -Encoding UTF8
+
+            $result = Invoke-PluginPreflight -RootPath $root -PluginJsonPath $pjPath
+            $check = $result.Results | Where-Object { $_.Name -eq 'AgentCount' }
+            # Without dedup the expected count would be 17 (raw array length) and
+            # the undeclared 17th on-disk file would be silently masked. With
+            # dedup the expectation is 16 unique paths, so the drift surfaces.
+            $check.Passed | Should -BeFalse
+            $check.Detail | Should -Match 'Expected 16'
+            $check.Detail | Should -Match 'found 17'
+        }
     }
 
     # ==================================================================

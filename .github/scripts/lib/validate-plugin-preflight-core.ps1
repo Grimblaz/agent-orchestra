@@ -49,7 +49,7 @@ function Invoke-PluginPreflight {
             # VS Code resolves paths in plugin.json relative to the manifest own directory.
             # The manifest sits at the plugin/repo root (relocated from .github/plugin.json
             # in v2.0.0 per issue #367 D10), so manifest-relative and plugin-root-relative
-            # resolution are equivalent — paths read as `./agents/` and `./skills/{name}/`.
+            # resolution are equivalent -- paths read as `./agents/` and `./skills/{name}/`.
             $manifestDir = Split-Path -Parent (Resolve-Path -LiteralPath $PluginJsonPath)
             $results.Add([PSCustomObject]@{ Name = 'PluginJsonExists'; Passed = $true; Detail = '' })
         }
@@ -121,7 +121,11 @@ function Invoke-PluginPreflight {
                 $expectedAgentCount = $agentFiles.Count
             }
             else {
-                $expectedAgentCount = @($agentsValue | Where-Object { $_ }).Count
+                # F9 fix: dedup declared paths before counting. Without
+                # Sort-Object -Unique a duplicated declared path inflates the
+                # expected count and can mask an undeclared on-disk *.agent.md
+                # file (the two errors cancel and the drift check reads green).
+                $expectedAgentCount = @($agentsValue | Where-Object { $_ } | Sort-Object -Unique).Count
             }
             if ($agentFiles.Count -eq $expectedAgentCount) {
                 $results.Add([PSCustomObject]@{ Name = 'AgentCount'; Passed = $true; Detail = "$($agentFiles.Count) agents found" })
@@ -208,10 +212,10 @@ function _PreflightSummary {
 
     foreach ($r in $Results) {
         if ($r.Passed -eq $true) {
-            Write-Host "[PASS] $($r.Name)$(if ($r.Detail) { ' — ' + $r.Detail })"
+            Write-Host "[PASS] $($r.Name)$(if ($r.Detail) { ' - ' + $r.Detail })"
         }
         else {
-            Write-Host "[FAIL] $($r.Name) — $($r.Detail)"
+            Write-Host "[FAIL] $($r.Name) - $($r.Detail)"
         }
     }
 

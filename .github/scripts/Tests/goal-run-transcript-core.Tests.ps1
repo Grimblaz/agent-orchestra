@@ -20,8 +20,8 @@ Describe 'Get-GoalRunTranscriptRoot' -Tag 'unit' {
         # enforces the requirement-contract wording ("never a hardcoded
         # C:\... literal") and confirms both env sources are actually read.
         $source = Get-Content -LiteralPath $script:LibPath -Raw
-        $source | Should -Not -Match "'C:\\\\"
-        $source | Should -Not -Match '"C:\\\\'
+        $source | Should -Not -Match "'[A-Za-z]:\\\\"
+        $source | Should -Not -Match '"[A-Za-z]:\\\\'
         $source | Should -Match '\$env:USERPROFILE'
         $source | Should -Match '\$HOME'
     }
@@ -64,6 +64,22 @@ Describe 'Select-GoalRunAllowedFields' -Tag 'unit' {
         $result.RejectedKeys | Should -Contain 'tokens'
     }
 
+    It 'drops an allow-listed key whose value is a nested [pscustomobject] (F5: scalar-only barrier must reject objects, not just dictionaries)' {
+        $source = @{ met = $true; condition = ([pscustomobject]@{ nested = 'structured payload'; deep = 'more text' }) }
+        $result = Select-GoalRunAllowedFields -Source $source -AllowList @('met', 'condition')
+        $result.Fields.PSObject.Properties.Name | Should -Not -Contain 'condition'
+        $result.RejectedKeys | Should -Contain 'condition'
+        ($result.Fields | ConvertTo-Json) | Should -Not -Match 'structured payload'
+    }
+
+    It 'still passes scalar (string, numeric, bool) values through under allow-listed keys' {
+        $source = @{ met = $true; iterations = 7; condition = 'goal text' }
+        $result = Select-GoalRunAllowedFields -Source $source -AllowList @('met', 'iterations', 'condition')
+        $result.Fields.PSObject.Properties.Name | Should -Contain 'met'
+        $result.Fields.PSObject.Properties.Name | Should -Contain 'iterations'
+        $result.Fields.PSObject.Properties.Name | Should -Contain 'condition'
+    }
+
     It 'returns an empty Fields object when the source has no allow-listed keys at all' {
         $source = @{ unrelated = 'value' }
         $result = Select-GoalRunAllowedFields -Source $source -AllowList @('met')
@@ -99,6 +115,29 @@ Describe 'Get-GoalRunRedactedText' -Tag 'unit' {
         $text = 'password: SuperSecretValue123'
         $redacted = Get-GoalRunRedactedText -Text $text
         $redacted | Should -Not -Match 'SuperSecretValue123'
+        $redacted | Should -Match '\[REDACTED:kv-secret-assignment\]'
+    }
+
+    It 'redacts an underscore-prefixed access_token assignment (F6: prefixed keys must not escape redaction)' {
+        # Value deliberately not github-token-shaped so the kv-secret-assignment
+        # pattern (the one F6 fixes) is what redacts it, not an earlier pattern.
+        $text = 'access_token: sk-abcdef0123456789ABCDEF'
+        $redacted = Get-GoalRunRedactedText -Text $text
+        $redacted | Should -Not -Match 'sk-abcdef0123456789ABCDEF'
+        $redacted | Should -Match '\[REDACTED:kv-secret-assignment\]'
+    }
+
+    It 'redacts an underscore-prefixed client_secret assignment (F6)' {
+        $text = 'client_secret=abcdef0123456789ABCDEF'
+        $redacted = Get-GoalRunRedactedText -Text $text
+        $redacted | Should -Not -Match 'abcdef0123456789ABCDEF'
+        $redacted | Should -Match '\[REDACTED:kv-secret-assignment\]'
+    }
+
+    It 'redacts an underscore-prefixed refresh_token assignment (F6)' {
+        $text = 'refresh_token = rt_0123456789abcdefghij'
+        $redacted = Get-GoalRunRedactedText -Text $text
+        $redacted | Should -Not -Match 'rt_0123456789abcdefghij'
         $redacted | Should -Match '\[REDACTED:kv-secret-assignment\]'
     }
 

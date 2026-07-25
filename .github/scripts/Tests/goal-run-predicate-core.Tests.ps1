@@ -78,6 +78,46 @@ Describe 'Invoke-GoalRunPredicateEvaluate' -Tag 'unit' {
         $script:haltEmitCalledForMatch | Should -Be $false
     }
 
+    It 'F15(a): refreshes the in-loop heartbeat exactly once per iteration' {
+        $activeStateReader = script:New-StubActiveStateReader
+        $resolver = {
+            param($Issue, $RepoRoot, $LaunchPinnedHash, $Marker, $Repo, $GhCliPath, $GitCliPath, $PwshCliPath, $ValidatorScriptPath)
+            [pscustomobject]@{ Disposition = 'not-satisfied'; HaltReason = $null; Reason = $null; ExitCode = 1; ValidatorRan = $true }
+        }
+        $haltEmitter = { param($Report, $Issue, $RepoRoot, $Owner, $Repo) }
+        $script:heartbeatCallCount = 0
+        $script:heartbeatPath = $null
+        $heartbeatRefresher = {
+            param($WorktreePath)
+            $script:heartbeatCallCount++
+            $script:heartbeatPath = $WorktreePath
+        }
+
+        $result = Invoke-GoalRunPredicateEvaluate -Issue 874 -RepoRoot 'C:\gr-874-token' -ActiveStateReader $activeStateReader -PredicateResolver $resolver -HaltEmitter $haltEmitter -HeartbeatRefresher $heartbeatRefresher
+
+        $script:heartbeatCallCount | Should -Be 1
+        $script:heartbeatPath | Should -Be 'C:\gr-874-token'
+        $result.HeartbeatRefreshed | Should -Be $true
+        # The verdict is unaffected by the heartbeat wiring.
+        $result.ExitCode | Should -Be 1
+    }
+
+    It 'F15(a): a failed heartbeat refresh never changes the predicate verdict (best-effort)' {
+        $activeStateReader = script:New-StubActiveStateReader
+        $resolver = {
+            param($Issue, $RepoRoot, $LaunchPinnedHash, $Marker, $Repo, $GhCliPath, $GitCliPath, $PwshCliPath, $ValidatorScriptPath)
+            [pscustomobject]@{ Disposition = 'satisfied'; HaltReason = $null; Reason = $null; ExitCode = 0; ValidatorRan = $true }
+        }
+        $haltEmitter = { param($Report, $Issue, $RepoRoot, $Owner, $Repo) }
+        $throwingRefresher = { param($WorktreePath) throw 'no state file found' }
+
+        $result = Invoke-GoalRunPredicateEvaluate -Issue 874 -RepoRoot 'C:\gr-874-token' -ActiveStateReader $activeStateReader -PredicateResolver $resolver -HaltEmitter $haltEmitter -HeartbeatRefresher $throwingRefresher
+
+        $result.ExitCode | Should -Be 0
+        $result.Disposition | Should -Be 'satisfied'
+        $result.HeartbeatRefreshed | Should -Be $false
+    }
+
     It 'reports ExitCode 1 (not-satisfied) without emitting a halt report when the validator ran and targets are not yet met' {
         $activeStateReader = script:New-StubActiveStateReader
         $resolver = {

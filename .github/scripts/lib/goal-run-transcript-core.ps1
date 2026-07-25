@@ -80,7 +80,15 @@ function Select-GoalRunAllowedFields {
         # by explicit key name; no free-text transcript passthrough").
         $isNestedDictionary = $value -is [System.Collections.IDictionary]
         $isNonStringEnumerable = ($value -is [System.Collections.IEnumerable]) -and ($value -isnot [string])
-        if ($isNestedDictionary -or $isNonStringEnumerable) {
+        # F5 fix: a [pscustomobject] (or any reference object carrying nested
+        # note properties) is neither an IDictionary nor a non-string
+        # IEnumerable, so it previously slipped through the barrier under an
+        # allow-listed key, violating the documented scalar-only contract.
+        # Require a positive scalar shape: a string, or a value type (numbers,
+        # bool, char, datetime, enum). A null value under an allow-listed key
+        # is permitted (an empty field is not a free-text passthrough risk).
+        $isScalar = ($null -eq $value) -or ($value -is [string]) -or ($value -is [System.ValueType])
+        if ($isNestedDictionary -or $isNonStringEnumerable -or (-not $isScalar)) {
             $rejectedKeys.Add($key) | Out-Null
             continue
         }
@@ -105,7 +113,13 @@ $script:GoalRunSecretPatterns = @(
     @{ Name = 'slack-token'; Pattern = '\bxox[baprs]-[A-Za-z0-9-]{10,}\b' }
     @{ Name = 'private-key-block'; Pattern = '(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----' }
     @{ Name = 'bearer-token'; Pattern = '(?i)\bbearer\s+[A-Za-z0-9\-_.]{20,}' }
-    @{ Name = 'kv-secret-assignment'; Pattern = '(?i)\b(api[_-]?key|secret|password|token)\b\s*[:=]\s*[''"]?[A-Za-z0-9\-_.]{12,}[''"]?' }
+    # F6 fix: an optional [A-Za-z0-9]+[_-] prefix lets the keyword match inside
+    # underscore/hyphen-prefixed compound keys (access_token, client_secret,
+    # refresh_token). Because `_` is a word char, the previous leading \b never
+    # anchored at `token`/`secret` inside those compounds, so they escaped
+    # redaction. The bare-keyword forms (token:, secret=, ...) still match
+    # because the prefix group is optional.
+    @{ Name = 'kv-secret-assignment'; Pattern = '(?i)\b(?:[A-Za-z0-9]+[_-])?(api[_-]?key|secret|password|token)\b\s*[:=]\s*[''"]?[A-Za-z0-9\-_.]{12,}[''"]?' }
 )
 
 function Get-GoalRunRedactedText {

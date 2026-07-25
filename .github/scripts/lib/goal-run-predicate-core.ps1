@@ -88,7 +88,8 @@ function Invoke-GoalRunPredicateEvaluate {
         [string]$ValidatorScriptPath,
         [scriptblock]$ActiveStateReader,
         [scriptblock]$PredicateResolver,
-        [scriptblock]$HaltEmitter
+        [scriptblock]$HaltEmitter,
+        [scriptblock]$HeartbeatRefresher
     )
 
     if (-not $ActiveStateReader) {
@@ -108,6 +109,31 @@ function Invoke-GoalRunPredicateEvaluate {
             param($Report, $Issue, $RepoRoot, $Owner, $Repo)
             Invoke-GoalRunHaltEmit -Report $Report -Issue $Issue -RepoRoot $RepoRoot -Owner $Owner -Repo $Repo
         }
+    }
+    if (-not $HeartbeatRefresher) {
+        $HeartbeatRefresher = {
+            param($WorktreePath)
+            Update-GoalRunActiveStateHeartbeat -WorktreePath $WorktreePath
+        }
+    }
+
+    # F15(a) fix: refresh the in-loop heartbeat every iteration. This predicate
+    # is invoked once per vendor-loop iteration, and before this fix the only
+    # heartbeat refresh happened at post-loop chain-stage boundaries -- so a
+    # genuinely live multi-hour in-loop run crossed the 60-minute stale
+    # threshold and Test-GoalRunInflightAppearsDead misclassified it dead,
+    # letting triage-dead-run offer a resume that relaunched the still-running
+    # vendor loop. Refreshing heartbeat_at here keeps a live loop seen as live.
+    # Best-effort: a heartbeat-write failure (e.g. a not-yet-written state file
+    # on the very first iteration) must NEVER change the predicate verdict, so
+    # it is caught and recorded without affecting the disposition below.
+    $heartbeatRefreshed = $false
+    try {
+        & $HeartbeatRefresher $RepoRoot | Out-Null
+        $heartbeatRefreshed = $true
+    }
+    catch {
+        $heartbeatRefreshed = $false
     }
 
     $state = & $ActiveStateReader $RepoRoot
@@ -159,11 +185,12 @@ function Invoke-GoalRunPredicateEvaluate {
     }
 
     return [pscustomobject]@{
-        ExitCode     = $exitCode
-        Disposition  = $result.Disposition
-        HaltReason   = $result.HaltReason
-        Reason       = $result.Reason
-        HaltEmitted  = $haltEmitted
-        ValidatorRan = $result.ValidatorRan
+        ExitCode           = $exitCode
+        Disposition        = $result.Disposition
+        HaltReason         = $result.HaltReason
+        Reason             = $result.Reason
+        HaltEmitted        = $haltEmitted
+        ValidatorRan       = $result.ValidatorRan
+        HeartbeatRefreshed = $heartbeatRefreshed
     }
 }

@@ -685,6 +685,15 @@ function Invoke-GoalRunMutexLaunch {
 
     $worktree = New-GoalRunWorktree -RepoRoot $RepoRoot -IssueNumber $Issue -WorktreeRoot $WorktreeRoot
     if (-not $worktree.Success) {
+        # F2 fix: self-resolve this run own just-posted inflight marker before
+        # returning, exactly as the two yield branches above already do.
+        # New-GoalRunWorktree failing (e.g. a dirty-tree refusal) after the
+        # mutex marker was posted would otherwise leave that marker unresolved,
+        # blocking an immediate retry until it aged out. Falls back to the gh
+        # api ambient {owner}/{repo} placeholders when -Owner/-Repo are omitted,
+        # the same way the marker POST itself already does.
+        Set-GoalRunInflightMarkerResolved -CommentId $posted.CommentId -Issue $Issue -ContractHash $ContractHash `
+            -LaunchedAt $posted.LaunchedAt -ResolvedReason 'launch-failed-provisioning' -Owner $Owner -Repo $Repo | Out-Null
         return [pscustomobject]@{ Outcome = 'launch-failed-provisioning'; CommentId = $posted.CommentId; Worktree = $worktree }
     }
 

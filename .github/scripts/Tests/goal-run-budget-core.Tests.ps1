@@ -78,6 +78,56 @@ Describe 'Register-GoalRunBudgetSession + Test-GoalRunBudgetSessionRegistered' -
 # 2. Wall-clock arm resolution
 # ---------------------------------------------------------------------------
 
+Describe 'ConvertTo-GoalRunCeilingMinutes (F1)' -Tag 'unit' {
+
+    It 'parses an hours string to minutes ("4h" -> 240, not 4)' {
+        ConvertTo-GoalRunCeilingMinutes -Value '4h' | Should -Be 240
+    }
+
+    It 'parses a minutes string verbatim ("30m" -> 30)' {
+        ConvertTo-GoalRunCeilingMinutes -Value '30m' | Should -Be 30
+    }
+
+    It 'parses a seconds string to minutes ("90s" -> 1.5)' {
+        ConvertTo-GoalRunCeilingMinutes -Value '90s' | Should -Be 1.5
+    }
+
+    It 'treats a bare number string as minutes ("90" -> 90)' {
+        ConvertTo-GoalRunCeilingMinutes -Value '90' | Should -Be 90
+    }
+
+    It 'treats a bare numeric value as minutes (90 -> 90)' {
+        ConvertTo-GoalRunCeilingMinutes -Value 90 | Should -Be 90
+    }
+
+    It 'parses a trivial compound ("1h30m" -> 90)' {
+        ConvertTo-GoalRunCeilingMinutes -Value '1h30m' | Should -Be 90
+    }
+
+    It 'is case-insensitive on the unit ("2H" -> 120)' {
+        ConvertTo-GoalRunCeilingMinutes -Value '2H' | Should -Be 120
+    }
+
+    It 'returns $null for a null or empty value' {
+        ConvertTo-GoalRunCeilingMinutes -Value $null | Should -BeNullOrEmpty
+        ConvertTo-GoalRunCeilingMinutes -Value '' | Should -BeNullOrEmpty
+    }
+
+    It 'returns $null for non-numeric junk' {
+        ConvertTo-GoalRunCeilingMinutes -Value 'soon' | Should -BeNullOrEmpty
+    }
+
+    It 'returns $null for a repeated unit ("1h2h")' {
+        ConvertTo-GoalRunCeilingMinutes -Value '1h2h' | Should -BeNullOrEmpty
+    }
+
+    It 'produces a value that binds cleanly to a [double] parameter (the runtime blocker F1 fixes)' {
+        $minutes = ConvertTo-GoalRunCeilingMinutes -Value '4h'
+        { [double]$bound = $minutes } | Should -Not -Throw
+        [double]$minutes | Should -Be 240
+    }
+}
+
 Describe 'Resolve-GoalRunBudgetArmState' -Tag 'unit' {
 
     It 'arms and reports BudgetExhausted when a registered session has run past the ceiling' {

@@ -109,7 +109,7 @@ flowchart TD
 
 ### Reading a halt report
 
-Every non-happy path in goal-run ends the same way: a typed `<!-- goal-halt-report-{issue} -->` comment with one of five `halt_reason` values. When more than one condition is true at once, this precedence decides the reported reason (highest wins): `invariant-conflict > unachievable-target > gate-input-needed > budget-exhausted > chain-stage-failure`.
+Every in-run non-happy path in goal-run ends the same way: once the run is launched, a stage or chain halt always produces exactly one typed `<!-- goal-halt-report-{issue} -->` comment with one of five `halt_reason` values. When more than one condition is true at once, this precedence decides the reported reason (highest wins): `invariant-conflict > unachievable-target > gate-input-needed > budget-exhausted > chain-stage-failure`. (The two pre-launch outcomes are the exception: `refuse-resume-existing` and `triage-dead-run` fire before a run is launched and produce plain-text refusal/triage reporting, not a typed halt-report comment.)
 
 | `halt_reason` | Plain language | Typically triggered by | Who acts next |
 | --- | --- | --- | --- |

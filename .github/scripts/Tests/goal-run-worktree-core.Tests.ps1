@@ -179,6 +179,13 @@ Describe 'goal-run-active.json state-file primitives' -Tag 'unit' {
         $read.teardown_deferred | Should -Be $false
         $read.heartbeat_at | Should -Be $read.launched_at
         [string]::IsNullOrWhiteSpace($read.heartbeat_at) | Should -Be $false
+        # F7: the two ISO-8601 timestamp fields must come back as STRINGS, not
+        # auto-coerced [datetime] objects, and must preserve the verbatim
+        # Z-suffixed UTC value this lib writes -- the 7.0-compatible read must
+        # match what the (7.5-only) -DateKind String switch used to guarantee.
+        $read.launched_at | Should -BeOfType [string]
+        $read.heartbeat_at | Should -BeOfType [string]
+        $read.launched_at | Should -Match 'Z$'
     }
 
     It 'returns $null when reading a state file that does not exist' {

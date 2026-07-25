@@ -114,7 +114,7 @@ Describe 'Reporting-economy directive in specialist agent bodies' {
         $script:ExpectedExcludedCount = 5
     }
 
-    It 'finds exactly 11 in-scope bodies and 5 excluded bodies' {
+    It 'finds exactly 12 in-scope bodies and 5 excluded bodies' {
         # Re-derive the counts at run time (BeforeDiscovery script: vars don't survive into run phase).
         $allBodies     = @(Get-ChildItem -Path $script:AgentsDirectory -Filter '*.agent.md' -File)
         $ExcludedNames = @('Code-Conductor','Spine-Runner','Experience-Owner','Solution-Designer','Issue-Planner')
