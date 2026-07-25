@@ -2289,7 +2289,7 @@ Describe 'session-cleanup-detector.ps1 — Issue #889 s4: shared eligibility gat
             Test-SCDCollectionGhBudgetExceeded -Budget $budget -Category 'orphan' | Should -Be $false
             $result = Get-SCDGatedEligibility -Budget $budget -Category 'orphan' -BranchName 'feature/issue-1-x' -DefaultBranch 'main'
             $result.Eligible | Should -Be $false
-            $result.ManualReviewReason | Should -Be "couldn't verify: too many candidates this run" `
+            $result.ManualReviewReason | Should -Be "could not verify: too many candidates this run" `
                 -Because 'a count-cap exhaustion means no gh call was even attempted — GhTimeout is reserved for a genuine per-call timeout'
         }
 
@@ -2298,7 +2298,7 @@ Describe 'session-cleanup-detector.ps1 — Issue #889 s4: shared eligibility gat
             Start-Sleep -Milliseconds 5
             $result = Get-SCDGatedEligibility -Budget $budget -Category 'orphan' -BranchName 'feature/issue-2-x' -DefaultBranch 'main'
             $result.Eligible | Should -Be $false
-            $result.ManualReviewReason | Should -Be "couldn't verify: too many candidates this run" `
+            $result.ManualReviewReason | Should -Be "could not verify: too many candidates this run" `
                 -Because 'the elapsed-time cap is also a collection-budget decision, not a genuine gh subprocess timeout'
         }
     }

@@ -2,6 +2,30 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.4.9] — 2026-07-23
+
+### Fixed
+
+- Wired the goal-run harness's budget arm, heartbeat, and run-log primitives into the live orchestration path (issue #874 review-gate fix cycle A2): the wall-clock budget arm and heartbeat updates now fire at real chain-stage-boundary call sites instead of having zero live callers; fixed a Kind-unaware datetime subtraction that skewed dead-run detection by the machine's UTC offset; gave the run log a real file location, schema-validating writer, and checkpoint reader; recorded the run's worktree path on the inflight marker so resume no longer depends on an undefined filesystem glob; fixed the mutex yield path to always resolve its own inflight marker; reconciled the stage-marker write/read vocabulary.
+
+## [3.4.8] — 2026-07-23
+
+### Added
+
+- Added the CE Gate goal-run surface-class delegation doc (skills/customer-experience/references/goal-run-surface-classes.md, 874-D8), classifying read-safe vs mutating goal-run harness surfaces for CE Gate exercise (issue #874 plan step 9).
+
+## [3.4.7] — 2026-07-23
+
+### Added
+
+Goal-run harness methodology skill (issue #874, plan step 8): skills/goal-run/SKILL.md documents the stage-machine contract, the five-value halt-precedence model, the Arm I launch sequence (with brief Arm H/Arm M forward-pointers), the worktree provision/state-file/teardown lifecycle, the goal_run_class label-to-ledger join key for escape-rate segmentation, and the untrusted-content discipline (contract-hash pin, transcript allow-list plus secret-redaction, executor-evidence inert-rendering).
+
+## [3.4.6] — 2026-07-22
+
+### Added
+
+Goal-run harness stage machine (issue #874, plan step 4): the `/goal-run {issue}` command, the shared `agents/Goal-Run.agent.md` body, and the Claude Code `goal-run` subagent shell — a minimal top-level stage vocabulary (pre-loop | loop-launched | loop-released | chain-dispatched) that resumes at the first incomplete stage from durable artifacts only, a marker-first-then-provision mutex with reconcile tiebreak, crash-atomicity detection for dead in-flight runs, and a bounded-retry control-return-then-read sequence for the vendor goal-loop verdict. Arm I only; the post-loop chain body and terminal-emissions verification are explicit seams for a later step.
+
 ## [3.4.5] — 2026-07-21
 
 ### Added
