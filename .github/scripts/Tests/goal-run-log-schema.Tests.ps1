@@ -33,7 +33,15 @@ Describe 'goal-run-log.schema.json' -Tag 'unit' {
         function script:Test-GoalRunLogEntry {
             param([Parameter(Mandatory)][hashtable]$Entry)
             $json = $Entry | ConvertTo-Json -Depth 10
-            return Test-Json -Json $json -Schema (script:Get-GoalRunLogSchemaTestRaw)
+            # -ErrorAction SilentlyContinue: Test-Json writes a NON-terminating
+            # error describing why validation failed and returns $false. Under a
+            # shared Invoke-Pester run another file can leave $ErrorActionPreference
+            # = 'Stop' set in the runspace, which would promote that error to a
+            # throw and break these negative assertions non-deterministically by
+            # file order. Pinning -ErrorAction here keeps the boolean contract
+            # regardless of ambient preference (the same guard the production
+            # caller in goal-run-log-core.ps1 already uses).
+            return Test-Json -Json $json -Schema (script:Get-GoalRunLogSchemaTestRaw) -ErrorAction SilentlyContinue
         }
     }
 

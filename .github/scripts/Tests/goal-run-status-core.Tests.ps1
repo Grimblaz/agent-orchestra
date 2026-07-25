@@ -177,7 +177,18 @@ Describe 'Get-GoalRunStatusEvent' -Tag 'unit' {
             # If the reader ever fell back to reading $input/pipeline content
             # instead of -TranscriptPath, this decoy "released" event would
             # flip the result to present-met-true. It must not.
-            $result = $decoyStdout | Get-GoalRunStatusEvent -TranscriptPath $path
+            #
+            # Get-GoalRunStatusEvent declares no ValueFromPipeline parameter, so
+            # piping to it writes a non-terminating parameter-binding error and
+            # the decoy object is discarded (the function still runs once against
+            # -TranscriptPath). Under a shared Invoke-Pester run another file can
+            # leave $ErrorActionPreference = 'Stop' in the runspace, which on
+            # Linux/pwsh promotes that binding error to a throw. Force the pref
+            # locally so this asserts the ignore-stdin behavior, not ambient state.
+            $result = & {
+                $ErrorActionPreference = 'SilentlyContinue'
+                $decoyStdout | Get-GoalRunStatusEvent -TranscriptPath $path
+            }
             $result.State | Should -Be 'status-absent'
             $result.Reason | Should -Be 'no-goal-status-event'
         }

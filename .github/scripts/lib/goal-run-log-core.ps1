@@ -75,9 +75,26 @@ function Test-GoalRunLogEntry {
 
     $violations = [System.Collections.Generic.List[string]]::new()
 
-    $schemaPath = Join-Path $RepoRoot $script:GoalRunLogSchemaRelativePath
-    if (-not (Test-Path -LiteralPath $schemaPath)) {
-        $violations.Add("Schema file not found at $schemaPath") | Out-Null
+    # Both Join-Path and Test-Path resolve the drive qualifier of $RepoRoot and
+    # throw a terminating DriveNotFoundException on Linux/macOS when the caller
+    # passes a Windows drive-qualified path that has no matching PSDrive (e.g.
+    # 'C:\...'), rather than treating it as a plain missing path. Wrap the whole
+    # resolve-and-probe so any such failure becomes a reported violation on every
+    # platform instead of a throw (the same defensive posture the shared suite
+    # expects — see goal-run-log-core.Tests.ps1 'reports a violation rather than
+    # throwing when the schema file cannot be found').
+    $schemaPath = $null
+    $schemaExists = $false
+    try {
+        $schemaPath = Join-Path $RepoRoot $script:GoalRunLogSchemaRelativePath
+        $schemaExists = Test-Path -LiteralPath $schemaPath -ErrorAction Stop
+    }
+    catch {
+        $schemaExists = $false
+    }
+    if (-not $schemaExists) {
+        $missingAt = if ($schemaPath) { $schemaPath } else { "$RepoRoot (+ $script:GoalRunLogSchemaRelativePath)" }
+        $violations.Add("Schema file not found at $missingAt") | Out-Null
         return [pscustomobject]@{ IsValid = $false; Violations = $violations.ToArray() }
     }
     $schemaRaw = Get-Content -LiteralPath $schemaPath -Raw
