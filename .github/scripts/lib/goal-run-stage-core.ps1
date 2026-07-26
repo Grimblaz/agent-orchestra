@@ -330,9 +330,19 @@ function Get-GoalRunIssueComments {
         }
         return @($flat | ForEach-Object {
                 [pscustomobject]@{
-                    id   = $_.id
-                    url  = $_.html_url
-                    body = $_.body
+                    id        = $_.id
+                    url       = $_.html_url
+                    body      = $_.body
+                    # #912 s7: the REST comment payload already carries
+                    # created_at/updated_at -- surfaced here (additive field,
+                    # existing callers only read id/url/body) so the
+                    # exhaustion-halt recency guard in
+                    # Resolve-GoalRunControlReturn can discriminate an
+                    # existing halt-report comment's age without a second
+                    # gh round-trip or a new schema field on the report body
+                    # itself (the schema is closed; see
+                    # goal-run-halt-core.ps1).
+                    updatedAt = $_.updated_at
                 }
             })
     }
@@ -1105,6 +1115,30 @@ function Resolve-GoalRunControlReturn {
         exhaustion, emits a distinct diagnostic halt via
         Invoke-GoalRunHaltEmit rather than a generic chain-stage-failure --
         see this file header .NOTES on the closed halt_reason enum.
+    .DESCRIPTION
+        #912 s7 fix: the exhaustion-halt emit upserts against the fixed
+        per-issue `goal-halt-report-{Issue}` marker (Invoke-GoalRunHaltEmit),
+        which would otherwise silently overwrite ANY prior halt report on
+        the same issue -- including a genuinely different, later run's
+        report -- with this run's "transcript flush delay" diagnosis. A
+        bare existence check would be worse than the overwrite it prevents:
+        it would mean a later run's genuine exhaustion could never post once
+        any halt report exists for the issue. Instead, when -LaunchedAt is
+        supplied, this function fetches the existing goal-halt-report-{Issue}
+        comment (if any) via Get-GoalRunIssueComments and compares its
+        `updatedAt` GitHub-comment metadata (the halt-report schema is
+        closed and carries no timestamp field of its own -- see
+        goal-run-halt-core.ps1 / skills/goal-run/schemas/goal-halt-report.schema.json)
+        against this run's -LaunchedAt:
+          - Existing report strictly NEWER than this run's launch -> it
+            belongs to a different, later run. Do not overwrite; HaltResult
+            reports Suppressed = $true instead of a false Success claim.
+          - Existing report at or before this run's launch (or absent, or
+            unparseable) -> stale or nonexistent; proceed with the emit as
+            before.
+        -LaunchedAt is optional and preserves pre-fix behavior when omitted
+        (no existing-report fetch, always emits) -- mirroring the M15
+        -LaunchedAt convention already documented below.
     .OUTPUTS
         [pscustomobject]@{ Outcome; Event; Attempts; HaltResult }
         Outcome is one of: 'released' | 'halted-verdict-not-flushed'.
@@ -1151,12 +1185,58 @@ function Resolve-GoalRunControlReturn {
         budget_snapshot        = @{}
     }
 
-    $haltResult = $null
-    try {
-        $haltResult = Invoke-GoalRunHaltEmit -Report $report -Issue $Issue -RepoRoot $RepoRoot -Owner $Owner -Repo $Repo
+    # #912 s7: recency-discriminated don't-overwrite guard. Only runs when a
+    # -LaunchedAt is supplied -- omitting it preserves pre-fix behavior
+    # (always emit), matching the existing M15 -LaunchedAt convention above.
+    $suppressAsNewerReportExists = $false
+    if (-not [string]::IsNullOrWhiteSpace($LaunchedAt)) {
+        # Plain [datetime] cast (not a manual ::Parse with an explicit
+        # culture/style) so this works uniformly whether the value arrives as
+        # a raw ISO-8601 string (-LaunchedAt) or as an already-parsed
+        # [datetime] (Get-GoalRunIssueComments' updatedAt, since
+        # ConvertFrom-Json auto-parses ISO-looking JSON string values).
+        $launchedTimestamp = $null
+        try { $launchedTimestamp = [datetime]$LaunchedAt } catch { $launchedTimestamp = $null }
+
+        if ($launchedTimestamp) {
+            $haltMarker = "<!-- goal-halt-report-$Issue -->"
+            $existingComments = @(Get-GoalRunIssueComments -Issue $Issue -Owner $Owner -Repo $Repo)
+            $existingMatches = @($existingComments | Where-Object { $_.body -and ($_.body -like "*$haltMarker*") })
+
+            if ($existingMatches.Count -gt 0) {
+                $latestExistingTimestamp = $null
+                foreach ($candidate in $existingMatches) {
+                    $candidateTimestamp = $null
+                    try { $candidateTimestamp = [datetime]$candidate.updatedAt } catch { $candidateTimestamp = $null }
+                    if ($candidateTimestamp -and (-not $latestExistingTimestamp -or $candidateTimestamp -gt $latestExistingTimestamp)) {
+                        $latestExistingTimestamp = $candidateTimestamp
+                    }
+                }
+
+                if ($latestExistingTimestamp -and $latestExistingTimestamp -gt $launchedTimestamp) {
+                    # The existing report postdates this run's launch -- it is
+                    # a different, newer run's report. A bare existence check
+                    # would suppress ALL future exhaustion halts once any
+                    # report exists; comparing recency instead lets a
+                    # genuinely stale (pre-launch) report be replaced below.
+                    $suppressAsNewerReportExists = $true
+                }
+            }
+        }
     }
-    catch {
-        [Console]::Error.WriteLine("Resolve-GoalRunControlReturn: Invoke-GoalRunHaltEmit failed -- $($_.Exception.Message)")
+
+    $haltResult = $null
+    if ($suppressAsNewerReportExists) {
+        [Console]::Error.WriteLine("Resolve-GoalRunControlReturn: existing goal-halt-report-$Issue comment postdates this run's launch ($LaunchedAt); not overwriting a newer run's report.")
+        $haltResult = [pscustomobject]@{ Success = $false; Url = $null; Body = $null; Suppressed = $true }
+    }
+    else {
+        try {
+            $haltResult = Invoke-GoalRunHaltEmit -Report $report -Issue $Issue -RepoRoot $RepoRoot -Owner $Owner -Repo $Repo
+        }
+        catch {
+            [Console]::Error.WriteLine("Resolve-GoalRunControlReturn: Invoke-GoalRunHaltEmit failed -- $($_.Exception.Message)")
+        }
     }
 
     return [pscustomobject]@{ Outcome = 'halted-verdict-not-flushed'; Event = $null; Attempts = $await.Attempts; HaltResult = $haltResult }

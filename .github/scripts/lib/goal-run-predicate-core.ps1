@@ -173,8 +173,24 @@ function Invoke-GoalRunPredicateEvaluate {
 
         $evidence = if ([string]::IsNullOrWhiteSpace([string]$result.Reason)) { @() } else { @([string]$result.Reason) }
         $report = New-GoalRunChainHaltReport -Issue $Issue -HaltReason $result.HaltReason -Stage 'loop' -PlanRemediation $remediation -Evidence $evidence
-        & $HaltEmitter $report $Issue $RepoRoot $Owner $Repo | Out-Null
-        $haltEmitted = $true
+        # #912 AC12/AC13 fix: the emitter can fail two distinct ways that must
+        # both resolve to HaltEmitted = $false rather than an unconditional
+        # $true. (1) Find-OrUpsertComment returns $null without throwing on
+        # every gh-failure path (find-or-upsert-comment.ps1:152-153, 183-184,
+        # 208-209, 246-247) -- Invoke-GoalRunHaltEmit surfaces that as
+        # Success = $false, so read .Success instead of assuming success.
+        # (2) A schema-invalid report makes Invoke-GoalRunHaltEmit THROW
+        # (goal-run-halt-core.ps1:218) -- catch it here so a bad report
+        # object cannot propagate out of this function; the halt disposition
+        # itself (HaltReason/Reason) is preserved either way since it was
+        # already computed above from $result, not from the emit outcome.
+        try {
+            $emitResult = & $HaltEmitter $report $Issue $RepoRoot $Owner $Repo
+            $haltEmitted = [bool]$emitResult.Success
+        }
+        catch {
+            $haltEmitted = $false
+        }
     }
 
     $exitCode = switch ($result.Disposition) {

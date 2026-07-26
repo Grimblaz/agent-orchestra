@@ -191,4 +191,41 @@ Describe 'Invoke-GoalRunPredicateEvaluate' -Tag 'unit' {
         $result.ExitCode | Should -Be 2
         $result.HaltEmitted | Should -Be $false -Because 'the emit itself failed, so reporting HaltEmitted = $true would be a false success claim'
     }
+
+    It '#912 AC12: does not report HaltEmitted = $true when the halt emitter returns bare $null' {
+        $activeStateReader = script:New-StubActiveStateReader
+        $resolver = {
+            param($Issue, $RepoRoot, $LaunchPinnedHash, $Marker, $Repo, $GhCliPath, $GitCliPath, $PwshCliPath, $ValidatorScriptPath)
+            [pscustomobject]@{ Disposition = 'halt'; HaltReason = 'chain-stage-failure'; Reason = 'infra-error: worktree session threw'; ExitCode = 3; ValidatorRan = $true }
+        }
+        # A caller-supplied emitter that returns nothing at all (not even a
+        # Success=$false object) must not crash the .Success read nor be
+        # treated as a successful emit.
+        $haltEmitter = { param($Report, $Issue, $RepoRoot, $Owner, $Repo) }
+
+        $result = Invoke-GoalRunPredicateEvaluate -Issue 874 -RepoRoot 'C:\gr-874-token' -ActiveStateReader $activeStateReader -PredicateResolver $resolver -HaltEmitter $haltEmitter
+
+        $result.ExitCode | Should -Be 2
+        $result.HaltEmitted | Should -Be $false -Because 'a bare $null return carries no proof of a successful post'
+    }
+
+    It '#912 AC12: a schema-invalid report (HaltEmitter throws) does not propagate, and the halt disposition is preserved with HaltEmitted = $false' {
+        $activeStateReader = script:New-StubActiveStateReader
+        $resolver = {
+            param($Issue, $RepoRoot, $LaunchPinnedHash, $Marker, $Repo, $GhCliPath, $GitCliPath, $PwshCliPath, $ValidatorScriptPath)
+            [pscustomobject]@{ Disposition = 'halt'; HaltReason = 'chain-stage-failure'; Reason = 'infra-error: worktree session threw'; ExitCode = 3; ValidatorRan = $true }
+        }
+        # Mirrors Invoke-GoalRunHaltEmit's real refusal throw
+        # (goal-run-halt-core.ps1:218) when Test-GoalRunHaltReport rejects the
+        # report object -- this must not propagate out of
+        # Invoke-GoalRunPredicateEvaluate.
+        $haltEmitter = { param($Report, $Issue, $RepoRoot, $Owner, $Repo) throw 'Invoke-GoalRunHaltEmit: refusing to post an invalid halt-report object -- schema violation' }
+
+        { $script:acSchemaInvalidResult = Invoke-GoalRunPredicateEvaluate -Issue 874 -RepoRoot 'C:\gr-874-token' -ActiveStateReader $activeStateReader -PredicateResolver $resolver -HaltEmitter $haltEmitter } | Should -Not -Throw
+
+        $script:acSchemaInvalidResult.ExitCode | Should -Be 2
+        $script:acSchemaInvalidResult.Disposition | Should -Be 'halt'
+        $script:acSchemaInvalidResult.HaltReason | Should -Be 'chain-stage-failure' -Because 'the halt disposition is computed from the resolver result, not the emit outcome, and must survive the emitter throwing'
+        $script:acSchemaInvalidResult.HaltEmitted | Should -Be $false -Because 'the emit itself threw, so it never posted'
+    }
 }

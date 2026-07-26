@@ -435,6 +435,26 @@ exit 1
         $result[1].body | Should -Match 'past the 100-comment page cap'
     }
 
+    It '#912 s7: normalizes the REST comment updated_at field to an updatedAt property' {
+        $mockGhPath = Join-Path $TestDrive 'gh-comments-updatedat.ps1'
+        @'
+param()
+if ($args[0] -eq 'api') {
+    Write-Output '[[{"id":1,"html_url":"https://github.com/o/r/issues/9#issuecomment-1","body":"c1","updated_at":"2026-07-26T09:00:00Z","created_at":"2026-07-26T08:00:00Z"}]]'
+    exit 0
+}
+exit 1
+'@ | Set-Content $mockGhPath -Encoding UTF8
+
+        $result = Get-GoalRunIssueComments -Issue 9 -Owner 'o' -Repo 'r' -GhCliPath $mockGhPath
+
+        # ConvertFrom-Json auto-parses ISO-8601-looking string values into
+        # [datetime] (Kind=Utc); a plain [datetime] string cast instead
+        # converts to local Kind. Compare via ToUniversalTime() so the
+        # assertion is independent of the runner's local timezone.
+        ([datetime]$result[0].updatedAt).ToUniversalTime() | Should -Be (([datetime]'2026-07-26T09:00:00Z').ToUniversalTime())
+    }
+
     It 'resolves owner/repo via gh repo view when -Owner/-Repo are not supplied' {
         $mockGhPath = Join-Path $TestDrive 'gh-comments-resolve-repo.ps1'
         @'
@@ -810,6 +830,52 @@ Describe 'Resolve-GoalRunControlReturn (M13: control-return-then-read, distinct 
 
         $validation = Test-GoalRunHaltReport -Report $script:CapturedReport -RepoRoot $script:RepoRoot
         $validation.IsValid | Should -Be $true -Because ($validation.Violations -join '; ')
+    }
+
+    It '#912 AC13: does NOT overwrite an existing goal-halt-report comment that postdates this run''s -LaunchedAt (a different, newer run''s report)' {
+        Mock -CommandName Invoke-GoalRunHaltEmit -MockWith { throw 'Invoke-GoalRunHaltEmit must not be called when a newer report already exists' }
+        Mock -CommandName Get-GoalRunIssueComments -MockWith {
+            @([pscustomobject]@{ id = 1; url = 'https://example/1'; body = '<!-- goal-halt-report-874 -->recent report'; updatedAt = '2026-07-26T12:00:00Z' })
+        }
+        $reader = { param($Path) [pscustomobject]@{ State = 'status-absent'; Event = $null } }
+
+        $result = Resolve-GoalRunControlReturn -TranscriptPath 'fake.jsonl' -Issue 874 -RepoRoot $script:RepoRoot -MaxRetries 1 -RetryDelayMs 1 -StatusReader $reader -LaunchedAt '2026-07-26T10:00:00Z'
+
+        $result.Outcome | Should -Be 'halted-verdict-not-flushed'
+        $result.HaltResult.Suppressed | Should -Be $true
+        $result.HaltResult.Success | Should -Be $false -Because 'nothing was posted, so Success must not falsely claim it was'
+        Should -Invoke -CommandName Invoke-GoalRunHaltEmit -Times 0
+    }
+
+    It '#912 AC13: DOES overwrite an existing goal-halt-report comment that predates this run''s -LaunchedAt (a stale report)' {
+        Mock -CommandName Invoke-GoalRunHaltEmit -MockWith {
+            param($Report, $Issue, $RepoRoot, $Owner, $Repo)
+            return [pscustomobject]@{ Success = $true; Url = 'https://example/halt'; Body = 'fake' }
+        }
+        Mock -CommandName Get-GoalRunIssueComments -MockWith {
+            @([pscustomobject]@{ id = 1; url = 'https://example/1'; body = '<!-- goal-halt-report-874 -->stale report'; updatedAt = '2026-07-26T08:00:00Z' })
+        }
+        $reader = { param($Path) [pscustomobject]@{ State = 'status-absent'; Event = $null } }
+
+        $result = Resolve-GoalRunControlReturn -TranscriptPath 'fake.jsonl' -Issue 874 -RepoRoot $script:RepoRoot -MaxRetries 1 -RetryDelayMs 1 -StatusReader $reader -LaunchedAt '2026-07-26T10:00:00Z'
+
+        $result.Outcome | Should -Be 'halted-verdict-not-flushed'
+        $result.HaltResult.Success | Should -Be $true
+        Should -Invoke -CommandName Invoke-GoalRunHaltEmit -Times 1
+    }
+
+    It '#912 AC13: proceeds with the emit when no existing goal-halt-report comment matches, even with -LaunchedAt supplied' {
+        Mock -CommandName Invoke-GoalRunHaltEmit -MockWith {
+            param($Report, $Issue, $RepoRoot, $Owner, $Repo)
+            return [pscustomobject]@{ Success = $true; Url = 'https://example/halt'; Body = 'fake' }
+        }
+        Mock -CommandName Get-GoalRunIssueComments -MockWith { @() }
+        $reader = { param($Path) [pscustomobject]@{ State = 'status-absent'; Event = $null } }
+
+        $result = Resolve-GoalRunControlReturn -TranscriptPath 'fake.jsonl' -Issue 874 -RepoRoot $script:RepoRoot -MaxRetries 1 -RetryDelayMs 1 -StatusReader $reader -LaunchedAt '2026-07-26T10:00:00Z'
+
+        $result.Outcome | Should -Be 'halted-verdict-not-flushed'
+        Should -Invoke -CommandName Invoke-GoalRunHaltEmit -Times 1
     }
 }
 
