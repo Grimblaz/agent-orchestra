@@ -144,6 +144,46 @@
       is restricted via -ValidateSet to the exact four keys legal at
       frame-spine-core.ps1:224 (spine_schema_version|generated_at|coverage|
       slice_comment_id) and is never used to widen that allowlist.
+
+    s6 addition (ac-refs AC4/AC12): adds scratch-root path bounding, a
+    GitHub 65,536-char comment-cap size refusal, and ordered multi-write
+    burst support, all consumed by the new thin wrapper
+    skills/session-memory-contract/scripts/persist-marker.ps1 (mirrors
+    persist-phase-ledger.ps1's wrapper/core split):
+      - Get-MarkerScratchRoot / Resolve-MarkerScratchBoundedPath /
+        Read-MarkerScratchBoundedBodyFile: resolve the CONSUMER repo's
+        scratch root ('.tmp/') from the live CWD (git-rev-parse with a CWD
+        fallback -- never $PSScriptRoot, which would resolve into this
+        PLUGIN's own bundled tree instead; see persist-phase-ledger.ps1's
+        header for why $PSScriptRoot is right there and wrong here) and
+        enforce REAL path-containment via Resolve-Path canonicalization
+        (symlink- and traversal-aware), never a raw string-prefix test on
+        the unresolved input.
+      - script:Test-MarkerCandidatePreflight: extracts the network-free
+        checks Invoke-PersistMarkerWrite already ran (registry lookup,
+        surface-declaration match, the new size-cap refusal, 893-D7
+        hygiene, and the family's ValidatorAdapter) into one shared helper,
+        so Invoke-PersistMarkerBurst's whole-manifest preflight runs the
+        EXACT SAME validation a single write already ran, on every burst
+        entry, before any network write -- this is what makes "a manifest
+        containing any invalid payload writes nothing at all" true at
+        INVOCATION scope. Deliberately does NOT re-run the
+        'plan-issue-write-back-preserve' PostStep (that step performs its
+        own live GET calls and is therefore not network-free); a PostStep's
+        live mutation stays a per-write, execution-time concern exercised
+        by the write itself, not predicted by this preflight.
+      - Invoke-PersistMarkerBurst / Invoke-PersistMarkerBurstFromManifest:
+        ordered multi-write burst. Preflights every entry first (zero
+        writes on any refusal), then executes Invoke-PersistMarkerWrite per
+        entry in manifest order, halting on the first execution failure.
+        Re-run convergence after a mid-burst halt relies entirely on
+        Invoke-PersistMarkerWrite's own s3 write-shape idempotency (a
+        previously-landed entry's re-attempt is reported as a no-op, not
+        re-posted) -- this file adds no separate dedup bookkeeping.
+        Returns a per-entry landed/not-attempted/failed artifact manifest
+        (ordered dictionary keyed 'entry-N'), mirroring the shape of
+        persist-phase-ledger-core.ps1's own
+        script:New-PPLPersistPhaseLedgerArtifactManifest.
 #>
 
 # ---------------------------------------------------------------------------
@@ -1266,6 +1306,172 @@ function script:Invoke-MarkerUpsertWrite {
 }
 
 # ---------------------------------------------------------------------------
+# Scratch-root bounding + size cap (s6 requirement contract, ac-refs
+# AC4/AC12).
+# ---------------------------------------------------------------------------
+
+# GitHub's REST comment body cap (issues/PRs). Refused pre-write with a
+# diagnosable message (see script:Test-MarkerCandidatePreflight) so an
+# oversized composed candidate never surfaces as a raw transport/HTTP error
+# from `gh`.
+$script:MarkerBodySizeCap = 65536
+
+function script:Get-MarkerScratchRoot {
+    <#
+    .SYNOPSIS
+        Resolves the CONSUMER repo's scratch root ('.tmp/', the
+        .gitignore-carved scratch convention -- see .gitignore's '.tmp/'
+        entries) from the live CWD via git-rev-parse with a CWD fallback,
+        mirroring session-cleanup-detector.ps1's identical
+        resolve-from-CWD pattern.
+    .DESCRIPTION
+        Deliberately never $PSScriptRoot: that resolves to THIS PLUGIN's own
+        bundled tree (see persist-phase-ledger.ps1's header for why
+        $PSScriptRoot is the right anchor for dot-sourcing bundled libs and
+        the wrong one here) -- the scratch root belongs to whatever consumer
+        repo the caller's session is actually operating in, not the plugin
+        install.
+    .OUTPUTS
+        [string] absolute path to '<repoRoot>/.tmp'. Does not require the
+        directory to exist.
+    #>
+    $gitOutput = & git rev-parse --show-toplevel 2>$null
+    $repoRoot = if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($gitOutput)) {
+        $gitOutput.Trim()
+    }
+    else {
+        (Get-Location).Path
+    }
+    return (Join-Path $repoRoot '.tmp')
+}
+
+function Resolve-MarkerScratchBoundedPath {
+    <#
+    .SYNOPSIS
+        Real path-containment check (893-s6 owner decision, security-
+        critical -- this is what keeps the recommended
+        `Bash(pwsh*persist-marker.ps1*)`-style allowlist entry safe rather
+        than an arbitrary-file-read-to-public-comment primitive): resolves
+        -Path via Resolve-Path (symlink-aware canonicalization; requires the
+        target to exist -- every caller here needs to read the file's
+        content anyway, so non-existence is itself a refusal) and checks
+        segment-boundary containment inside the canonicalized -ScratchRoot.
+    .DESCRIPTION
+        Never a raw string-prefix test on the UNRESOLVED input -- that is
+        spoofable both by relative-traversal payloads
+        ('.tmp/../../secrets') and by same-string-prefix SIBLING
+        directories ('.tmp-not-really/file') that a naive ".tmp" prefix
+        check would wrongly admit. The trailing-separator comparison below
+        (StartsWith($rootWithSep)) is what rejects the sibling-directory
+        case even after both sides are canonicalized.
+    .OUTPUTS
+        [PSCustomObject] InBounds [bool], ResolvedPath [string or $null],
+        Reason [string or $null] (populated only when InBounds=$false).
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$ScratchRoot
+    )
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return [PSCustomObject]@{ InBounds = $false; ResolvedPath = $null; Reason = "path does not exist: $(script:ConvertTo-MarkerRefusalEcho -Value $Path)" }
+    }
+    $resolvedPath = (Resolve-Path -LiteralPath $Path).ProviderPath
+    $resolvedScratchRoot = [System.IO.Path]::GetFullPath($ScratchRoot).TrimEnd('/', '\')
+    $comparison = if ($IsWindows) { [System.StringComparison]::OrdinalIgnoreCase } else { [System.StringComparison]::Ordinal }
+    $rootWithSep = $resolvedScratchRoot + [System.IO.Path]::DirectorySeparatorChar
+    $inBounds = $resolvedPath.Equals($resolvedScratchRoot, $comparison) -or $resolvedPath.StartsWith($rootWithSep, $comparison)
+    if (-not $inBounds) {
+        return [PSCustomObject]@{ InBounds = $false; ResolvedPath = $resolvedPath; Reason = "path resolves outside the scratch root '$resolvedScratchRoot': $(script:ConvertTo-MarkerRefusalEcho -Value $resolvedPath)" }
+    }
+    return [PSCustomObject]@{ InBounds = $true; ResolvedPath = $resolvedPath; Reason = $null }
+}
+
+function Read-MarkerScratchBoundedBodyFile {
+    <#
+    .SYNOPSIS
+        Reads -BodyFile after confirming it resolves inside -ScratchRoot
+        (Resolve-MarkerScratchBoundedPath). Refuses (never throws) on an
+        out-of-bounds or missing path with a diagnosable message naming the
+        offending path -- the size cap itself is enforced downstream by
+        script:Test-MarkerCandidatePreflight (uniformly, for every write
+        entry point, not only BodyFile-sourced ones).
+    .OUTPUTS
+        [PSCustomObject] Success [bool], Body [string or $null], Reason
+        [string or $null].
+    #>
+    param(
+        [Parameter(Mandatory)][string]$BodyFile,
+        [Parameter(Mandatory)][string]$ScratchRoot
+    )
+    $bounded = Resolve-MarkerScratchBoundedPath -Path $BodyFile -ScratchRoot $ScratchRoot
+    if (-not $bounded.InBounds) {
+        return [PSCustomObject]@{ Success = $false; Body = $null; Reason = "persist-marker: REFUSED (-BodyFile out of bounds): $($bounded.Reason)" }
+    }
+    $body = Get-Content -LiteralPath $bounded.ResolvedPath -Raw -ErrorAction Stop
+    if ($null -eq $body) { $body = '' }
+    return [PSCustomObject]@{ Success = $true; Body = $body; Reason = $null }
+}
+
+function script:Test-MarkerCandidatePreflight {
+    <#
+    .SYNOPSIS
+        Network-free preflight (s6): registry lookup, surface-declaration
+        match, the size-cap refusal, 893-D7 payload hygiene, and the
+        family's ValidatorAdapter (if any) -- the checks
+        Invoke-PersistMarkerWrite already runs before ever attempting a
+        network write (s3/s4, size cap added s6).
+    .DESCRIPTION
+        Extracted so Invoke-PersistMarkerBurst's whole-manifest preflight
+        can run the EXACT SAME validation a single write already runs, on
+        every burst entry, without duplicating the logic and without also
+        running the PostStep dispatch: 'plan-issue-write-back-preserve'
+        performs its own live GET calls and is therefore NOT network-free,
+        so it is deliberately excluded here. s6 scope: the whole-manifest
+        preflight validates what s4's validator-adapter contract already
+        guarantees is payload-only; a PostStep's live mutation stays a
+        per-write, execution-time concern, exercised by the write itself
+        (Invoke-PersistMarkerWrite), never predicted by this preflight.
+    .OUTPUTS
+        [PSCustomObject] a refusal result (script:New-MarkerRefusal shape),
+        or $null when the candidate is clean.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Family,
+        [Parameter(Mandatory)][ValidateSet('issue', 'pull-request')][string]$TargetSurface,
+        [Parameter(Mandatory)][int]$Number,
+        [Parameter(Mandatory)][string]$Marker,
+        [Parameter(Mandatory)][string]$Body
+    )
+    $allRows = @(Get-MarkerFamilyRegistry)
+    $row = @($allRows | Where-Object { $_.Family -eq $Family })
+    if ($row.Count -eq 0) {
+        return script:New-MarkerRefusal -Family $Family -Target "$TargetSurface/$Number" -Detail "unknown marker family '$Family' -- not present in the family registry"
+    }
+    $familyRow = $row[0]
+    if ($familyRow.TargetSurface -ne $TargetSurface) {
+        return script:New-MarkerRefusal -Family $Family -Target "$TargetSurface/$Number" -Detail "surface mismatch: registry declares '$($familyRow.TargetSurface)' but this write was targeted at '$TargetSurface'"
+    }
+    $target = "$TargetSurface/$Number"
+
+    if ($Body.Length -gt $script:MarkerBodySizeCap) {
+        return script:New-MarkerRefusal -Family $Family -Target $target -Detail "composed body is $($Body.Length) chars, exceeding GitHub's $($script:MarkerBodySizeCap)-char comment cap"
+    }
+
+    $hygieneDetail = script:Test-MarkerPayloadHygiene -Family $Family -Marker $Marker -Body $Body -Registry $allRows
+    if ($null -ne $hygieneDetail) {
+        return script:New-MarkerRefusal -Family $Family -Target $target -Detail $hygieneDetail
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($familyRow.ValidatorAdapter)) {
+        $adapterRefusal = script:Invoke-MarkerValidatorAdapter -ValidatorAdapter $familyRow.ValidatorAdapter -Family $Family -Target $target -Marker $Marker -Body $Body -Number $Number
+        if ($null -ne $adapterRefusal) {
+            return $adapterRefusal
+        }
+    }
+    return $null
+}
+
+# ---------------------------------------------------------------------------
 # Public dispatcher.
 # ---------------------------------------------------------------------------
 
@@ -1351,24 +1557,18 @@ function Invoke-PersistMarkerWrite {
         $preservedArtifactClasses = $preserveResult.PreservedClasses
     }
 
-    # 893-D7 payload hygiene -- runs unconditionally for every family,
-    # before any network write. See Test-MarkerPayloadHygiene's own
-    # .SYNOPSIS for the two distinct refusal rules.
-    $hygieneDetail = script:Test-MarkerPayloadHygiene -Family $Family -Marker $Marker -Body $Body -Registry $allRows
-    if ($null -ne $hygieneDetail) {
-        return script:New-MarkerRefusal -Family $Family -Target $target -Detail $hygieneDetail
-    }
-
-    # Per-family validator adapter (s4 requirement contract) -- validates
-    # the marker-composed candidate (this -Body, already carrying -Marker),
-    # never the raw payload. Runs before any network write; a refusal here
-    # is fail-closed (adapter infrastructure failure is refused, never
-    # treated as "no findings").
-    if (-not [string]::IsNullOrWhiteSpace($familyRow.ValidatorAdapter)) {
-        $adapterRefusal = script:Invoke-MarkerValidatorAdapter -ValidatorAdapter $familyRow.ValidatorAdapter -Family $Family -Target $target -Marker $Marker -Body $Body -Number $Number
-        if ($null -ne $adapterRefusal) {
-            return $adapterRefusal
-        }
+    # Size cap + 893-D7 payload hygiene + per-family validator adapter (s4
+    # requirement contract; size cap added s6) -- s6 extracts this whole
+    # network-free check sequence into script:Test-MarkerCandidatePreflight
+    # so Invoke-PersistMarkerBurst's whole-manifest preflight can run the
+    # EXACT SAME checks a single write already runs, on every burst entry,
+    # before any network write. Behavior here is unchanged from s3/s4: every
+    # check still runs unconditionally, after the PostStep above (so it sees
+    # the TRUE final candidate, including anything write-back-preserve
+    # merged in), and a refusal is still fail-closed.
+    $preflightRefusal = script:Test-MarkerCandidatePreflight -Family $Family -TargetSurface $TargetSurface -Number $Number -Marker $Marker -Body $Body
+    if ($null -ne $preflightRefusal) {
+        return $preflightRefusal
     }
 
     $ghType = if ($TargetSurface -eq 'pull-request') { 'pr' } else { 'issue' }
@@ -1399,4 +1599,176 @@ function Invoke-PersistMarkerWrite {
     }
 
     return $writeResult
+}
+
+# ---------------------------------------------------------------------------
+# Burst dispatch (s6 requirement contract, ac-refs AC4/AC12).
+# ---------------------------------------------------------------------------
+
+function Invoke-PersistMarkerBurst {
+    <#
+    .SYNOPSIS
+        Ordered multi-write burst. -Entries is an array of PSCustomObjects
+        each carrying Family/Number/TargetSurface/Marker/Body/NoPreserve --
+        Body already resolved from a scratch-bounded bodyFile by the caller
+        (see Invoke-PersistMarkerBurstFromManifest; this function itself
+        never reads a manifest file or a bodyFile).
+    .DESCRIPTION
+        WHOLE-MANIFEST validation preflight (script:Test-MarkerCandidatePreflight,
+        run against every entry in order) happens BEFORE the first network
+        write -- a manifest containing ANY invalid entry writes NOTHING at
+        all. After preflight passes for every entry, executes writes in
+        manifest order via Invoke-PersistMarkerWrite, halting on the first
+        execution failure (a later entry is never attempted once an earlier
+        one fails).
+
+        Re-run convergence after a mid-burst halt is NOT separately tracked
+        here -- it relies entirely on Invoke-PersistMarkerWrite's own s3
+        write-shape idempotency: re-invoking this function with the SAME
+        entries after a halt reports every already-landed entry as a no-op
+        (Invoke-PersistMarkerWrite's own post-new/upsert comparison against
+        the existing latest/canonical match) rather than posting a
+        duplicate, so execution simply resumes past what already landed and
+        retries what did not.
+    .OUTPUTS
+        [PSCustomObject] Success [bool], Reason [string or $null], Results
+        [object[]] (one per ATTEMPTED entry, Invoke-PersistMarkerWrite's own
+        result shape -- empty when preflight refused the whole manifest),
+        Artifacts [ordered dictionary] keyed 'entry-1'..'entry-N' (1-based,
+        manifest order), each value one of 'not-attempted' (preflight
+        refused the whole manifest, or execution halted before this entry
+        was reached), 'landed' (write succeeded), 'failed' (write attempted
+        and failed) -- mirrors persist-phase-ledger-core.ps1's own
+        landed/not-attempted artifact-manifest shape
+        (script:New-PPLPersistPhaseLedgerArtifactManifest).
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Owner,
+        [Parameter(Mandatory)][string]$Repo,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Entries
+    )
+
+    $artifacts = [ordered]@{}
+    for ($i = 0; $i -lt $Entries.Count; $i++) {
+        $artifacts["entry-$($i + 1)"] = 'not-attempted'
+    }
+
+    if ($Entries.Count -eq 0) {
+        return [PSCustomObject]@{ Success = $false; Reason = 'persist-marker: REFUSED (burst manifest empty): manifest carries zero entries'; Results = [object[]]@(); Artifacts = $artifacts }
+    }
+
+    # --- Whole-manifest preflight: network-free, zero writes on any refusal. ---
+    for ($i = 0; $i -lt $Entries.Count; $i++) {
+        $entry = $Entries[$i]
+        $refusal = script:Test-MarkerCandidatePreflight -Family $entry.Family -TargetSurface $entry.TargetSurface -Number $entry.Number -Marker $entry.Marker -Body $entry.Body
+        if ($null -ne $refusal) {
+            return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (burst preflight, entry $($i + 1) of $($Entries.Count), family '$($entry.Family)'): $($refusal.Reason)"; Results = [object[]]@(); Artifacts = $artifacts }
+        }
+    }
+
+    # --- Execution: manifest order, halt-on-first-failure. ---
+    $results = [System.Collections.Generic.List[object]]::new()
+    for ($i = 0; $i -lt $Entries.Count; $i++) {
+        $entry = $Entries[$i]
+        $noPreserve = [bool]$entry.NoPreserve
+        $writeResult = Invoke-PersistMarkerWrite -Family $entry.Family -Owner $Owner -Repo $Repo -Number $entry.Number `
+            -TargetSurface $entry.TargetSurface -Marker $entry.Marker -Body $entry.Body -NoPreserve:$noPreserve
+        $results.Add($writeResult)
+        if ($writeResult.Success) {
+            $artifacts["entry-$($i + 1)"] = 'landed'
+        }
+        else {
+            $artifacts["entry-$($i + 1)"] = 'failed'
+            return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: burst halted at entry $($i + 1) of $($Entries.Count), family '$($entry.Family)': $($writeResult.Reason)"; Results = [object[]]$results.ToArray(); Artifacts = $artifacts }
+        }
+    }
+
+    return [PSCustomObject]@{ Success = $true; Reason = $null; Results = [object[]]$results.ToArray(); Artifacts = $artifacts }
+}
+
+function Invoke-PersistMarkerBurstFromManifest {
+    <#
+    .SYNOPSIS
+        Public s6 entry point for -BurstManifest: reads and parses the JSON
+        manifest file at -ManifestPath, resolves and scratch-bounds every
+        entry's bodyFile, then delegates to Invoke-PersistMarkerBurst for
+        the whole-manifest preflight and ordered execution.
+    .DESCRIPTION
+        A malformed manifest (unparseable JSON, a missing required field,
+        an empty entry list) is refused HERE -- naming the manifest path
+        and, for a per-entry problem, the 1-based entry index and the
+        specific offending field -- before any bodyFile is even opened.
+        Required fields per entry: family, number, targetSurface, marker,
+        bodyFile; noPreserve is optional (defaults to $false).
+
+        -ScratchRoot defaults to script:Get-MarkerScratchRoot's live-CWD
+        resolution; callers (chiefly Pester) may override it to bind
+        entries to an isolated test directory instead of the real
+        '<repoRoot>/.tmp'.
+    .OUTPUTS
+        [PSCustomObject] see Invoke-PersistMarkerBurst's .OUTPUTS; a
+        manifest-level refusal (before Invoke-PersistMarkerBurst is ever
+        called) returns the same shape with Results=@() and
+        Artifacts=[ordered]@{}.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Owner,
+        [Parameter(Mandatory)][string]$Repo,
+        [Parameter(Mandatory)][string]$ManifestPath,
+        [string]$ScratchRoot = (script:Get-MarkerScratchRoot)
+    )
+
+    if (-not (Test-Path -LiteralPath $ManifestPath)) {
+        return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (burst manifest not found): $(script:ConvertTo-MarkerRefusalEcho -Value $ManifestPath)"; Results = [object[]]@(); Artifacts = [ordered]@{} }
+    }
+
+    $rawManifest = Get-Content -LiteralPath $ManifestPath -Raw
+    try {
+        $parsed = $rawManifest | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        $echoed = script:ConvertTo-MarkerRefusalEcho -Value $_.Exception.Message
+        return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (malformed manifest '$ManifestPath'): not parseable JSON -- $echoed"; Results = [object[]]@(); Artifacts = [ordered]@{} }
+    }
+
+    $rawEntries = @($parsed)
+    if ($rawEntries.Count -eq 0) {
+        return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (malformed manifest '$ManifestPath'): manifest carries zero entries"; Results = [object[]]@(); Artifacts = [ordered]@{} }
+    }
+
+    $requiredFields = @('family', 'number', 'targetSurface', 'marker', 'bodyFile')
+    $resolvedEntries = [System.Collections.Generic.List[object]]::new()
+    for ($i = 0; $i -lt $rawEntries.Count; $i++) {
+        $entryIndex = $i + 1
+        $rawEntry = $rawEntries[$i]
+        foreach ($field in $requiredFields) {
+            $value = $rawEntry.$field
+            if ($null -eq $value -or ([string]$value).Trim().Length -eq 0) {
+                return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (malformed manifest '$ManifestPath', entry $entryIndex): missing required field '$field'"; Results = [object[]]@(); Artifacts = [ordered]@{} }
+            }
+        }
+
+        try {
+            $number = [int]$rawEntry.number
+        }
+        catch {
+            return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (malformed manifest '$ManifestPath', entry $entryIndex): field 'number' is not a valid integer ($(script:ConvertTo-MarkerRefusalEcho -Value ([string]$rawEntry.number)))"; Results = [object[]]@(); Artifacts = [ordered]@{} }
+        }
+
+        $bodyFileResult = Read-MarkerScratchBoundedBodyFile -BodyFile ([string]$rawEntry.bodyFile) -ScratchRoot $ScratchRoot
+        if (-not $bodyFileResult.Success) {
+            return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (manifest '$ManifestPath', entry $entryIndex, family '$($rawEntry.family)'): $($bodyFileResult.Reason)"; Results = [object[]]@(); Artifacts = [ordered]@{} }
+        }
+
+        $resolvedEntries.Add([PSCustomObject]@{
+                Family        = [string]$rawEntry.family
+                Number        = $number
+                TargetSurface = [string]$rawEntry.targetSurface
+                Marker        = [string]$rawEntry.marker
+                Body          = $bodyFileResult.Body
+                NoPreserve    = [bool]$rawEntry.noPreserve
+            }) | Out-Null
+    }
+
+    return Invoke-PersistMarkerBurst -Owner $Owner -Repo $Repo -Entries ([object[]]$resolvedEntries.ToArray())
 }
