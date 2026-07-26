@@ -157,6 +157,19 @@ Describe 'Goal-run inflight marker body round-trip' -Tag 'unit' {
         $parsed.Status | Should -Be 'resolved'
         $parsed.ResolvedReason | Should -Be 'yielded-to-lower-comment-id'
     }
+
+    It '#912 step 4: round-trips an adopted marker carrying the owner/session field' {
+        $body = New-GoalRunInflightMarkerBody -Issue 912 -ContractHash ('e' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -Status 'adopted' -AdoptedBySessionId 'sess-adopt-1'
+        $parsed = ConvertFrom-GoalRunInflightMarkerBody -Body $body
+        $parsed.Status | Should -Be 'adopted'
+        $parsed.AdoptedBySessionId | Should -Be 'sess-adopt-1'
+    }
+
+    It '#912 step 4: the adopted body is NOT byte-identical to the pre-adoption unresolved body for the same issue/hash/launched-at (the observable-mutation invariant)' {
+        $unresolvedBody = New-GoalRunInflightMarkerBody -Issue 912 -ContractHash ('e' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -Status 'unresolved'
+        $adoptedBody = New-GoalRunInflightMarkerBody -Issue 912 -ContractHash ('e' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -Status 'adopted' -AdoptedBySessionId 'sess-adopt-1'
+        $adoptedBody | Should -Not -Be $unresolvedBody
+    }
 }
 
 Describe 'Resolve-GoalRunInflightMutexOutcome (marker-first ordering + reconcile tiebreak)' -Tag 'unit' {
@@ -182,6 +195,220 @@ Describe 'Resolve-GoalRunInflightMutexOutcome (marker-first ordering + reconcile
         $result = Resolve-GoalRunInflightMutexOutcome -OwnCommentId 50 -LiveMarkerCommentIds @(60, 70)
         $result.Outcome | Should -Be 'proceed'
         $result.WinningCommentId | Should -Be 50
+    }
+}
+
+Describe 'Resolve-GoalRunInflightMarkerForResolution (#912 step 4: re-fetch helper for resolution sites)' -Tag 'unit' {
+
+    It 'selects the lowest-id LIVE (unresolved) marker, mirroring the Resolve-GoalRunInflightMutexOutcome tiebreak rule' {
+        Mock -CommandName Get-GoalRunInflightMarkers -MockWith {
+            @(
+                [pscustomobject]@{ CommentId = 200; Status = 'unresolved'; ContractHash = ('a' * 64); LaunchedAt = '2026-07-23T00:00:00.0000000Z'; ResolvedReason = $null },
+                [pscustomobject]@{ CommentId = 105; Status = 'unresolved'; ContractHash = ('b' * 64); LaunchedAt = '2026-07-22T00:00:00.0000000Z'; ResolvedReason = $null }
+            )
+        }
+
+        $result = Resolve-GoalRunInflightMarkerForResolution -Issue 912
+
+        $result.Found | Should -Be $true
+        $result.CommentId | Should -Be 105
+        $result.ContractHash | Should -Be ('b' * 64)
+        $result.LaunchedAt | Should -Be '2026-07-22T00:00:00.0000000Z'
+        $result.Reason | Should -Be 'resolved-lowest-unresolved-comment-id'
+    }
+
+    It 'applies its OWN unresolved-only filter -- a lower-id RESOLVED marker never wins over a higher-id unresolved one (the :658 filter is the caller''s, not inherited)' {
+        Mock -CommandName Get-GoalRunInflightMarkers -MockWith {
+            @(
+                [pscustomobject]@{ CommentId = 50; Status = 'resolved'; ContractHash = ('a' * 64); LaunchedAt = '2026-07-20T00:00:00.0000000Z'; ResolvedReason = 'yielded-to-lower-comment-id' },
+                [pscustomobject]@{ CommentId = 105; Status = 'unresolved'; ContractHash = ('b' * 64); LaunchedAt = '2026-07-22T00:00:00.0000000Z'; ResolvedReason = $null }
+            )
+        }
+
+        $result = Resolve-GoalRunInflightMarkerForResolution -Issue 912
+
+        $result.Found | Should -Be $true
+        $result.CommentId | Should -Be 105
+    }
+
+    It 'reports no-unresolved-marker when Get-GoalRunInflightMarkers returns nothing live' {
+        Mock -CommandName Get-GoalRunInflightMarkers -MockWith { @() }
+
+        $result = Resolve-GoalRunInflightMarkerForResolution -Issue 912
+
+        $result.Found | Should -Be $false
+        $result.CommentId | Should -BeNullOrEmpty
+        $result.Reason | Should -Be 'no-unresolved-marker'
+    }
+
+    It 'refuses as marker-fields-unparseable instead of letting a downstream Mandatory parameter throw, when the winning marker has Parsed=true but null ContractHash/LaunchedAt' {
+        Mock -CommandName Get-GoalRunInflightMarkers -MockWith {
+            @([pscustomobject]@{ CommentId = 105; Status = 'unresolved'; ContractHash = $null; LaunchedAt = $null; ResolvedReason = $null })
+        }
+
+        $result = Resolve-GoalRunInflightMarkerForResolution -Issue 912
+
+        $result.Found | Should -Be $false
+        $result.CommentId | Should -Be 105
+        $result.Reason | Should -Be 'marker-fields-unparseable'
+    }
+
+    It 'integration: a genuinely unparseable ConvertFrom-GoalRunInflightMarkerBody result (Parsed=true, fields null on a hand-edited/truncated marker) flows through the real Get-GoalRunInflightMarkers into the typed refusal, not a throw' {
+        $handEditedBody = "<!-- goal-run-inflight-912 -->`n## Goal-run in-flight marker`n`n- **schema_version**: 1`n- **issue**: 912`n- **status**: unresolved"
+        Mock -CommandName Get-GoalRunIssueComments -MockWith {
+            @([pscustomobject]@{ id = 300; url = 'https://github.com/o/r/issues/912#issuecomment-300'; body = $handEditedBody })
+        }
+
+        { Resolve-GoalRunInflightMarkerForResolution -Issue 912 } | Should -Not -Throw
+
+        $result = Resolve-GoalRunInflightMarkerForResolution -Issue 912
+        $result.Found | Should -Be $false
+        $result.Reason | Should -Be 'marker-fields-unparseable'
+    }
+}
+
+Describe 'Set-GoalRunInflightMarkerAdopted (#912 step 4: mutate-and-verify adoption primitive)' -Tag 'unit' {
+
+    BeforeEach {
+        $script:grsaGhPatchCalled = $false
+        $script:grsaGhExitCode = 0
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            if ($joined -match '^api -X PATCH ') {
+                $script:grsaGhPatchCalled = $true
+                $global:LASTEXITCODE = $script:grsaGhExitCode
+                return ''
+            }
+            $global:LASTEXITCODE = 0
+            return ''
+        }
+    }
+
+    AfterEach {
+        # Same footgun as find-or-upsert-comment.Tests.ps1: `Remove-Item
+        # function:global:gh` treats `global:gh` as a literal name and
+        # silently no-ops, leaking the mock into later test files.
+        # `Remove-Item Function:gh` is what actually removes it.
+        Remove-Item Function:gh -ErrorAction SilentlyContinue
+    }
+
+    It 'mutates the marker to status=adopted plus the session field, then verifies the mutation actually landed via a re-fetch (the observable-mutation invariant)' {
+        $preBody = New-GoalRunInflightMarkerBody -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -Status 'unresolved'
+        $postBody = New-GoalRunInflightMarkerBody -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -Status 'adopted' -AdoptedBySessionId 'sess-42'
+
+        $script:grsaReadCount = 0
+        Mock -CommandName Get-GoalRunIssueComments -MockWith {
+            $script:grsaReadCount++
+            if ($script:grsaReadCount -eq 1) {
+                return @([pscustomobject]@{ id = 100; url = 'https://github.com/o/r/issues/912#issuecomment-100'; body = $preBody })
+            }
+            return @([pscustomobject]@{ id = 100; url = 'https://github.com/o/r/issues/912#issuecomment-100'; body = $postBody })
+        }
+
+        $result = Set-GoalRunInflightMarkerAdopted -CommentId 100 -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -SessionId 'sess-42'
+
+        $result.Success | Should -Be $true
+        $result.Verified | Should -Be $true
+        $result.Reason | Should -Be 'adopted-and-verified'
+        $result.AdoptedBySessionId | Should -Be 'sess-42'
+        $script:grsaGhPatchCalled | Should -Be $true
+        Should -Invoke -CommandName Get-GoalRunIssueComments -Times 2
+    }
+
+    It 'concurrent-adoption rejection: refuses with already-adopted and never PATCHes when the pre-check read shows another session already adopted this marker' {
+        $alreadyAdoptedBody = New-GoalRunInflightMarkerBody -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -Status 'adopted' -AdoptedBySessionId 'sess-first'
+
+        Mock -CommandName Get-GoalRunIssueComments -MockWith {
+            @([pscustomobject]@{ id = 100; url = 'https://github.com/o/r/issues/912#issuecomment-100'; body = $alreadyAdoptedBody })
+        }
+
+        $result = Set-GoalRunInflightMarkerAdopted -CommentId 100 -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -SessionId 'sess-second'
+
+        $result.Success | Should -Be $false
+        $result.Reason | Should -Be 'already-adopted'
+        $result.AdoptedBySessionId | Should -Be 'sess-first'
+        $script:grsaGhPatchCalled | Should -Be $false
+        Should -Invoke -CommandName Get-GoalRunIssueComments -Times 1
+    }
+
+    It 'reports patch-failed and does not claim Verified when the gh api PATCH call itself fails' {
+        $preBody = New-GoalRunInflightMarkerBody -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -Status 'unresolved'
+        Mock -CommandName Get-GoalRunIssueComments -MockWith {
+            @([pscustomobject]@{ id = 100; url = 'https://github.com/o/r/issues/912#issuecomment-100'; body = $preBody })
+        }
+        $script:grsaGhExitCode = 1
+
+        $result = Set-GoalRunInflightMarkerAdopted -CommentId 100 -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -SessionId 'sess-42'
+
+        $result.Success | Should -Be $false
+        $result.Verified | Should -Be $false
+        $result.Reason | Should -Be 'patch-failed'
+    }
+
+    It 'reports verification-body-unchanged when the re-fetched body is byte-identical to the pre-adoption body despite a 0 PATCH exit code (the no-ETag/If-Match race this primitive exists to catch)' {
+        $preBody = New-GoalRunInflightMarkerBody -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -Status 'unresolved'
+        Mock -CommandName Get-GoalRunIssueComments -MockWith {
+            @([pscustomobject]@{ id = 100; url = 'https://github.com/o/r/issues/912#issuecomment-100'; body = $preBody })
+        }
+
+        $result = Set-GoalRunInflightMarkerAdopted -CommentId 100 -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -SessionId 'sess-42'
+
+        $result.Success | Should -Be $true
+        $result.Verified | Should -Be $false
+        $result.Reason | Should -Be 'verification-body-unchanged'
+    }
+
+    It 'reports verification-comment-not-found when the verification read cannot locate the comment at all' {
+        $preBody = New-GoalRunInflightMarkerBody -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -Status 'unresolved'
+        $script:grsaReadCount = 0
+        Mock -CommandName Get-GoalRunIssueComments -MockWith {
+            $script:grsaReadCount++
+            if ($script:grsaReadCount -eq 1) {
+                return @([pscustomobject]@{ id = 100; url = 'https://github.com/o/r/issues/912#issuecomment-100'; body = $preBody })
+            }
+            return @()
+        }
+
+        $result = Set-GoalRunInflightMarkerAdopted -CommentId 100 -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -SessionId 'sess-42'
+
+        $result.Success | Should -Be $true
+        $result.Verified | Should -Be $false
+        $result.Reason | Should -Be 'verification-comment-not-found'
+    }
+
+    It 'the ContractHash carried through to the adopted body is NOT reconciled against any other value -- it is copied through unchanged (forensics-only scope)' {
+        $preBody = New-GoalRunInflightMarkerBody -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -Status 'unresolved'
+        $capturedPatchBody = $null
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            if ($joined -match '^api -X PATCH (\S+) --input (.+)$') {
+                $script:capturedPatchBody = (Get-Content -LiteralPath $Matches[2].Trim() -Raw | ConvertFrom-Json).body
+                $global:LASTEXITCODE = 0
+                return ''
+            }
+            $global:LASTEXITCODE = 0
+            return ''
+        }
+        $script:grsaReadCount = 0
+        Mock -CommandName Get-GoalRunIssueComments -MockWith {
+            $script:grsaReadCount++
+            if ($script:grsaReadCount -eq 1) {
+                return @([pscustomobject]@{ id = 100; url = 'https://github.com/o/r/issues/912#issuecomment-100'; body = $preBody })
+            }
+            $postBody = New-GoalRunInflightMarkerBody -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -Status 'adopted' -AdoptedBySessionId 'sess-42'
+            return @([pscustomobject]@{ id = 100; url = 'https://github.com/o/r/issues/912#issuecomment-100'; body = $postBody })
+        }
+
+        Set-GoalRunInflightMarkerAdopted -CommentId 100 -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -SessionId 'sess-42' | Out-Null
+
+        # The PATCHed body's contract_hash is the SAME value passed in --
+        # this function never compares it against a launch-pinned hash, it
+        # only carries it through. Reconciliation is out of scope (see the
+        # forensics-only comment on Set-GoalRunInflightMarkerAdopted).
+        $expectedHashPattern = [regex]::Escape('f' * 64)
+        $script:capturedPatchBody | Should -Match $expectedHashPattern
     }
 }
 

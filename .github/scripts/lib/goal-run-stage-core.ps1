@@ -26,7 +26,12 @@
          Get-GoalRunIssueComments, New-GoalRunIssueComment,
          New-GoalRunInflightMarker, Get-GoalRunInflightMarkers,
          Set-GoalRunInflightMarkerResolved,
+         Set-GoalRunInflightMarkerAdopted (#912 step 4: mutate-and-verify
+         adoption primitive),
          Resolve-GoalRunInflightMutexOutcome (pure tiebreak),
+         Resolve-GoalRunInflightMarkerForResolution (#912 step 4: re-fetch
+         helper for later resolution sites, lowest-unresolved-comment-id
+         selection),
          Invoke-GoalRunMutexLaunch (orchestrates the above)
 
       4. Crash-atomicity + second-invocation triage
@@ -403,8 +408,19 @@ function New-GoalRunInflightMarkerBody {
         [Parameter(Mandatory)][int]$Issue,
         [Parameter(Mandatory)][string]$ContractHash,
         [Parameter(Mandatory)][string]$LaunchedAt,
-        [ValidateSet('unresolved', 'resolved')][string]$Status = 'unresolved',
-        [string]$ResolvedReason
+        # #912 step 4: 'adopted' is a distinct status value from both
+        # 'unresolved' and 'resolved' -- the mutation an adoption performs
+        # (see Set-GoalRunInflightMarkerAdopted below) transitions to this
+        # value rather than reusing 'resolved', so a body diff/status read
+        # can tell "adopted, run in progress under a new session" apart
+        # from "resolved, marker withdrawn/completed".
+        [ValidateSet('unresolved', 'resolved', 'adopted')][string]$Status = 'unresolved',
+        [string]$ResolvedReason,
+        # #912 step 4: the owner/session field an adoption mutation stamps
+        # onto the body. Only meaningful when -Status 'adopted'; a caller
+        # building an 'unresolved' or 'resolved' body has no reason to pass
+        # it.
+        [string]$AdoptedBySessionId
     )
 
     $lines = @(
@@ -420,6 +436,9 @@ function New-GoalRunInflightMarkerBody {
     if ($ResolvedReason) {
         $lines += "- **resolved_reason**: $ResolvedReason"
     }
+    if ($AdoptedBySessionId) {
+        $lines += "- **adopted_by_session_id**: $AdoptedBySessionId"
+    }
     return ($lines -join "`n")
 }
 
@@ -431,7 +450,7 @@ function ConvertFrom-GoalRunInflightMarkerBody {
     )
 
     if ($Body -notmatch '<!-- goal-run-inflight-(\d+) -->') {
-        return [pscustomobject]@{ Parsed = $false; Issue = $null; Status = $null; ContractHash = $null; LaunchedAt = $null; ResolvedReason = $null }
+        return [pscustomobject]@{ Parsed = $false; Issue = $null; Status = $null; ContractHash = $null; LaunchedAt = $null; ResolvedReason = $null; AdoptedBySessionId = $null }
     }
 
     $issue = [int]$Matches[1]
@@ -439,8 +458,11 @@ function ConvertFrom-GoalRunInflightMarkerBody {
     $contractHash = if ($Body -match '(?m)^-\s+\*\*contract_hash\*\*:\s*(\S+)') { $Matches[1] } else { $null }
     $launchedAt = if ($Body -match '(?m)^-\s+\*\*launched_at\*\*:\s*(\S+)') { $Matches[1] } else { $null }
     $resolvedReason = if ($Body -match '(?m)^-\s+\*\*resolved_reason\*\*:\s*(.+)$') { $Matches[1].Trim() } else { $null }
+    # #912 step 4: optional owner/session field an adoption mutation stamps
+    # onto the body -- absent on any marker never adopted.
+    $adoptedBySessionId = if ($Body -match '(?m)^-\s+\*\*adopted_by_session_id\*\*:\s*(\S+)') { $Matches[1] } else { $null }
 
-    return [pscustomobject]@{ Parsed = $true; Issue = $issue; Status = $status; ContractHash = $contractHash; LaunchedAt = $launchedAt; ResolvedReason = $resolvedReason }
+    return [pscustomobject]@{ Parsed = $true; Issue = $issue; Status = $status; ContractHash = $contractHash; LaunchedAt = $launchedAt; ResolvedReason = $resolvedReason; AdoptedBySessionId = $adoptedBySessionId }
 }
 
 function New-GoalRunIssueComment {
@@ -516,11 +538,15 @@ function Get-GoalRunInflightMarkers {
 
         $parsed = ConvertFrom-GoalRunInflightMarkerBody -Body $c.body
         $results.Add([pscustomobject]@{
-                CommentId      = $commentId
-                Status         = $parsed.Status
-                ContractHash   = $parsed.ContractHash
-                LaunchedAt     = $parsed.LaunchedAt
-                ResolvedReason = $parsed.ResolvedReason
+                CommentId          = $commentId
+                Status             = $parsed.Status
+                ContractHash       = $parsed.ContractHash
+                LaunchedAt         = $parsed.LaunchedAt
+                ResolvedReason     = $parsed.ResolvedReason
+                # #912 step 4: carried through for symmetry with the other
+                # ConvertFrom-GoalRunInflightMarkerBody fields -- not yet
+                # consumed by any reader in this file.
+                AdoptedBySessionId = $parsed.AdoptedBySessionId
             }) | Out-Null
     }
     return $results.ToArray()
@@ -572,6 +598,143 @@ function Set-GoalRunInflightMarkerResolved {
     return $true
 }
 
+function script:Find-GRSInflightMarkerCommentById {
+    <#
+    .SYNOPSIS
+        Private helper: finds the single comment matching -TargetCommentId
+        in an already-fetched Get-GoalRunIssueComments result set, by
+        either the normalized numeric `id` field or the `#issuecomment-N`
+        suffix on `url`. Shared by Set-GoalRunInflightMarkerAdopted's
+        pre-check and verification reads so both use the same match logic.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [AllowEmptyCollection()]$Comments,
+        [Parameter(Mandatory)][long]$TargetCommentId
+    )
+    return @($Comments) | Where-Object {
+        ($_.id -and ([long]$_.id -eq $TargetCommentId)) -or
+        ($_.url -and ($_.url -match "#issuecomment-$TargetCommentId$"))
+    } | Select-Object -First 1
+}
+
+function Set-GoalRunInflightMarkerAdopted {
+    <#
+    .SYNOPSIS
+        #912 D2/D5 (step 4): adopts an inflight marker -- PATCHes the
+        existing goal-run-inflight-{Issue} comment identified by
+        -CommentId to status = 'adopted' plus an owner/session field
+        (-SessionId), then performs a verification read to confirm the
+        mutation actually landed, rather than trusting the PATCH call's
+        exit code alone.
+    .DESCRIPTION
+        Set-GoalRunInflightMarkerResolved (above) PATCHes with no ETag or
+        If-Match, and an adopted marker keeps the SAME comment id it had
+        while unresolved -- there is no new artifact a second invocation
+        could use to distinguish "already adopted" from "still
+        unresolved". Without an OBSERVABLE body mutation, the
+        post-adoption body could be byte-identical to the pre-adoption
+        body in every field a second reader inspects, and that second
+        invocation would go on to adopt the same marker. This function
+        makes the mutation observable two ways: (1) the status field
+        transitions from 'unresolved' to the distinct value 'adopted'
+        (never reusing 'resolved', which means something different --
+        withdrawn/completed, not "run in progress under a new session");
+        and (2) an owner/session field (-SessionId) is stamped onto the
+        body. It then re-fetches the same comment via
+        Get-GoalRunIssueComments and confirms the returned body actually
+        differs from the pre-adoption body and parses back to status =
+        'adopted' with the same SessionId.
+
+        Concurrent-adoption guard: before mutating, this function reads
+        the CURRENT live body of -CommentId. Two invocations can race to
+        adopt the same still-unresolved marker; without this pre-check
+        both would PATCH the same comment id and the second PATCH would
+        silently clobber the first adopter's SessionId (same
+        no-ETag/If-Match gap Set-GoalRunInflightMarkerResolved already
+        has). When the live body already parses to status = 'adopted',
+        this function refuses outright (Reason = 'already-adopted')
+        instead of re-PATCHing over an existing adoption.
+
+        NOTE (forensics-only scope): the -ContractHash value threaded
+        through to the adopted body is carried through UNCHANGED from the
+        pre-adoption marker and is NOT reconciled against the
+        launch-pinned contract hash anywhere in this function. That
+        reconciliation is explicitly out of scope for this primitive --
+        the field on an adopted marker is forensics only (it records what
+        the marker said at adoption time, nothing more).
+    .OUTPUTS
+        [pscustomobject]@{ Success; Verified; Reason; AdoptedBySessionId }
+        Reason is one of: 'adopted-and-verified' | 'already-adopted' |
+        'patch-failed' | 'verification-comment-not-found' |
+        'verification-body-unchanged' | 'verification-status-mismatch'.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][long]$CommentId,
+        [Parameter(Mandatory)][int]$Issue,
+        [Parameter(Mandatory)][string]$ContractHash,
+        [Parameter(Mandatory)][string]$LaunchedAt,
+        [Parameter(Mandatory)][string]$SessionId,
+        [string]$Owner,
+        [string]$Repo
+    )
+
+    $preCheckComments = Get-GoalRunIssueComments -Issue $Issue -Owner $Owner -Repo $Repo
+    $preCheckMatch = Find-GRSInflightMarkerCommentById -Comments $preCheckComments -TargetCommentId $CommentId
+    if ($preCheckMatch) {
+        $preCheckParsed = ConvertFrom-GoalRunInflightMarkerBody -Body $preCheckMatch.body
+        if ($preCheckParsed.Parsed -and $preCheckParsed.Status -eq 'adopted') {
+            return [pscustomobject]@{ Success = $false; Verified = $false; Reason = 'already-adopted'; AdoptedBySessionId = $preCheckParsed.AdoptedBySessionId }
+        }
+    }
+
+    $preBody = New-GoalRunInflightMarkerBody -Issue $Issue -ContractHash $ContractHash -LaunchedAt $LaunchedAt -Status 'unresolved'
+    $adoptedBody = New-GoalRunInflightMarkerBody -Issue $Issue -ContractHash $ContractHash -LaunchedAt $LaunchedAt -Status 'adopted' -AdoptedBySessionId $SessionId
+    $ownerSegment = if ($Owner) { $Owner } else { '{owner}' }
+    $repoSegment = if ($Repo) { $Repo } else { '{repo}' }
+    $patchPath = "repos/$ownerSegment/$repoSegment/issues/comments/$CommentId"
+
+    $tempFile = $null
+    try {
+        $tempFile = [System.IO.Path]::GetTempFileName()
+        $payload = @{ body = $adoptedBody } | ConvertTo-Json -Depth 4 -Compress
+        Set-Content -LiteralPath $tempFile -Value $payload -Encoding UTF8 -NoNewline
+        & gh api -X PATCH $patchPath --input $tempFile 2>$null | Out-Null
+    }
+    finally {
+        if ($tempFile -and (Test-Path -LiteralPath $tempFile)) {
+            Remove-Item -LiteralPath $tempFile -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    if ($LASTEXITCODE -ne 0) {
+        [Console]::Error.WriteLine("Set-GoalRunInflightMarkerAdopted: gh api PATCH $patchPath failed (exit $LASTEXITCODE)")
+        return [pscustomobject]@{ Success = $false; Verified = $false; Reason = 'patch-failed'; AdoptedBySessionId = $SessionId }
+    }
+
+    # Verification read -- see .DESCRIPTION above for why the PATCH exit
+    # code alone is not trusted as proof of an observable mutation.
+    $verifyComments = Get-GoalRunIssueComments -Issue $Issue -Owner $Owner -Repo $Repo
+    $verifyMatch = Find-GRSInflightMarkerCommentById -Comments $verifyComments -TargetCommentId $CommentId
+
+    if (-not $verifyMatch) {
+        return [pscustomobject]@{ Success = $true; Verified = $false; Reason = 'verification-comment-not-found'; AdoptedBySessionId = $SessionId }
+    }
+    if ($verifyMatch.body -eq $preBody) {
+        return [pscustomobject]@{ Success = $true; Verified = $false; Reason = 'verification-body-unchanged'; AdoptedBySessionId = $SessionId }
+    }
+
+    $parsedVerify = ConvertFrom-GoalRunInflightMarkerBody -Body $verifyMatch.body
+    if ($parsedVerify.Status -ne 'adopted' -or $parsedVerify.AdoptedBySessionId -ne $SessionId) {
+        return [pscustomobject]@{ Success = $true; Verified = $false; Reason = 'verification-status-mismatch'; AdoptedBySessionId = $SessionId }
+    }
+
+    return [pscustomobject]@{ Success = $true; Verified = $true; Reason = 'adopted-and-verified'; AdoptedBySessionId = $SessionId }
+}
+
 function Resolve-GoalRunInflightMutexOutcome {
     <#
     .SYNOPSIS
@@ -599,6 +762,72 @@ function Resolve-GoalRunInflightMutexOutcome {
         WinningCommentId     = $lowest
         LiveMarkerCommentIds = @($ids | Sort-Object -Unique)
     }
+}
+
+function Resolve-GoalRunInflightMarkerForResolution {
+    <#
+    .SYNOPSIS
+        #912 D2/D5 (step 4): re-fetch helper for the resolution sites later
+        steps (5-6) will call -- the pre-loop launch-pin halt, the
+        chain-boundary halts, Stage-1 halts, and Stage-5 completion. Each
+        of those sites needs CommentId/ContractHash/LaunchedAt for the
+        marker it is about to resolve or adopt, and this function is the
+        single place that answers "which marker, and is it safe to act
+        on".
+    .DESCRIPTION
+        Selection mirrors Resolve-GoalRunInflightMutexOutcome's tiebreak:
+        the lowest comment id among the LIVE (unresolved) markers wins.
+        Resolve-GoalRunInflightMutexOutcome itself applies no status
+        filter -- the unresolved-only Where-Object that feeds it belongs
+        to Invoke-GoalRunMutexLaunch (the caller, not a property of the
+        pure tiebreak function), so this function applies its OWN
+        unresolved-only filter here rather than assuming one is inherited
+        from elsewhere.
+
+        Returns a typed, non-throwing refusal (Found = $false) in two
+        cases: no unresolved marker exists at all, or the winning marker's
+        body parsed with Parsed = $true but one or more of the
+        Mandatory-consumed fields (ContractHash, LaunchedAt) came back
+        $null. The second case matters because
+        ConvertFrom-GoalRunInflightMarkerBody can report Parsed = $true
+        while still returning per-field $null for a hand-edited or
+        truncated marker body -- passing those nulls straight into a
+        Mandatory non-nullable parameter on a downstream consumer (for
+        example Set-GoalRunInflightMarkerAdopted's -ContractHash/
+        -LaunchedAt) would throw an unguarded parameter-binding error
+        rather than a caller-actionable refusal. This function is the
+        guard point that turns that into 'marker-fields-unparseable'
+        instead.
+    .OUTPUTS
+        [pscustomobject]@{ Found; CommentId; ContractHash; LaunchedAt; Reason }
+        Reason is one of: 'resolved-lowest-unresolved-comment-id' |
+        'no-unresolved-marker' | 'marker-fields-unparseable'.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][int]$Issue,
+        [string]$Owner,
+        [string]$Repo
+    )
+
+    $allMarkers = Get-GoalRunInflightMarkers -Issue $Issue -Owner $Owner -Repo $Repo
+    # This site's OWN unresolved-only filter -- see .DESCRIPTION above for
+    # why it is not inherited from Resolve-GoalRunInflightMutexOutcome or
+    # from Invoke-GoalRunMutexLaunch's :~658 Where-Object.
+    $unresolved = @($allMarkers | Where-Object { $_.Status -eq 'unresolved' -and $null -ne $_.CommentId })
+
+    if ($unresolved.Count -eq 0) {
+        return [pscustomobject]@{ Found = $false; CommentId = $null; ContractHash = $null; LaunchedAt = $null; Reason = 'no-unresolved-marker' }
+    }
+
+    $winner = $unresolved | Sort-Object -Property CommentId | Select-Object -First 1
+
+    if ([string]::IsNullOrEmpty($winner.ContractHash) -or [string]::IsNullOrEmpty($winner.LaunchedAt)) {
+        return [pscustomobject]@{ Found = $false; CommentId = $winner.CommentId; ContractHash = $null; LaunchedAt = $null; Reason = 'marker-fields-unparseable' }
+    }
+
+    return [pscustomobject]@{ Found = $true; CommentId = $winner.CommentId; ContractHash = $winner.ContractHash; LaunchedAt = $winner.LaunchedAt; Reason = 'resolved-lowest-unresolved-comment-id' }
 }
 
 function Invoke-GoalRunMutexLaunch {
