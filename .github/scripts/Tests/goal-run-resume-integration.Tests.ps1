@@ -235,7 +235,8 @@ BeforeAll {
         .SYNOPSIS
             Mirrors agents/Goal-Run.agent.md's Invocation Contract step 2
             EXACTLY: Get-GoalRunInflightMarkers -> (if any marker has
-            Status: unresolved) guard the winning marker's fields via
+            Status: unresolved OR Status: adopted -- #912 post-fix defense
+            F1/D1 widened this gate) guard the winning marker's fields via
             Resolve-GoalRunInflightMarkerForResolution -> read
             goal-run-active.json + halt-report/PR existence ->
             Test-GoalRunInflightAppearsDead -> Resolve-GoalRunInvocationAction
@@ -254,6 +255,15 @@ BeforeAll {
             review finding identified. -SessionId/-ReconfirmDelayMs are
             exposed so callers can supply a fixed session id and skip the
             production reconfirm-delay sleep in tests.
+
+            #912 post-fix defense (F1/D1): the top-level filter now matches
+            `unresolved` OR `adopted` (mirroring the corresponding agent-body
+            fix), and `Resolve-GoalRunInvocationAction` is now called with
+            `-MarkerStatus`/`-AdoptedBySessionId`/`-CurrentSessionId` so the
+            new `resume-own-adopted` rung is reachable. On that action, this
+            helper does NOT call Set-GoalRunInflightMarkerAdopted (it is
+            already adopted by this same session) -- mirroring the agent
+            body's own "do not re-adopt" instruction for that action.
         #>
         param(
             [Parameter(Mandatory)][string]$WorktreePath,
@@ -265,14 +275,14 @@ BeforeAll {
         )
 
         $markers = Get-GoalRunInflightMarkers -Issue $script:GRIIssue
-        $unresolved = @($markers | Where-Object { $_.Status -eq 'unresolved' })
-        if ($unresolved.Count -eq 0) {
+        $live = @($markers | Where-Object { $_.Status -eq 'unresolved' -or $_.Status -eq 'adopted' })
+        if ($live.Count -eq 0) {
             $action = Resolve-GoalRunInvocationAction -ExistingUnresolvedMarker $null -AppearsDead $false
             return [pscustomobject]@{ Action = $action.Action; Reason = $action.Reason; Marker = $null; Appears = $null; ForResolution = $null; Adoption = $null }
         }
-        $marker = $unresolved | Select-Object -First 1
+        $marker = $live | Sort-Object -Property CommentId | Select-Object -First 1
 
-        # Guard (I10 fix): validate the winning unresolved marker's fields
+        # Guard (I10 fix): validate the winning live marker's fields
         # BEFORE they reach Test-GoalRunInflightAppearsDead's Mandatory,
         # non-nullable [datetime] -LaunchedAt parameter. A marker whose
         # body parsed (Parsed: $true) but whose contract_hash/launched_at
@@ -296,7 +306,8 @@ BeforeAll {
             -HeartbeatAt $heartbeatAt -HaltReportExists $haltReportExists -PrExists $PrExists -Now $Now
 
         $action = Resolve-GoalRunInvocationAction -ExistingUnresolvedMarker $marker -AppearsDead $appears.AppearsDead `
-            -TerminalOutcomePresent $appears.TerminalOutcomePresent -ForceAdopt:$ForceAdopt
+            -TerminalOutcomePresent $appears.TerminalOutcomePresent -ForceAdopt:$ForceAdopt `
+            -MarkerStatus $marker.Status -AdoptedBySessionId $marker.AdoptedBySessionId -CurrentSessionId $SessionId
 
         if ($action.Action -eq 'resolve-and-report-complete' -and $forResolution.Found) {
             # I5 fix: resolve the held marker before reporting, reusing the
@@ -314,12 +325,16 @@ BeforeAll {
             # resuming", reusing the marker's own CommentId/ContractHash/
             # LaunchedAt already fetched above rather than a second live
             # re-fetch. Every caller of this test-local helper (I1, I2, I6,
-            # I7, I8, I9, I12) now observes the REAL post-adoption corpus
+            # I7, I8, I9) now observes the REAL post-adoption corpus
             # state through Get-GoalRunIssueComments instead of asserting a
             # status by hand afterward against a mock that never touched it.
             $adoption = Set-GoalRunInflightMarkerAdopted -CommentId $marker.CommentId -Issue $script:GRIIssue `
                 -ContractHash $marker.ContractHash -LaunchedAt $marker.LaunchedAt -SessionId $SessionId -ReconfirmDelayMs $ReconfirmDelayMs
         }
+        # #912 post-fix defense (F1/D1): 'resume-own-adopted' deliberately
+        # does NOT call Set-GoalRunInflightMarkerAdopted -- the marker is
+        # already adopted by this exact session; a redundant re-PATCH is not
+        # what the agent body's own "do not re-adopt" instruction calls for.
 
         return [pscustomobject]@{ Action = $action.Action; Reason = $action.Reason; Marker = $marker; Appears = $appears; ForResolution = $forResolution; Adoption = $adoption }
     }
@@ -1016,21 +1031,31 @@ Describe '#912 s8 I12: M1/M12 regression class -- a real adoption must be observ
       1. The mutex tiebreak (Resolve-GoalRunInflightMutexOutcome, fed the
          REAL live-marker set Invoke-GoalRunMutexLaunch itself builds) --
          this is the actual concurrency guard against a genuinely
-         concurrent second `/goal-run` process.
+         concurrent second `/goal-run` process (a DIFFERENT session).
       2. A second script:Invoke-GRIAdmissionGate call against the SAME
-         corpus -- documenting that the per-session admission gate's own
-         top-level check is Status-'unresolved'-literal by design (per
-         Goal-Run.agent.md's Invocation Contract step 2: "Check for an
-         existing unresolved inflight marker first ... If any marker has
-         Status: unresolved"), so it does NOT re-trip on an already-adopted
-         marker -- the mutex tiebreak in (1), not this gate, is what
-         actually protects a genuinely concurrent launch attempt.
+         corpus, using the SAME session id as the first call.
+
+    #912 post-fix defense (F1/D1) UPDATE: the second bullet above used to
+    document (and assert) that the admission gate's own top-level check
+    was Status-'unresolved'-literal by design and did NOT re-trip on an
+    already-adopted marker, reporting `launch-new`. A post-fix adversarial
+    pass proved that "does not re-trip" framing was itself the deterministic
+    self-yield livelock bug (F1/D1): `launch-new` here means the SAME
+    session would go on to post a BRAND-NEW marker in the pre-loop Stage
+    Machine section and immediately lose the mutex tiebreak to the marker
+    it already holds -- forever, since every retry posts a strictly higher
+    comment id. The gate now recognizes `Status: adopted` too, and because
+    this second admission call uses the SAME session id as the first
+    (both default to 'sess-fixture'), `Resolve-GoalRunInvocationAction`'s
+    new `resume-own-adopted` rung fires instead of `launch-new` -- the
+    correct outcome: continue the session's own already-adopted run
+    in place, never post a competing marker.
     #>
     AfterEach {
         Remove-Item Function:gh -ErrorAction SilentlyContinue
     }
 
-    It 'a marker adopted for real by the first invocation is seen as LIVE by the mutex tiebreak, while a second admission-gate call over the same corpus correctly reports launch-new (not a false refuse/re-adopt)' {
+    It 'a marker adopted for real by the first invocation is seen as LIVE by the mutex tiebreak, while a second SAME-SESSION admission-gate call correctly reports resume-own-adopted (not a false launch-new that would self-livelock)' {
         $wt = script:New-GRIWorktree -Name 'i12'
         $now = (Get-Date).ToUniversalTime()
         $launchedAt = $now.AddHours(-3).ToString('o')
@@ -1050,11 +1075,12 @@ Describe '#912 s8 I12: M1/M12 regression class -- a real adoption must be observ
         $liveAfterAdoption = @(Get-GoalRunInflightMarkers -Issue $script:GRIIssue | Where-Object { $_.CommentId -eq $adoptedCommentId })[0]
         $liveAfterAdoption.Status | Should -Be 'adopted' -Because 'the corpus itself, not a mock claim, must show the real post-adoption status'
 
-        # --- (1) Mutex tiebreak: a hypothetical second launcher posts a NEW
-        # marker with a HIGHER comment id and reconciles against the SAME
-        # real corpus. Mirrors Invoke-GoalRunMutexLaunch's own live-set
-        # construction (goal-run-stage-core.ps1 M1 fix): every marker whose
-        # Status is 'unresolved' OR 'adopted' counts as live. ---
+        # --- (1) Mutex tiebreak: a hypothetical second launcher (a
+        # DIFFERENT session/process) posts a NEW marker with a HIGHER
+        # comment id and reconciles against the SAME real corpus. Mirrors
+        # Invoke-GoalRunMutexLaunch's own live-set construction
+        # (goal-run-stage-core.ps1 M1 fix): every marker whose Status is
+        # 'unresolved' OR 'adopted' counts as live. ---
         $secondLauncherCommentId = $adoptedCommentId + 50
         $liveIdsForTiebreak = @(Get-GoalRunInflightMarkers -Issue $script:GRIIssue | Where-Object { $_.Status -eq 'unresolved' -or $_.Status -eq 'adopted' } | ForEach-Object { $_.CommentId })
         $tiebreak = Resolve-GoalRunInflightMutexOutcome -OwnCommentId $secondLauncherCommentId -LiveMarkerCommentIds $liveIdsForTiebreak
@@ -1063,14 +1089,115 @@ Describe '#912 s8 I12: M1/M12 regression class -- a real adoption must be observ
         $tiebreak.WinningCommentId | Should -Be $adoptedCommentId
 
         # --- (2) A second script:Invoke-GRIAdmissionGate call over the SAME
-        # corpus. The admission gate's own top-level check is literally
-        # Status-'unresolved' (Goal-Run.agent.md Invocation Contract step 2)
-        # -- an already-adopted marker does not re-trip THIS gate; the
-        # mutex tiebreak in (1) is the actual concurrency guard. This
-        # documents that behavior explicitly rather than leaving it
-        # unasserted. ---
+        # corpus, using the SAME (default) session id as the first call --
+        # this is THIS session re-invoking, not a concurrent process. #912
+        # post-fix defense (F1/D1): this must now report resume-own-adopted,
+        # not launch-new -- launch-new here would post a brand-new marker
+        # that always loses the mutex tiebreak to the marker this session
+        # already holds (case (1) above proves exactly that), producing a
+        # deterministic non-terminating self-yield loop. ---
         $secondAdmission = script:Invoke-GRIAdmissionGate -WorktreePath $wt -Now $now
-        $secondAdmission.Action | Should -Be 'launch-new' -Because 'the admission gate''s own unresolved-only check does not re-trip on an already-adopted marker -- the mutex tiebreak above is the real concurrency guard for a genuinely concurrent second invocation'
-        $secondAdmission.Adoption | Should -Be $null -Because 'launch-new never performs an adoption mutation'
+        $secondAdmission.Action | Should -Be 'resume-own-adopted' -Because 'F1/D1: this is the SAME session continuing its own already-adopted run -- launch-new would self-livelock via the mutex tiebreak proven in (1) above'
+        $secondAdmission.Marker.CommentId | Should -Be $adoptedCommentId -Because 'resume-own-adopted must carry forward the ALREADY-HELD marker id, never a freshly-posted one'
+        $secondAdmission.Adoption | Should -Be $null -Because 'resume-own-adopted never re-adopts a marker already adopted by this same session'
+    }
+
+    It '#912 post-fix defense (F1/D1): a DIFFERENT session''s admission-gate call over the same adopted-and-live corpus is refused as live with the distinguishing adopted-by-other-session reason, never resume-own-adopted' {
+        $wt = script:New-GRIWorktree -Name 'i12b'
+        $now = (Get-Date).ToUniversalTime()
+        $launchedAt = $now.AddHours(-3).ToString('o')
+        $freshHeartbeat = $now.AddMinutes(-2).ToString('o')
+        script:Write-GRIActiveState -WorktreePath $wt -LaunchedAt $launchedAt -HeartbeatAt $freshHeartbeat
+
+        $inflightBody = New-GoalRunInflightMarkerBody -Issue $script:GRIIssue -ContractHash $script:GRIContractHash -LaunchedAt $launchedAt -Status 'unresolved'
+        $stageBody = New-GoalRunStageMarkerBody -Issue $script:GRIIssue -Stage 'loop-launched' -ContractHash $script:GRIContractHash -UpdatedAt $launchedAt -WorktreePath $wt
+        script:Use-GRIMutableCorpus -InflightBody $inflightBody -StageBody $stageBody | Out-Null
+
+        $firstAdmission = script:Invoke-GRIAdmissionGate -WorktreePath $wt -Now $now -SessionId 'sess-first'
+        $firstAdmission.Action | Should -Be 'refuse-resume-existing' -Because 'a fresh heartbeat refuses BEFORE any adoption happens, so there is nothing yet for a first-invocation adoption to race against in this fixture'
+
+        # Directly land an adoption under a DIFFERENT session so the second
+        # admission call below observes a genuinely other-session-held
+        # marker (the scenario the F1/D1 fix must distinguish from
+        # resume-own-adopted).
+        $marker = @(Get-GoalRunInflightMarkers -Issue $script:GRIIssue)[0]
+        Set-GoalRunInflightMarkerAdopted -CommentId $marker.CommentId -Issue $script:GRIIssue `
+            -ContractHash $marker.ContractHash -LaunchedAt $marker.LaunchedAt -SessionId 'sess-other' -ReconfirmDelayMs 0 | Out-Null
+
+        $secondAdmission = script:Invoke-GRIAdmissionGate -WorktreePath $wt -Now $now -SessionId 'sess-mine'
+        $secondAdmission.Action | Should -Be 'refuse-resume-existing'
+        $secondAdmission.Reason | Should -Be 'adopted-by-other-session'
+    }
+}
+
+Describe '#912 s8 I13: pre-loop-crash-with-adopted-marker -- the deterministic self-yield livelock fixture (F1/D1)' -Tag 'unit' {
+    <#
+    #912 post-fix defense: THE fixture shape that did not exist before this
+    fix and is why the livelock shipped green -- a crash genuinely BEFORE
+    provisioning ever completed. No stage marker (pre-loop never writes
+    one), no goal-run-active.json (the worktree was never provisioned),
+    only a single adopted inflight marker held by THIS session. Proves the
+    same session can re-invoke `/goal-run {issue}` against this exact state
+    without looping: the admission gate returns resume-own-adopted (not
+    launch-new), step 3 resolves to pre-loop (the InflightMarkerPresent
+    rung, since nothing else is present), and the pre-loop Stage Machine's
+    own resume-own-adopted path provisions directly via New-GoalRunWorktree
+    WITHOUT ever calling Invoke-GoalRunMutexLaunch -- so no competing
+    marker is ever posted and the mutex-tiebreak self-yield this issue
+    describes cannot occur.
+    #>
+    AfterEach {
+        Remove-Item Function:gh -ErrorAction SilentlyContinue
+    }
+
+    It 'the admission gate resumes its own adopted marker, resolves to pre-loop, and the pre-loop path provisions directly without ever calling Invoke-GoalRunMutexLaunch' {
+        $wt = script:New-GRIWorktree -Name 'i13'
+        $now = (Get-Date).ToUniversalTime()
+        $launchedAt = $now.AddHours(-1).ToString('o')
+
+        # No goal-run-active.json (crash before provisioning) and no stage
+        # marker (pre-loop never writes one) -- only the adopted inflight
+        # marker, held by THIS session.
+        $inflightBody = New-GoalRunInflightMarkerBody -Issue $script:GRIIssue -ContractHash $script:GRIContractHash -LaunchedAt $launchedAt -Status 'adopted' -AdoptedBySessionId 'sess-fixture'
+        script:Use-GRIMutableCorpus -InflightBody $inflightBody | Out-Null
+
+        # --- Admission gate: must resume, never launch-new (which would
+        # self-livelock -- see I12 above) and never re-adopt. ---
+        $admission = script:Invoke-GRIAdmissionGate -WorktreePath $wt -Now $now -SessionId 'sess-fixture'
+        $admission.Action | Should -Be 'resume-own-adopted'
+        $admission.Adoption | Should -Be $null -Because 'already adopted by this exact session -- no re-adoption mutation should occur'
+        $heldCommentId = $admission.Marker.CommentId
+
+        # --- Step 3 (Resolve the resume stage): no stage marker and no
+        # active state -- InflightMarkerPresent is the only signal present,
+        # so this resolves to pre-loop, exactly the crash-before-
+        # provisioning scenario this fixture reproduces. ---
+        $resume = Resolve-GoalRunResumeStage -ContractHashVerified $true -InflightMarkerPresent $true `
+            -ActiveStatePresent $false -RunLogHasCheckpoint $false -ExplicitStageMarker $null
+        $resume.ResumeStage | Should -Be 'pre-loop'
+        $resume.Reason | Should -Be 'marker-posted-not-provisioned'
+
+        # --- Pre-loop Stage Machine's own resume-own-adopted path: direct
+        # New-GoalRunWorktree call, Invoke-GoalRunMutexLaunch NEVER called
+        # (a real call would post a competing marker and prove the fix
+        # regressed -- this mock makes any such call a hard test failure). ---
+        Mock -CommandName Invoke-GoalRunMutexLaunch -MockWith { throw 'F1/D1 regression: resume-own-adopted must never call Invoke-GoalRunMutexLaunch -- doing so posts a competing marker that always loses the mutex tiebreak to the marker this session already holds' }
+        Mock -CommandName New-GoalRunWorktree -MockWith { [pscustomobject]@{ Success = $true; RefusalReason = $null; Path = $wt; BranchName = 'goal-run/issue-912-i13token' } }
+
+        if ($resume.ResumeStage -eq 'pre-loop' -and $admission.Action -eq 'resume-own-adopted') {
+            $provision = New-GoalRunWorktree -RepoRoot $script:RepoRoot -IssueNumber $script:GRIIssue
+            $provision.Success | Should -Be $true
+        }
+
+        Should -Invoke -CommandName Invoke-GoalRunMutexLaunch -Times 0
+        Should -Invoke -CommandName New-GoalRunWorktree -Times 1
+
+        # --- Determinism proof: exactly ONE inflight marker exists on the
+        # corpus throughout -- no new marker was ever posted, so there is
+        # nothing left to lose a tiebreak to and no loop can occur. ---
+        $allMarkers = @(Get-GoalRunInflightMarkers -Issue $script:GRIIssue)
+        $allMarkers.Count | Should -Be 1
+        $allMarkers[0].CommentId | Should -Be $heldCommentId
+        $allMarkers[0].Status | Should -Be 'adopted'
     }
 }

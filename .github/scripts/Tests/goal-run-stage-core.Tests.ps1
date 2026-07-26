@@ -214,7 +214,11 @@ Describe 'Resolve-GoalRunInflightMarkerForResolution (#912 step 4: re-fetch help
         $result.CommentId | Should -Be 105
         $result.ContractHash | Should -Be ('b' * 64)
         $result.LaunchedAt | Should -Be '2026-07-22T00:00:00.0000000Z'
-        $result.Reason | Should -Be 'resolved-lowest-unresolved-comment-id'
+        # #912 post-fix defense (F1/F6): renamed from
+        # 'resolved-lowest-unresolved-comment-id' now that this reader also
+        # matches 'adopted' markers.
+        $result.Reason | Should -Be 'resolved-lowest-live-comment-id'
+        $result.Status | Should -Be 'unresolved'
     }
 
     It 'applies its OWN unresolved-only filter -- a lower-id RESOLVED marker never wins over a higher-id unresolved one (the :658 filter is the caller''s, not inherited)' {
@@ -231,14 +235,14 @@ Describe 'Resolve-GoalRunInflightMarkerForResolution (#912 step 4: re-fetch help
         $result.CommentId | Should -Be 105
     }
 
-    It 'reports no-unresolved-marker when Get-GoalRunInflightMarkers returns nothing live' {
+    It '#912 post-fix defense (F1/F6): reports no-live-marker (renamed from no-unresolved-marker) when Get-GoalRunInflightMarkers returns nothing live' {
         Mock -CommandName Get-GoalRunInflightMarkers -MockWith { @() }
 
         $result = Resolve-GoalRunInflightMarkerForResolution -Issue 912
 
         $result.Found | Should -Be $false
         $result.CommentId | Should -BeNullOrEmpty
-        $result.Reason | Should -Be 'no-unresolved-marker'
+        $result.Reason | Should -Be 'no-live-marker'
     }
 
     It 'refuses as marker-fields-unparseable instead of letting a downstream Mandatory parameter throw, when the winning marker has Parsed=true but null ContractHash/LaunchedAt' {
@@ -274,7 +278,12 @@ Describe 'Resolve-GoalRunInflightMarkerForResolution (#912 step 4: re-fetch help
 
         $result.Found | Should -Be $true
         $result.CommentId | Should -Be 100
-        $result.Reason | Should -Be 'resolved-lowest-unresolved-comment-id'
+        $result.Reason | Should -Be 'resolved-lowest-live-comment-id'
+        # #912 post-fix defense (F1/D1): Status/AdoptedBySessionId now
+        # surface on the output so a caller can make session-identity-aware
+        # decisions without a second live re-fetch.
+        $result.Status | Should -Be 'adopted'
+        $result.AdoptedBySessionId | Should -Be 'sess-1'
     }
 
     It '#912 review fix (M1): tiebreaks correctly across a MIX of unresolved and adopted markers by lowest comment id, same as the all-unresolved case' {
@@ -871,6 +880,45 @@ Describe 'Test-GoalRunInflightAppearsDead (crash-atomicity)' -Tag 'unit' {
     }
 }
 
+Describe 'ConvertTo-GRSParsedUtcDateTimeOrNull (#912 post-fix defense, F4)' -Tag 'unit' {
+
+    It 'normalizes a NAIVE (no timezone suffix) timestamp to Kind=Utc rather than leaving it Kind=Unspecified' {
+        $result = ConvertTo-GRSParsedUtcDateTimeOrNull -Value '2026-07-26T10:00:00'
+        $result.Kind | Should -Be ([System.DateTimeKind]::Utc)
+    }
+
+    It 'F4 regression: a naive timestamp no longer skews by the host UTC offset when later compared via ToUniversalTime()' {
+        # Before the fix, a naive string parsed to Kind=Unspecified, and a
+        # later .ToUniversalTime() call treats Unspecified as LOCAL time --
+        # skewing the elapsed-time math by the host's UTC offset. On a
+        # positive-UTC-offset host this could make a genuinely live run
+        # (LaunchedAt = 5 minutes ago) read as further in the past than it
+        # really is, potentially crossing a staleness threshold it should
+        # not have crossed.
+        $fiveMinutesAgoNaive = (Get-Date).ToUniversalTime().AddMinutes(-5).ToString('yyyy-MM-ddTHH:mm:ss')
+        $parsed = ConvertTo-GRSParsedUtcDateTimeOrNull -Value $fiveMinutesAgoNaive
+        $nowUtc = (Get-Date).ToUniversalTime()
+        $elapsedMinutes = ($nowUtc - $parsed.ToUniversalTime()).TotalMinutes
+        [math]::Abs($elapsedMinutes - 5) | Should -BeLessThan 2 -Because 'a Kind=Utc-normalized naive value must not skew by the host UTC offset when .ToUniversalTime() is applied'
+    }
+
+    It 'still normalizes an explicit Z-suffixed UTC string to Kind=Utc (unchanged pre-fix behavior)' {
+        $result = ConvertTo-GRSParsedUtcDateTimeOrNull -Value '2026-07-26T10:00:00Z'
+        $result.Kind | Should -Be ([System.DateTimeKind]::Utc)
+    }
+
+    It 'passes an already-parsed [datetime] straight through without re-normalizing its Kind' {
+        $localValue = [datetime]::SpecifyKind([datetime]'2026-07-26T10:00:00', [System.DateTimeKind]::Local)
+        $result = ConvertTo-GRSParsedUtcDateTimeOrNull -Value $localValue
+        $result.Kind | Should -Be ([System.DateTimeKind]::Local) -Because 'an already-typed [datetime] is passed through unchanged -- only a freshly-parsed STRING gets the Unspecified-to-Utc normalization'
+    }
+
+    It 'returns $null for genuinely unparseable garbage, unaffected by the Kind-normalization addition' {
+        $result = ConvertTo-GRSParsedUtcDateTimeOrNull -Value 'TBD'
+        $result | Should -BeNullOrEmpty
+    }
+}
+
 Describe 'Resolve-GoalRunInvocationAction' -Tag 'unit' {
 
     It 'launches a new run when no unresolved marker exists' {
@@ -915,6 +963,43 @@ Describe 'Resolve-GoalRunInvocationAction' -Tag 'unit' {
         $marker = [pscustomobject]@{ CommentId = 100 }
         $result = Resolve-GoalRunInvocationAction -ExistingUnresolvedMarker $marker -AppearsDead $false -ForceAdopt $true
         $result.Action | Should -Be 'adopt-and-resume'
+    }
+
+    It '#912 post-fix defense (F1/D1): resumes its own already-adopted marker instead of falling through to launch-new, refuse, or re-adopt -- the deterministic self-yield livelock fix' {
+        $marker = [pscustomobject]@{ CommentId = 100 }
+        $result = Resolve-GoalRunInvocationAction -ExistingUnresolvedMarker $marker -AppearsDead $false `
+            -MarkerStatus 'adopted' -AdoptedBySessionId 'sess-own' -CurrentSessionId 'sess-own'
+        $result.Action | Should -Be 'resume-own-adopted'
+        $result.Reason | Should -Be 'adopted-by-own-session'
+    }
+
+    It '#912 post-fix defense (F1/D1): resume-own-adopted wins even when -ForceAdopt is also set -- an operator re-typing adopt against its own already-adopted marker still resumes in place rather than re-adopting' {
+        $marker = [pscustomobject]@{ CommentId = 100 }
+        $result = Resolve-GoalRunInvocationAction -ExistingUnresolvedMarker $marker -AppearsDead $false -ForceAdopt $true `
+            -MarkerStatus 'adopted' -AdoptedBySessionId 'sess-own' -CurrentSessionId 'sess-own'
+        $result.Action | Should -Be 'resume-own-adopted'
+    }
+
+    It '#912 post-fix defense (F1/D1): an adopted marker held by a DIFFERENT session is refused as live with the distinguishing adopted-by-other-session reason, not the generic unresolved-marker-present' {
+        $marker = [pscustomobject]@{ CommentId = 100 }
+        $result = Resolve-GoalRunInvocationAction -ExistingUnresolvedMarker $marker -AppearsDead $false `
+            -MarkerStatus 'adopted' -AdoptedBySessionId 'sess-other' -CurrentSessionId 'sess-own'
+        $result.Action | Should -Be 'refuse-resume-existing'
+        $result.Reason | Should -Be 'adopted-by-other-session'
+    }
+
+    It '#912 post-fix defense (F1/D1): an adopted marker held by a different session that genuinely appears dead still falls through to adopt-and-resume, same as an unresolved marker' {
+        $marker = [pscustomobject]@{ CommentId = 100 }
+        $result = Resolve-GoalRunInvocationAction -ExistingUnresolvedMarker $marker -AppearsDead $true `
+            -MarkerStatus 'adopted' -AdoptedBySessionId 'sess-other' -CurrentSessionId 'sess-own'
+        $result.Action | Should -Be 'adopt-and-resume'
+    }
+
+    It '#912 post-fix defense (F1/D1): omitting -MarkerStatus/-AdoptedBySessionId/-CurrentSessionId preserves every pre-fix caller''s behavior exactly (backward compatibility)' {
+        $marker = [pscustomobject]@{ CommentId = 100 }
+        $result = Resolve-GoalRunInvocationAction -ExistingUnresolvedMarker $marker -AppearsDead $false
+        $result.Action | Should -Be 'refuse-resume-existing'
+        $result.Reason | Should -Be 'unresolved-marker-present'
     }
 }
 
@@ -1363,7 +1448,14 @@ Describe 'Invoke-GoalRunRestart (#912 D6, step 5: operator-initiated restart lev
     It '#912 review fix (M18): reports the honest partial-failure outcome, not unconditionally "restarted", when Clear-GoalRunStageMarker itself reports failure' {
         Mock -CommandName New-GoalRunIssueComment -MockWith { [pscustomobject]@{ Success = $true; CommentId = 1; Url = 'https://example/1' } }
         Mock -CommandName Clear-GoalRunStageMarker -MockWith { [pscustomobject]@{ Success = $false; DeletedCommentIds = @(); FailedCommentIds = @(555) } }
-        Mock -CommandName Clear-GoalRunActiveState -MockWith { $true }
+        # #912 post-fix defense (F3): before this fix, both clears ran
+        # unconditionally in sequence, so an ambiguous-match refusal on the
+        # stage-marker clear still let Clear-GoalRunActiveState proceed --
+        # producing an unrecoverable half-clear (active state gone, stage
+        # marker survives). This must now NEVER be called when the
+        # stage-marker clear itself fails -- a real call here (rather than
+        # this throwing mock) would indicate the F3 gate regressed.
+        Mock -CommandName Clear-GoalRunActiveState -MockWith { throw 'must not clear active state when the stage-marker clear itself failed (F3 fix)' }
 
         $now = (Get-Date).ToUniversalTime()
         $result = Invoke-GoalRunRestart -Issue 912 -WorktreePath 'C:\fake\gr-912' -LaunchedAt $now.AddHours(-2) -Now $now
@@ -1371,6 +1463,8 @@ Describe 'Invoke-GoalRunRestart (#912 D6, step 5: operator-initiated restart lev
         $result.Outcome | Should -Be 'restarted-partial-marker-clear-failed'
         $result.Reason | Should -Be 'stage-marker-clear-failed'
         $result.ClearedStageMarker | Should -Be $false
+        $result.ClearedActiveState | Should -Be $false
+        Should -Invoke -CommandName Clear-GoalRunActiveState -Times 0
     }
 
     It '#912 fixture (a): captures the worktree path and branch into the durable report comment BEFORE clearing either artifact' {

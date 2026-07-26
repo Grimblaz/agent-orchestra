@@ -935,6 +935,25 @@ function script:ConvertTo-GRSParsedUtcDateTimeOrNull {
         [ref]$parsed
     )
     if (-not $ok) { return $null }
+
+    # #912 post-fix defense (F4): RoundtripKind preserves an explicit Z/
+    # offset suffix's Kind (Utc or Local), but a NAIVE (no timezone
+    # suffix) timestamp parses to Kind=Unspecified -- neither Utc nor
+    # Local. A later .ToUniversalTime() call on an Unspecified value
+    # treats it as LOCAL time (the same underlying .NET behavior the M6
+    # fix elsewhere in this file documents for a bare [datetime] cast),
+    # which on a positive-UTC-offset host can make a genuinely live run's
+    # LaunchedAt/heartbeat read as further in the past than it really is
+    # -- exactly the wrong direction for a liveness gate that must fail
+    # closed (it can make a still-live run look dead and get adopted out
+    # from under itself). This function's own name and docstring already
+    # promise UTC normalization, and every production writer in this
+    # codebase emits UTC-suffixed strings, so this closes the one gap
+    # those writers never produce but a hand-edited/test-supplied naive
+    # value still could.
+    if ($parsed.Kind -eq [System.DateTimeKind]::Unspecified) {
+        $parsed = [datetime]::SpecifyKind($parsed, [System.DateTimeKind]::Utc)
+    }
     return $parsed
 }
 
@@ -950,19 +969,19 @@ function Resolve-GoalRunInflightMarkerForResolution {
         on".
     .DESCRIPTION
         Selection mirrors Resolve-GoalRunInflightMutexOutcome's tiebreak:
-        the lowest comment id among the LIVE (unresolved) markers wins.
-        Resolve-GoalRunInflightMutexOutcome itself applies no status
-        filter -- the unresolved-only Where-Object that feeds it belongs
-        to Invoke-GoalRunMutexLaunch (the caller, not a property of the
-        pure tiebreak function), so this function applies its OWN
-        unresolved-only filter here rather than assuming one is inherited
-        from elsewhere.
+        the lowest comment id among the LIVE (unresolved OR adopted)
+        markers wins. Resolve-GoalRunInflightMutexOutcome itself applies
+        no status filter -- the live-set Where-Object that feeds it
+        belongs to Invoke-GoalRunMutexLaunch (the caller, not a property
+        of the pure tiebreak function), so this function applies its OWN
+        unresolved-or-adopted filter here rather than assuming one is
+        inherited from elsewhere.
 
         Returns a typed, non-throwing refusal (Found = $false) in two
-        cases: no unresolved marker exists at all, or the winning marker's
-        body parsed with Parsed = $true but one or more of the
-        Mandatory-consumed fields (ContractHash, LaunchedAt) came back
-        $null. The second case matters because
+        cases: no live (unresolved or adopted) marker exists at all, or
+        the winning marker's body parsed with Parsed = $true but one or
+        more of the Mandatory-consumed fields (ContractHash, LaunchedAt)
+        came back $null. The second case matters because
         ConvertFrom-GoalRunInflightMarkerBody can report Parsed = $true
         while still returning per-field $null for a hand-edited or
         truncated marker body -- passing those nulls straight into a
@@ -972,10 +991,24 @@ function Resolve-GoalRunInflightMarkerForResolution {
         rather than a caller-actionable refusal. This function is the
         guard point that turns that into 'marker-fields-unparseable'
         instead.
+
+        #912 post-fix defense (F1/F6): the output now also surfaces the
+        winning marker's own `Status` and `AdoptedBySessionId` fields, so
+        a caller (Goal-Run.agent.md's Invocation Contract step 2) can
+        make session-identity-aware decisions -- see
+        Resolve-GoalRunInvocationAction's `resume-own-adopted` rung --
+        without a second live re-fetch. The `Reason` values are also
+        renamed here: this function's own diagnostic strings previously
+        said "unresolved" only even though the M1 fix above already
+        widened its live-marker filter to also match `adopted` markers,
+        which was misleading to any caller reading `Reason` back.
+        'no-unresolved-marker' becomes 'no-live-marker' and
+        'resolved-lowest-unresolved-comment-id' becomes
+        'resolved-lowest-live-comment-id'.
     .OUTPUTS
-        [pscustomobject]@{ Found; CommentId; ContractHash; LaunchedAt; Reason }
-        Reason is one of: 'resolved-lowest-unresolved-comment-id' |
-        'no-unresolved-marker' | 'marker-fields-unparseable'.
+        [pscustomobject]@{ Found; CommentId; ContractHash; LaunchedAt; Status; AdoptedBySessionId; Reason }
+        Reason is one of: 'resolved-lowest-live-comment-id' |
+        'no-live-marker' | 'marker-fields-unparseable'.
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -998,7 +1031,7 @@ function Resolve-GoalRunInflightMarkerForResolution {
     $live = @($allMarkers | Where-Object { ($_.Status -eq 'unresolved' -or $_.Status -eq 'adopted') -and $null -ne $_.CommentId })
 
     if ($live.Count -eq 0) {
-        return [pscustomobject]@{ Found = $false; CommentId = $null; ContractHash = $null; LaunchedAt = $null; Reason = 'no-unresolved-marker' }
+        return [pscustomobject]@{ Found = $false; CommentId = $null; ContractHash = $null; LaunchedAt = $null; Status = $null; AdoptedBySessionId = $null; Reason = 'no-live-marker' }
     }
 
     $winner = $live | Sort-Object -Property CommentId | Select-Object -First 1
@@ -1013,10 +1046,10 @@ function Resolve-GoalRunInflightMarkerForResolution {
     # uses) turns that into the same typed refusal empty already gets.
     $parsedLaunchedAt = ConvertTo-GRSParsedUtcDateTimeOrNull -Value $winner.LaunchedAt
     if ([string]::IsNullOrEmpty($winner.ContractHash) -or $null -eq $parsedLaunchedAt) {
-        return [pscustomobject]@{ Found = $false; CommentId = $winner.CommentId; ContractHash = $null; LaunchedAt = $null; Reason = 'marker-fields-unparseable' }
+        return [pscustomobject]@{ Found = $false; CommentId = $winner.CommentId; ContractHash = $null; LaunchedAt = $null; Status = $winner.Status; AdoptedBySessionId = $winner.AdoptedBySessionId; Reason = 'marker-fields-unparseable' }
     }
 
-    return [pscustomobject]@{ Found = $true; CommentId = $winner.CommentId; ContractHash = $winner.ContractHash; LaunchedAt = $winner.LaunchedAt; Reason = 'resolved-lowest-unresolved-comment-id' }
+    return [pscustomobject]@{ Found = $true; CommentId = $winner.CommentId; ContractHash = $winner.ContractHash; LaunchedAt = $winner.LaunchedAt; Status = $winner.Status; AdoptedBySessionId = $winner.AdoptedBySessionId; Reason = 'resolved-lowest-live-comment-id' }
 }
 
 function Invoke-GoalRunMutexLaunch {
@@ -1206,27 +1239,62 @@ function Resolve-GoalRunInvocationAction {
     .SYNOPSIS
         Decides what a /goal-run {issue} invocation should do given the
         current mutex state, per the requirement contract: a second
-        invocation while an unresolved marker exists refuses to launch a
-        new run and instead offers resume/triage.
+        invocation while a live (unresolved or adopted) marker exists
+        refuses to launch a new run and instead offers resume/triage.
     .DESCRIPTION
-        #912 D2-D4/AC15: exhaustive precedence, highest wins --
+        #912 D2-D4/AC15, extended by the #912 post-fix defense pass
+        (F1/D1): exhaustive precedence, highest wins --
           (i)   -ExistingUnresolvedMarker is $null -> 'launch-new'.
-          (ii)  -ForceAdopt is set -> 'adopt-and-resume' (the explicit
-                override lever always wins once a marker exists, even over
-                a fresh/non-dead marker).
-          (iii) -AppearsDead is $false (heartbeat fresh) ->
+          (ii)  -MarkerStatus is 'adopted' AND -AdoptedBySessionId equals
+                -CurrentSessionId -> 'resume-own-adopted' -- the SAME
+                session continuing its own already-adopted run (e.g. a
+                crash before provisioning ever completed), not a
+                concurrent launch. This closes a deterministic self-yield
+                livelock: without this rung, the admission gate saw no
+                'unresolved' marker (only its own 'adopted' one), fell
+                through to 'launch-new', posted a brand-new marker, and
+                that new marker (a strictly higher comment id) always lost
+                the mutex tiebreak to the session's own already-adopted
+                marker -- forever. This rung sits ahead of -ForceAdopt: an
+                operator re-typing `adopt` against a marker this session
+                already holds should still resume in place, not attempt a
+                redundant re-adoption.
+          (iii) -ForceAdopt is set -> 'adopt-and-resume' (the explicit
+                override lever always wins once a live marker exists and
+                is not this session's own already-adopted marker, even
+                over a fresh/non-dead marker).
+          (iv)  -AppearsDead is $false (heartbeat fresh) ->
                 'refuse-resume-existing' -- the live-run protection is
-                never inferred from an absent terminal outcome.
-          (iv)  -AppearsDead is $true AND -TerminalOutcomePresent is $true
+                never inferred from an absent terminal outcome. When
+                -MarkerStatus is 'adopted' (necessarily held by a
+                DIFFERENT session here, since rung (ii) already claimed
+                the same-session case), `Reason` is the distinguishing
+                'adopted-by-other-session' rather than the generic
+                'unresolved-marker-present'.
+          (v)   -AppearsDead is $true AND -TerminalOutcomePresent is $true
                 -> 'resolve-and-report-complete'.
-          (v)   -AppearsDead is $true, no terminal outcome ->
+          (vi)  -AppearsDead is $true, no terminal outcome ->
                 'adopt-and-resume' -- the sole action once staleness is
                 confirmed with nothing terminal recorded; there is no
                 separate report-only dead-run outcome anymore.
+    .PARAMETER MarkerStatus
+        #912 post-fix defense (F1/D1): the existing marker's own `Status`
+        field ('unresolved' | 'adopted'), when known -- e.g. from
+        Resolve-GoalRunInflightMarkerForResolution's own `Status` field.
+        Optional; omitted (the pre-fix caller shape), rung (ii) can never
+        trigger and every pre-fix caller's behavior is unchanged.
+    .PARAMETER AdoptedBySessionId
+        #912 post-fix defense (F1/D1): the existing marker's own
+        `AdoptedBySessionId` field, meaningful only when -MarkerStatus is
+        'adopted'.
+    .PARAMETER CurrentSessionId
+        #912 post-fix defense (F1/D1): the CURRENT invocation's own
+        session id, compared against -AdoptedBySessionId at rung (ii).
     .OUTPUTS
         [pscustomobject]@{ Action; Reason }
-        Action is one of: 'launch-new' | 'refuse-resume-existing' |
-        'adopt-and-resume' | 'resolve-and-report-complete'.
+        Action is one of: 'launch-new' | 'resume-own-adopted' |
+        'refuse-resume-existing' | 'adopt-and-resume' |
+        'resolve-and-report-complete'.
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -1234,17 +1302,24 @@ function Resolve-GoalRunInvocationAction {
         $ExistingUnresolvedMarker,
         [Parameter(Mandatory)][bool]$AppearsDead,
         [bool]$TerminalOutcomePresent = $false,
-        [bool]$ForceAdopt = $false
+        [bool]$ForceAdopt = $false,
+        [string]$MarkerStatus,
+        [string]$AdoptedBySessionId,
+        [string]$CurrentSessionId
     )
 
     if ($null -eq $ExistingUnresolvedMarker) {
         return [pscustomobject]@{ Action = 'launch-new'; Reason = 'no-unresolved-marker' }
     }
+    if ($MarkerStatus -eq 'adopted' -and -not [string]::IsNullOrEmpty($AdoptedBySessionId) -and -not [string]::IsNullOrEmpty($CurrentSessionId) -and $AdoptedBySessionId -eq $CurrentSessionId) {
+        return [pscustomobject]@{ Action = 'resume-own-adopted'; Reason = 'adopted-by-own-session' }
+    }
     if ($ForceAdopt) {
         return [pscustomobject]@{ Action = 'adopt-and-resume'; Reason = 'force-adopt-requested' }
     }
     if (-not $AppearsDead) {
-        return [pscustomobject]@{ Action = 'refuse-resume-existing'; Reason = 'unresolved-marker-present' }
+        $reason = if ($MarkerStatus -eq 'adopted') { 'adopted-by-other-session' } else { 'unresolved-marker-present' }
+        return [pscustomobject]@{ Action = 'refuse-resume-existing'; Reason = $reason }
     }
     if ($TerminalOutcomePresent) {
         return [pscustomobject]@{ Action = 'resolve-and-report-complete'; Reason = 'stale-marker-with-terminal-outcome' }
@@ -1771,6 +1846,21 @@ function Invoke-GoalRunRestart {
         active-state file alone is sufficient to fire that rung; only
         clearing both artifacts reaches the true 'pre-loop' resume state.
 
+        #912 post-fix defense (F3): "required, not optional" above does
+        NOT mean the two clears run unconditionally in sequence -- the
+        active-state clear is now gated on the stage-marker clear's own
+        success. Before this fix, an ambiguous-match refusal on the
+        stage-marker clear (Clear-GoalRunStageMarker's own `marker-
+        ambiguous` Reason, ClearedStageMarker = $false) still let the
+        active-state clear proceed unconditionally, producing an
+        unrecoverable half-clear: goal-run-active.json gone but the stage
+        marker -- the only durable carrier of the worktree path -- still
+        present. When the stage-marker clear itself fails,
+        ClearedActiveState now stays $false and Clear-GoalRunActiveState
+        is never even called, matching the existing
+        'restarted-partial-marker-clear-failed' outcome this function
+        already returns in that case.
+
         Never deletes the worktree directory itself -- restart's non-goals
         explicitly exclude worktree teardown; the operator recovers
         committed work from the reported branch by hand.
@@ -1910,7 +2000,19 @@ function Invoke-GoalRunRestart {
     # Only clear once the report has landed -- capture-then-clear, never the
     # reverse, per the requirement contract's single most load-bearing rule.
     $clearedMarker = Clear-GoalRunStageMarker -Issue $Issue -Owner $Owner -Repo $Repo
-    $clearedState = Clear-GoalRunActiveState -WorktreePath $WorktreePath
+
+    # #912 post-fix defense (F3): the two clears are NOT independent --
+    # gate the second on the first's own success. Before this fix both ran
+    # unconditionally in sequence, so an ambiguous-match refusal on the
+    # stage-marker clear (Reason = 'marker-ambiguous') still let the
+    # active-state clear proceed, producing an unrecoverable half-clear:
+    # goal-run-active.json gone but the stage marker (the only durable
+    # carrier of the worktree path) survives. When the stage-marker clear
+    # itself did not succeed, do not proceed to clear the active-state
+    # file at all -- the 'restarted-partial-marker-clear-failed' outcome
+    # below already reports this honestly, and ClearedActiveState stays
+    # $false to match.
+    $clearedState = if ($clearedMarker.Success) { Clear-GoalRunActiveState -WorktreePath $WorktreePath } else { $false }
 
     # M18 fix: an honest outcome distinguishes a fully-completed restart
     # from one where the stage-marker clear itself did not actually succeed
