@@ -288,4 +288,87 @@ exit /b 0
             $loggedArgvLine | Should -Match '--body-file'
         }
     }
+
+    Context 'Console.OutputEncoding UTF-8 pin (CE Gate #893 live-run fix, S1/S3(a))' {
+        BeforeAll {
+            $script:EncodingSavedPath = $env:PATH
+        }
+
+        AfterAll {
+            $env:PATH = $script:EncodingSavedPath
+        }
+
+        It 'decodes non-ASCII gh api stdout correctly even when the host console encoding starts as a legacy non-UTF8 code page' {
+            # Real external-command seam (a .cmd batch file spawned as a
+            # genuine child OS process, `type`-ing a pre-written UTF-8
+            # no-BOM fixture file to stdout byte-for-byte) -- never the
+            # `function global:gh` mock used elsewhere in this file, which
+            # hands back an in-memory .NET string and never exercises
+            # [Console]::OutputEncoding-governed native-stdout byte
+            # decoding at all (the same reason the CE Gate's live defect
+            # never showed up against the mocked suite despite 384/384
+            # green).
+            $mockDir = Join-Path $TestDrive 'gh-encoding-mock'
+            New-Item -ItemType Directory -Path $mockDir -Force | Out-Null
+
+            # Mixed non-ASCII payload matching the CE Gate S1 live-run
+            # fixture shape: accented character, em-dash, emoji, homoglyph.
+            # Built via direct string concatenation (never ConvertTo-Json)
+            # so the fixture file's on-disk bytes are the genuine
+            # multi-byte UTF-8 sequences (e.g. the em-dash's E2 80 94) --
+            # ConvertTo-Json's default \uXXXX escaping would silently
+            # collapse every non-ASCII character back down to plain ASCII
+            # digits/letters, which decodes identically under every
+            # single-byte code page and would make this test pass even
+            # with the pin missing entirely (a false-negative RED gap).
+            $nonAsciiBody = "caf`u{00E9} `u{2014} `u{1F389} `u{00EB}"
+            $payload = '{"body":"' + $nonAsciiBody + '"}'
+            $fixturePath = Join-Path $mockDir 'response.json'
+            [System.IO.File]::WriteAllText($fixturePath, $payload, [System.Text.UTF8Encoding]::new($false))
+
+            $ghMockContent = @"
+@echo off
+type "$fixturePath"
+exit /b 0
+"@
+            Set-Content -LiteralPath (Join-Path $mockDir 'gh.cmd') -Value $ghMockContent -Encoding ASCII
+
+            Remove-Item Function:gh -ErrorAction SilentlyContinue
+            $env:PATH = "$mockDir$([System.IO.Path]::PathSeparator)$script:EncodingSavedPath"
+
+            $originalEncoding = [Console]::OutputEncoding
+            try {
+                # Force the exact host state the CE Gate live-run defect
+                # surfaced under: a legacy OEM/DOS code page (CP437 on
+                # Windows), set BEFORE this file is (re-)dot-sourced, so
+                # this test proves the library's OWN pin -- not test
+                # ordering elsewhere in the suite -- is what corrects it.
+                [Console]::OutputEncoding = [System.Text.Encoding]::GetEncoding(437)
+
+                # Re-dot-source the library now, with the console still
+                # pinned to CP437: this is the exact moment the fix must
+                # fire (marker-transport-core.ps1's first top-level
+                # statement).
+                . $script:CoreLibPath
+
+                [Console]::OutputEncoding.WebName | Should -Be 'utf-8' -Because 'marker-transport-core.ps1 must pin Console.OutputEncoding to UTF-8 at dot-source time, before any of its functions run'
+
+                $actualBody = $null
+                try {
+                    $actualBody = Get-CommentBodyById -Owner $script:Owner -Repo $script:Repo -CommentId 999
+                }
+                finally {
+                    # Restore the in-process mock immediately so no later
+                    # test in this Describe accidentally spawns a real
+                    # process.
+                    . ([scriptblock]::Create('function global:gh {}'))
+                }
+
+                $actualBody | Should -Be $nonAsciiBody -Because 'a real native gh process emitting genuine UTF-8 stdout must decode correctly once the pin has fired -- CP437-decoded mojibake would corrupt every multi-byte UTF-8 sequence (e.g. the em-dash''s E2 80 94 bytes) instead, exactly the corruption that failed CE Gate S1 (verbatim persistence) and, via the same broken read-back never matching the write candidate, S3(a) (double-run convergence)'
+            }
+            finally {
+                [Console]::OutputEncoding = $originalEncoding
+            }
+        }
+    }
 }

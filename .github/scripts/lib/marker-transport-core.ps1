@@ -63,6 +63,43 @@
     upsert helper); no GraphQL anywhere in this file.
 #>
 
+# Read-side UTF-8 pin (CE Gate live-run fix, issue #893 S1/S3(a)): every
+# function below that captures `gh api` stdout via the `&` call operator --
+# Get-CommentBodyById, Get-CommentBodyByIdWithStatus, Set-CommentBodyDirect
+# (its own post-write verify GET), and Find-AllCommentsByExactMarker --
+# otherwise decodes that captured output through [Console]::OutputEncoding,
+# which defaults to the host's legacy OEM/DOS code page (e.g. CP437 on
+# Windows), not UTF-8. Any non-ASCII byte in a marker-family body (emoji,
+# accented characters, an em-dash, a homoglyph) then round-trips corrupted,
+# which fails Test-MarkerReadBack's normalized-equality gate and -- because
+# the corrupted read-back never matches the write candidate either --
+# defeats post-new/upsert idempotency, so a re-run posts a duplicate comment
+# instead of converging (CE Gate S1 and S3(a)).
+#
+# This is the SAME process-wide-static class of bug already fixed at
+# .github/scripts/frame-credit-ledger.ps1:63 and
+# .github/scripts/orchestra-spine.ps1:15 (see also the C2 relocation history
+# in .github/scripts/lib/cost-baseline-harvest.ps1:1575). Those fixes pin at
+# each TOP-LEVEL ENTRY POINT; this file has no single entry point of its
+# own -- it is dot-sourced directly by multiple wrappers
+# (skills/session-memory-contract/scripts/persist-marker.ps1 AND
+# skills/session-memory-contract/scripts/persist-phase-ledger.ps1, the
+# latter carrying no OutputEncoding pin of its own anywhere in its own call
+# chain today) and is documented (this file's own .DESCRIPTION) as safe to
+# dot-source directly, bypassing any wrapper. Pinning only in one wrapper
+# would leave every other caller -- present or future -- silently exposed
+# again, exactly the fragility class the cost-baseline-harvest.ps1 C2 fix
+# already had to correct once. Pinning HERE, as this file's own first
+# top-level statement, fires at dot-source time regardless of which caller
+# loads it, before any of this file's functions can run, and needs no
+# per-caller opt-in.
+try {
+    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+}
+catch {
+    [Console]::Error.WriteLine("marker-transport-core: console UTF-8 pin failed: $($_.Exception.Message)")
+}
+
 # ---------------------------------------------------------------------------
 # Promoted (byte-identical behavior vs. the PPL-prefixed originals; see
 # persist-phase-ledger-core.ps1's own comments for the delegators that now

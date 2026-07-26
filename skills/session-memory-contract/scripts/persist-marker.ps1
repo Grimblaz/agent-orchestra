@@ -113,6 +113,26 @@ param(
     [Parameter(Mandatory, ParameterSetName = 'Burst')][string]$BurstManifest
 )
 
+# Read-side UTF-8 pin (CE Gate live-run fix, issue #893 S1/S3(a)): the
+# authoritative pin now lives at the top of
+# .github/scripts/lib/marker-transport-core.ps1 (fires for every caller
+# that dot-sources it, including a direct dot-source that bypasses this
+# wrapper entirely). This second, redundant instance follows the same
+# defense-in-depth convention already established for this process-wide
+# static -- see .github/scripts/frame-credit-ledger.ps1:63 and
+# .github/scripts/orchestra-spine.ps1:15, both of which pin at their own
+# top-level entry point rather than relying solely on a dot-sourced lib --
+# and the .github/scripts/lib/cost-baseline-harvest.ps1 C2 fix, which
+# needed a SECOND pin instance in the same file after a single upstream pin
+# proved insufficient under a different call order. Setting this twice in
+# one process is a harmless idempotent no-op.
+try {
+    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+}
+catch {
+    [Console]::Error.WriteLine("persist-marker: console UTF-8 pin failed: $($_.Exception.Message)")
+}
+
 . (Join-Path $PSScriptRoot '../../../.github/scripts/lib/marker-transport-core.ps1')
 . (Join-Path $PSScriptRoot '../../../.github/scripts/lib/frame-engagement-record-core.ps1')
 . (Join-Path $PSScriptRoot '../../../.github/scripts/lib/frame-spine-core.ps1')
