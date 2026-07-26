@@ -107,6 +107,13 @@ if (-not $isDotSourced) {
         $result = Invoke-GoalRunPredicateEvaluate @invokeArgs
     }
     catch {
+        # #912 review fix (M18): a bare `exit 2` here discarded the
+        # exception with no diagnostic at all -- a human reading process
+        # logs after an unexpected halt had no way to tell WHY the
+        # predicate crashed. Writing the message to stderr before exiting
+        # does not change the exit-code contract (still exit 2, still
+        # release-permitting-never on this path).
+        [Console]::Error.WriteLine($_.Exception.Message)
         exit 2
     }
 

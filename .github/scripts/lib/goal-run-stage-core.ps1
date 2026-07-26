@@ -262,6 +262,18 @@ function Get-GoalRunIssueComments {
         (receiving $Issue, $Owner, $Repo, $GhCliPath), mirroring the
         -PrReader convention Test-GoalRunPrEmissionsVerified already uses,
         so tests never need gh on PATH or a live network call.
+    .PARAMETER RepoRoot
+        #912 review fix (M18): when -Owner/-Repo are not supplied, the
+        owner/repo resolution below previously ALWAYS resolved against the
+        process CWD (`gh repo view` / bare `git remote get-url origin`,
+        neither pointed at any particular directory) -- wrong whenever a
+        caller with a worktree path different from the process cwd (e.g.
+        the goal-run harness) needs comments for a repo other than
+        whatever the process happens to be sitting in. When supplied, this
+        resolves owner/repo from THIS path's git remote instead, mirroring
+        Get-GCPinnedCommentBody's own -RepoRoot-aware `git -C` resolution
+        (goal-contract-validate-core.ps1). Optional -- omitted, this
+        preserves pre-fix behavior (resolve from process cwd).
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject[]])]
@@ -269,7 +281,9 @@ function Get-GoalRunIssueComments {
         [Parameter(Mandatory)][int]$Issue,
         [string]$Owner,
         [string]$Repo,
+        [string]$RepoRoot,
         [string]$GhCliPath = 'gh',
+        [string]$GitCliPath = 'git',
         [scriptblock]$CommentsReader
     )
 
@@ -281,7 +295,22 @@ function Get-GoalRunIssueComments {
     if ($Owner -and $Repo) {
         $ownerRepo = "$Owner/$Repo"
     }
-    else {
+    elseif (-not [string]::IsNullOrWhiteSpace($RepoRoot)) {
+        # M18 fix: resolve from THIS worktree's git remote rather than the
+        # ambient-cwd paths below, which is wrong whenever -RepoRoot
+        # differs from the process cwd.
+        try {
+            $remoteUrl = & $GitCliPath -C $RepoRoot remote get-url origin 2>$null
+            if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($remoteUrl)) {
+                $match = [regex]::Match($remoteUrl, 'github\.com[:/](.+?)(?:\.git)?/?$')
+                if ($match.Success) { $ownerRepo = $match.Groups[1].Value.Trim() }
+            }
+        }
+        catch {
+            # Falls through to the ambient-cwd resolution below.
+        }
+    }
+    if (-not $ownerRepo) {
         try {
             $viewed = & $GhCliPath repo view --json nameWithOwner --jq '.nameWithOwner' 2>$null
             if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($viewed)) {
@@ -293,7 +322,7 @@ function Get-GoalRunIssueComments {
         }
         if (-not $ownerRepo) {
             try {
-                $remoteUrl = git remote get-url origin 2>$null
+                $remoteUrl = & $GitCliPath remote get-url origin 2>$null
                 if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($remoteUrl)) {
                     $match = [regex]::Match($remoteUrl, 'github\.com[:/](.+?)(?:\.git)?/?$')
                     if ($match.Success) { $ownerRepo = $match.Groups[1].Value.Trim() }
@@ -681,11 +710,39 @@ function Set-GoalRunInflightMarkerAdopted {
         reconciliation is explicitly out of scope for this primitive --
         the field on an adopted marker is forensics only (it records what
         the marker said at adoption time, nothing more).
+
+        #912 review fix (M7): the pre-check-then-PATCH sequence above is
+        itself check-then-act (TOCTOU) with no compare-and-set -- two
+        invocations can both pass the pre-check (neither yet sees the
+        other's adoption) and both PATCH, with the second silently
+        clobbering the first. The single verification read immediately
+        after OUR OWN PATCH cannot detect a concurrent PATCH that lands
+        AFTER that read succeeds. This function now adds a SECOND,
+        reconfirmation read after -ReconfirmDelayMs (mirroring
+        Invoke-GoalRunMutexLaunch's own reconfirm-after-delay mechanism for
+        the exact same eventual-consistency/race class) that re-checks the
+        comment still shows OUR SessionId. A losing concurrent adopter
+        detects the loss here (Reason = 'lost-to-concurrent-adopter')
+        instead of falsely believing it holds the marker.
+
+        #912 review fix (M7): -preBody now uses the ACTUALLY-FETCHED
+        pre-adoption body (already read into $preCheckMatch.body above)
+        rather than a synthetically reconstructed one. A reconstructed
+        body only matches the real one when the caller's inputs are
+        byte-identical to what generated the real body (field order,
+        whitespace, optional fields) -- any drift would make the
+        'verification-body-unchanged' comparison silently wrong (a false
+        negative OR positive) in a way that has nothing to do with whether
+        the mutation actually landed.
     .OUTPUTS
         [pscustomobject]@{ Success; Verified; Reason; AdoptedBySessionId }
         Reason is one of: 'adopted-and-verified' | 'already-adopted' |
         'patch-failed' | 'verification-comment-not-found' |
-        'verification-body-unchanged' | 'verification-status-mismatch'.
+        'verification-body-unchanged' | 'verification-status-mismatch' |
+        'reconfirm-comment-not-found' | 'lost-to-concurrent-adopter'.
+        Success is truthful (never $true when Verified is $false) --
+        Verified remains the more specific field for "the PATCH call itself
+        succeeded but the mutation could not be confirmed".
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -696,7 +753,13 @@ function Set-GoalRunInflightMarkerAdopted {
         [Parameter(Mandatory)][string]$LaunchedAt,
         [Parameter(Mandatory)][string]$SessionId,
         [string]$Owner,
-        [string]$Repo
+        [string]$Repo,
+        # #912 review fix (M7): injectable to 0 for tests, mirroring
+        # Invoke-GoalRunMutexLaunch's -ReconfirmDelayMs convention.
+        # Production callers should leave the default so the reconfirm
+        # read has a real chance to observe a concurrent adopter's PATCH
+        # that had not yet landed at the first verification read.
+        [int]$ReconfirmDelayMs = 1500
     )
 
     $preCheckComments = Get-GoalRunIssueComments -Issue $Issue -Owner $Owner -Repo $Repo
@@ -708,7 +771,13 @@ function Set-GoalRunInflightMarkerAdopted {
         }
     }
 
-    $preBody = New-GoalRunInflightMarkerBody -Issue $Issue -ContractHash $ContractHash -LaunchedAt $LaunchedAt -Status 'unresolved'
+    # #912 review fix (M7): use the actually-fetched pre-adoption body when
+    # the pre-check read found the comment; only fall back to a
+    # synthetically reconstructed body in the edge case where the pre-check
+    # read itself could not locate the comment at all (nothing real to use).
+    $preBody = if ($preCheckMatch) { $preCheckMatch.body } else {
+        New-GoalRunInflightMarkerBody -Issue $Issue -ContractHash $ContractHash -LaunchedAt $LaunchedAt -Status 'unresolved'
+    }
     $adoptedBody = New-GoalRunInflightMarkerBody -Issue $Issue -ContractHash $ContractHash -LaunchedAt $LaunchedAt -Status 'adopted' -AdoptedBySessionId $SessionId
     $ownerSegment = if ($Owner) { $Owner } else { '{owner}' }
     $repoSegment = if ($Repo) { $Repo } else { '{repo}' }
@@ -737,16 +806,41 @@ function Set-GoalRunInflightMarkerAdopted {
     $verifyComments = Get-GoalRunIssueComments -Issue $Issue -Owner $Owner -Repo $Repo
     $verifyMatch = Find-GRSInflightMarkerCommentById -Comments $verifyComments -TargetCommentId $CommentId
 
+    # #912 review fix (M18): Success must be truthful -- a verification
+    # failure means the mutation this function exists to confirm did NOT
+    # observably land, which is not a success by this function's own
+    # contract, even though the PATCH call itself returned exit 0. Verified
+    # remains the more specific field for that distinction.
     if (-not $verifyMatch) {
-        return [pscustomobject]@{ Success = $true; Verified = $false; Reason = 'verification-comment-not-found'; AdoptedBySessionId = $SessionId }
+        return [pscustomobject]@{ Success = $false; Verified = $false; Reason = 'verification-comment-not-found'; AdoptedBySessionId = $SessionId }
     }
     if ($verifyMatch.body -eq $preBody) {
-        return [pscustomobject]@{ Success = $true; Verified = $false; Reason = 'verification-body-unchanged'; AdoptedBySessionId = $SessionId }
+        return [pscustomobject]@{ Success = $false; Verified = $false; Reason = 'verification-body-unchanged'; AdoptedBySessionId = $SessionId }
     }
 
     $parsedVerify = ConvertFrom-GoalRunInflightMarkerBody -Body $verifyMatch.body
     if ($parsedVerify.Status -ne 'adopted' -or $parsedVerify.AdoptedBySessionId -ne $SessionId) {
-        return [pscustomobject]@{ Success = $true; Verified = $false; Reason = 'verification-status-mismatch'; AdoptedBySessionId = $SessionId }
+        return [pscustomobject]@{ Success = $false; Verified = $false; Reason = 'verification-status-mismatch'; AdoptedBySessionId = $SessionId }
+    }
+
+    # #912 review fix (M7): TOCTOU reconfirmation -- the verification read
+    # above proves OUR PATCH landed, but not that a concurrent adopter's
+    # PATCH did not land immediately afterward. Re-read after a brief delay
+    # to give a same-window concurrent adopter time to have already
+    # clobbered this comment, mirroring Invoke-GoalRunMutexLaunch's own
+    # reconfirm-after-delay pattern for the identical race class.
+    if ($ReconfirmDelayMs -gt 0) {
+        Start-Sleep -Milliseconds $ReconfirmDelayMs
+    }
+    $reconfirmComments = Get-GoalRunIssueComments -Issue $Issue -Owner $Owner -Repo $Repo
+    $reconfirmMatch = Find-GRSInflightMarkerCommentById -Comments $reconfirmComments -TargetCommentId $CommentId
+
+    if (-not $reconfirmMatch) {
+        return [pscustomobject]@{ Success = $false; Verified = $false; Reason = 'reconfirm-comment-not-found'; AdoptedBySessionId = $SessionId }
+    }
+    $parsedReconfirm = ConvertFrom-GoalRunInflightMarkerBody -Body $reconfirmMatch.body
+    if ($parsedReconfirm.Status -ne 'adopted' -or $parsedReconfirm.AdoptedBySessionId -ne $SessionId) {
+        return [pscustomobject]@{ Success = $false; Verified = $false; Reason = 'lost-to-concurrent-adopter'; AdoptedBySessionId = $parsedReconfirm.AdoptedBySessionId }
     }
 
     return [pscustomobject]@{ Success = $true; Verified = $true; Reason = 'adopted-and-verified'; AdoptedBySessionId = $SessionId }
@@ -779,6 +873,50 @@ function Resolve-GoalRunInflightMutexOutcome {
         WinningCommentId     = $lowest
         LiveMarkerCommentIds = @($ids | Sort-Object -Unique)
     }
+}
+
+function script:ConvertTo-GRSParsedUtcDateTimeOrNull {
+    <#
+    .SYNOPSIS
+        #912 review fix (M6): shared parse guard -- attempts to parse
+        -Value as a [datetime] and returns $null on ANY failure (empty,
+        whitespace, or genuinely unparseable garbage such as "TBD"),
+        rather than letting a bare [datetime] cast throw. Used everywhere a
+        LaunchedAt-shaped value needs a typed refusal instead of an
+        unguarded cast blowing up downstream (Delegation Instead Of
+        Duplication -- implementation-discipline methodology -- rather than
+        re-deriving this guard at each call site).
+    .DESCRIPTION
+        Accepts either an already-parsed [datetime] (passed straight
+        through, no string round-trip that could lose Kind) or a string
+        (parsed via [datetime]::TryParse with RoundtripKind so a Z-suffixed
+        UTC string parses as Kind=Utc rather than Kind=Local -- consistent
+        with the M6/#874 fix already applied to Test-GoalRunInflightAppearsDead
+        just above).
+    .OUTPUTS
+        [Nullable[datetime]] -- $null on any parse failure or empty input.
+    #>
+    [CmdletBinding()]
+    [OutputType([object])]
+    param(
+        [AllowNull()]$Value
+    )
+
+    if ($null -eq $Value) { return $null }
+    if ($Value -is [datetime]) { return $Value }
+
+    $asString = [string]$Value
+    if ([string]::IsNullOrWhiteSpace($asString)) { return $null }
+
+    $parsed = [datetime]::MinValue
+    $ok = [datetime]::TryParse(
+        $asString,
+        [System.Globalization.CultureInfo]::InvariantCulture,
+        [System.Globalization.DateTimeStyles]::RoundtripKind,
+        [ref]$parsed
+    )
+    if (-not $ok) { return $null }
+    return $parsed
 }
 
 function Resolve-GoalRunInflightMarkerForResolution {
@@ -829,18 +967,33 @@ function Resolve-GoalRunInflightMarkerForResolution {
     )
 
     $allMarkers = Get-GoalRunInflightMarkers -Issue $Issue -Owner $Owner -Repo $Repo
-    # This site's OWN unresolved-only filter -- see .DESCRIPTION above for
-    # why it is not inherited from Resolve-GoalRunInflightMutexOutcome or
-    # from Invoke-GoalRunMutexLaunch's :~658 Where-Object.
-    $unresolved = @($allMarkers | Where-Object { $_.Status -eq 'unresolved' -and $null -ne $_.CommentId })
+    # This site's OWN live-marker filter -- see .DESCRIPTION above for why
+    # it is not inherited from Resolve-GoalRunInflightMutexOutcome or from
+    # Invoke-GoalRunMutexLaunch's own Where-Object. #912 review fix (M1):
+    # 'adopted' is a live/held status (a run in progress under a new
+    # session), not a resolved one -- a marker this session itself just
+    # adopted must still be findable here so that session's own later
+    # resolution call (at its own ending) can locate it. Excluding it (the
+    # pre-fix `-eq 'unresolved'`-only filter) made every already-adopted
+    # marker invisible to this function.
+    $live = @($allMarkers | Where-Object { ($_.Status -eq 'unresolved' -or $_.Status -eq 'adopted') -and $null -ne $_.CommentId })
 
-    if ($unresolved.Count -eq 0) {
+    if ($live.Count -eq 0) {
         return [pscustomobject]@{ Found = $false; CommentId = $null; ContractHash = $null; LaunchedAt = $null; Reason = 'no-unresolved-marker' }
     }
 
-    $winner = $unresolved | Sort-Object -Property CommentId | Select-Object -First 1
+    $winner = $live | Sort-Object -Property CommentId | Select-Object -First 1
 
-    if ([string]::IsNullOrEmpty($winner.ContractHash) -or [string]::IsNullOrEmpty($winner.LaunchedAt)) {
+    # #912 review fix (M6): IsNullOrEmpty alone only catches an EMPTY
+    # LaunchedAt -- a field containing non-whitespace garbage (e.g. "TBD"
+    # on a hand-edited marker) passed this guard before the fix and then
+    # threw downstream at the exact Mandatory [datetime] parameter binding
+    # this guard's own docstring claims to prevent reaching. Attempting an
+    # actual parse (via the shared ConvertTo-GRSParsedUtcDateTimeOrNull
+    # guard, same helper Invoke-GoalRunRestart's M17 fix below now also
+    # uses) turns that into the same typed refusal empty already gets.
+    $parsedLaunchedAt = ConvertTo-GRSParsedUtcDateTimeOrNull -Value $winner.LaunchedAt
+    if ([string]::IsNullOrEmpty($winner.ContractHash) -or $null -eq $parsedLaunchedAt) {
         return [pscustomobject]@{ Found = $false; CommentId = $winner.CommentId; ContractHash = $null; LaunchedAt = $null; Reason = 'marker-fields-unparseable' }
     }
 
@@ -901,7 +1054,12 @@ function Invoke-GoalRunMutexLaunch {
     }
 
     $allMarkers = Get-GoalRunInflightMarkers -Issue $Issue -Owner $Owner -Repo $Repo
-    $liveIds = @($allMarkers | Where-Object { $_.Status -eq 'unresolved' } | ForEach-Object { $_.CommentId } | Where-Object { $null -ne $_ })
+    # #912 review fix (M1): 'adopted' is a live/held marker, not a resolved
+    # one -- a marker held by a concurrent invocation that has already
+    # adopted it must still count in the tiebreak set, otherwise a second
+    # invocation racing against an adopted (in-progress) run would see it
+    # as absent and wrongly proceed to provision a duplicate worktree.
+    $liveIds = @($allMarkers | Where-Object { $_.Status -eq 'unresolved' -or $_.Status -eq 'adopted' } | ForEach-Object { $_.CommentId } | Where-Object { $null -ne $_ })
     $tiebreak = Resolve-GoalRunInflightMutexOutcome -OwnCommentId $posted.CommentId -LiveMarkerCommentIds $liveIds
 
     if ($tiebreak.Outcome -eq 'yield') {
@@ -920,7 +1078,9 @@ function Invoke-GoalRunMutexLaunch {
         Start-Sleep -Milliseconds $ReconfirmDelayMs
     }
     $reconfirmMarkers = Get-GoalRunInflightMarkers -Issue $Issue -Owner $Owner -Repo $Repo
-    $reconfirmLiveIds = @($reconfirmMarkers | Where-Object { $_.Status -eq 'unresolved' } | ForEach-Object { $_.CommentId } | Where-Object { $null -ne $_ })
+    # #912 review fix (M1): same live-set fix as the reconcile read above --
+    # an adopted marker must still be visible on reconfirm.
+    $reconfirmLiveIds = @($reconfirmMarkers | Where-Object { $_.Status -eq 'unresolved' -or $_.Status -eq 'adopted' } | ForEach-Object { $_.CommentId } | Where-Object { $null -ne $_ })
     $reconfirmTiebreak = Resolve-GoalRunInflightMutexOutcome -OwnCommentId $posted.CommentId -LiveMarkerCommentIds $reconfirmLiveIds
 
     if ($reconfirmTiebreak.Outcome -eq 'yield') {
@@ -983,7 +1143,15 @@ function Test-GoalRunInflightAppearsDead {
 
     $terminalOutcomePresent = [bool]($HaltReportExists -or $PrExists)
 
-    if ($MarkerStatus -ne 'unresolved') {
+    # #912 review fix (M1): short-circuit ONLY on a genuinely resolved
+    # marker. Before this fix, this checked `-ne 'unresolved'`, which also
+    # matched 'adopted' and reported it via the SAME 'marker-already-
+    # resolved' reason -- a false claim, since an adopted marker is a run
+    # still in progress under a new session, not a withdrawn/completed one
+    # (see the Status enum note on New-GoalRunInflightMarkerBody). An
+    # adopted marker must fall through to the same elapsed-time staleness
+    # computation an unresolved marker gets.
+    if ($MarkerStatus -eq 'resolved') {
         return [pscustomobject]@{ AppearsDead = $false; Reason = 'marker-already-resolved'; ElapsedMinutes = $null; LastSeenAt = $null; TerminalOutcomePresent = $terminalOutcomePresent }
     }
 
@@ -1141,6 +1309,16 @@ function Resolve-GoalRunControlReturn {
         -LaunchedAt is optional and preserves pre-fix behavior when omitted
         (no existing-report fetch, always emits) -- mirroring the M15
         -LaunchedAt convention already documented below.
+
+        #912 review fix (M18): the recency-guard comment fetch now passes
+        -RepoRoot through to Get-GoalRunIssueComments (this function
+        already receives -RepoRoot as a Mandatory parameter, but never used
+        it for this call before this fix -- the fetch silently resolved
+        owner/repo from the PROCESS CWD instead) and exposes its own
+        -CommentsReader injectable, matching this file's existing
+        injectable-reader convention (Get-GoalRunIssueComments's own
+        -CommentsReader, Test-GoalRunPrEmissionsVerified's -PrReader) so
+        tests can substitute a fixture reader without needing gh on PATH.
     .OUTPUTS
         [pscustomobject]@{ Outcome; Event; Attempts; HaltResult }
         Outcome is one of: 'released' | 'halted-verdict-not-flushed'.
@@ -1161,7 +1339,11 @@ function Resolve-GoalRunControlReturn {
         [string]$LaunchedAt,
         [scriptblock]$StatusReader = { param($Path, $LaunchedAtArg) Get-GoalRunStatusEvent -TranscriptPath $Path -LaunchedAt $LaunchedAtArg },
         [string]$Owner,
-        [string]$Repo
+        [string]$Repo,
+        # #912 review fix (M18): injectable reader for the recency-guard's
+        # own comment fetch below -- passed straight through to
+        # Get-GoalRunIssueComments's existing -CommentsReader parameter.
+        [scriptblock]$CommentsReader
     )
 
     $await = Invoke-GoalRunAwaitStatusVerdict -TranscriptPath $TranscriptPath -MaxRetries $MaxRetries -RetryDelayMs $RetryDelayMs -LaunchedAt $LaunchedAt -StatusReader $StatusReader
@@ -1197,19 +1379,34 @@ function Resolve-GoalRunControlReturn {
         # a raw ISO-8601 string (-LaunchedAt) or as an already-parsed
         # [datetime] (Get-GoalRunIssueComments' updatedAt, since
         # ConvertFrom-Json auto-parses ISO-looking JSON string values).
+        #
+        # #912 review fix (M3): a Z-suffixed -LaunchedAt string cast via
+        # plain [datetime] lands Kind=Local (the SAME .NET behavior the M6
+        # fix on Test-GoalRunInflightAppearsDead, ~200 lines above,
+        # documents and fixes for LaunchedAt/HeartbeatAt) -- but
+        # $candidate.updatedAt arrives from ConvertFrom-Json already
+        # Kind=Utc. Comparing a Kind=Local value against a Kind=Utc value
+        # with a plain `-gt` skews the verdict by the host machine's local
+        # UTC offset, exactly the M6 bug shape. .ToUniversalTime() is the
+        # same fix applied here: a correct no-op on an already-Utc value, a
+        # correct reverse-conversion on a Local-tagged one.
         $launchedTimestamp = $null
-        try { $launchedTimestamp = [datetime]$LaunchedAt } catch { $launchedTimestamp = $null }
+        try { $launchedTimestamp = ([datetime]$LaunchedAt).ToUniversalTime() } catch { $launchedTimestamp = $null }
 
         if ($launchedTimestamp) {
             $haltMarker = "<!-- goal-halt-report-$Issue -->"
-            $existingComments = @(Get-GoalRunIssueComments -Issue $Issue -Owner $Owner -Repo $Repo)
+            # #912 review fix (M18): thread -RepoRoot and the injectable
+            # -CommentsReader through so this fetch resolves owner/repo from
+            # the target worktree (or a test fixture) instead of always the
+            # process CWD.
+            $existingComments = @(Get-GoalRunIssueComments -Issue $Issue -Owner $Owner -Repo $Repo -RepoRoot $RepoRoot -CommentsReader $CommentsReader)
             $existingMatches = @($existingComments | Where-Object { $_.body -and ($_.body -like "*$haltMarker*") })
 
             if ($existingMatches.Count -gt 0) {
                 $latestExistingTimestamp = $null
                 foreach ($candidate in $existingMatches) {
                     $candidateTimestamp = $null
-                    try { $candidateTimestamp = [datetime]$candidate.updatedAt } catch { $candidateTimestamp = $null }
+                    try { $candidateTimestamp = ([datetime]$candidate.updatedAt).ToUniversalTime() } catch { $candidateTimestamp = $null }
                     if ($candidateTimestamp -and (-not $latestExistingTimestamp -or $candidateTimestamp -gt $latestExistingTimestamp)) {
                         $latestExistingTimestamp = $candidateTimestamp
                     }
@@ -1404,10 +1601,21 @@ function Clear-GoalRunStageMarker {
         each match. Fail-open per this file's existing gh-wrapper
         convention: a failed delete is reported to stderr and does not
         throw or stop the remaining deletes.
+
+        #912 review fix (M8): before deleting anything, refuses outright
+        (deletes NOTHING) when 2+ comments carry the marker, rather than
+        hard-DELETEing every match. This repo already established the
+        contrary precedent for exactly this ambiguity shape --
+        Get-GCPinnedCommentBody (goal-contract-validate-core.ps1) treats
+        2+ marker-pinned matches as unresolvable and refuses to guess
+        rather than acting on any candidate. A single unambiguous match
+        still deletes normally.
     .OUTPUTS
-        [pscustomobject]@{ Success; DeletedCommentIds; FailedCommentIds }
+        [pscustomobject]@{ Success; DeletedCommentIds; FailedCommentIds; Reason }
         Success is $true only when every matched comment id was deleted
-        (or there were zero matches to delete in the first place).
+        (or there were zero matches to delete in the first place). Reason
+        is $null on the normal path, or 'marker-ambiguous' when 2+ matches
+        caused a full refusal.
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -1420,6 +1628,20 @@ function Clear-GoalRunStageMarker {
     $marker = "<!-- goal-run-stage-$Issue -->"
     $comments = Get-GoalRunIssueComments -Issue $Issue -Owner $Owner -Repo $Repo
     $matched = @($comments | Where-Object { $_.body -and ($_.body -like "*$marker*") })
+
+    if ($matched.Count -gt 1) {
+        # M8 fix: refuse-on-ambiguity, mirroring Get-GCPinnedCommentBody's
+        # own precedent -- deleting every match risked destroying a
+        # legitimate different marker instance with no way to know which
+        # one the caller actually intended.
+        [Console]::Error.WriteLine("Clear-GoalRunStageMarker: $($matched.Count) comments on issue $Issue carry marker '$marker'; refusing to guess (ambiguous).")
+        return [pscustomobject]@{
+            Success           = $false
+            DeletedCommentIds = @()
+            FailedCommentIds  = @()
+            Reason            = 'marker-ambiguous'
+        }
+    }
 
     $deleted = [System.Collections.Generic.List[long]]::new()
     $failed = [System.Collections.Generic.List[long]]::new()
@@ -1447,6 +1669,7 @@ function Clear-GoalRunStageMarker {
         Success           = ($failed.Count -eq 0)
         DeletedCommentIds = $deleted.ToArray()
         FailedCommentIds  = $failed.ToArray()
+        Reason            = $null
     }
 }
 
@@ -1532,11 +1755,41 @@ function Invoke-GoalRunRestart {
         Never deletes the worktree directory itself -- restart's non-goals
         explicitly exclude worktree teardown; the operator recovers
         committed work from the reported branch by hand.
+
+        #912 review fix (M6/M17): the -LaunchedAt liveness check now routes
+        through the SAME shared parse guard (ConvertTo-GRSParsedUtcDateTimeOrNull)
+        Resolve-GoalRunInflightMarkerForResolution's M6 fix uses, rather
+        than a bare `[datetime]$LaunchedAt` cast that throws on garbage
+        input. This also closes the M17 fail-OPEN gap: a genuinely
+        ABSENT -LaunchedAt (the documented "prior restart already cleared
+        the active-state file" case) still proceeds -- there is nothing
+        live to protect against -- but a NON-NULL, UNPARSEABLE -LaunchedAt
+        (the active-state file exists but could not be read/parsed) now
+        fails CLOSED with a distinct refusal (Outcome =
+        'refused-unparseable-state') instead of being silently treated as
+        "appears dead" and permitted to clear a possibly-live run's
+        markers. These are deliberately different signals: absence is
+        confirmed-safe evidence, corruption is NO evidence either way.
+
+        #912 review fix (M18): the branch-name capture now also reports
+        whether the resolved value is a REAL branch name via
+        -BranchNameResolved, rather than letting a degenerate result
+        (git's own 'unknown'/'could not determine' answer of the literal
+        string 'HEAD' on a detached-HEAD worktree) be recorded as if it
+        were authoritative.
+
+        #912 review fix (M18): the final Outcome is no longer 'restarted'
+        unconditionally -- when Clear-GoalRunStageMarker itself reports
+        failure, this returns 'restarted-partial-marker-clear-failed'
+        instead, so a caller/report cannot mistake a partially-completed
+        restart for a fully clean one.
     .OUTPUTS
         [pscustomobject]@{ Outcome; Reason; ReportUrl; BranchName;
-        WorktreePath; ClearedStageMarker; ClearedActiveState }
-        Outcome is one of: 'refused-live-run' | 'report-post-failed' |
-        'restarted'.
+        BranchNameResolved; WorktreePath; ClearedStageMarker;
+        ClearedActiveState }
+        Outcome is one of: 'refused-live-run' | 'refused-unparseable-state'
+        | 'report-post-failed' | 'restarted' |
+        'restarted-partial-marker-clear-failed'.
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -1553,14 +1806,34 @@ function Invoke-GoalRunRestart {
         [datetime]$Now = (Get-Date).ToUniversalTime()
     )
 
-    if ($null -ne $LaunchedAt) {
-        $appears = Test-GoalRunInflightAppearsDead -MarkerStatus 'unresolved' -LaunchedAt ([datetime]$LaunchedAt) `
-            -HeartbeatAt $HeartbeatAt -HaltReportExists $false -PrExists $false -Now $Now -StaleThresholdMinutes $StaleThresholdMinutes
-        $appearsDead = $appears.AppearsDead
+    if ($null -eq $LaunchedAt) {
+        # Genuinely absent evidence -- e.g. a prior restart attempt already
+        # cleared the active-state file but the marker delete failed. There
+        # is nothing live to refuse against.
+        $appearsDead = $true
     }
     else {
-        # No active-state evidence at all -- nothing live to refuse against.
-        $appearsDead = $true
+        $parsedLaunchedAt = ConvertTo-GRSParsedUtcDateTimeOrNull -Value $LaunchedAt
+        if ($null -eq $parsedLaunchedAt) {
+            # M17 fix: a NON-NULL but unparseable -LaunchedAt means the
+            # active-state file exists but could not be read/parsed -- this
+            # carries no assurance the run is safe to treat as dead. Fail
+            # CLOSED rather than falling through to the old fail-open
+            # $appearsDead = $true behavior.
+            return [pscustomobject]@{
+                Outcome             = 'refused-unparseable-state'
+                Reason              = 'launched-at-unparseable'
+                ReportUrl           = $null
+                BranchName          = $null
+                BranchNameResolved  = $false
+                WorktreePath        = $WorktreePath
+                ClearedStageMarker  = $false
+                ClearedActiveState  = $false
+            }
+        }
+        $appears = Test-GoalRunInflightAppearsDead -MarkerStatus 'unresolved' -LaunchedAt $parsedLaunchedAt `
+            -HeartbeatAt $HeartbeatAt -HaltReportExists $false -PrExists $false -Now $Now -StaleThresholdMinutes $StaleThresholdMinutes
+        $appearsDead = $appears.AppearsDead
     }
 
     if (-not $appearsDead) {
@@ -1569,6 +1842,7 @@ function Invoke-GoalRunRestart {
             Reason             = 'fresh-heartbeat'
             ReportUrl          = $null
             BranchName         = $null
+            BranchNameResolved = $false
             WorktreePath       = $WorktreePath
             ClearedStageMarker = $false
             ClearedActiveState = $false
@@ -1578,10 +1852,20 @@ function Invoke-GoalRunRestart {
     # Capture BEFORE clearing anything -- resolve the branch name live from
     # the still-intact worktree (restart never deletes the worktree itself).
     $branchName = $null
+    $branchNameResolved = $false
     try {
         $branchOutput = & $GitCliPath -C $WorktreePath rev-parse --abbrev-ref HEAD 2>$null
         if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($branchOutput)) {
-            $branchName = ($branchOutput | Out-String).Trim()
+            $candidateBranchName = ($branchOutput | Out-String).Trim()
+            # M18 fix: `git rev-parse --abbrev-ref HEAD` returns the literal
+            # string 'HEAD' on a detached-HEAD worktree -- that is git's own
+            # "could not determine a branch name" answer, not a real branch.
+            # Recording it as if authoritative would present a non-answer as
+            # the recovery path.
+            if ($candidateBranchName -ne 'HEAD') {
+                $branchName = $candidateBranchName
+                $branchNameResolved = $true
+            }
         }
     }
     catch {
@@ -1597,6 +1881,7 @@ function Invoke-GoalRunRestart {
             Reason             = 'restart-report-post-failed'
             ReportUrl          = $null
             BranchName         = $branchName
+            BranchNameResolved = $branchNameResolved
             WorktreePath       = $WorktreePath
             ClearedStageMarker = $false
             ClearedActiveState = $false
@@ -1608,11 +1893,18 @@ function Invoke-GoalRunRestart {
     $clearedMarker = Clear-GoalRunStageMarker -Issue $Issue -Owner $Owner -Repo $Repo
     $clearedState = Clear-GoalRunActiveState -WorktreePath $WorktreePath
 
+    # M18 fix: an honest outcome distinguishes a fully-completed restart
+    # from one where the stage-marker clear itself did not actually succeed
+    # -- the pre-fix code returned 'restarted' unconditionally here.
+    $outcome = if ($clearedMarker.Success) { 'restarted' } else { 'restarted-partial-marker-clear-failed' }
+    $reason = if ($clearedMarker.Success) { 'operator-restart' } else { 'stage-marker-clear-failed' }
+
     return [pscustomobject]@{
-        Outcome            = 'restarted'
-        Reason             = 'operator-restart'
+        Outcome            = $outcome
+        Reason             = $reason
         ReportUrl          = $report.Url
         BranchName         = $branchName
+        BranchNameResolved = $branchNameResolved
         WorktreePath       = $WorktreePath
         ClearedStageMarker = $clearedMarker.Success
         ClearedActiveState = $clearedState

@@ -229,3 +229,34 @@ Describe 'Invoke-GoalRunPredicateEvaluate' -Tag 'unit' {
         $script:acSchemaInvalidResult.HaltEmitted | Should -Be $false -Because 'the emit itself threw, so it never posted'
     }
 }
+
+Describe 'goal-run-predicate.ps1 -- thin wrapper smoke test (#912 review fix M18)' -Tag 'integration' {
+
+    BeforeAll {
+        $script:PredicateWrapperFile = Join-Path $script:RepoRoot '.github/scripts/goal-run-predicate.ps1'
+    }
+
+    It 'the wrapper script file exists' {
+        (Test-Path -LiteralPath $script:PredicateWrapperFile -PathType Leaf) | Should -Be $true
+    }
+
+    It '#912 review fix (M18): an exception escaping Invoke-GoalRunPredicateEvaluate now writes a diagnostic to stderr before exiting 2, instead of a bare silent exit' {
+        # Force a genuine unhandled exception inside Invoke-GoalRunPredicateEvaluate:
+        # Get-GoalRunActiveState (goal-run-worktree-core.ps1) parses
+        # goal-run-active.json via [System.Text.Json.JsonDocument]::Parse,
+        # which THROWS on malformed JSON -- that throw is not caught inside
+        # Invoke-GoalRunPredicateEvaluate's own `$state = & $ActiveStateReader
+        # $RepoRoot` call, so it propagates all the way to the wrapper's own
+        # try/catch.
+        $worktreePath = Join-Path $TestDrive 'predicate-wrapper-malformed-state'
+        New-Item -ItemType Directory -Path $worktreePath -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $worktreePath 'goal-run-active.json') -Value '{ not valid json at all' -Encoding utf8 -NoNewline
+
+        $output = & pwsh -NoProfile -NoLogo -NonInteractive -File $script:PredicateWrapperFile -Issue 874 -RepoRoot $worktreePath 2>&1
+        $exitCode = $LASTEXITCODE
+
+        $exitCode | Should -Be 2
+        $stderrText = ($output | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] } | ForEach-Object { $_.ToString() }) -join "`n"
+        $stderrText | Should -Not -BeNullOrEmpty -Because 'the M18 fix writes the exception message to stderr before exiting 2 -- before the fix, this path exited silently with no diagnostic'
+    }
+}

@@ -253,6 +253,44 @@ Describe 'Resolve-GoalRunInflightMarkerForResolution (#912 step 4: re-fetch help
         $result.Reason | Should -Be 'marker-fields-unparseable'
     }
 
+    It '#912 review fix (M6): refuses as marker-fields-unparseable when LaunchedAt is non-empty GARBAGE (e.g. "TBD"), not just when it is null/empty -- the pre-fix IsNullOrEmpty-only guard let this straight through to a downstream throw' {
+        Mock -CommandName Get-GoalRunInflightMarkers -MockWith {
+            @([pscustomobject]@{ CommentId = 105; Status = 'unresolved'; ContractHash = ('a' * 64); LaunchedAt = 'TBD'; ResolvedReason = $null })
+        }
+
+        $result = Resolve-GoalRunInflightMarkerForResolution -Issue 912
+
+        $result.Found | Should -Be $false
+        $result.CommentId | Should -Be 105
+        $result.Reason | Should -Be 'marker-fields-unparseable'
+    }
+
+    It '#912 review fix (M1): an ADOPTED marker is LIVE, not resolved -- it is found and selected the same as an unresolved one (fixes the pre-fix bug where an adopted marker held by the current session was invisible to its own eventual resolution call)' {
+        Mock -CommandName Get-GoalRunInflightMarkers -MockWith {
+            @([pscustomobject]@{ CommentId = 100; Status = 'adopted'; ContractHash = ('a' * 64); LaunchedAt = '2026-07-23T00:00:00.0000000Z'; ResolvedReason = $null; AdoptedBySessionId = 'sess-1' })
+        }
+
+        $result = Resolve-GoalRunInflightMarkerForResolution -Issue 912
+
+        $result.Found | Should -Be $true
+        $result.CommentId | Should -Be 100
+        $result.Reason | Should -Be 'resolved-lowest-unresolved-comment-id'
+    }
+
+    It '#912 review fix (M1): tiebreaks correctly across a MIX of unresolved and adopted markers by lowest comment id, same as the all-unresolved case' {
+        Mock -CommandName Get-GoalRunInflightMarkers -MockWith {
+            @(
+                [pscustomobject]@{ CommentId = 200; Status = 'unresolved'; ContractHash = ('a' * 64); LaunchedAt = '2026-07-23T00:00:00.0000000Z'; ResolvedReason = $null },
+                [pscustomobject]@{ CommentId = 105; Status = 'adopted'; ContractHash = ('b' * 64); LaunchedAt = '2026-07-22T00:00:00.0000000Z'; ResolvedReason = $null; AdoptedBySessionId = 'sess-1' }
+            )
+        }
+
+        $result = Resolve-GoalRunInflightMarkerForResolution -Issue 912
+
+        $result.Found | Should -Be $true
+        $result.CommentId | Should -Be 105
+    }
+
     It 'integration: a genuinely unparseable ConvertFrom-GoalRunInflightMarkerBody result (Parsed=true, fields null on a hand-edited/truncated marker) flows through the real Get-GoalRunInflightMarkers into the typed refusal, not a throw' {
         $handEditedBody = "<!-- goal-run-inflight-912 -->`n## Goal-run in-flight marker`n`n- **schema_version**: 1`n- **issue**: 912`n- **status**: unresolved"
         Mock -CommandName Get-GoalRunIssueComments -MockWith {
@@ -293,7 +331,7 @@ Describe 'Set-GoalRunInflightMarkerAdopted (#912 step 4: mutate-and-verify adopt
         Remove-Item Function:gh -ErrorAction SilentlyContinue
     }
 
-    It 'mutates the marker to status=adopted plus the session field, then verifies the mutation actually landed via a re-fetch (the observable-mutation invariant)' {
+    It 'mutates the marker to status=adopted plus the session field, then verifies the mutation actually landed via a re-fetch AND survives the M7 reconfirmation read (the observable-mutation invariant)' {
         $preBody = New-GoalRunInflightMarkerBody -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -Status 'unresolved'
         $postBody = New-GoalRunInflightMarkerBody -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -Status 'adopted' -AdoptedBySessionId 'sess-42'
 
@@ -303,17 +341,88 @@ Describe 'Set-GoalRunInflightMarkerAdopted (#912 step 4: mutate-and-verify adopt
             if ($script:grsaReadCount -eq 1) {
                 return @([pscustomobject]@{ id = 100; url = 'https://github.com/o/r/issues/912#issuecomment-100'; body = $preBody })
             }
+            # Both the verification read (2nd) and the M7 reconfirm read
+            # (3rd) see the same landed-and-still-ours body.
             return @([pscustomobject]@{ id = 100; url = 'https://github.com/o/r/issues/912#issuecomment-100'; body = $postBody })
         }
 
-        $result = Set-GoalRunInflightMarkerAdopted -CommentId 100 -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -SessionId 'sess-42'
+        $result = Set-GoalRunInflightMarkerAdopted -CommentId 100 -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -SessionId 'sess-42' -ReconfirmDelayMs 0
 
         $result.Success | Should -Be $true
         $result.Verified | Should -Be $true
         $result.Reason | Should -Be 'adopted-and-verified'
         $result.AdoptedBySessionId | Should -Be 'sess-42'
         $script:grsaGhPatchCalled | Should -Be $true
-        Should -Invoke -CommandName Get-GoalRunIssueComments -Times 2
+        # #912 review fix (M7): 3 reads now -- pre-check, verification, AND
+        # the new TOCTOU reconfirmation read.
+        Should -Invoke -CommandName Get-GoalRunIssueComments -Times 3
+    }
+
+    It '#912 review fix (M7): reports lost-to-concurrent-adopter when a concurrent adopter''s PATCH lands AFTER this session''s own verification read succeeds -- the race window the reconfirmation read exists to catch' {
+        $preBody = New-GoalRunInflightMarkerBody -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -Status 'unresolved'
+        $ownAdoptedBody = New-GoalRunInflightMarkerBody -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -Status 'adopted' -AdoptedBySessionId 'sess-42'
+        $concurrentAdoptedBody = New-GoalRunInflightMarkerBody -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -Status 'adopted' -AdoptedBySessionId 'sess-concurrent-winner'
+
+        $script:grsaReadCount = 0
+        Mock -CommandName Get-GoalRunIssueComments -MockWith {
+            $script:grsaReadCount++
+            switch ($script:grsaReadCount) {
+                1 { return @([pscustomobject]@{ id = 100; url = 'https://github.com/o/r/issues/912#issuecomment-100'; body = $preBody }) }
+                2 { return @([pscustomobject]@{ id = 100; url = 'https://github.com/o/r/issues/912#issuecomment-100'; body = $ownAdoptedBody }) }
+                default { return @([pscustomobject]@{ id = 100; url = 'https://github.com/o/r/issues/912#issuecomment-100'; body = $concurrentAdoptedBody }) }
+            }
+        }
+
+        $result = Set-GoalRunInflightMarkerAdopted -CommentId 100 -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -SessionId 'sess-42' -ReconfirmDelayMs 0
+
+        $result.Success | Should -Be $false
+        $result.Verified | Should -Be $false
+        $result.Reason | Should -Be 'lost-to-concurrent-adopter'
+        $result.AdoptedBySessionId | Should -Be 'sess-concurrent-winner'
+    }
+
+    It '#912 review fix (M7): reports reconfirm-comment-not-found when the comment vanishes between the verification read and the reconfirmation read' {
+        $preBody = New-GoalRunInflightMarkerBody -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -Status 'unresolved'
+        $ownAdoptedBody = New-GoalRunInflightMarkerBody -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -Status 'adopted' -AdoptedBySessionId 'sess-42'
+
+        $script:grsaReadCount = 0
+        Mock -CommandName Get-GoalRunIssueComments -MockWith {
+            $script:grsaReadCount++
+            switch ($script:grsaReadCount) {
+                1 { return @([pscustomobject]@{ id = 100; url = 'https://github.com/o/r/issues/912#issuecomment-100'; body = $preBody }) }
+                2 { return @([pscustomobject]@{ id = 100; url = 'https://github.com/o/r/issues/912#issuecomment-100'; body = $ownAdoptedBody }) }
+                default { return @() }
+            }
+        }
+
+        $result = Set-GoalRunInflightMarkerAdopted -CommentId 100 -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -SessionId 'sess-42' -ReconfirmDelayMs 0
+
+        $result.Success | Should -Be $false
+        $result.Verified | Should -Be $false
+        $result.Reason | Should -Be 'reconfirm-comment-not-found'
+    }
+
+    It '#912 review fix (M7): the body-unchanged comparison uses the ACTUALLY-FETCHED pre-adoption body, not a synthetic reconstruction -- catches drift a reconstructed body would miss' {
+        # Deliberately not byte-identical to what New-GoalRunInflightMarkerBody
+        # would reconstruct from the same Issue/ContractHash/LaunchedAt/Status
+        # inputs (trailing newline appended) -- simulating real-world drift
+        # between the live body and a synthetic reconstruction.
+        $actualFetchedPreBody = (New-GoalRunInflightMarkerBody -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -Status 'unresolved') + "`n"
+
+        Mock -CommandName Get-GoalRunIssueComments -MockWith {
+            @([pscustomobject]@{ id = 100; url = 'https://github.com/o/r/issues/912#issuecomment-100'; body = $actualFetchedPreBody })
+        }
+
+        $result = Set-GoalRunInflightMarkerAdopted -CommentId 100 -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -SessionId 'sess-42' -ReconfirmDelayMs 0
+
+        # Before the M7 fix, $preBody was a SYNTHETIC reconstruction lacking
+        # the trailing newline, so it would never equal $actualFetchedPreBody
+        # and the comparison would fall through to a misleading
+        # 'verification-status-mismatch' (the mock's PATCH is a no-op, so the
+        # body genuinely never changed to 'adopted' either) instead of the
+        # correct 'verification-body-unchanged'.
+        $result.Reason | Should -Be 'verification-body-unchanged'
+        $result.Success | Should -Be $false
     }
 
     It 'concurrent-adoption rejection: refuses with already-adopted and never PATCHes when the pre-check read shows another session already adopted this marker' {
@@ -352,9 +461,12 @@ Describe 'Set-GoalRunInflightMarkerAdopted (#912 step 4: mutate-and-verify adopt
             @([pscustomobject]@{ id = 100; url = 'https://github.com/o/r/issues/912#issuecomment-100'; body = $preBody })
         }
 
-        $result = Set-GoalRunInflightMarkerAdopted -CommentId 100 -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -SessionId 'sess-42'
+        $result = Set-GoalRunInflightMarkerAdopted -CommentId 100 -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -SessionId 'sess-42' -ReconfirmDelayMs 0
 
-        $result.Success | Should -Be $true
+        # #912 review fix (M18): Success must be truthful -- a verification
+        # failure is not a success, even though the PATCH exit code itself
+        # was 0. Before the fix this asserted Success = $true.
+        $result.Success | Should -Be $false
         $result.Verified | Should -Be $false
         $result.Reason | Should -Be 'verification-body-unchanged'
     }
@@ -370,9 +482,11 @@ Describe 'Set-GoalRunInflightMarkerAdopted (#912 step 4: mutate-and-verify adopt
             return @()
         }
 
-        $result = Set-GoalRunInflightMarkerAdopted -CommentId 100 -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -SessionId 'sess-42'
+        $result = Set-GoalRunInflightMarkerAdopted -CommentId 100 -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -SessionId 'sess-42' -ReconfirmDelayMs 0
 
-        $result.Success | Should -Be $true
+        # #912 review fix (M18): Success must be truthful here too. Before
+        # the fix this asserted Success = $true.
+        $result.Success | Should -Be $false
         $result.Verified | Should -Be $false
         $result.Reason | Should -Be 'verification-comment-not-found'
     }
@@ -401,7 +515,7 @@ Describe 'Set-GoalRunInflightMarkerAdopted (#912 step 4: mutate-and-verify adopt
             return @([pscustomobject]@{ id = 100; url = 'https://github.com/o/r/issues/912#issuecomment-100'; body = $postBody })
         }
 
-        Set-GoalRunInflightMarkerAdopted -CommentId 100 -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -SessionId 'sess-42' | Out-Null
+        Set-GoalRunInflightMarkerAdopted -CommentId 100 -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -SessionId 'sess-42' -ReconfirmDelayMs 0 | Out-Null
 
         # The PATCHed body's contract_hash is the SAME value passed in --
         # this function never compares it against a launch-pinned hash, it
@@ -499,6 +613,33 @@ exit 1
 
         $result.Count | Should -Be 1
         $result[0].body | Should -Be 'injected'
+    }
+
+    It '#912 review fix (M18): resolves owner/repo from -RepoRoot''s git remote instead of the process CWD when -Owner/-Repo are omitted' {
+        $repoPath = script:New-GRSTestRepo -Path (Join-Path $TestDrive 'grs-reporoot-ownerrepo')
+        & git -C $repoPath remote add origin 'https://github.com/repo-root-owner/repo-root-repo.git' 2>&1 | Out-Null
+
+        $mockGhPath = Join-Path $TestDrive 'gh-comments-reporoot.ps1'
+        @'
+param()
+if ($args[0] -eq 'repo') {
+    # If this is ever hit, -RepoRoot resolution was skipped and the
+    # process-cwd fallback ran instead -- the wrong owner/repo for this test.
+    Write-Output 'process-cwd-owner/process-cwd-repo'
+    exit 0
+}
+if ($args[0] -eq 'api') {
+    if ($args[1] -notmatch 'repos/repo-root-owner/repo-root-repo/issues/9/comments') { exit 1 }
+    Write-Output '[[{"id":1,"html_url":"https://github.com/repo-root-owner/repo-root-repo/issues/9#issuecomment-1","body":"from repo root remote"}]]'
+    exit 0
+}
+exit 1
+'@ | Set-Content $mockGhPath -Encoding UTF8
+
+        $result = Get-GoalRunIssueComments -Issue 9 -RepoRoot $repoPath -GhCliPath $mockGhPath
+
+        $result.Count | Should -Be 1
+        $result[0].body | Should -Be 'from repo root remote'
     }
 }
 
@@ -613,6 +754,23 @@ Describe 'Invoke-GoalRunMutexLaunch' -Tag 'unit' {
         Should -Invoke -CommandName Get-GoalRunInflightMarkers -Times 2
     }
 
+    It '#912 review fix (M1): yields when reconcile finds a lower-id ADOPTED (not just unresolved) marker -- an adopted marker is a live concurrent run, not an absent one' {
+        Mock -CommandName New-GoalRunInflightMarker -MockWith { [pscustomobject]@{ Success = $true; CommentId = 105; Url = 'https://example/105'; LaunchedAt = '2026-07-23T00:00:00.0000000Z' } }
+        Mock -CommandName Get-GoalRunInflightMarkers -MockWith {
+            @(
+                [pscustomobject]@{ CommentId = 100; Status = 'adopted'; ContractHash = ('c' * 64); LaunchedAt = '2026-07-23T00:00:00.0000000Z'; ResolvedReason = $null; AdoptedBySessionId = 'sess-other' },
+                [pscustomobject]@{ CommentId = 105; Status = 'unresolved'; ContractHash = ('c' * 64); LaunchedAt = '2026-07-23T00:00:00.0000000Z'; ResolvedReason = $null }
+            )
+        }
+        Mock -CommandName Set-GoalRunInflightMarkerResolved -MockWith { $true }
+        Mock -CommandName New-GoalRunWorktree -MockWith { throw 'New-GoalRunWorktree must not be called when a lower-id adopted marker is live' }
+
+        $result = Invoke-GoalRunMutexLaunch -Issue 874 -RepoRoot 'C:\fake\repo' -ContractHash ('c' * 64) -ReconfirmDelayMs 0
+
+        $result.Outcome | Should -Be 'yielded'
+        Should -Invoke -CommandName New-GoalRunWorktree -Times 0
+    }
+
     It 'M16 fix: -ReconfirmDelayMs is honored as an actual delay before the reconfirm read (production default path)' {
         Mock -CommandName New-GoalRunInflightMarker -MockWith { [pscustomobject]@{ Success = $true; CommentId = 100; Url = 'https://example/100'; LaunchedAt = '2026-07-23T00:00:00.0000000Z' } }
         Mock -CommandName Get-GoalRunInflightMarkers -MockWith {
@@ -674,6 +832,20 @@ Describe 'Test-GoalRunInflightAppearsDead (crash-atomicity)' -Tag 'unit' {
         $result = Test-GoalRunInflightAppearsDead -MarkerStatus 'unresolved' -LaunchedAt $now.AddHours(-5) -HeartbeatAt $now.AddMinutes(-5) -HaltReportExists $false -PrExists $false -Now $now -StaleThresholdMinutes 60
         $result.AppearsDead | Should -Be $false
         $result.LastSeenAt | Should -Be $now.AddMinutes(-5)
+    }
+
+    It '#912 review fix (M1/M2): an ADOPTED marker is NOT short-circuited to not-dead via the "already resolved" reason -- it falls through to the same elapsed-time staleness computation an unresolved marker gets' {
+        $now = Get-Date
+        $result = Test-GoalRunInflightAppearsDead -MarkerStatus 'adopted' -LaunchedAt $now.AddMinutes(-90) -HaltReportExists $false -PrExists $false -Now $now -StaleThresholdMinutes 60
+        $result.AppearsDead | Should -Be $true -Because 'an adopted marker is a live/held status, not a resolved one -- the pre-fix -ne ''unresolved'' filter falsely short-circuited it to AppearsDead=$false'
+        $result.Reason | Should -Be 'stale-no-terminal-outcome'
+    }
+
+    It '#912 review fix (M1/M2): an ADOPTED marker within the stale threshold correctly reports not dead via elapsed-time computation, not the false marker-already-resolved reason' {
+        $now = Get-Date
+        $result = Test-GoalRunInflightAppearsDead -MarkerStatus 'adopted' -LaunchedAt $now.AddMinutes(-5) -HaltReportExists $false -PrExists $false -Now $now -StaleThresholdMinutes 60
+        $result.AppearsDead | Should -Be $false
+        $result.Reason | Should -Be 'within-stale-threshold' -Because 'the pre-fix code reported this as marker-already-resolved, which is FALSE for an adopted marker (it is not resolved -- it is a run in progress under a new session)'
     }
 
     It 'M6 regression: a UTC Z-suffixed LaunchedAt string cast to [datetime] alongside a genuinely UTC -Now reports near-zero elapsed, not a multi-hour skew' {
@@ -877,6 +1049,50 @@ Describe 'Resolve-GoalRunControlReturn (M13: control-return-then-read, distinct 
         $result.Outcome | Should -Be 'halted-verdict-not-flushed'
         Should -Invoke -CommandName Invoke-GoalRunHaltEmit -Times 1
     }
+
+    It '#912 review fix (M3): normalizes DateTime.Kind before comparing -LaunchedAt against an existing report''s updatedAt, so the recency verdict is correct regardless of the host machine''s local UTC offset' {
+        Mock -CommandName Invoke-GoalRunHaltEmit -MockWith { throw 'Invoke-GoalRunHaltEmit must not be called when a newer report already exists' }
+
+        # A Z-suffixed -LaunchedAt string (exactly how it always arrives in
+        # production) and an ALREADY-Kind=Utc updatedAt (exactly how
+        # Get-GoalRunIssueComments/ConvertFrom-Json already produces it),
+        # anchored to real UTC instants 30 REAL minutes apart. Before the M3
+        # fix, casting the Z-suffixed string via a bare [datetime] converts
+        # it to LOCAL wall-clock time (tagged Kind=Local) while updatedAt
+        # stays genuinely Utc -- comparing the two Ticks values directly
+        # (DateTime comparison ignores Kind) skews the verdict by the host's
+        # UTC offset, the exact bug shape the M6 fix above already documents
+        # and fixes for Test-GoalRunInflightAppearsDead.
+        $launchedAtUtc = [datetime]::SpecifyKind([datetime]'2026-07-26T10:00:00', [System.DateTimeKind]::Utc)
+        $launchedAtZString = $launchedAtUtc.ToString('yyyy-MM-ddTHH:mm:ssZ')
+        $existingReportUpdatedAtUtc = [datetime]::SpecifyKind([datetime]'2026-07-26T10:30:00', [System.DateTimeKind]::Utc)
+
+        Mock -CommandName Get-GoalRunIssueComments -MockWith {
+            @([pscustomobject]@{ id = 1; url = 'https://example/1'; body = '<!-- goal-halt-report-874 -->newer report'; updatedAt = $existingReportUpdatedAtUtc })
+        }
+        $reader = { param($Path) [pscustomobject]@{ State = 'status-absent'; Event = $null } }
+
+        $result = Resolve-GoalRunControlReturn -TranscriptPath 'fake.jsonl' -Issue 874 -RepoRoot $script:RepoRoot -MaxRetries 1 -RetryDelayMs 1 -StatusReader $reader -LaunchedAt $launchedAtZString
+
+        $result.HaltResult.Suppressed | Should -Be $true -Because 'the existing report genuinely postdates this run''s launch by 30 real minutes -- this must hold regardless of host UTC offset'
+        Should -Invoke -CommandName Invoke-GoalRunHaltEmit -Times 0
+    }
+
+    It '#912 review fix (M18): the recency guard threads -RepoRoot and the injectable -CommentsReader through to Get-GoalRunIssueComments instead of the fetch always resolving from the process CWD' {
+        Mock -CommandName Invoke-GoalRunHaltEmit -MockWith { throw 'Invoke-GoalRunHaltEmit must not be called when a newer report already exists' }
+        $script:grcrReaderInvoked = $false
+        $injectedReader = {
+            param($Issue, $Owner, $Repo, $GhCliPath)
+            $script:grcrReaderInvoked = $true
+            @([pscustomobject]@{ id = 1; url = 'https://example/1'; body = '<!-- goal-halt-report-874 -->newer report'; updatedAt = '2026-07-26T12:00:00Z' })
+        }
+        $reader = { param($Path) [pscustomobject]@{ State = 'status-absent'; Event = $null } }
+
+        $result = Resolve-GoalRunControlReturn -TranscriptPath 'fake.jsonl' -Issue 874 -RepoRoot $script:RepoRoot -MaxRetries 1 -RetryDelayMs 1 -StatusReader $reader -LaunchedAt '2026-07-26T10:00:00Z' -CommentsReader $injectedReader
+
+        $script:grcrReaderInvoked | Should -Be $true
+        $result.HaltResult.Suppressed | Should -Be $true
+    }
 }
 
 Describe 'Invoke-GoalRunLaunchChain and Test-GoalRunTerminalEmissionsVerified (seams)' -Tag 'unit' {
@@ -994,6 +1210,24 @@ Describe 'Clear-GoalRunStageMarker (#912 D6, step 5: the first comment-DELETE pr
 
         $script:cgsmDeletedPaths | Should -Contain 'repos/{owner}/{repo}/issues/comments/555'
     }
+
+    It '#912 review fix (M8): refuses (deletes NOTHING) when 2+ comments carry the marker, mirroring Get-GCPinnedCommentBody''s refuse-on-ambiguity precedent -- the pre-fix code hard-DELETEd every match with no ambiguity refusal at all' {
+        $bodyA = New-GoalRunStageMarkerBody -Issue 912 -Stage 'loop-launched' -ContractHash ('a' * 64) -UpdatedAt '2026-07-26T00:00:00.0000000Z'
+        $bodyB = New-GoalRunStageMarkerBody -Issue 912 -Stage 'loop-released' -ContractHash ('a' * 64) -UpdatedAt '2026-07-26T01:00:00.0000000Z'
+        Mock -CommandName Get-GoalRunIssueComments -MockWith {
+            @(
+                [pscustomobject]@{ id = 555; url = 'https://github.com/o/r/issues/912#issuecomment-555'; body = $bodyA },
+                [pscustomobject]@{ id = 556; url = 'https://github.com/o/r/issues/912#issuecomment-556'; body = $bodyB }
+            )
+        }
+
+        $result = Clear-GoalRunStageMarker -Issue 912 -Owner 'o' -Repo 'r'
+
+        $result.Success | Should -Be $false
+        $result.Reason | Should -Be 'marker-ambiguous'
+        $result.DeletedCommentIds | Should -BeNullOrEmpty
+        $script:cgsmDeletedPaths | Should -BeNullOrEmpty -Because 'an ambiguous match set must refuse to guess, never delete any candidate'
+    }
 }
 
 Describe 'Clear-GoalRunActiveState (#912 D6, step 5)' -Tag 'unit' {
@@ -1057,6 +1291,86 @@ Describe 'Invoke-GoalRunRestart (#912 D6, step 5: operator-initiated restart lev
         $result = Invoke-GoalRunRestart -Issue 912 -WorktreePath 'C:\fake\gr-912'
 
         $result.Outcome | Should -Not -Be 'refused-live-run'
+    }
+
+    It '#912 review fix (M6/M17): fails CLOSED with a distinct refusal when -LaunchedAt is NON-NULL but unparseable garbage (the active-state file exists but could not be read/parsed), rather than the pre-fix bare [datetime] cast throwing OR silently falling through to fail-open' {
+        Mock -CommandName New-GoalRunIssueComment -MockWith { throw 'must not post a report when refusing on unparseable state' }
+        Mock -CommandName Clear-GoalRunStageMarker -MockWith { throw 'must not clear the stage marker when refusing on unparseable state' }
+        Mock -CommandName Clear-GoalRunActiveState -MockWith { throw 'must not clear active state when refusing on unparseable state' }
+
+        $threw = $false
+        $result = $null
+        try {
+            $result = Invoke-GoalRunRestart -Issue 912 -WorktreePath 'C:\fake\gr-912' -LaunchedAt 'TBD'
+        }
+        catch {
+            $threw = $true
+        }
+
+        $threw | Should -Be $false -Because 'a garbage LaunchedAt must produce a typed refusal, not an unguarded [datetime] cast throw'
+        $result.Outcome | Should -Be 'refused-unparseable-state'
+        $result.Reason | Should -Be 'launched-at-unparseable'
+        $result.ClearedStageMarker | Should -Be $false
+        $result.ClearedActiveState | Should -Be $false
+    }
+
+    It '#912 review fix (M18): reports BranchNameResolved = $false and a null BranchName on a detached-HEAD worktree instead of recording the literal string "HEAD" as if it were a real branch name' {
+        $repoRoot = Join-Path $TestDrive 'grr-detached-repo'
+        script:New-GRSTestRepo -Path $repoRoot
+        $worktreePath = Join-Path $TestDrive 'grr-detached-worktree'
+        $headSha = (& git -C $repoRoot rev-parse HEAD).Trim()
+        & git -C $repoRoot worktree add --detach $worktreePath $headSha 2>&1 | Out-Null
+
+        try {
+            Mock -CommandName New-GoalRunIssueComment -MockWith { [pscustomobject]@{ Success = $true; CommentId = 1; Url = 'https://example/1' } }
+            Mock -CommandName Clear-GoalRunStageMarker -MockWith { [pscustomobject]@{ Success = $true; DeletedCommentIds = @(); FailedCommentIds = @() } }
+            Mock -CommandName Clear-GoalRunActiveState -MockWith { $true }
+
+            $now = (Get-Date).ToUniversalTime()
+            $result = Invoke-GoalRunRestart -Issue 912 -WorktreePath $worktreePath -LaunchedAt $now.AddHours(-2) -Now $now
+
+            $result.Outcome | Should -Be 'restarted'
+            $result.BranchNameResolved | Should -Be $false
+            $result.BranchName | Should -BeNullOrEmpty
+        }
+        finally {
+            script:Remove-GRSTestWorktree -RepoRoot $repoRoot -WorktreePath $worktreePath
+        }
+    }
+
+    It '#912 review fix (M18): reports BranchNameResolved = $true for a normal (non-detached) branch checkout' {
+        $repoRoot = Join-Path $TestDrive 'grr-normal-repo'
+        script:New-GRSTestRepo -Path $repoRoot
+        $worktreePath = Join-Path $TestDrive 'grr-normal-worktree'
+        & git -C $repoRoot worktree add -b 'goal-run/issue-912-normaltoken' $worktreePath 2>&1 | Out-Null
+
+        try {
+            Mock -CommandName New-GoalRunIssueComment -MockWith { [pscustomobject]@{ Success = $true; CommentId = 1; Url = 'https://example/1' } }
+            Mock -CommandName Clear-GoalRunStageMarker -MockWith { [pscustomobject]@{ Success = $true; DeletedCommentIds = @(); FailedCommentIds = @() } }
+            Mock -CommandName Clear-GoalRunActiveState -MockWith { $true }
+
+            $now = (Get-Date).ToUniversalTime()
+            $result = Invoke-GoalRunRestart -Issue 912 -WorktreePath $worktreePath -LaunchedAt $now.AddHours(-2) -Now $now
+
+            $result.BranchNameResolved | Should -Be $true
+            $result.BranchName | Should -Be 'goal-run/issue-912-normaltoken'
+        }
+        finally {
+            script:Remove-GRSTestWorktree -RepoRoot $repoRoot -WorktreePath $worktreePath
+        }
+    }
+
+    It '#912 review fix (M18): reports the honest partial-failure outcome, not unconditionally "restarted", when Clear-GoalRunStageMarker itself reports failure' {
+        Mock -CommandName New-GoalRunIssueComment -MockWith { [pscustomobject]@{ Success = $true; CommentId = 1; Url = 'https://example/1' } }
+        Mock -CommandName Clear-GoalRunStageMarker -MockWith { [pscustomobject]@{ Success = $false; DeletedCommentIds = @(); FailedCommentIds = @(555) } }
+        Mock -CommandName Clear-GoalRunActiveState -MockWith { $true }
+
+        $now = (Get-Date).ToUniversalTime()
+        $result = Invoke-GoalRunRestart -Issue 912 -WorktreePath 'C:\fake\gr-912' -LaunchedAt $now.AddHours(-2) -Now $now
+
+        $result.Outcome | Should -Be 'restarted-partial-marker-clear-failed'
+        $result.Reason | Should -Be 'stage-marker-clear-failed'
+        $result.ClearedStageMarker | Should -Be $false
     }
 
     It '#912 fixture (a): captures the worktree path and branch into the durable report comment BEFORE clearing either artifact' {
