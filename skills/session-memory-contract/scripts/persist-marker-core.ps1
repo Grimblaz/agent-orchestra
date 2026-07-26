@@ -190,7 +190,19 @@
         so a preview/execution divergence can at most produce a burst-
         preflight false PASS here (execution then still fails safely later,
         exactly as before this fix) -- it can never produce a false
-        REFUSAL of an otherwise-valid burst.
+        REFUSAL of an otherwise-valid burst FROM STATE DIVERGENCE.
+        P10 fix (issue #893 s11 post-fix): a SEPARATE failure mode --
+        a TRANSIENT transport error (network blip, rate limit) inside this
+        preview's own live sibling-identity GETs -- WAS directly reachable
+        and DID produce a false preflight REFUSAL (script:Test-MarkerSiblingIdentity,
+        M19, throws rather than returning a confirmed-absent $false on a
+        transport failure, and the preflight loop's try/catch turned that
+        throw into a hard refusal). The preflight loop now catches that
+        specific throw and proceeds with the unmerged candidate body
+        instead, deferring to Invoke-PersistMarkerWrite's own
+        execution-time re-check -- see the preflight loop's own comment for
+        the narrow catch. With that fix in place, the "never a false
+        REFUSAL" claim above holds again for both failure modes.
       - Invoke-PersistMarkerBurst / Invoke-PersistMarkerBurstFromManifest:
         ordered multi-write burst. Preflights every entry first (zero
         writes on any refusal), then executes Invoke-PersistMarkerWrite per
@@ -549,15 +561,23 @@ function script:Get-MarkerLineStartMatchIndexes {
     )
     $normalized = ($Body -replace "`r`n", "`n") -replace "`r", "`n"
     $lines = $normalized -split "`n"
-    # M15 fix (issue #893 s11): the leading-whitespace anchor widens to also
-    # absorb `\p{Cf}` (Unicode "format" category -- zero-width space U+200B,
-    # BOM/ZWNBSP U+FEFF, etc.), not just `\s`. `\s` does not match `\p{Cf}`,
-    # so a marker prefixed by an invisible format character previously
-    # bypassed this line-start check even though downstream substring-based
-    # readers (`-like`, grep) still match it -- an inverted trust
-    # relationship where the gate was anchored MORE strictly than the
-    # readers it exists to protect.
-    $pattern = '^[\s\p{Cf}]*' + [regex]::Escape($Literal)
+    # M15 fix (issue #893 s11), REVERTED at s11 post-fix P1 (issue #893):
+    # M15 widened this own-family anchor to also absorb `\p{Cf}` (Unicode
+    # "format" category -- zero-width space U+200B, BOM/ZWNBSP U+FEFF,
+    # etc.), not just `\s`. That widening was NOT mirrored onto
+    # Get-MarkerWholeLinePattern (.github/scripts/lib/marker-transport-core.ps1,
+    # the transport finder every write/read path actually uses to locate a
+    # posted marker), which still anchors on `^\s*` only. The mismatch let a
+    # ZWSP-prefixed marker pass THIS hygiene check as "present" while
+    # remaining unfindable by the finder -- unbounded duplicate accretion on
+    # every subsequent write, reopening M3's exact defect for that character
+    # class. This anchor must stay byte-symmetric with the finder, so it
+    # reverts to `^\s*`. The `\p{Cf}` widening remains correct and stays on
+    # script:ConvertTo-MarkerFamilyLineStartPattern below (the cross-family
+    # detector), a different use case that never needs to match what the
+    # transport finder finds -- it only needs to catch a decoy marker before
+    # it gets written, not locate an already-written one.
+    $pattern = '^\s*' + [regex]::Escape($Literal)
     $indexes = [System.Collections.Generic.List[int]]::new()
     for ($i = 0; $i -lt $lines.Count; $i++) {
         if ($lines[$i] -match $pattern) {
@@ -597,10 +617,13 @@ function script:ConvertTo-MarkerFamilyLineStartPattern {
     # '\{ID\}'. Matching only the opening escape here is deliberate, not a
     # typo.
     $withWildcards = $escaped -replace '\\\{[A-Za-z]+\}', '[\w-]+'
-    # M15 fix (issue #893 s11): same `\p{Cf}` widening as
-    # script:Get-MarkerLineStartMatchIndexes above -- see that function's
-    # comment for the full rationale (zero-width/invisible Unicode bypassing
-    # a `\s`-only leading-whitespace anchor).
+    # M15 fix (issue #893 s11), KEPT here after the s11 post-fix P1 partial
+    # revert (see script:Get-MarkerLineStartMatchIndexes above): this
+    # detector only needs to catch a decoy marker literal BEFORE it gets
+    # written -- it has no downstream finder counterpart to stay
+    # byte-symmetric with, unlike the own-family anchor above -- so the
+    # `\p{Cf}` widening (zero-width space U+200B, BOM/ZWNBSP U+FEFF, etc.,
+    # which plain `\s` does not match) stays correct here.
     return '(?m)^[\s\p{Cf}]*' + $withWildcards
 }
 
@@ -1060,9 +1083,46 @@ function script:Set-MarkerSpineScalarValue {
     # success. Both alternatives are mirrored here (never re-implemented
     # narrower) so this helper can never silently no-op against a shape
     # Get-FSCSpineBlock itself already accepts.
-    $blockPattern = '(?s)<!--\s*frame-spine\s*-->\s*\n(?<payload>.*?)\n\s*-->|<!--\s*frame-spine(?:\s*\n|\s+)(?<payload>.*?)\n?\s*-->'
-    $blockMatch = [regex]::Match($Body, $blockPattern)
-    if (-not $blockMatch.Success) { return $Body }
+    #
+    # P5 fix (issue #893 s11 post-fix): this mirror regex was missing the
+    # canonical parser's `(?m)^[ \t]*` line-start anchor on the alternation
+    # group, and ran against the raw, un-normalized $Body instead of the
+    # canonical parser's own normalization step
+    # (script:ConvertTo-FSCNormalizedText / this file's own
+    # script:ConvertTo-MarkerLFBody, CRLF/CR -> LF only). Without the
+    # anchor, this regex could match a PROSE MENTION of the block (e.g.
+    # "the `<!-- frame-spine -->` block below") anywhere mid-line as a
+    # decoy, ahead of the real block -- defense proved this live: the
+    # unanchored regex matched at the decoy's index with an empty payload
+    # capture instead of the real block further down. Anchoring to
+    # `(?m)^[ \t]*`, exactly like the canonical parser, makes a mid-line
+    # mention structurally unmatchable. `(?ms)` (not just `(?s)`) supplies
+    # both the Multiline `^` behavior the anchor needs and the Singleline
+    # `.`-matches-newline behavior the payload capture needs, mirroring
+    # Get-FSCCommentBlockPayloads' own `(?m)` inline flag + separately
+    # passed RegexOptions.Singleline.
+    $normalizedBody = script:ConvertTo-MarkerLFBody -Text $Body
+    $blockPattern = '(?ms)^[ \t]*(?:<!--\s*frame-spine\s*-->\s*\n(?<payload>.*?)\n\s*-->|<!--\s*frame-spine(?:\s*\n|\s+)(?<payload>.*?)\n?\s*-->)'
+    $blockMatch = [regex]::Match($normalizedBody, $blockPattern)
+    if (-not $blockMatch.Success) {
+        # P6 fix (issue #893 s11 post-fix): the post-condition safety net
+        # below (re-reading -Name back through the CANONICAL parser) used to
+        # be unreachable on this early-return path, so a body the canonical
+        # parser CAN see a frame-spine block in, but this mirror regex
+        # cannot (the "third, currently-unknown block shape" the M6 comment
+        # above already anticipated), silently returned the body unchanged
+        # with no loud failure -- exactly the "matched-but-wrong" class of
+        # bug this post-condition exists to catch, just reached from the
+        # opposite direction (didn't-match-at-all rather than
+        # matched-the-wrong-thing). Run the same canonical-parser check here
+        # too: only return silently when the canonical parser also sees no
+        # block (a genuine "nothing to splice" case); throw loud otherwise.
+        $canonicalBlock = Get-FSCSpineBlock -CommentBody $normalizedBody
+        if ($null -ne $canonicalBlock) {
+            throw "persist-marker-core: Set-MarkerSpineScalarValue post-condition failed -- the canonical parser (Get-FSCSpineBlock) sees a frame-spine block in this body but this helper's own splice regex did not match it; refusing to silently no-op against an unrecognized block shape"
+        }
+        return $Body
+    }
 
     $payloadGroup = $blockMatch.Groups['payload']
     $payload = $payloadGroup.Value
@@ -1086,7 +1146,12 @@ function script:Set-MarkerSpineScalarValue {
         }
     }
 
-    $updatedBody = $Body.Substring(0, $payloadGroup.Index) + $newPayload + $Body.Substring($payloadGroup.Index + $payloadGroup.Length)
+    # P5 fix (issue #893 s11 post-fix): splice into $normalizedBody, not the
+    # raw $Body -- $blockMatch's Index/Length are offsets into the
+    # normalized (LF-only) text the match ran against above, so splicing
+    # them into the original, possibly-CRLF $Body would misalign on any
+    # body that actually contains CRLF line endings.
+    $updatedBody = $normalizedBody.Substring(0, $payloadGroup.Index) + $newPayload + $normalizedBody.Substring($payloadGroup.Index + $payloadGroup.Length)
 
     # M6 post-condition (issue #893 s11): re-read -Name back off the
     # UPDATED body through the CANONICAL parser (Get-FSCSpineBlock /
@@ -1212,27 +1277,21 @@ function script:Invoke-PlanIssueWriteBackPreserve {
     )
 
     $preservedClasses = [System.Collections.Generic.List[string]]::new()
-    # No extra @() wrap: Find-AllCommentsByExactMarker's own contract already
-    # guarantees array identity via its internal `return , @(...)` (see that
-    # function's own .OUTPUTS doc) -- wrapping its result in a second @()
-    # here would double-wrap a single-element array output into a 1-element
-    # array WHOSE element is the original array, corrupting .Count and
-    # element access. Every other caller in this file (e.g.
-    # Invoke-MarkerUpsertWrite) assigns the return value directly for the
-    # same reason.
-    $existing = Find-AllCommentsByExactMarker -Owner $Owner -Repo $Repo -IssueNumber $Number -Marker $Marker
-    if ($existing.Count -eq 0) {
-        return [PSCustomObject]@{ Body = $Body; PreservedClasses = [string[]]@(); Refusal = $null }
-    }
-
-    # Canonical = earliest (lowest REST id) match -- same selector
-    # Invoke-MarkerUpsertWrite itself uses for the upsert comparison target.
-    $existingBody = script:ConvertTo-MarkerLFBody -Text $existing[0].Body
     $mergedBody = $Body
-
-    # --- 1. phase-containment-ledger-ref pointer (live-checked). ---
     $pointerPattern = '(?m)^[ \t]*<!--\s*phase-containment-ledger-ref:\s*(?<id>\d+)\s*-->[ \t]*$'
-    $pointerMatch = [regex]::Match($existingBody, $pointerPattern)
+
+    # --- Candidate-supplied-pointer validation (P7 fix, issue #893 s11
+    # post-fix): HOISTED to run BEFORE the $existing.Count -eq 0
+    # early-return below. Both checks below only need the CANDIDATE body
+    # plus a live GET against the claimed sibling -- neither needs the
+    # existing comment at all. M14 originally placed both checks AFTER the
+    # early-return, so a forged/stale candidate-supplied pointer on the
+    # very FIRST plan-issue write (no prior comment yet, so
+    # $existing.Count -eq 0) wrote through completely unvalidated; only a
+    # re-persist (an existing comment already present) was actually
+    # protected. ---
+
+    # --- 1a. phase-containment-ledger-ref candidate-supplied pointer. ---
     $candidatePointerMatch = [regex]::Match((script:ConvertTo-MarkerLFBody -Text $mergedBody), $pointerPattern)
     $candidateHasPointer = $candidatePointerMatch.Success
     if ($candidateHasPointer) {
@@ -1254,24 +1313,13 @@ function script:Invoke-PlanIssueWriteBackPreserve {
             }
         }
     }
-    elseif ($pointerMatch.Success) {
-        $siblingId = [long]$pointerMatch.Groups['id'].Value
-        $expectedSiblingMarker = "<!-- phase-containment-ledger-$Number -->"
-        $siblingValid = script:Test-MarkerSiblingIdentity -Owner $Owner -Repo $Repo -CommentId $siblingId -ExpectedMarker $expectedSiblingMarker
-        if ($siblingValid) {
-            $mergedBody = Set-PointerLineAfterMarker -Body $mergedBody -Marker $Marker -PointerLine "<!-- phase-containment-ledger-ref: $siblingId -->"
-            $preservedClasses.Add('phase-containment-ledger-ref pointer') | Out-Null
-        }
-        # else: stale/forged pointer -- DROP it; fall through to
-        # persist-phase-ledger-core.ps1's own M1 self-heal on its next run.
-    }
 
-    # --- 2. frame-spine slice_comment_id scalar (live-checked). ---
-    $existingSpineBlock = Get-FSCSpineBlock -CommentBody $existingBody
+    # --- 1b. frame-spine slice_comment_id candidate-supplied scalar. ---
     # M14 fix (issue #893 s11): validate a CANDIDATE-SUPPLIED slice_comment_id
     # regardless of whether the existing comment carries one -- the prior
     # code only ever live-checked an INHERITED value (the preserve-decision
-    # branch below, which only runs when the candidate lacks a value).
+    # branch further below, which only runs when the candidate lacks a
+    # value).
     $candidateSpineBlockForValidation = Get-FSCSpineBlock -CommentBody (script:ConvertTo-MarkerLFBody -Text $mergedBody)
     if ($null -ne $candidateSpineBlockForValidation) {
         $candidateSuppliedSliceCommentId = script:Get-FSCScalarValue -Block $candidateSpineBlockForValidation -Name 'slice_comment_id'
@@ -1290,6 +1338,45 @@ function script:Invoke-PlanIssueWriteBackPreserve {
             }
         }
     }
+
+    # No extra @() wrap: Find-AllCommentsByExactMarker's own contract already
+    # guarantees array identity via its internal `return , @(...)` (see that
+    # function's own .OUTPUTS doc) -- wrapping its result in a second @()
+    # here would double-wrap a single-element array output into a 1-element
+    # array WHOSE element is the original array, corrupting .Count and
+    # element access. Every other caller in this file (e.g.
+    # Invoke-MarkerUpsertWrite) assigns the return value directly for the
+    # same reason.
+    $existing = Find-AllCommentsByExactMarker -Owner $Owner -Repo $Repo -IssueNumber $Number -Marker $Marker
+    if ($existing.Count -eq 0) {
+        return [PSCustomObject]@{ Body = $Body; PreservedClasses = [string[]]@(); Refusal = $null }
+    }
+
+    # Canonical = earliest (lowest REST id) match -- same selector
+    # Invoke-MarkerUpsertWrite itself uses for the upsert comparison target.
+    $existingBody = script:ConvertTo-MarkerLFBody -Text $existing[0].Body
+
+    # --- 1. phase-containment-ledger-ref pointer preserve-decision. Only
+    # relevant when the candidate did NOT already supply its own pointer
+    # (already validated above) -- an inherited pointer is preserved from
+    # the existing comment instead. ---
+    $pointerMatch = [regex]::Match($existingBody, $pointerPattern)
+    if (-not $candidateHasPointer -and $pointerMatch.Success) {
+        $siblingId = [long]$pointerMatch.Groups['id'].Value
+        $expectedSiblingMarker = "<!-- phase-containment-ledger-$Number -->"
+        $siblingValid = script:Test-MarkerSiblingIdentity -Owner $Owner -Repo $Repo -CommentId $siblingId -ExpectedMarker $expectedSiblingMarker
+        if ($siblingValid) {
+            $mergedBody = Set-PointerLineAfterMarker -Body $mergedBody -Marker $Marker -PointerLine "<!-- phase-containment-ledger-ref: $siblingId -->"
+            $preservedClasses.Add('phase-containment-ledger-ref pointer') | Out-Null
+        }
+        # else: stale/forged pointer -- DROP it; fall through to
+        # persist-phase-ledger-core.ps1's own M1 self-heal on its next run.
+    }
+
+    # --- 2. frame-spine slice_comment_id scalar preserve-decision
+    # (inherited only -- a candidate-supplied value was already validated
+    # above). ---
+    $existingSpineBlock = Get-FSCSpineBlock -CommentBody $existingBody
     if ($null -ne $existingSpineBlock) {
         $existingSliceCommentId = script:Get-FSCScalarValue -Block $existingSpineBlock -Name 'slice_comment_id'
         if (-not [string]::IsNullOrWhiteSpace($existingSliceCommentId)) {
@@ -1347,29 +1434,34 @@ function script:Invoke-PlanIssueWriteBackPreserve {
             $mergedBody = $mergedBody.TrimEnd() + "`n`n" + $blockText
             $preservedClasses.Add('legacy phase-containment blocks') | Out-Null
         }
+    }
 
-        # M10 fix (issue #893 s11): the **Plan Stress-Test** heading/section
-        # preserve is scoped INSIDE this same legacy (no-ledger-pointer) gate
-        # -- this function's own class 3.-4. doc comment above and the s5
-        # requirement contract both already document this carry-forward as
-        # legacy-only, but the code previously ran unconditionally, outside
-        # this gate. On a modern (ledger-pointer-carrying) plan re-persist,
-        # that let the capture regex's lazy "up to the next bold heading or
-        # end-of-body" fallthrough capture and duplicate unrelated trailing
-        # content (e.g. `## Named Decisions`) whenever no further
-        # `**Bold**`-style heading followed the stress-test section.
-        # Additionally bounded (defense-in-depth): the pattern below now also
-        # stops at a `## ` Markdown heading or a `<!-- named-decisions:begin
-        # -->` sentinel, so even a legacy body whose stress-test section is
-        # immediately followed by one of those (rather than another `**Bold**`
-        # heading) cannot over-capture past it.
-        $stressTestPattern = '(?ms)^\*\*Plan Stress-Test\*\*.*?(?=^\*\*[A-Za-z]|^##[ \t]|<!--\s*named-decisions:begin|\z)'
-        $stressTestMatch = [regex]::Match($existingBody, $stressTestPattern)
-        $candidateHasStressTestHeading = [regex]::IsMatch((script:ConvertTo-MarkerLFBody -Text $mergedBody), '(?m)^\*\*Plan Stress-Test\*\*')
-        if ($stressTestMatch.Success -and -not $candidateHasStressTestHeading) {
-            $mergedBody = $mergedBody.TrimEnd() + "`n`n" + $stressTestMatch.Value.Trim()
-            $preservedClasses.Add('**Plan Stress-Test** heading/section') | Out-Null
-        }
+    # M10 fix (issue #893 s11), PARTIALLY REVERTED at s11 post-fix P3 (issue
+    # #893): M10 moved this **Plan Stress-Test** heading/section preserve
+    # INSIDE the legacy (no-ledger-pointer) gate above, but
+    # plan-authoring/SKILL.md rule 8 explicitly states "Post-split, the
+    # heading and its prose bullets stay on the plan comment" for MODERN
+    # (ledger-pointer-carrying) plans too, and the live reader at
+    # phase-containment-emission-check-core.ps1's plan-stress-test honest
+    # fallback depends on the heading being present regardless of pointer
+    # generation. Gating this preserve to legacy-only caused a modern
+    # re-persist that omitted the heading to silently drop it, collapsing
+    # the emission-check gate to a false-clean. This preserve now runs
+    # unconditionally again (matching pre-M10 scope), while KEEPING M10's
+    # independently-correct bounded-capture-regex fix below: the pattern
+    # stops at a `## ` Markdown heading or a `<!-- named-decisions:begin
+    # -->` sentinel (in addition to the next `**Bold**` heading or
+    # end-of-body), so it can no longer over-capture and duplicate
+    # unrelated trailing content (e.g. `## Named Decisions`) the way the
+    # pre-M10 unbounded capture did -- that bounding alone fully closes
+    # M10's original over-capture complaint without the harmful
+    # legacy-gating.
+    $stressTestPattern = '(?ms)^\*\*Plan Stress-Test\*\*.*?(?=^\*\*[A-Za-z]|^##[ \t]|<!--\s*named-decisions:begin|\z)'
+    $stressTestMatch = [regex]::Match($existingBody, $stressTestPattern)
+    $candidateHasStressTestHeading = [regex]::IsMatch((script:ConvertTo-MarkerLFBody -Text $mergedBody), '(?m)^\*\*Plan Stress-Test\*\*')
+    if ($stressTestMatch.Success -and -not $candidateHasStressTestHeading) {
+        $mergedBody = $mergedBody.TrimEnd() + "`n`n" + $stressTestMatch.Value.Trim()
+        $preservedClasses.Add('**Plan Stress-Test** heading/section') | Out-Null
     }
 
     return [PSCustomObject]@{ Body = $mergedBody; PreservedClasses = [string[]]$preservedClasses.ToArray(); Refusal = $null }
@@ -1536,22 +1628,37 @@ function script:Invoke-MarkerCreateComment {
         # retries, each adding one more duplicate.
         $originalReadBackMessage = $_.Exception.Message
         $repairSucceeded = $false
+        # P11 fix (issue #893 s11 post-fix): capture the ACTUAL repair
+        # failure detail instead of discarding it -- both the non-throwing
+        # failure path ($repairPatch.Reason, when Set-CommentBodyDirect
+        # itself returns Success=$false without throwing) and the
+        # throwing path ($_.Exception.Message inside the nested catch,
+        # when the post-repair Test-MarkerReadBack call throws). The
+        # 893-D6 diagnosability standard this file otherwise follows
+        # throughout requires every refusal to name a specific reason, not
+        # a generic "also failed" with no why.
+        $repairFailureDetail = $null
         try {
             $repairPatch = Set-CommentBodyDirect -Owner $Owner -Repo $Repo -CommentId $newId -NewBody $Body
             if ($repairPatch.Success) {
                 $null = script:Test-MarkerReadBack -Owner $Owner -Repo $Repo -CommentId $newId -ExpectedBody $Body
                 $repairSucceeded = $true
             }
+            else {
+                $repairFailureDetail = $repairPatch.Reason
+            }
         }
         catch {
             $repairSucceeded = $false
+            $repairFailureDetail = $_.Exception.Message
         }
         if ($repairSucceeded) {
             $confirmation = "persist-marker-core: family '$Family' comment $newId $Action (after a read-back-failure repair-PATCH)"
             Write-Host $confirmation
             return [PSCustomObject]@{ Success = $true; Family = $Family; CommentId = $newId; Action = $Action; Confirmation = $confirmation; Reason = $null }
         }
-        return [PSCustomObject]@{ Success = $false; Family = $Family; CommentId = $newId; Action = $null; Confirmation = $null; Reason = "$originalReadBackMessage (repair-PATCH attempt also failed)" }
+        $repairDetailSuffix = if ([string]::IsNullOrWhiteSpace($repairFailureDetail)) { '' } else { " -- $repairFailureDetail" }
+        return [PSCustomObject]@{ Success = $false; Family = $Family; CommentId = $newId; Action = $null; Confirmation = $null; Reason = "$originalReadBackMessage (repair-PATCH attempt also failed$repairDetailSuffix)" }
     }
 
     $confirmation = "persist-marker-core: family '$Family' comment $newId $Action"
@@ -2204,7 +2311,12 @@ function Invoke-PersistMarkerBurst {
         return [PSCustomObject]@{ Success = $false; Reason = 'persist-marker: REFUSED (burst manifest empty): manifest carries zero entries'; Results = [object[]]@(); Artifacts = $artifacts }
     }
 
-    # --- Whole-manifest preflight: network-free, zero writes on any refusal. ---
+    # --- Whole-manifest preflight: read-only (may issue GETs for
+    # plan-issue preserve preview), zero writes on any refusal. P9 fix
+    # (issue #893 s11 post-fix): this comment previously said "network-free"
+    # -- stale since M11 made the plan-issue preview path inside this
+    # preflight issue real `gh api` GETs (Test-MarkerSiblingIdentity live
+    # sibling-identity checks). ---
     # M4/N1 fix (issue #893 s11): a ValidateSet-binding failure on
     # -TargetSurface (or any other bound parameter) inside
     # Test-MarkerCandidatePreflight is a genuine PowerShell footgun -- it can
@@ -2240,17 +2352,44 @@ function Invoke-PersistMarkerBurst {
             $entryFamilyRow = @($burstPreflightRegistry | Where-Object { $_.Family -eq $entry.Family })
             $candidateSuppliedRefusal = $null
             if ($entryFamilyRow.Count -gt 0 -and $entryFamilyRow[0].PostStep -eq 'plan-issue-write-back-preserve' -and -not [bool]$entry.NoPreserve) {
-                $preview = script:Invoke-PlanIssueWriteBackPreserve -Owner $Owner -Repo $Repo -Number $entry.Number -Marker $entry.Marker -Body $entry.Body
-                # M14 fix (issue #893 s11): a non-null Refusal means the
-                # entry's OWN candidate body carried a forged/stale
-                # phase-containment-ledger-ref pointer or slice_comment_id --
-                # surface that as a preflight refusal too, exactly mirroring
-                # Invoke-PersistMarkerWrite's own execution-time check.
-                if ($null -ne $preview.Refusal) {
-                    $candidateSuppliedRefusal = script:New-MarkerRefusal -Family $entry.Family -Target "$($entry.TargetSurface)/$($entry.Number)" -Detail $preview.Refusal
+                # P10 fix (issue #893 s11 post-fix): script:Test-MarkerSiblingIdentity
+                # (M19) THROWS on a TRANSIENT transport failure (network
+                # blip, rate limit) during this preview's live
+                # sibling-identity GETs, distinct from a confirmed-absent
+                # $false. Before M11 introduced this preview, the burst
+                # preflight issued no GETs at all, so a transient GET
+                # failure could never refuse an otherwise-valid burst at
+                # preflight time -- defense proved this specific failure
+                # mode directly reachable today. Catch it HERE, narrowly by
+                # message match, and treat "couldn't verify during preview"
+                # as "proceed with the unmerged candidate body, let
+                # execution time re-check" -- Invoke-PersistMarkerWrite's
+                # own preflight always re-validates the TRUE final
+                # candidate at write time regardless of this preview, so
+                # this can only ever soften a preflight-time false REFUSAL
+                # into a (still safe) execution-time re-check, never widen
+                # what ultimately gets written. Any OTHER (non-transient)
+                # error re-throws, unchanged, to the outer catch below.
+                try {
+                    $preview = script:Invoke-PlanIssueWriteBackPreserve -Owner $Owner -Repo $Repo -Number $entry.Number -Marker $entry.Marker -Body $entry.Body
+                    # M14 fix (issue #893 s11): a non-null Refusal means the
+                    # entry's OWN candidate body carried a forged/stale
+                    # phase-containment-ledger-ref pointer or slice_comment_id --
+                    # surface that as a preflight refusal too, exactly mirroring
+                    # Invoke-PersistMarkerWrite's own execution-time check.
+                    if ($null -ne $preview.Refusal) {
+                        $candidateSuppliedRefusal = script:New-MarkerRefusal -Family $entry.Family -Target "$($entry.TargetSurface)/$($entry.Number)" -Detail $preview.Refusal
+                    }
+                    else {
+                        $previewBody = $preview.Body
+                    }
                 }
-                else {
-                    $previewBody = $preview.Body
+                catch {
+                    if ($_.Exception.Message -notmatch 'Test-MarkerSiblingIdentity transport failure') { throw }
+                    # Transient transport failure during preview -- proceed
+                    # with the unmerged $entry.Body ($previewBody already
+                    # defaults to it above); execution time re-checks for
+                    # real.
                 }
             }
             $refusal = if ($null -ne $candidateSuppliedRefusal) { $candidateSuppliedRefusal } else { script:Test-MarkerCandidatePreflight -Family $entry.Family -TargetSurface $entry.TargetSurface -Number $entry.Number -Marker $entry.Marker -Body $previewBody }
@@ -2438,7 +2577,12 @@ function Invoke-PersistMarkerBurstFromManifest {
                 $noPreserveValue = ($rawEntry.noPreserve.ToLowerInvariant() -eq 'true')
             }
             else {
-                $offendingType = if ($null -eq $rawEntry.noPreserve) { 'null' } else { $rawEntry.noPreserve.GetType().Name }
+                # P12 fix (issue #893 s11 post-fix): this branch is already
+                # nested inside `if ($null -ne $rawEntry.noPreserve)` above,
+                # so $rawEntry.noPreserve can never be $null here -- the
+                # dead `if ($null -eq $rawEntry.noPreserve) { 'null' }`
+                # conditional was unreachable.
+                $offendingType = $rawEntry.noPreserve.GetType().Name
                 return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (malformed manifest '$echoedManifestPath', entry $entryIndex): field 'noPreserve' must be a JSON boolean (or the case-insensitive string 'true'/'false'), got '$(script:ConvertTo-MarkerRefusalEcho -Value ([string]$rawEntry.noPreserve))' (type $offendingType)"; Results = [object[]]@(); Artifacts = [ordered]@{} }
             }
         }

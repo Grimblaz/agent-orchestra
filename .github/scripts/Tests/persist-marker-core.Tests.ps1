@@ -417,6 +417,33 @@ evidence:
             $result.Success | Should -Be $false
             $result.Reason | Should -Match '(?i)repair-PATCH attempt also failed'
         }
+
+        It 'P11 (issue #893 s11 post-fix): when the repair-PATCH itself fails (distinctly from the original read-back failure), the Reason names the repair''s OWN failure detail, not just the generic "also failed" with no why' {
+            # Regression coverage: the repair-PATCH catch block discarded
+            # the real repair-attempt failure detail (Set-CommentBodyDirect's
+            # .Reason on a non-throwing failure, or the nested
+            # Test-MarkerReadBack throw's own message), reporting only the
+            # generic "repair-PATCH attempt also failed" -- violating the
+            # 893-D6 diagnosability standard the rest of this file follows
+            # (every OTHER refusal in this file names a specific reason).
+            # This fixture deliberately makes the REPAIR PATCH itself fail
+            # for a DIFFERENT, distinguishable reason ("PATCH failed (exit
+            # 1)") than the original read-back mismatch, so an assertion
+            # that only echoes the ORIGINAL failure's own message (already
+            # present even before this fix) cannot pass by coincidence.
+            $marker = $script:PostNewFamily.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+            $body = "$marker`n`nA sentence with several letter e characters in it."
+            $script:CorruptReadBackIds.Add($script:NextCommentId) | Out-Null
+            $script:simulatePatchFailure = @($script:NextCommentId)
+
+            $result = Invoke-PersistMarkerWrite -Family $script:PostNewFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $marker -Body $body
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '(?i)repair-PATCH attempt also failed'
+            # The repair PATCH's OWN distinct failure detail must be
+            # present too, not just the generic wrapper text.
+            $result.Reason | Should -Match '(?i)PATCH failed \(exit 1\)'
+        }
     }
 
     Context 'upsert write shape: end-to-end' {
@@ -639,14 +666,67 @@ evidence:
             $script:ghCallLog.Count | Should -Be 0
         }
 
-        It 'M15: recognizes the candidate''s OWN family marker at line 1 even when prefixed by a zero-width space (U+200B), never a false "missing" refusal' {
+        It 'P1 (issue #893 s11 post-fix): the own-family hygiene anchor stays byte-symmetric with the REAL transport finder -- whatever hygiene admits at line 1 must be locatable by Find-AllCommentsByExactMarker (real transport, only gh mocked), and whatever a downstream reader cannot find must never be silently admitted as present' {
+            # Regression coverage for the intra-batch fix negation defense
+            # found live (issue #893 s11 postfix P1): M15 widened this
+            # own-family anchor to admit `\p{Cf}` (Unicode "format" category
+            # -- zero-width space U+200B, BOM/ZWNBSP U+FEFF) without
+            # mirroring the widening onto Get-MarkerWholeLinePattern
+            # (.github/scripts/lib/marker-transport-core.ps1:84, the real
+            # finder every write/read path uses). That let a ZWSP-prefixed
+            # marker pass hygiene as "present" while remaining unfindable by
+            # the finder -- unbounded duplicate accretion on every
+            # subsequent write. This test proves the round trip with the
+            # REAL Find-AllCommentsByExactMarker primitive (dot-sourced from
+            # marker-transport-core.ps1 in this file's BeforeEach), not a
+            # synthetic mock of the finder, so this defect class can't hide
+            # behind mock fidelity again.
             $marker = $script:PostNewFamily.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
             $zwsp = [char]0x200B
-            $body = "$zwsp$marker`n`nSome content, but line 1 starts with an invisible zero-width space."
+            $zwnbsp = [char]0xFEFF
+            $nbsp = [char]0x00A0
 
-            $result = Invoke-PersistMarkerWrite -Family $script:PostNewFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $marker -Body $body
+            # Case 1: a plain leading space is `\s`-matched by BOTH the
+            # hygiene anchor and the real finder -- hygiene must admit it,
+            # and the posted comment must be locatable afterward.
+            $spaceBody = " $marker`n`nLine 1 has an ordinary leading space."
+            $spaceResult = Invoke-PersistMarkerWrite -Family $script:PostNewFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $marker -Body $spaceBody
+            $spaceResult.Success | Should -Be $true
+            $spaceFound = @(Find-AllCommentsByExactMarker -Owner $script:Owner -Repo $script:Repo -IssueNumber $script:IssueNumber -Marker $marker)
+            $spaceFound.Count | Should -Be 1
+            $spaceFound[0].Id | Should -Be $spaceResult.CommentId
 
-            $result.Success | Should -Be $true
+            # Case 2: NBSP (U+00A0) is Unicode whitespace category Zs, which
+            # .NET's `\s` also matches -- hygiene must admit it, and the
+            # posted comment must be locatable afterward. Uses a distinct
+            # issue number so its posted comment does not collide with
+            # case 1's.
+            $script:mockComments.Clear()
+            $nbspBody = "$nbsp$marker`n`nLine 1 starts with a non-breaking space."
+            $nbspResult = Invoke-PersistMarkerWrite -Family $script:PostNewFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $marker -Body $nbspBody
+            $nbspResult.Success | Should -Be $true
+            $nbspFound = @(Find-AllCommentsByExactMarker -Owner $script:Owner -Repo $script:Repo -IssueNumber $script:IssueNumber -Marker $marker)
+            $nbspFound.Count | Should -Be 1
+            $nbspFound[0].Id | Should -Be $nbspResult.CommentId
+
+            # Case 3/4: ZWSP (U+200B) and BOM/ZWNBSP (U+FEFF) are `\p{Cf}`
+            # (Unicode "format" category), which `\s` does NOT match --
+            # hygiene must REFUSE (never silently admit a body the real
+            # finder could not locate), and no comment may be posted.
+            foreach ($case in @(
+                    @{ Name = 'ZWSP (U+200B)'; Char = $zwsp }
+                    @{ Name = 'BOM/ZWNBSP (U+FEFF)'; Char = $zwnbsp }
+                )) {
+                $script:mockComments.Clear()
+                $script:PostLog.Clear()
+                $body = "$($case.Char)$marker`n`nLine 1 starts with an invisible $($case.Name) character."
+
+                $result = Invoke-PersistMarkerWrite -Family $script:PostNewFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $marker -Body $body
+
+                $result.Success | Should -Be $false -Because "$($case.Name) is invisible to the real transport finder, so hygiene must not treat it as a present marker"
+                $result.Reason | Should -Match '(?i)missing'
+                $script:PostLog.Count | Should -Be 0
+            }
         }
 
         It 'M15: still refuses a decoy cross-family marker whose leading whitespace is a zero-width space (U+200B), never a silent hygiene bypass' {
@@ -1097,7 +1177,16 @@ Old plan prose.
             $result.Confirmation | Should -Match '\*\*Plan Stress-Test\*\* heading/section'
         }
 
-        It 'M10: does NOT carry forward the **Plan Stress-Test** section when the existing comment carries a ledger pointer (modern, non-legacy plan)' {
+        It 'P3 (issue #893 s11 post-fix): STILL carries forward the **Plan Stress-Test** section when the existing comment carries a ledger pointer (modern, non-legacy plan) -- plan-authoring/SKILL.md rule 8 keeps the heading on the plan comment post-split regardless of pointer generation' {
+            # Regression coverage: M10 originally gated this preserve
+            # entirely inside the legacy (no-ledger-pointer) branch,
+            # contradicting plan-authoring/SKILL.md:277 ("Post-split, the
+            # heading and its prose bullets stay on the plan comment" for
+            # modern plans too) and the live reader at
+            # phase-containment-emission-check-core.ps1's plan-stress-test
+            # honest fallback, which depends on the heading being present.
+            # Dropping it on a modern re-persist collapsed the
+            # emission-check gate to a false-clean.
             $ledgerMarker = "<!-- phase-containment-ledger-$script:IssueNumber -->"
             Add-MockComment -Id 500 -Body "$ledgerMarker`n`nSibling content."
             $existingBody = @"
@@ -1116,8 +1205,8 @@ Old plan prose.
             $result = Invoke-PersistMarkerWrite -Family $script:UpsertFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $script:PlanMarker -Body $candidateBody
 
             $result.Success | Should -Be $true
-            $script:PatchLog[0].Body | Should -Not -Match '\*\*Plan Stress-Test\*\*'
-            $result.Confirmation | Should -Not -Match '\*\*Plan Stress-Test\*\* heading/section'
+            $script:PatchLog[0].Body | Should -Match '\*\*Plan Stress-Test\*\*'
+            $result.Confirmation | Should -Match '\*\*Plan Stress-Test\*\* heading/section'
         }
 
         It 'M10: bounds the stress-test capture at a following `## ` heading, never duplicating it, even on a legacy (no-pointer) plan' {
@@ -1227,6 +1316,59 @@ Fresh plan prose with a forged slice_comment_id.
             $result.Success | Should -Be $false
             $result.Reason | Should -Match '(?i)candidate-supplied'
             $result.Reason | Should -Match '888'
+            $script:PatchLog.Count | Should -Be 0
+        }
+
+        It 'P7 (issue #893 s11 post-fix): REFUSES a candidate-SUPPLIED phase-containment-ledger-ref pointer that fails its own live sibling-identity check on the VERY FIRST plan-issue write, when no existing comment is present yet' {
+            # Regression coverage: M14's candidate-supplied-pointer
+            # validation sat AFTER the `$existing.Count -eq 0` early-return
+            # for a first-ever plan-issue write, so a forged/stale
+            # candidate-supplied pointer wrote through completely
+            # unvalidated on first write -- only a re-persist (where an
+            # existing comment already exists) was actually protected.
+            # Deliberately no Add-MockComment call here: the issue carries
+            # NO plan-issue-{ID} comment at all yet.
+            $candidateBody = "$script:PlanMarker`n<!-- phase-containment-ledger-ref: 777 -->`n`nFresh plan prose with a forged pointer, first-ever write."
+
+            $result = Invoke-PersistMarkerWrite -Family $script:UpsertFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $script:PlanMarker -Body $candidateBody
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '(?i)candidate-supplied'
+            $result.Reason | Should -Match '777'
+            $script:PostLog.Count | Should -Be 0
+            $script:PatchLog.Count | Should -Be 0
+        }
+
+        It 'P7 (issue #893 s11 post-fix): REFUSES a candidate-SUPPLIED slice_comment_id that fails its own live sibling-identity check on the VERY FIRST plan-issue write, when no existing comment is present yet' {
+            # Deliberately no Add-MockComment call here: the issue carries
+            # NO plan-issue-{ID} comment at all yet, and no sibling comment
+            # 888 exists either.
+            $candidateBody = @"
+$script:PlanMarker
+
+<!-- frame-spine
+spine_schema_version: 2
+generated_at: 2026-07-02T00:00:00Z
+coverage: complete
+slice_comment_id: 888
+ports:
+  implement-code: [s1]
+slices:
+  s1:
+    ac_refs: [AC1]
+    depends_on: []
+    cycle: 1
+-->
+
+Fresh plan prose with a forged slice_comment_id, first-ever write.
+"@
+
+            $result = Invoke-PersistMarkerWrite -Family $script:UpsertFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $script:PlanMarker -Body $candidateBody
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '(?i)candidate-supplied'
+            $result.Reason | Should -Match '888'
+            $script:PostLog.Count | Should -Be 0
             $script:PatchLog.Count | Should -Be 0
         }
 
@@ -1371,6 +1513,56 @@ Plan prose that must survive.
             $planPatch[0].Body | Should -Match 'Plan prose that must survive\.'
         }
 
+        It 'P5 (issue #893 s11 post-fix): splices the REAL frame-spine block, never a mid-line PROSE MENTION of it, when a decoy mention precedes the real block' {
+            # Regression coverage: the splice regex was missing the
+            # canonical parser's `(?m)^[ \t]*` line-start anchor, so a prose
+            # sentence mentioning the block syntax (a legitimate, common
+            # authoring pattern -- e.g. explaining what follows) matched as
+            # a decoy self-closing form with an EMPTY payload capture,
+            # ahead of the real block further down. Defense proved this
+            # live: the unanchored mirror regex matched at the decoy's
+            # index instead of the real block on an identical body where
+            # the canonical parser (and the pre-fix regex) correctly found
+            # the real block.
+            $planBody = @"
+$script:PlanMarkerForSplice
+
+See the ``<!-- frame-spine -->`` block below for the port routing index.
+
+<!-- frame-spine
+spine_schema_version: 2
+generated_at: 2026-07-16T18:00:00Z
+coverage: complete
+ports:
+  implement-code: [s1]
+slices:
+  s1:
+    ac_refs: [AC1]
+    depends_on: []
+    cycle: 1
+-->
+
+Plan prose that must survive.
+"@
+            Add-MockComment -Id 100 -Body $planBody
+            $sliceBody = "$script:SliceMarker`n<!-- frame-slices-generated-at: 2026-07-16T18:00:00Z -->`n`n<!-- frame-slice`nid: s1`n-->"
+
+            $result = Invoke-PersistMarkerWrite -Family $script:FrameSlicesFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $script:SliceMarker -Body $sliceBody
+
+            $result.Success | Should -Be $true
+            $newSiblingId = $result.CommentId
+            $planPatch = @($script:PatchLog | Where-Object { $_.CommentId -eq 100 })
+            $planPatch.Count | Should -Be 1
+            # The real block's slice_comment_id must be set -- a decoy
+            # match would leave this absent (the splice would have no-oped
+            # against the decoy's empty payload instead).
+            $planPatch[0].Body | Should -Match "(?m)^slice_comment_id:\s*$newSiblingId\s*$"
+            # The decoy prose mention itself must survive verbatim, never
+            # corrupted by a wrongly-targeted splice.
+            $planPatch[0].Body | Should -Match 'See the `<!-- frame-spine -->` block below'
+            $planPatch[0].Body | Should -Match 'Plan prose that must survive\.'
+        }
+
         It 'REFUSES (Success=$false) when the issue carries no plan-issue-{ID} marker at all' {
             $sliceBody = "$script:SliceMarker`n<!-- frame-slices-generated-at: 2026-07-16T18:00:00Z -->`n`n<!-- frame-slice`nid: s1`n-->"
 
@@ -1478,6 +1670,39 @@ Plan prose that must survive byte-for-byte.
             $expectedBody = $planBody -replace '(?m)^generated_at: 2026-07-16T18:00:00Z\s*$', "generated_at: 2026-07-16T18:00:00Z`nslice_comment_id: $newSiblingId"
             $planPatch.Body | Should -Be $expectedBody
             $planPatch.Body | Should -Match 'Plan prose that must survive byte-for-byte\.'
+        }
+    }
+
+    Context 'Set-MarkerSpineScalarValue: post-condition safety net on the early-return path (P6, issue #893 s11 post-fix)' {
+        It 'throws loud instead of silently no-oping when the canonical parser sees a frame-spine block that this helper''s own splice regex did not match' {
+            # Regression coverage: the M6 post-condition safety net (re-read
+            # -Name back through the canonical parser -- Get-FSCSpineBlock
+            # -- after a successful splice, throw if it disagrees) only ran
+            # on the SUCCESSFUL-match path. The early `if (-not
+            # $blockMatch.Success) { return $Body }` fired first and
+            # returned a false "nothing to splice" success for any body
+            # shape this helper's own regex could not match, even one the
+            # canonical parser DOES recognize as carrying a frame-spine
+            # block -- the exact "third, currently-unknown block shape"
+            # class the post-condition's own docstring already names as
+            # its reason for existing, just unreachable from this
+            # direction. After the P5 fix the two parsers are kept
+            # byte-identical in production, so a real divergent body is not
+            # constructible without forcing one -- this test mocks
+            # Get-FSCSpineBlock to force the exact divergence and proves
+            # the early-return path now throws loud instead of silently
+            # no-oping.
+            Mock -CommandName Get-FSCSpineBlock -MockWith { return 'slice_comment_id: 999' }
+
+            { Set-MarkerSpineScalarValue -Body 'plain body with no frame-spine literal at all' -Name 'slice_comment_id' -Value '123' } | Should -Throw '*post-condition failed*'
+        }
+
+        It 'returns the body unchanged, with no throw, when BOTH the canonical parser and this helper''s own splice regex agree no frame-spine block is present' {
+            $body = 'plain body with no frame-spine literal at all'
+
+            $result = Set-MarkerSpineScalarValue -Body $body -Name 'slice_comment_id' -Value '123'
+
+            $result | Should -Be $body
         }
     }
 }

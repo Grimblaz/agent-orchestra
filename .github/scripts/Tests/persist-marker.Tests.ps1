@@ -388,6 +388,50 @@ evidence: issue-893-plan-marker-posted
         }
     }
 
+    Context 'Invoke-PersistMarkerBurst: transient transport failure during preview never produces a false preflight REFUSAL of the WHOLE burst (P10, issue #893 s11 post-fix)' {
+        It 'lets an EARLIER unrelated entry land through preflight and execution even though a LATER plan-issue entry''s preview hits a transient GET failure on its inherited ledger-ref sibling check' {
+            # Regression coverage: M11's docstring claimed the preflight
+            # preview "can never produce a false REFUSAL of an
+            # otherwise-valid burst". Defense proved that false:
+            # script:Test-MarkerSiblingIdentity (M19) THROWS on a TRANSIENT
+            # transport failure (not a confirmed-absent $false), and before
+            # this fix the burst preflight loop's try/catch turned that
+            # throw into a hard REFUSAL for the WHOLE burst -- at PREFLIGHT
+            # time, before ANY entry (including ones with no relationship
+            # at all to the plan-issue preview) had a chance to land.
+            # Before M11 introduced this preview, the preflight issued no
+            # GETs at all, so this failure mode was impossible.
+            $markerA = $script:GoodFamilyA.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+            $planMarker = $script:PlanIssueFamily.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+            Add-MockComment -Id 100 -Body "$planMarker`n<!-- phase-containment-ledger-ref: 500 -->`n`nOld plan prose."
+            # Sibling comment 500 is never actually reachable -- every GET
+            # for it fails TRANSIENTLY (not a confirmed 404).
+            $script:simulateTransientGetFailure = @(500)
+
+            $entries = @(
+                [PSCustomObject]@{ Family = $script:GoodFamilyA.Family; Number = $script:IssueNumber; TargetSurface = 'issue'; Marker = $markerA; Body = "$markerA`n`nUnrelated entry, must land regardless."; NoPreserve = $false }
+                [PSCustomObject]@{ Family = $script:PlanIssueFamily.Family; Number = $script:IssueNumber; TargetSurface = 'issue'; Marker = $planMarker; Body = "$planMarker`n`nFresh plan prose, no candidate-supplied pointer of its own."; NoPreserve = $false }
+            )
+
+            $result = Invoke-PersistMarkerBurst -Owner $script:Owner -Repo $script:Repo -Entries $entries
+
+            # The unrelated FIRST entry must have actually landed -- proving
+            # the transient preview failure did not block the whole burst
+            # at PREFLIGHT time (the old behavior: Artifacts['entry-1']
+            # would read 'not-attempted' and PostLog.Count would be 0).
+            $script:PostLog.Count | Should -Be 1
+            $result.Artifacts['entry-1'] | Should -Be 'landed'
+            # The plan-issue entry itself still legitimately fails, but
+            # only at EXECUTION time, once Invoke-PersistMarkerWrite's own
+            # M19 transport-failure handling re-checks for real (the
+            # transient failure never clears in this fixture) -- this is
+            # the CORRECT, unchanged fail-closed behavior for that specific
+            # entry, not a regression.
+            $result.Success | Should -Be $false
+            $result.Artifacts['entry-2'] | Should -Be 'failed'
+        }
+    }
+
     Context 'Invoke-PersistMarkerBurst: ordering + halt-on-first-failure' {
         It 'writes entries in manifest order' {
             $markerA = $script:GoodFamilyA.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
