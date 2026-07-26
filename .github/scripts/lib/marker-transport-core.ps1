@@ -69,6 +69,21 @@
 # call these).
 # ---------------------------------------------------------------------------
 
+function Get-MarkerWholeLinePattern {
+    <#
+    .SYNOPSIS
+        Shared "marker appears as a whole, standalone line" detection regex
+        (s10 consolidation): byte-identical construction previously
+        duplicated between Find-CommentIdByExactMarker and
+        Find-AllCommentsByExactMarker.
+    .OUTPUTS
+        [string] a multiline-anchored regex pattern matching -Marker at line
+        start, modulo surrounding whitespace, through end of line.
+    #>
+    param([Parameter(Mandatory)][string]$Marker)
+    return "(?m)^\s*$([regex]::Escape($Marker))\s*`$"
+}
+
 function Get-CommentIdFromUrl {
     <#
     .SYNOPSIS
@@ -227,7 +242,7 @@ function Find-CommentIdByExactMarker {
         }
     }
 
-    $linePattern = "(?m)^\s*$([regex]::Escape($Marker))\s*`$"
+    $linePattern = Get-MarkerWholeLinePattern -Marker $Marker
     $matched = @($comments | Where-Object { $_.body -and ([regex]::IsMatch([string]$_.body, $linePattern)) })
     if ($matched.Count -eq 0) { return $null }
 
@@ -365,7 +380,7 @@ function Find-AllCommentsByExactMarker {
         }
     }
 
-    $linePattern = "(?m)^\s*$([regex]::Escape($Marker))\s*`$"
+    $linePattern = Get-MarkerWholeLinePattern -Marker $Marker
     $matched = @($allComments | Where-Object { $_.body -and ([regex]::IsMatch([string]$_.body, $linePattern)) })
 
     # Explicit empty-array guard, PLUS the unary-comma return below: a

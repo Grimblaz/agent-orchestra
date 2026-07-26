@@ -920,6 +920,34 @@ function script:Set-MarkerSpineScalarValue {
     return $Body.Substring(0, $payloadGroup.Index) + $newPayload + $Body.Substring($payloadGroup.Index + $payloadGroup.Length)
 }
 
+function script:Test-MarkerSiblingIdentity {
+    <#
+    .SYNOPSIS
+        Shared "live-fetch a comment by id and confirm it carries the
+        expected identity marker as a whole, standalone line" check (s10
+        consolidation): byte-identical shape previously duplicated between
+        script:Invoke-PlanIssueWriteBackPreserve's phase-containment-ledger-ref
+        pointer live-check and its frame-spine slice_comment_id live-check.
+    .DESCRIPTION
+        Callers keep their own preconditions (e.g. confirming the candidate
+        id string is numeric before casting to [long]) -- this helper only
+        centralizes the GET + line-anchored marker match that both call
+        sites performed identically.
+    .OUTPUTS
+        [bool] $true only when the comment exists and its LF-normalized body
+        carries -ExpectedMarker as a whole, standalone line.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Owner,
+        [Parameter(Mandatory)][string]$Repo,
+        [Parameter(Mandatory)][long]$CommentId,
+        [Parameter(Mandatory)][string]$ExpectedMarker
+    )
+    $siblingBody = Get-CommentBodyById -Owner $Owner -Repo $Repo -CommentId $CommentId
+    return ($null -ne $siblingBody) -and
+        [regex]::IsMatch((script:ConvertTo-MarkerLFBody -Text $siblingBody), '(?m)^[ \t]*' + [regex]::Escape($ExpectedMarker) + '[ \t]*$')
+}
+
 function script:Invoke-PlanIssueWriteBackPreserve {
     <#
     .SYNOPSIS
@@ -1001,9 +1029,7 @@ function script:Invoke-PlanIssueWriteBackPreserve {
     if ($pointerMatch.Success -and -not $candidateHasPointer) {
         $siblingId = [long]$pointerMatch.Groups['id'].Value
         $expectedSiblingMarker = "<!-- phase-containment-ledger-$Number -->"
-        $siblingBody = Get-CommentBodyById -Owner $Owner -Repo $Repo -CommentId $siblingId
-        $siblingValid = ($null -ne $siblingBody) -and
-            [regex]::IsMatch((script:ConvertTo-MarkerLFBody -Text $siblingBody), '(?m)^[ \t]*' + [regex]::Escape($expectedSiblingMarker) + '[ \t]*$')
+        $siblingValid = script:Test-MarkerSiblingIdentity -Owner $Owner -Repo $Repo -CommentId $siblingId -ExpectedMarker $expectedSiblingMarker
         if ($siblingValid) {
             $mergedBody = Set-PointerLineAfterMarker -Body $mergedBody -Marker $Marker -PointerLine "<!-- phase-containment-ledger-ref: $siblingId -->"
             $preservedClasses.Add('phase-containment-ledger-ref pointer') | Out-Null
@@ -1024,12 +1050,10 @@ function script:Invoke-PlanIssueWriteBackPreserve {
             }
             if ($null -ne $candidateSpineBlock -and [string]::IsNullOrWhiteSpace($candidateSliceCommentId)) {
                 $expectedSiblingMarker = "<!-- frame-slices-$Number -->"
-                $siblingBody = $null
+                $siblingValid = $false
                 if ($existingSliceCommentId -match '^\d+$') {
-                    $siblingBody = Get-CommentBodyById -Owner $Owner -Repo $Repo -CommentId ([long]$existingSliceCommentId)
+                    $siblingValid = script:Test-MarkerSiblingIdentity -Owner $Owner -Repo $Repo -CommentId ([long]$existingSliceCommentId) -ExpectedMarker $expectedSiblingMarker
                 }
-                $siblingValid = ($null -ne $siblingBody) -and
-                    [regex]::IsMatch((script:ConvertTo-MarkerLFBody -Text $siblingBody), '(?m)^[ \t]*' + [regex]::Escape($expectedSiblingMarker) + '[ \t]*$')
                 if ($siblingValid) {
                     $mergedBody = script:Set-MarkerSpineScalarValue -Body $mergedBody -Name 'slice_comment_id' -Value $existingSliceCommentId
                     $preservedClasses.Add('slice_comment_id (frame-spine)') | Out-Null
@@ -1151,6 +1175,58 @@ function script:Invoke-FrameSlicesSpineSplice {
 # Write shapes.
 # ---------------------------------------------------------------------------
 
+function script:Invoke-MarkerCreateComment {
+    <#
+    .SYNOPSIS
+        Shared create-and-verify sequence (s10 consolidation): POSTs a new
+        comment via New-MarkerComment, extracts its numeric REST id, and
+        read-back-verifies it via script:Test-MarkerReadBack -- byte-
+        identical logic previously duplicated between
+        script:Invoke-MarkerPostNewWrite's fresh-post path and
+        script:Invoke-MarkerUpsertWrite's first-persist (zero-match) path.
+    .DESCRIPTION
+        -Action names the caller's verb ('posted' for post-new,
+        'created' for upsert's first persist) so each write shape's own
+        Action/Confirmation text stays exactly what it was before this
+        consolidation, while the create+verify mechanics -- and every
+        failure-message wording -- are shared and can no longer drift
+        between the two write shapes.
+    .OUTPUTS
+        [PSCustomObject] Success [bool], Family [string], CommentId
+        [long or $null], Action [string or $null], Confirmation
+        [string or $null], Reason [string or $null] -- the same result
+        shape every write-shape function already returns.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Owner,
+        [Parameter(Mandatory)][string]$Repo,
+        [Parameter(Mandatory)][string]$Family,
+        [Parameter(Mandatory)][ValidateSet('issue', 'pr')][string]$Type,
+        [Parameter(Mandatory)][int]$Number,
+        [Parameter(Mandatory)][string]$Body,
+        [Parameter(Mandatory)][string]$Action
+    )
+    $postResult = New-MarkerComment -Type $Type -Owner $Owner -Repo $Repo -Number $Number -Body $Body
+    if ($null -eq $postResult) {
+        return [PSCustomObject]@{ Success = $false; Family = $Family; CommentId = $null; Action = $null; Confirmation = $null; Reason = "New-MarkerComment failed to create the comment for family '$Family'" }
+    }
+    $newId = Get-CommentIdFromUrl -Url $postResult
+    if ($null -eq $newId) {
+        return [PSCustomObject]@{ Success = $false; Family = $Family; CommentId = $null; Action = $null; Confirmation = $null; Reason = "Could not extract a numeric comment id from the created comment's url '$postResult' for family '$Family'" }
+    }
+
+    try {
+        $null = script:Test-MarkerReadBack -Owner $Owner -Repo $Repo -CommentId $newId -ExpectedBody $Body
+    }
+    catch {
+        return [PSCustomObject]@{ Success = $false; Family = $Family; CommentId = $newId; Action = $null; Confirmation = $null; Reason = $_.Exception.Message }
+    }
+
+    $confirmation = "persist-marker-core: family '$Family' comment $newId $Action"
+    Write-Host $confirmation
+    return [PSCustomObject]@{ Success = $true; Family = $Family; CommentId = $newId; Action = $Action; Confirmation = $confirmation; Reason = $null }
+}
+
 function script:Invoke-MarkerPostNewWrite {
     <#
     .SYNOPSIS
@@ -1202,25 +1278,7 @@ function script:Invoke-MarkerPostNewWrite {
         }
     }
 
-    $postResult = New-MarkerComment -Type $Type -Owner $Owner -Repo $Repo -Number $Number -Body $Body
-    if ($null -eq $postResult) {
-        return [PSCustomObject]@{ Success = $false; Family = $Family; CommentId = $null; Action = $null; Confirmation = $null; Reason = "New-MarkerComment failed to create the comment for family '$Family'" }
-    }
-    $newId = Get-CommentIdFromUrl -Url $postResult
-    if ($null -eq $newId) {
-        return [PSCustomObject]@{ Success = $false; Family = $Family; CommentId = $null; Action = $null; Confirmation = $null; Reason = "Could not extract a numeric comment id from the created comment's url '$postResult' for family '$Family'" }
-    }
-
-    try {
-        $null = script:Test-MarkerReadBack -Owner $Owner -Repo $Repo -CommentId $newId -ExpectedBody $Body
-    }
-    catch {
-        return [PSCustomObject]@{ Success = $false; Family = $Family; CommentId = $newId; Action = $null; Confirmation = $null; Reason = $_.Exception.Message }
-    }
-
-    $confirmation = "persist-marker-core: family '$Family' comment $newId posted"
-    Write-Host $confirmation
-    return [PSCustomObject]@{ Success = $true; Family = $Family; CommentId = $newId; Action = 'posted'; Confirmation = $confirmation; Reason = $null }
+    return script:Invoke-MarkerCreateComment -Owner $Owner -Repo $Repo -Family $Family -Type $Type -Number $Number -Body $Body -Action 'posted'
 }
 
 function script:Invoke-MarkerUpsertWrite {
@@ -1247,23 +1305,7 @@ function script:Invoke-MarkerUpsertWrite {
 
     $existing = Find-AllCommentsByExactMarker -Owner $Owner -Repo $Repo -IssueNumber $Number -Marker $Marker
     if ($existing.Count -eq 0) {
-        $postResult = New-MarkerComment -Type $Type -Owner $Owner -Repo $Repo -Number $Number -Body $Body
-        if ($null -eq $postResult) {
-            return [PSCustomObject]@{ Success = $false; Family = $Family; CommentId = $null; Action = $null; Confirmation = $null; Reason = "New-MarkerComment failed to create the comment for family '$Family'" }
-        }
-        $newId = Get-CommentIdFromUrl -Url $postResult
-        if ($null -eq $newId) {
-            return [PSCustomObject]@{ Success = $false; Family = $Family; CommentId = $null; Action = $null; Confirmation = $null; Reason = "Could not extract a numeric comment id from the created comment's url '$postResult' for family '$Family'" }
-        }
-        try {
-            $null = script:Test-MarkerReadBack -Owner $Owner -Repo $Repo -CommentId $newId -ExpectedBody $Body
-        }
-        catch {
-            return [PSCustomObject]@{ Success = $false; Family = $Family; CommentId = $newId; Action = $null; Confirmation = $null; Reason = $_.Exception.Message }
-        }
-        $confirmation = "persist-marker-core: family '$Family' comment $newId created"
-        Write-Host $confirmation
-        return [PSCustomObject]@{ Success = $true; Family = $Family; CommentId = $newId; Action = 'created'; Confirmation = $confirmation; Reason = $null }
+        return script:Invoke-MarkerCreateComment -Owner $Owner -Repo $Repo -Family $Family -Type $Type -Number $Number -Body $Body -Action 'created'
     }
 
     # Canonical target = earliest (lowest REST id) match -- ascending order
@@ -1412,6 +1454,49 @@ function Read-MarkerScratchBoundedBodyFile {
     return [PSCustomObject]@{ Success = $true; Body = $body; Reason = $null }
 }
 
+function script:Resolve-MarkerFamilyRow {
+    <#
+    .SYNOPSIS
+        Shared registry-lookup + surface-preflight helper (s10
+        consolidation): looks up -Family in -Registry and validates
+        -TargetSurface against the matched row's declared TargetSurface.
+        Byte-identical logic previously duplicated between
+        script:Test-MarkerCandidatePreflight and Invoke-PersistMarkerWrite
+        (same unknown-family and surface-mismatch Detail message text in
+        both) -- both callers now share this one lookup instead of two
+        independently-maintained copies.
+    .DESCRIPTION
+        Invoke-PersistMarkerWrite still needs its OWN call to this helper
+        (rather than only relying on Test-MarkerCandidatePreflight's later
+        call) because it must read WriteShape/PostStep off the resolved row
+        before the PostStep dispatch runs -- the PostStep can mutate the
+        candidate Body, and Test-MarkerCandidatePreflight's own resolution
+        happens afterward, against that TRUE final candidate. This helper
+        does not change that two-call shape; it only removes the duplicated
+        lookup/refusal logic each call site previously reimplemented.
+    .OUTPUTS
+        [PSCustomObject] with Row (the matched registry row, or $null) and
+        Refusal (a script:New-MarkerRefusal result, or $null) -- exactly one
+        of the two is non-null.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Family,
+        [Parameter(Mandatory)][ValidateSet('issue', 'pull-request')][string]$TargetSurface,
+        [Parameter(Mandatory)][int]$Number,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Registry
+    )
+    $target = "$TargetSurface/$Number"
+    $row = @($Registry | Where-Object { $_.Family -eq $Family })
+    if ($row.Count -eq 0) {
+        return [PSCustomObject]@{ Row = $null; Refusal = (script:New-MarkerRefusal -Family $Family -Target $target -Detail "unknown marker family '$Family' -- not present in the family registry") }
+    }
+    $familyRow = $row[0]
+    if ($familyRow.TargetSurface -ne $TargetSurface) {
+        return [PSCustomObject]@{ Row = $null; Refusal = (script:New-MarkerRefusal -Family $Family -Target $target -Detail "surface mismatch: registry declares '$($familyRow.TargetSurface)' but this write was targeted at '$TargetSurface'") }
+    }
+    return [PSCustomObject]@{ Row = $familyRow; Refusal = $null }
+}
+
 function script:Test-MarkerCandidatePreflight {
     <#
     .SYNOPSIS
@@ -1443,14 +1528,11 @@ function script:Test-MarkerCandidatePreflight {
         [Parameter(Mandatory)][string]$Body
     )
     $allRows = @(Get-MarkerFamilyRegistry)
-    $row = @($allRows | Where-Object { $_.Family -eq $Family })
-    if ($row.Count -eq 0) {
-        return script:New-MarkerRefusal -Family $Family -Target "$TargetSurface/$Number" -Detail "unknown marker family '$Family' -- not present in the family registry"
+    $resolved = script:Resolve-MarkerFamilyRow -Family $Family -TargetSurface $TargetSurface -Number $Number -Registry $allRows
+    if ($null -ne $resolved.Refusal) {
+        return $resolved.Refusal
     }
-    $familyRow = $row[0]
-    if ($familyRow.TargetSurface -ne $TargetSurface) {
-        return script:New-MarkerRefusal -Family $Family -Target "$TargetSurface/$Number" -Detail "surface mismatch: registry declares '$($familyRow.TargetSurface)' but this write was targeted at '$TargetSurface'"
-    }
+    $familyRow = $resolved.Row
     $target = "$TargetSurface/$Number"
 
     if ($Body.Length -gt $script:MarkerBodySizeCap) {
@@ -1531,18 +1613,14 @@ function Invoke-PersistMarkerWrite {
         [switch]$NoPreserve
     )
 
+    # Registry lookup + surface preflight -- see this file's header for why
+    # this compares declared surfaces rather than performing a live lookup.
     $allRows = @(Get-MarkerFamilyRegistry)
-    $row = @($allRows | Where-Object { $_.Family -eq $Family })
-    if ($row.Count -eq 0) {
-        return script:New-MarkerRefusal -Family $Family -Target "$TargetSurface/$Number" -Detail "unknown marker family '$Family' -- not present in the family registry"
+    $resolved = script:Resolve-MarkerFamilyRow -Family $Family -TargetSurface $TargetSurface -Number $Number -Registry $allRows
+    if ($null -ne $resolved.Refusal) {
+        return $resolved.Refusal
     }
-    $familyRow = $row[0]
-
-    # Surface preflight -- see this file's header for why this compares
-    # declared surfaces rather than performing a live lookup.
-    if ($familyRow.TargetSurface -ne $TargetSurface) {
-        return script:New-MarkerRefusal -Family $Family -Target "$TargetSurface/$Number" -Detail "surface mismatch: registry declares '$($familyRow.TargetSurface)' but this write was targeted at '$TargetSurface'"
-    }
+    $familyRow = $resolved.Row
 
     $target = "$TargetSurface/$Number"
 
