@@ -8,7 +8,7 @@
 
 ## Purpose
 
-This document describes `persist-marker.ps1` — the registry-driven CLI that owns quoting, encoding, comment targeting, marker-literal emission, burst ordering, and read-back verification for nine durable GitHub-comment marker families. It records why the primitive exists, how it is built, the decisions (and owner-approved amendments) that shaped it, what CE Gate caught that the mocked test suite could not, and what remains hand-authored.
+This document describes `persist-marker.ps1` — the registry-driven CLI that owns quoting, encoding, comment targeting, marker-literal emission, burst ordering, and read-back verification for eight durable GitHub-comment marker families. It records why the primitive exists, how it is built, the decisions (and owner-approved amendments) that shaped it, what CE Gate caught that the mocked test suite could not, and what remains hand-authored.
 
 The operational marker catalog — which family writes through this primitive today — lives in [skills/session-memory-contract/references/handoff-markers.md](../../skills/session-memory-contract/references/handoff-markers.md). This document does not duplicate that catalog; it explains the transport machinery behind it.
 
@@ -52,7 +52,7 @@ Adoption is by contract rewrite and friction advantage (a recommended `.claude/s
 
 `Get-MarkerFamilyRegistry` (`persist-marker-core.ps1`) returns one row per durable marker family: `Family`, `MarkerTemplate`, `TargetSurface` (`issue` | `pull-request`), `WriteShape` (`post-new` | `upsert`), `ValidatorAdapter`, and `PostStep`. Adding a family later is one registry row plus an optional validator adapter — the registry is what keeps N families from becoming N separate invocation contracts.
 
-Registry v1 (eight families with a live writer; a ninth, `frame-slices`, is upsert; see [Known v1 gaps](#known-v1-gaps--deferred-work) for what is not yet in the registry):
+Registry v1 (eight families with a live writer, including `frame-slices`, whose write shape is `upsert`; see [Known v1 gaps](#known-v1-gaps--deferred-work) for what is not yet in the registry):
 
 | Family | Write shape | Validator adapter | Post-step |
 | --- | --- | --- | --- |
@@ -144,7 +144,7 @@ CE Gate found a defect the fully-mocked Pester suite (385/385 green) could not: 
 
 ## Known v1 Gaps / Deferred Work
 
-The registry covers eight of the marker catalog's live families with a v1 writer (nine counting `frame-slices`, whose write shape is `upsert`). Two families stay hand-authored, and one is explicitly out of scope:
+The registry covers eight of the marker catalog's live families with a v1 writer (including `frame-slices`, whose write shape is `upsert`). Two families stay hand-authored, and one is explicitly out of scope:
 
 - **`engagement-record-review-{PR}`** — the `engagement-record` registry row declares `TargetSurface: issue` for every phase, but the `review` phase is PR-keyed; a `review`-phase write through `persist-marker.ps1` would be refused by the surface preflight. Per-phase surface selection is a known v1 registry gap, not solved in this slice. See `skills/session-memory-contract/references/handoff-markers.md` for the current hand-authored write path.
 - **`design-issue-{ID}`** — a legacy Copilot session-memory concept with no active writer on the current Claude pipeline; not a live registry family.

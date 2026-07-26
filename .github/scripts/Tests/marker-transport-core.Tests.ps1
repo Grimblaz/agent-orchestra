@@ -292,7 +292,13 @@ Describe 'marker-transport-core' {
         }
     }
 
-    Context 'New-MarkerComment: large-body native invocation (M2, issue #893 s11)' {
+    Context 'New-MarkerComment: large-body native invocation (M2, issue #893 s11)' -Skip:(-not $IsWindows) {
+        # Windows-only OS primitive: the fixture below is a `.cmd` batch
+        # file (`@echo off` / `exit /b 0`), a Windows-specific external-
+        # process shape with no Linux equivalent. None of this suite's
+        # Describe blocks are in pester.yml's current Linux CI allowlist
+        # yet, so this is a latent guard against a future Linux run, not
+        # an active regression fix.
         BeforeAll {
             $script:SavedPath = $env:PATH
         }
@@ -351,7 +357,12 @@ exit /b 0
         }
     }
 
-    Context 'Console.OutputEncoding UTF-8 pin (CE Gate #893 live-run fix, S1/S3(a))' {
+    Context 'Console.OutputEncoding UTF-8 pin (CE Gate #893 live-run fix, S1/S3(a))' -Skip:(-not $IsWindows) {
+        # Windows-only OS primitive: the fixture below is a `.cmd` batch
+        # file (`@echo off` / `type` / `exit /b 0`), a Windows-specific
+        # external-process shape with no Linux equivalent. None of this
+        # suite's Describe blocks are in pester.yml's current Linux CI
+        # allowlist yet, so this is a latent guard, not an active fix.
         BeforeAll {
             $script:EncodingSavedPath = $env:PATH
         }

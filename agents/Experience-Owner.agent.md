@@ -146,7 +146,7 @@ evidence: "issue #{ISSUE_NUMBER}; experience completion marker posted"
 
 Build a burst manifest JSON array in this canonical order — completion, engagement-record, credit-input — each entry naming its `family`/`number`/`targetSurface`/`marker`/`bodyFile`, then invoke `pwsh skills/session-memory-contract/scripts/persist-marker.ps1 -Owner {owner} -Repo {repo} -BurstManifest <manifest-path>` exactly once. Relay the script's per-entry artifact manifest (landed/not-attempted/failed) in your completion report so Code-Conductor harvest can use the `-InMemoryMarkers` fallback.
 
-**Ordering is now script-enforced** by the burst's halt-on-first-failure execution (previously an agent-remembered rule — see `Documents/Design/engagement-record-write-discipline.md` § D6, 893-D4 amendment): if engagement-record emission fails, the burst halts before credit-input — the completion artifact (entry 1) already landed and stands, the phase is still marked complete, you MUST relay the script's actual halt reason as a warning to the user (the burst's own `persist-marker (burst): FAILED -- {reason}` diagnostic text for the engagement-record entry, not a fixed literal string), credit-input is NOT attempted, and `same-decision-resume` next session degrades to v1.1 behavior. Re-running the same manifest after a halt is safe — already-landed entries no-op via the script's own write-shape idempotency.
+**Ordering is now script-enforced** by the burst's preflight-then-execute contract (previously an agent-remembered rule — see `Documents/Design/engagement-record-write-discipline.md` § D6, 893-D4 amendment): the whole-manifest preflight validates every entry (registry lookup, surface match, size cap, payload hygiene, validator adapter) before any network write, so if engagement-record fails **preflight**, nothing in the burst lands — not even the completion artifact — and you MUST relay the script's refusal reason as a warning to the user before retrying the whole manifest. If preflight passes and engagement-record instead fails during **execution**, the burst halts before credit-input — the completion artifact (entry 1, already executed earlier in manifest order) already landed and stands, the phase is still marked complete, you MUST relay the script's actual halt reason as a warning to the user (the burst's own `persist-marker (burst): FAILED -- {reason}` diagnostic text for the engagement-record entry, not a fixed literal string), credit-input is NOT attempted, and `same-decision-resume` next session degrades to v1.1 behavior. Re-running the same manifest after either kind of halt is safe — already-landed entries no-op via the script's own write-shape idempotency.
 
 ## Upstream Completion Gate (Mandatory)
 
@@ -154,7 +154,8 @@ Hard-stop: never conclude without durable artifacts.
 
 - [ ] GitHub issue updated (problem statement, journeys, scenarios, surface, design intent, CE Gate readiness).
 - [ ] Completion comment with `<!-- experience-owner-complete-{ISSUE_NUMBER} -->` posted.
-- [ ] Credit-input marker `<!-- credit-input-experience-{ISSUE_NUMBER} -->` posted immediately after.
+- [ ] Engagement-record marker `<!-- engagement-record-experience-{ISSUE_NUMBER} -->` posted next.
+- [ ] Credit-input marker `<!-- credit-input-experience-{ISSUE_NUMBER} -->` posted last, via the same burst manifest (completion → engagement-record → credit-input).
 
 **Exception**: purely exploratory sessions (user said "just brainstorming") skip documentation.
 

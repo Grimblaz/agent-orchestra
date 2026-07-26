@@ -3679,7 +3679,14 @@ Describe 'Add-JudgeRulingsBlock - sibling append primitive with entry-level posi
         $result = Add-JudgeRulingsBlock -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 794 -ExpectedMarker '<!-- plan-issue-811' -NewContent $newContentNearBoundary
         $result.Success | Should -Be $false
         $result.Reason | Should -Not -Match 'found at offset \d+, outside the'
-        $result.Reason | Should -Match '(?i)leaves insufficient room|no judge-rulings marker head'
+        # Tightened to match ONLY the specific M27 whole-token-fit message
+        # (:3328), not the generic fallback (:3339) that explicitly means
+        # "excluded for a reason OTHER than window/length" -- the prior
+        # combined pattern accepted both, so this test could not actually
+        # fail if the M27 branch regressed and fell through to the generic
+        # fallback.
+        $result.Reason | Should -Match 'judge_ruling token position \(starts at offset \d+, ends at offset \d+\) leaves insufficient room before the \d+-char lookahead window closes -- the whole token must fit inside the window for the gate to recognize it'
+        $result.Reason | Should -Not -Match 'no judge-rulings marker head with recognizable field vocabulary'
     }
 
     It "842 (s3, RED, M17): refuses when Get-DispositionTally's SustainedCount + DefenseSustainedCount disagrees with the raw judge_ruling: entry count assembled (required_fixes: decoy list)" {
