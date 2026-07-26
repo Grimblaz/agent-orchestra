@@ -3215,6 +3215,118 @@ function Add-CommentBlocks {
 
 #endregion
 
+#region Get-JudgeRulingsCouldNotVerifyDetail (private)
+
+function script:Get-JudgeRulingsCouldNotVerifyDetail {
+    <#
+    .SYNOPSIS
+        Diagnosis-only re-derivation of WHY a judge-rulings payload's
+        Get-DispositionTally -Surface 'plan-stress-test' parse returned
+        ParseStatus 'could-not-verify' (issue #893 s8, AC7).
+    .DESCRIPTION
+        Add-JudgeRulingsBlock's preflight refusal
+        (`$preflightTally.ParseStatus -ne 'ok'`) previously reported only the
+        bare ParseStatus token, with no indication of WHICH of the two
+        mutually exclusive rejection causes fired:
+          1. The window/vocabulary gate (Get-JudgeRulingsIsolatedRegion /
+             Get-RealJudgeRulingsHeadMatches): no judge-rulings head's own
+             bounded lookahead window ($script:JudgeRulingsLookaheadWindow
+             chars) contains real field vocabulary — e.g. a long preamble
+             pushes `judge_ruling:` past the window.
+          2. Value recognition (Get-JudgeRulingsSustainedCountInternal's
+             canonical-variant branch): a head passed the window/vocab gate
+             and its region was isolated cleanly, but a `judge_ruling:` value
+             is not a member of the closed 2-value enum
+             (Test-JudgeRulingValueRecognized; sustained |
+             defense-sustained) — e.g. a recorded incident value like
+             'partial'.
+        These two causes live on mutually exclusive branches: the window gate
+        short-circuits Get-JudgeRulingsIsolatedRegion before the value scan
+        (inside Get-JudgeRulingsSustainedCountInternal) ever runs, so a
+        payload can only ever be diagnosed as ONE of the two — never both.
+        This function re-derives which branch fired by calling the same
+        read-only, side-effect-free scanning primitives
+        (Get-RealJudgeRulingsHeadMatches, Get-JudgeRulingsIsolatedRegion,
+        Test-JudgeRulingValueRecognized) those functions already use, so the
+        diagnosis is grounded in the identical decision logic rather than a
+        second, independently-drifting copy of it.
+
+        This function NEVER changes any accept/reject verdict. It is called
+        only from Add-JudgeRulingsBlock's existing
+        `$preflightTally.ParseStatus -ne 'ok'` refusal branch, purely to
+        enrich the already-refused Reason string with diagnostic detail
+        (diagnosis-only, per the s8 frame-slice contract's hard invariant).
+    .PARAMETER Body
+        The raw NewContent body text that Get-DispositionTally already
+        determined has ParseStatus 'could-not-verify' for -Surface
+        'plan-stress-test'.
+    .OUTPUTS
+        [string] — a human-readable diagnostic detail. One of:
+          "judge_ruling token found at offset N, outside the M-char
+          lookahead window" (window/vocab-gate branch, first raw head
+          candidate present but no vocabulary within its window)
+          "unrecognized judge_ruling value: 'X'" (value-recognition branch)
+          A generic fallback description for the remaining edge cases (no
+          head at all; duplicate/unclosed/ambiguous region; vocabulary that
+          survived the gate via a non-judge_ruling token) that the two named
+          formats above do not cover.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Body
+    )
+
+    $realHeadMatches = Get-RealJudgeRulingsHeadMatches -Body $Body
+    if ($realHeadMatches.Count -eq 0) {
+        # Window/vocabulary gate branch: no head's own lookahead window
+        # contains real field vocabulary. Report the first RAW head
+        # candidate's window-relative offset of the first vocabulary token
+        # found anywhere after it (if the body has neither a head nor any
+        # vocabulary at all, fall through to the generic description below).
+        $allHeadMatches = [regex]::Matches($Body, $script:JudgeRulingsHeadPattern)
+        if ($allHeadMatches.Count -gt 0) {
+            $firstHead = $allHeadMatches[0]
+            $afterHead = $Body.Substring($firstHead.Index + $firstHead.Length)
+            $vocabMatch = [regex]::Match($afterHead, $script:JudgeRulingsVocabGatePattern)
+            if ($vocabMatch.Success) {
+                return "judge_ruling token found at offset $($vocabMatch.Index), outside the $($script:JudgeRulingsLookaheadWindow)-char lookahead window"
+            }
+        }
+        return 'no judge-rulings marker head with recognizable field vocabulary was found'
+    }
+
+    # A real head passed the window/vocab gate. Region isolation can still
+    # independently fail (duplicate heads, unclosed region, ambiguous
+    # closer) — those are also window/vocab-gate-class failures, since the
+    # value scan never runs without a successfully isolated region.
+    $isolated = Get-JudgeRulingsIsolatedRegion -Body $Body
+    if ($isolated.ParseStatus -ne 'ok') {
+        return 'the judge-rulings marker region could not be isolated (duplicate, unclosed, or ambiguous marker boundary)'
+    }
+
+    # Region isolated cleanly; value-recognition branch. Mirror
+    # Get-JudgeRulingsSustainedCountInternal's own required_fixes: stripping
+    # before scanning judge_ruling: values, so the reported value matches
+    # exactly what the real check flagged.
+    $region = $isolated.Region
+    $requiredFixesMatch = [regex]::Match($region, '(?m)^required_fixes\s*:\s*$')
+    if ($requiredFixesMatch.Success) {
+        $region = $region.Substring(0, $requiredFixesMatch.Index)
+    }
+    $rulingMatches = [regex]::Matches($region, 'judge_ruling\s*:\s*(\S+)')
+    $unrecognized = @($rulingMatches | Where-Object {
+            $val = $_.Groups[1].Value.TrimEnd(',')
+            -not (Test-JudgeRulingValueRecognized -Value $val)
+        })
+    if ($unrecognized.Count -gt 0) {
+        $badValue = $unrecognized[0].Groups[1].Value.TrimEnd(',')
+        return "unrecognized judge_ruling value: '$badValue'"
+    }
+
+    return 'the judge-rulings marker vocabulary could not be recognized'
+}
+
+#endregion
+
 #region Add-JudgeRulingsBlock
 
 function Add-JudgeRulingsBlock {
@@ -3337,8 +3449,15 @@ function Add-JudgeRulingsBlock {
     # above and the entry-level post-write positive-proof below.
     $preflightTally = Get-DispositionTally -Surface 'plan-stress-test' -Body $NewContent
     if ($preflightTally.ParseStatus -ne 'ok') {
-        [Console]::Error.WriteLine("Add-JudgeRulingsBlock: NewContent's judge-rulings vocabulary did not parse (ParseStatus '$($preflightTally.ParseStatus)') for comment $CommentId; refusing to append.")
-        return [PSCustomObject]@{ Success = $false; Reason = "NewContent's judge-rulings vocabulary did not parse (ParseStatus '$($preflightTally.ParseStatus)')" }
+        # issue #893 s8 (AC7): name the rejection cause PER BRANCH — the
+        # window/vocabulary gate and value-recognition are mutually
+        # exclusive (the window gate short-circuits before the value scan
+        # ever runs), so exactly one detail string applies. Diagnosis-only:
+        # this call never changes the ParseStatus check above or this
+        # branch's Success=$false verdict, only the message content.
+        $couldNotVerifyDetail = Get-JudgeRulingsCouldNotVerifyDetail -Body $NewContent
+        [Console]::Error.WriteLine("Add-JudgeRulingsBlock: NewContent's judge-rulings vocabulary did not parse (ParseStatus '$($preflightTally.ParseStatus)') for comment $CommentId; refusing to append. $couldNotVerifyDetail")
+        return [PSCustomObject]@{ Success = $false; Reason = "NewContent's judge-rulings vocabulary did not parse (ParseStatus '$($preflightTally.ParseStatus)'): $couldNotVerifyDetail" }
     }
     $preflightTallyCount = $preflightTally.SustainedCount + $preflightTally.DefenseSustainedCount
     if ($preflightTallyCount -ne $preflightEntryMatches.Count) {

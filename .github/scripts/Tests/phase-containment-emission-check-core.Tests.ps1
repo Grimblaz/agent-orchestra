@@ -3621,6 +3621,42 @@ Describe 'Add-JudgeRulingsBlock - sibling append primitive with entry-level posi
         $result.Success | Should -Be $false
     }
 
+    It "893 (s8, RED): value-recognition rejection names the unrecognized judge_ruling value verbatim ('partial' — a real recorded incident value outside the closed sustained|defense-sustained enum)" {
+        # Mutually exclusive from the window/vocab-gate branch below: the
+        # head here passes the vocab gate (judge_ruling: is well within the
+        # lookahead window), so Get-JudgeRulingsIsolatedRegion succeeds and
+        # the value-recognition scan actually runs and finds 'partial'
+        # unrecognized.
+        $newContentBadEnum = "`n<!-- judge-rulings`n- id: M1`n  judge_ruling: sustained`n- id: M2`n  judge_ruling: partial`n-->`n"
+
+        $tally = Get-DispositionTally -Surface 'plan-stress-test' -Body $newContentBadEnum
+        $tally.ParseStatus | Should -Be 'could-not-verify'
+
+        $script:mockFullNewContent = $newContentBadEnum
+        $result = Add-JudgeRulingsBlock -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 794 -ExpectedMarker '<!-- plan-issue-811' -NewContent $newContentBadEnum
+        $result.Success | Should -Be $false
+        $result.Reason | Should -Match "unrecognized judge_ruling value: 'partial'"
+    }
+
+    It '893 (s8, RED): window/vocabulary-gate rejection reports the first vocabulary-token offset against the lookahead window (long preamble pushes judge_ruling: past the 400-char window)' {
+        # The window/vocab gate short-circuits BEFORE the value-recognition
+        # scan ever runs (Get-JudgeRulingsIsolatedRegion returns
+        # could-not-verify because no head's own lookahead window contains
+        # real field vocabulary) — this fixture must never reach, let alone
+        # report, a value-recognition message.
+        $longPreamble = 'x' * 450
+        $newContentLongPreamble = "`n<!-- judge-rulings`n$longPreamble`n- id: M1`n  judge_ruling: sustained`n-->`n"
+
+        $tally = Get-DispositionTally -Surface 'plan-stress-test' -Body $newContentLongPreamble
+        $tally.ParseStatus | Should -Be 'could-not-verify'
+
+        $script:mockFullNewContent = $newContentLongPreamble
+        $result = Add-JudgeRulingsBlock -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 794 -ExpectedMarker '<!-- plan-issue-811' -NewContent $newContentLongPreamble
+        $result.Success | Should -Be $false
+        $result.Reason | Should -Match 'judge_ruling token found at offset \d+, outside the 400-char lookahead window'
+        $result.Reason | Should -Not -Match 'unrecognized judge_ruling value'
+    }
+
     It "842 (s3, RED, M17): refuses when Get-DispositionTally's SustainedCount + DefenseSustainedCount disagrees with the raw judge_ruling: entry count assembled (required_fixes: decoy list)" {
         # required_fixes: is a parallel decoy list (PR #775 intake-mode
         # shape) that Get-JudgeRulingsSustainedCountInternal strips BEFORE
