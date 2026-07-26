@@ -241,6 +241,73 @@ function ConvertFrom-GoalRunStageMarkerBody {
     return [pscustomobject]@{ Parsed = $true; Issue = $issue; Stage = $stage; ContractHash = $contractHash; UpdatedAt = $updatedAt; WorktreePath = $worktreePath }
 }
 
+function script:Get-GRSMarkerWholeLinePattern {
+    <#
+    .SYNOPSIS
+        #912 external-review fix (G7): "the marker appears as its own
+        standalone line" detection regex, shared by every marker-matching
+        reader in this file (Get-GoalRunStageMarker,
+        Get-GoalRunInflightMarkers, Clear-GoalRunStageMarker).
+    .DESCRIPTION
+        Every marker reader in this file used `-like "*$marker*"` before
+        this fix -- a raw SUBSTRING match, so a comment that merely
+        MENTIONS the marker in prose (a maintainer explaining the
+        convention, a pasted diagnostic message) counted as a real marker-
+        carrying comment. On the read paths that mis-selects the wrong
+        comment; on Clear-GoalRunStageMarker's DELETE path it is worse in
+        both directions at once -- the extra prose match either pushes the
+        matched set to 2+ and permanently wedges restart on its
+        `marker-ambiguous` refusal, or (with the real marker absent) makes
+        a prose comment itself the DELETE target. Every marker this file
+        writes is emitted as the body's own first line
+        (New-GoalRunStageMarkerBody / New-GoalRunInflightMarkerBody), so a
+        line-anchored match is the exact shape those writers produce.
+
+        Pattern shape is deliberately identical to the shipped shared
+        helper Get-MarkerWholeLinePattern
+        (.github/scripts/lib/marker-transport-core.ps1) rather than a
+        newly-invented one. That file is NOT dot-sourced here: its first
+        top-level statement mutates [Console]::OutputEncoding process-wide
+        at dot-source time (marker-transport-core.ps1:96-101, deliberate
+        and documented there), which would impose a global console-encoding
+        side effect on every caller and test of this stage lib in exchange
+        for one pure single-expression regex builder. The narrower
+        alternative -- Find-AllCommentsByExactMarker from the same file --
+        was rejected on behavior, not packaging: it throws on gh failure,
+        requires Mandatory -Owner/-Repo with no ambient fallback, and
+        issues its own gh call, and all three conflict with this file's
+        fail-open, ambient-capable, already-fetched-comments design.
+    .OUTPUTS
+        [string] a multiline-anchored regex matching -Marker as a whole
+        line, modulo surrounding whitespace.
+    #>
+    param([Parameter(Mandatory)][string]$Marker)
+    return "(?m)^\s*$([regex]::Escape($Marker))\s*`$"
+}
+
+function script:Get-GRSInertMarkerLabel {
+    <#
+    .SYNOPSIS
+        #912 external-review fix (G6): renders a marker for human-facing
+        prose (stderr text an operator may paste into the issue) with the
+        <!-- / --> HTML-comment delimiters STRIPPED.
+    .DESCRIPTION
+        Per skills/session-memory-contract/references/handoff-markers.md
+        § Writing about markers safely, a complete delimited marker literal
+        is live to every raw-text marker scan -- backticks do not
+        neutralize it. Emitting the delimited literal inside an ambiguity-
+        refusal message means pasting that message into the issue creates a
+        SECOND marker-carrying comment, which makes the very ambiguity the
+        message reports permanent. Stripping the delimiters genuinely
+        breaks the match because the anchors the patterns key on are no
+        longer present in the text at all.
+    .OUTPUTS
+        [string] the marker text with '<!--' / '-->' removed and trimmed.
+    #>
+    param([Parameter(Mandatory)][string]$Marker)
+    return ($Marker -replace '^<!--\s*', '' -replace '\s*-->$', '').Trim()
+}
+
 function Get-GoalRunIssueComments {
     <#
     .SYNOPSIS
@@ -410,8 +477,15 @@ function Get-GoalRunStageMarker {
     )
 
     $marker = "<!-- goal-run-stage-$Issue -->"
+    # #912 external-review fix (G7): line-anchored, not substring. A prose
+    # comment merely MENTIONING this marker would otherwise be picked up here
+    # -- and because the selection below is `-Last 1`, a later prose mention
+    # would win over the real marker and hand the caller a garbage
+    # Stage/WorktreePath (or a Found = $false parse) for a run that genuinely
+    # has a marker. See Get-GRSMarkerWholeLinePattern.
+    $markerPattern = Get-GRSMarkerWholeLinePattern -Marker $marker
     $comments = Get-GoalRunIssueComments -Issue $Issue -Owner $Owner -Repo $Repo
-    $matched = @($comments | Where-Object { $_.body -and ($_.body -like "*$marker*") })
+    $matched = @($comments | Where-Object { $_.body -and ($_.body -match $markerPattern) })
     if ($matched.Count -eq 0) {
         return [pscustomobject]@{ Found = $false; Stage = $null; ContractHash = $null; UpdatedAt = $null; WorktreePath = $null }
     }
@@ -592,8 +666,13 @@ function Get-GoalRunInflightMarkers {
     )
 
     $marker = "<!-- goal-run-inflight-$Issue -->"
+    # #912 external-review fix (G7): line-anchored, not substring -- a prose
+    # comment mentioning this marker would otherwise be parsed as a real
+    # mutex marker and (with a null Status) silently join or distort the
+    # live-marker set every admission/tiebreak decision reads.
+    $markerPattern = Get-GRSMarkerWholeLinePattern -Marker $marker
     $comments = Get-GoalRunIssueComments -Issue $Issue -Owner $Owner -Repo $Repo
-    $matched = @($comments | Where-Object { $_.body -and ($_.body -like "*$marker*") })
+    $matched = @($comments | Where-Object { $_.body -and ($_.body -match $markerPattern) })
 
     $results = [System.Collections.Generic.List[pscustomobject]]::new()
     foreach ($c in $matched) {
@@ -722,6 +801,18 @@ function Set-GoalRunInflightMarkerAdopted {
         this function refuses outright (Reason = 'already-adopted')
         instead of re-PATCHing over an existing adoption.
 
+        #912 external-review fix (G3): that pre-check now admits ONLY a
+        freshly-read status of exactly 'unresolved'. It previously refused
+        only on 'adopted', so a marker the owning run had RESOLVED in the
+        window between the caller's admission read and this pre-check fell
+        through and got PATCHed back to 'adopted' -- destroying its
+        resolved_reason and re-arming a duplicate resume of an already-
+        finished run. Neither the verification read nor the M7 reconfirm
+        read below could catch that, because both inspect the body this
+        function itself just wrote. 'resolved' now refuses as
+        'already-resolved', and a marker-carrying body whose status line is
+        absent or unrecognized refuses as 'marker-status-unrecognized'.
+
         NOTE (forensics-only scope): the -ContractHash value threaded
         through to the adopted body is carried through UNCHANGED from the
         pre-adoption marker and is NOT reconciled against the
@@ -756,6 +847,7 @@ function Set-GoalRunInflightMarkerAdopted {
     .OUTPUTS
         [pscustomobject]@{ Success; Verified; Reason; AdoptedBySessionId }
         Reason is one of: 'adopted-and-verified' | 'already-adopted' |
+        'already-resolved' | 'marker-status-unrecognized' |
         'patch-failed' | 'verification-comment-not-found' |
         'verification-body-unchanged' | 'verification-status-mismatch' |
         'reconfirm-comment-not-found' | 'lost-to-concurrent-adopter'.
@@ -785,8 +877,30 @@ function Set-GoalRunInflightMarkerAdopted {
     $preCheckMatch = Find-GRSInflightMarkerCommentById -Comments $preCheckComments -TargetCommentId $CommentId
     if ($preCheckMatch) {
         $preCheckParsed = ConvertFrom-GoalRunInflightMarkerBody -Body $preCheckMatch.body
-        if ($preCheckParsed.Parsed -and $preCheckParsed.Status -eq 'adopted') {
-            return [pscustomobject]@{ Success = $false; Verified = $false; Reason = 'already-adopted'; AdoptedBySessionId = $preCheckParsed.AdoptedBySessionId }
+        # #912 external-review fix (G3): the gate is now "the freshly-read
+        # status must be EXACTLY 'unresolved' to proceed", not "must not be
+        # 'adopted'". Before this fix a marker the owning run RESOLVED in the
+        # window between the admission read and this pre-check fell straight
+        # through the `-eq 'adopted'` test, and this function then PATCHed
+        # that completed marker back to status = 'adopted' -- destroying its
+        # resolved_reason and re-arming a duplicate resume of a run that had
+        # already finished. The corruption was self-concealing: both the
+        # verification read and the M7 reconfirm read below inspect the body
+        # THIS function just wrote, so both confirmed the overwrite as a
+        # successful adoption.
+        if ($preCheckParsed.Parsed -and $preCheckParsed.Status -ne 'unresolved') {
+            $refusalReason = switch ($preCheckParsed.Status) {
+                'adopted' { 'already-adopted' }
+                'resolved' { 'already-resolved' }
+                # A body that carries the marker but whose status line is
+                # missing/hand-edited/truncated parses to Parsed = $true with
+                # Status = $null. That is no evidence the marker is safe to
+                # adopt either, and PATCHing over it would silently discard
+                # whatever a maintainer put there -- refuse rather than
+                # mislabel it as one of the two known states above.
+                default { 'marker-status-unrecognized' }
+            }
+            return [pscustomobject]@{ Success = $false; Verified = $false; Reason = $refusalReason; AdoptedBySessionId = $preCheckParsed.AdoptedBySessionId }
         }
     }
 
@@ -1180,6 +1294,10 @@ function Test-GoalRunInflightAppearsDead {
     .OUTPUTS
         [pscustomobject]@{ AppearsDead; Reason; ElapsedMinutes; LastSeenAt;
         TerminalOutcomePresent }
+        Reason is one of: 'marker-already-resolved' |
+        'heartbeat-unparseable-assumed-live' (#912 external-review fix G4 --
+        a non-null but unparseable -HeartbeatAt, refused fail-closed) |
+        'stale-no-terminal-outcome' | 'within-stale-threshold'.
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -1207,10 +1325,38 @@ function Test-GoalRunInflightAppearsDead {
         return [pscustomobject]@{ AppearsDead = $false; Reason = 'marker-already-resolved'; ElapsedMinutes = $null; LastSeenAt = $null; TerminalOutcomePresent = $terminalOutcomePresent }
     }
 
-    $lastSeen = if ($HeartbeatAt) { [datetime]$HeartbeatAt } else { $LaunchedAt }
+    # #912 external-review fix (G4): -HeartbeatAt now routes through the same
+    # shared parse guard every other LaunchedAt-shaped value in this file uses
+    # (ConvertTo-GRSParsedUtcDateTimeOrNull) instead of a bare
+    # `[datetime]$HeartbeatAt` cast. The bare cast had two failure modes, both
+    # reachable from the live restart lever and the admission-gate triage:
+    #   (a) a malformed non-null heartbeat threw a raw cast error straight out
+    #       of this pure decision function, where every caller expects a typed
+    #       verdict object;
+    #   (b) a NAIVE (no timezone suffix) heartbeat cast to Kind=Unspecified,
+    #       and the .ToUniversalTime() below then treats Unspecified as LOCAL
+    #       -- on a positive-UTC-offset host that shifts LastSeenAt further
+    #       into the past and can report a genuinely LIVE run as dead, which
+    #       is the fail-OPEN direction for a liveness gate whose $true verdict
+    #       authorizes clearing another run's markers. The shared guard
+    #       SpecifyKind's Unspecified to Utc, closing (b) for every caller.
+    # An UNPARSEABLE non-null heartbeat is refused fail-CLOSED (AppearsDead =
+    # $false, "assume live") rather than silently falling back to -LaunchedAt:
+    # that fallback moves LastSeenAt strictly further into the past, i.e.
+    # toward the destructive verdict, and Core Principles (agents/Goal-Run.agent.md)
+    # require failing closed on ambiguity. Absence stays the documented safe
+    # case it already was -- fall back to -LaunchedAt.
+    $lastSeen = $LaunchedAt
+    if ($HeartbeatAt) {
+        $parsedHeartbeat = ConvertTo-GRSParsedUtcDateTimeOrNull -Value $HeartbeatAt
+        if ($null -eq $parsedHeartbeat) {
+            return [pscustomobject]@{ AppearsDead = $false; Reason = 'heartbeat-unparseable-assumed-live'; ElapsedMinutes = $null; LastSeenAt = $null; TerminalOutcomePresent = $terminalOutcomePresent }
+        }
+        $lastSeen = $parsedHeartbeat
+    }
 
     # M6 fix: a Z-suffixed UTC string cast to [datetime] (either via the
-    # [datetime]$HeartbeatAt cast above or via the PowerShell parameter-
+    # -HeartbeatAt parse above or via the PowerShell parameter-
     # binding coercion of -LaunchedAt/-Now) lands with Kind=Local -- the
     # .NET default parse of a 'Z' string converts it to local wall-clock
     # time and tags it Local, it does not keep it Utc. Subtracting that
@@ -1720,15 +1866,32 @@ function Clear-GoalRunStageMarker {
     )
 
     $marker = "<!-- goal-run-stage-$Issue -->"
+    # #912 external-review fix (G7): line-anchored, not substring. This is
+    # the DELETE path, so a loose substring match is destructive in both
+    # directions -- a comment merely mentioning the marker in prose either
+    # pushes the matched set to 2+ and permanently wedges restart on the
+    # ambiguity refusal below, or (real marker already gone) becomes the
+    # DELETE target itself. See Get-GRSMarkerWholeLinePattern.
+    $markerPattern = Get-GRSMarkerWholeLinePattern -Marker $marker
     $comments = Get-GoalRunIssueComments -Issue $Issue -Owner $Owner -Repo $Repo
-    $matched = @($comments | Where-Object { $_.body -and ($_.body -like "*$marker*") })
+    $matched = @($comments | Where-Object { $_.body -and ($_.body -match $markerPattern) })
 
     if ($matched.Count -gt 1) {
         # M8 fix: refuse-on-ambiguity, mirroring Get-GCPinnedCommentBody's
         # own precedent -- deleting every match risked destroying a
         # legitimate different marker instance with no way to know which
         # one the caller actually intended.
-        [Console]::Error.WriteLine("Clear-GoalRunStageMarker: $($matched.Count) comments on issue $Issue carry marker '$marker'; refusing to guess (ambiguous).")
+        #
+        # #912 external-review fix (G6): the marker is named here in its
+        # INERT (delimiter-stripped) form. The delimited literal is live to
+        # this function's own reader, so an operator pasting this refusal
+        # message into the issue would create the second marker-carrying
+        # comment that makes this very ambiguity permanent. See
+        # Get-GRSInertMarkerLabel and
+        # skills/session-memory-contract/references/handoff-markers.md
+        # § Writing about markers safely.
+        $inertMarker = Get-GRSInertMarkerLabel -Marker $marker
+        [Console]::Error.WriteLine("Clear-GoalRunStageMarker: $($matched.Count) comments on issue $Issue carry marker '$inertMarker' (HTML-comment delimiters stripped so this message is safe to paste); refusing to guess (ambiguous).")
         return [pscustomobject]@{
             Success           = $false
             DeletedCommentIds = @()
@@ -1892,13 +2055,40 @@ function Invoke-GoalRunRestart {
         failure, this returns 'restarted-partial-marker-clear-failed'
         instead, so a caller/report cannot mistake a partially-completed
         restart for a fully clean one.
+
+        #912 external-review fix (G2): the same honesty now extends to the
+        SECOND clear. A failed Clear-GoalRunActiveState after a SUCCESSFUL
+        stage-marker clear used to be invisible -- Outcome was derived
+        solely from $clearedMarker.Success and still said 'restarted' --
+        and the agent body resolved the mutex marker on that word. It now
+        returns the distinct 'restarted-partial-active-state-clear-failed'.
+        The two partial outcomes are NOT interchangeable: the marker-clear
+        failure cleared NOTHING (so the mutex marker must stay held),
+        whereas this one genuinely deleted the stage marker and posted the
+        capture report, leaving only a stale goal-run-active.json in an
+        already-abandoned worktree for the operator to remove by hand.
+
+        #912 external-review fix (G4): -HeartbeatAt is resolved through the
+        SAME ConvertTo-GRSParsedUtcDateTimeOrNull guard as -LaunchedAt
+        BEFORE the liveness call, with the same absent-vs-unparseable
+        split: absent falls back to -LaunchedAt (unchanged), while a
+        non-null unparseable value refuses with Outcome =
+        'refused-unparseable-state' and Reason = 'heartbeat-at-unparseable'.
+        Previously it was handed raw to Test-GoalRunInflightAppearsDead's
+        bare [datetime] cast, which threw on garbage and mis-zoned a naive
+        (no-suffix) timestamp as local -- the latter able to report a LIVE
+        run as dead and authorize clearing its markers on a positive-UTC-
+        offset host.
     .OUTPUTS
         [pscustomobject]@{ Outcome; Reason; ReportUrl; BranchName;
         BranchNameResolved; WorktreePath; ClearedStageMarker;
         ClearedActiveState }
         Outcome is one of: 'refused-live-run' | 'refused-unparseable-state'
         | 'report-post-failed' | 'restarted' |
-        'restarted-partial-marker-clear-failed'.
+        'restarted-partial-marker-clear-failed' |
+        'restarted-partial-active-state-clear-failed'.
+        Reason on 'refused-unparseable-state' distinguishes which input was
+        unparseable: 'launched-at-unparseable' or 'heartbeat-at-unparseable'.
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -1914,6 +2104,37 @@ function Invoke-GoalRunRestart {
         [string]$GitCliPath = 'git',
         [datetime]$Now = (Get-Date).ToUniversalTime()
     )
+
+    # #912 external-review fix (G4): -HeartbeatAt gets the SAME absent-vs-
+    # unparseable treatment -LaunchedAt already got from the M6/M17 fix,
+    # resolved BEFORE the liveness call rather than being handed raw to
+    # Test-GoalRunInflightAppearsDead. Two failures were reachable through
+    # this operator lever before the fix: a malformed non-null heartbeat threw
+    # a raw [datetime] cast error out of the restart command entirely, and a
+    # naive (no timezone suffix) heartbeat parsed Kind=Unspecified and was
+    # then treated as LOCAL time by the elapsed-time math -- skewing the
+    # verdict by the host's UTC offset, which on a positive-offset host makes
+    # a LIVE run read as dead and lets restart clear its markers. Absence
+    # remains the documented safe case (fall back to -LaunchedAt inside the
+    # liveness call, exactly as before); a NON-NULL unparseable value is no
+    # evidence either way and refuses with the same typed
+    # 'refused-unparseable-state' outcome -LaunchedAt uses.
+    $heartbeatForLivenessCheck = $null
+    if ($HeartbeatAt) {
+        $heartbeatForLivenessCheck = ConvertTo-GRSParsedUtcDateTimeOrNull -Value $HeartbeatAt
+        if ($null -eq $heartbeatForLivenessCheck) {
+            return [pscustomobject]@{
+                Outcome            = 'refused-unparseable-state'
+                Reason             = 'heartbeat-at-unparseable'
+                ReportUrl          = $null
+                BranchName         = $null
+                BranchNameResolved = $false
+                WorktreePath       = $WorktreePath
+                ClearedStageMarker = $false
+                ClearedActiveState = $false
+            }
+        }
+    }
 
     if ($null -eq $LaunchedAt) {
         # Genuinely absent evidence -- e.g. a prior restart attempt already
@@ -1940,8 +2161,11 @@ function Invoke-GoalRunRestart {
                 ClearedActiveState  = $false
             }
         }
+        # G4: pass the ALREADY-PARSED, Kind-normalized heartbeat (or $null for
+        # the absent case, which the liveness function falls back to
+        # -LaunchedAt for), never the raw value.
         $appears = Test-GoalRunInflightAppearsDead -MarkerStatus 'unresolved' -LaunchedAt $parsedLaunchedAt `
-            -HeartbeatAt $HeartbeatAt -HaltReportExists $false -PrExists $false -Now $Now -StaleThresholdMinutes $StaleThresholdMinutes
+            -HeartbeatAt $heartbeatForLivenessCheck -HaltReportExists $false -PrExists $false -Now $Now -StaleThresholdMinutes $StaleThresholdMinutes
         $appearsDead = $appears.AppearsDead
     }
 
@@ -2017,8 +2241,33 @@ function Invoke-GoalRunRestart {
     # M18 fix: an honest outcome distinguishes a fully-completed restart
     # from one where the stage-marker clear itself did not actually succeed
     # -- the pre-fix code returned 'restarted' unconditionally here.
-    $outcome = if ($clearedMarker.Success) { 'restarted' } else { 'restarted-partial-marker-clear-failed' }
-    $reason = if ($clearedMarker.Success) { 'operator-restart' } else { 'stage-marker-clear-failed' }
+    #
+    # #912 external-review fix (G2): the outcome was derived SOLELY from
+    # $clearedMarker.Success, so a FAILED Clear-GoalRunActiveState after a
+    # SUCCESSFUL marker clear still reported a clean 'restarted' -- and the
+    # agent body's step 4 then resolved the mutex marker on the strength of
+    # that word, with no signal anywhere that goal-run-active.json had in
+    # fact survived. The stage marker (deleted) and the active-state file
+    # (surviving) are different artifacts with different failure
+    # consequences, so they get different outcomes rather than sharing one.
+    $outcome = if (-not $clearedMarker.Success) {
+        'restarted-partial-marker-clear-failed'
+    }
+    elseif (-not $clearedState) {
+        'restarted-partial-active-state-clear-failed'
+    }
+    else {
+        'restarted'
+    }
+    $reason = if (-not $clearedMarker.Success) {
+        'stage-marker-clear-failed'
+    }
+    elseif (-not $clearedState) {
+        'active-state-clear-failed'
+    }
+    else {
+        'operator-restart'
+    }
 
     return [pscustomobject]@{
         Outcome            = $outcome

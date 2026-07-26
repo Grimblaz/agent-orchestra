@@ -450,6 +450,80 @@ Describe 'Set-GoalRunInflightMarkerAdopted (#912 step 4: mutate-and-verify adopt
         Should -Invoke -CommandName Get-GoalRunIssueComments -Times 1
     }
 
+    It '#912 external-review fix (G3): refuses with already-resolved and never PATCHes when the owning run RESOLVED its marker between the admission read and this pre-check -- the pre-fix gate refused only on ''adopted'', so a resolved marker fell through and was overwritten back to adopted' {
+        # The whole point of the pre-fix defect: this body is a COMPLETED
+        # run's marker, carrying the resolved_reason that records how it
+        # finished. Pre-fix, the `-eq 'adopted'` pre-check did not match
+        # 'resolved', so this function PATCHed straight over it -- destroying
+        # resolved_reason and re-arming a duplicate resume of a finished run.
+        $resolvedBody = New-GoalRunInflightMarkerBody -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -Status 'resolved' -ResolvedReason 'run-complete'
+        $adoptedBody = New-GoalRunInflightMarkerBody -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -Status 'adopted' -AdoptedBySessionId 'sess-42'
+
+        $script:grsaReadCount = 0
+        Mock -CommandName Get-GoalRunIssueComments -MockWith {
+            $script:grsaReadCount++
+            if ($script:grsaReadCount -eq 1) {
+                return @([pscustomobject]@{ id = 100; url = 'https://github.com/o/r/issues/912#issuecomment-100'; body = $resolvedBody })
+            }
+            # Pre-fix, the verification and reconfirm reads would both see
+            # THIS FUNCTION'S OWN overwrite and confirm it as a successful
+            # adoption -- which is exactly why the corruption was invisible.
+            return @([pscustomobject]@{ id = 100; url = 'https://github.com/o/r/issues/912#issuecomment-100'; body = $adoptedBody })
+        }
+
+        $result = Set-GoalRunInflightMarkerAdopted -CommentId 100 -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -SessionId 'sess-42' -ReconfirmDelayMs 0
+
+        $result.Success | Should -Be $false
+        $result.Verified | Should -Be $false
+        $result.Reason | Should -Be 'already-resolved' -Because 'a resolved marker is a FINISHED run; pre-fix this returned adopted-and-verified after overwriting it'
+        $script:grsaGhPatchCalled | Should -Be $false -Because 'the resolved marker (and its resolved_reason) must never be PATCHed over'
+        Should -Invoke -CommandName Get-GoalRunIssueComments -Times 1 -Because 'the refusal happens at the pre-check read, before any mutation or verification read'
+    }
+
+    It '#912 external-review fix (G3): refuses with marker-status-unrecognized, and never PATCHes, when the marker-carrying body parses but its status line is absent -- an unrecognized status is no evidence the marker is safe to adopt either' {
+        # Parsed = $true (the marker literal is present) but Status = $null:
+        # a hand-edited or truncated marker body. Requiring EXACTLY
+        # 'unresolved' is what keeps this from falling through to a PATCH.
+        $statuslessBody = @(
+            '<!-- goal-run-inflight-912 -->',
+            '## Goal-run in-flight marker',
+            '',
+            '- **schema_version**: 1',
+            '- **issue**: 912',
+            "- **contract_hash**: $('f' * 64)",
+            '- **launched_at**: 2026-07-23T00:00:00.0000000Z'
+        ) -join "`n"
+
+        Mock -CommandName Get-GoalRunIssueComments -MockWith {
+            @([pscustomobject]@{ id = 100; url = 'https://github.com/o/r/issues/912#issuecomment-100'; body = $statuslessBody })
+        }
+
+        $result = Set-GoalRunInflightMarkerAdopted -CommentId 100 -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -SessionId 'sess-42' -ReconfirmDelayMs 0
+
+        $result.Success | Should -Be $false
+        $result.Reason | Should -Be 'marker-status-unrecognized'
+        $script:grsaGhPatchCalled | Should -Be $false
+    }
+
+    It '#912 external-review fix (G3): an actually-unresolved marker still adopts normally -- the tightened gate admits exactly the one status it should' {
+        $preBody = New-GoalRunInflightMarkerBody -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -Status 'unresolved'
+        $postBody = New-GoalRunInflightMarkerBody -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -Status 'adopted' -AdoptedBySessionId 'sess-42'
+
+        $script:grsaReadCount = 0
+        Mock -CommandName Get-GoalRunIssueComments -MockWith {
+            $script:grsaReadCount++
+            if ($script:grsaReadCount -eq 1) {
+                return @([pscustomobject]@{ id = 100; url = 'https://github.com/o/r/issues/912#issuecomment-100'; body = $preBody })
+            }
+            return @([pscustomobject]@{ id = 100; url = 'https://github.com/o/r/issues/912#issuecomment-100'; body = $postBody })
+        }
+
+        $result = Set-GoalRunInflightMarkerAdopted -CommentId 100 -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -SessionId 'sess-42' -ReconfirmDelayMs 0
+
+        $result.Reason | Should -Be 'adopted-and-verified'
+        $script:grsaGhPatchCalled | Should -Be $true
+    }
+
     It 'reports patch-failed and does not claim Verified when the gh api PATCH call itself fails' {
         $preBody = New-GoalRunInflightMarkerBody -Issue 912 -ContractHash ('f' * 64) -LaunchedAt '2026-07-23T00:00:00.0000000Z' -Status 'unresolved'
         Mock -CommandName Get-GoalRunIssueComments -MockWith {
@@ -649,6 +723,104 @@ exit 1
 
         $result.Count | Should -Be 1
         $result[0].body | Should -Be 'from repo root remote'
+    }
+}
+
+Describe 'Marker readers select whole-line marker comments only (#912 external-review fix, G7)' -Tag 'unit' {
+
+    # Built by concatenation so this test file never itself carries a live
+    # delimited marker literal (see
+    # skills/session-memory-contract/references/handoff-markers.md
+    # § Writing about markers safely). Every mention below is mid-line --
+    # exactly the shape a maintainer's prose or a pasted diagnostic message
+    # produces, and exactly what the pre-fix `-like "*$marker*"` substring
+    # match could not tell apart from a real marker comment.
+
+    It 'Get-GoalRunStageMarker: a later prose comment mentioning the marker no longer wins over the real marker via -Last 1' {
+        $realBody = New-GoalRunStageMarkerBody -Issue 912 -Stage 'loop-launched' -ContractHash ('a' * 64) `
+            -UpdatedAt '2026-07-26T00:00:00.0000000Z' -WorktreePath 'C:\wt\gr-912'
+        $proseMention = 'FYI the ' + '<!--' + ' goal-run-stage-912 ' + '-->' + ' marker is what the resumer reads for the worktree path.'
+        Mock -CommandName Get-GoalRunIssueComments -MockWith {
+            @(
+                [pscustomobject]@{ id = 555; url = 'https://github.com/o/r/issues/912#issuecomment-555'; body = $realBody },
+                [pscustomobject]@{ id = 556; url = 'https://github.com/o/r/issues/912#issuecomment-556'; body = $proseMention }
+            )
+        }
+
+        $result = Get-GoalRunStageMarker -Issue 912 -Owner 'o' -Repo 'r'
+
+        # Pre-fix this returned Found = $true with EVERY field null (the
+        # prose comment carries the marker literal, so it "parsed", but has
+        # none of the `- **field**:` lines) -- handing the resumer a
+        # confidently-found marker with no stage and no worktree path.
+        $result.Found | Should -Be $true
+        $result.Stage | Should -Be 'loop-launched' -Because 'the real marker comment must win, not the later prose mention that -Last 1 would otherwise pick'
+        $result.ContractHash | Should -Be ('a' * 64)
+        $result.WorktreePath | Should -Be 'C:\wt\gr-912'
+    }
+
+    It 'Get-GoalRunStageMarker: a lone prose mention with no real marker reports Found = $false rather than a marker with null fields' {
+        $proseMention = 'We removed the ' + '<!--' + ' goal-run-stage-912 ' + '-->' + ' marker during the restart.'
+        Mock -CommandName Get-GoalRunIssueComments -MockWith {
+            @([pscustomobject]@{ id = 556; url = 'https://github.com/o/r/issues/912#issuecomment-556'; body = $proseMention })
+        }
+
+        $result = Get-GoalRunStageMarker -Issue 912 -Owner 'o' -Repo 'r'
+
+        $result.Found | Should -Be $false
+        $result.Stage | Should -BeNullOrEmpty
+    }
+
+    It 'Get-GoalRunInflightMarkers: a prose mention does not enter the live-marker set every admission and mutex-tiebreak decision reads' {
+        $realBody = New-GoalRunInflightMarkerBody -Issue 912 -ContractHash ('b' * 64) -LaunchedAt '2026-07-26T00:00:00.0000000Z' -Status 'unresolved'
+        $proseMention = 'The ' + '<!--' + ' goal-run-inflight-912 ' + '-->' + ' marker is the mutex; do not delete it by hand.'
+        Mock -CommandName Get-GoalRunIssueComments -MockWith {
+            @(
+                [pscustomobject]@{ id = 700; url = 'https://github.com/o/r/issues/912#issuecomment-700'; body = $realBody },
+                [pscustomobject]@{ id = 701; url = 'https://github.com/o/r/issues/912#issuecomment-701'; body = $proseMention }
+            )
+        }
+
+        $markers = @(Get-GoalRunInflightMarkers -Issue 912 -Owner 'o' -Repo 'r')
+
+        $markers.Count | Should -Be 1 -Because 'pre-fix the prose comment produced a second entry with a null Status, silently distorting the live-marker set'
+        $markers[0].CommentId | Should -Be 700
+        $markers[0].Status | Should -Be 'unresolved'
+    }
+
+    It 'Resolve-GoalRunInflightMarkerForResolution: a prose mention cannot become the winning marker via the lowest-comment-id tiebreak' {
+        # The prose comment has the LOWER comment id here, so pre-fix it would
+        # have parsed to a null-Status entry that the live filter dropped --
+        # or, on a body whose prose happened to include a status line, won the
+        # tiebreak outright. Either way it must not be in the candidate set.
+        $realBody = New-GoalRunInflightMarkerBody -Issue 912 -ContractHash ('b' * 64) -LaunchedAt '2026-07-26T00:00:00.0000000Z' -Status 'unresolved'
+        # NOTE the outer parentheses on the first element: PowerShell's comma
+        # operator binds TIGHTER than '+', so an unparenthesized
+        # `'a' + '<!--' + 'b', 'line2', 'line3'` parses as
+        # `'a' + '<!--' + ('b','line2','line3')` -- string + array, which
+        # stringifies the array with $OFS and collapses the whole fixture to
+        # ONE space-joined line. That silently produced a body with no
+        # `- **status**:` line at all, which the live filter then dropped for
+        # the right answer by the wrong route (this test passed against the
+        # pre-fix code until the parentheses were added).
+        $proseMention = @(
+            ('Explaining the convention: a comment carrying ' + '<!--' + ' goal-run-inflight-912 ' + '-->' + ' looks like this,'),
+            '- **status**: unresolved',
+            "- **contract_hash**: $('c' * 64)",
+            '- **launched_at**: 2020-01-01T00:00:00.0000000Z'
+        ) -join "`n"
+        Mock -CommandName Get-GoalRunIssueComments -MockWith {
+            @(
+                [pscustomobject]@{ id = 600; url = 'https://github.com/o/r/issues/912#issuecomment-600'; body = $proseMention },
+                [pscustomobject]@{ id = 700; url = 'https://github.com/o/r/issues/912#issuecomment-700'; body = $realBody }
+            )
+        }
+
+        $result = Resolve-GoalRunInflightMarkerForResolution -Issue 912 -Owner 'o' -Repo 'r'
+
+        $result.Found | Should -Be $true
+        $result.CommentId | Should -Be 700 -Because 'pre-fix the lower-id prose comment parsed as a fully-populated live marker and won the tiebreak, pointing every resolution site at the wrong comment'
+        $result.ContractHash | Should -Be ('b' * 64)
     }
 }
 
@@ -877,6 +1049,68 @@ Describe 'Test-GoalRunInflightAppearsDead (crash-atomicity)' -Tag 'unit' {
         # of minutes (60, 240, etc.) -- allow a couple of minutes of test
         # execution slack only.
         [math]::Abs($result.ElapsedMinutes) | Should -BeLessThan 2
+    }
+
+    It '#912 external-review fix (G4): a NON-NULL but unparseable -HeartbeatAt produces a typed fail-CLOSED verdict instead of throwing out of the bare [datetime] cast' {
+        $now = (Get-Date).ToUniversalTime()
+
+        $threw = $false
+        $result = $null
+        try {
+            $result = Test-GoalRunInflightAppearsDead -MarkerStatus 'unresolved' -LaunchedAt $now.AddHours(-5) `
+                -HeartbeatAt 'TBD' -HaltReportExists $false -PrExists $false -Now $now -StaleThresholdMinutes 60
+        }
+        catch {
+            $threw = $true
+        }
+
+        $threw | Should -Be $false -Because 'pre-fix, [datetime]''TBD'' threw an InvalidCastException straight out of this pure decision function'
+        $result.AppearsDead | Should -Be $false -Because 'an unreadable heartbeat is no evidence the run is dead, and a $true verdict here authorizes clearing another run''s markers -- fail closed'
+        $result.Reason | Should -Be 'heartbeat-unparseable-assumed-live'
+        $result.LastSeenAt | Should -BeNullOrEmpty -Because 'no heartbeat instant could be established, so none is reported'
+    }
+
+    It '#912 external-review fix (G4): a NAIVE (no timezone suffix) -HeartbeatAt string is normalized to Kind=Utc, not left Kind=Unspecified for .ToUniversalTime() to reinterpret as local' {
+        # Host-independent form of the skew bug: pre-fix, [datetime] on a
+        # no-suffix string produced Kind=Unspecified, and the elapsed math's
+        # .ToUniversalTime() then treated that instant as LOCAL wall-clock
+        # time -- shifting it by the host's UTC offset. On a positive-offset
+        # host the shift is backwards in time, which can push a genuinely
+        # LIVE run past the stale threshold and let the restart lever clear
+        # its markers (fail-open, destructive).
+        $now = (Get-Date).ToUniversalTime()
+        $naiveHeartbeat = $now.AddMinutes(-5).ToString('yyyy-MM-ddTHH:mm:ss')
+
+        $result = Test-GoalRunInflightAppearsDead -MarkerStatus 'unresolved' -LaunchedAt $now.AddHours(-5) `
+            -HeartbeatAt $naiveHeartbeat -HaltReportExists $false -PrExists $false -Now $now -StaleThresholdMinutes 60
+
+        $result.LastSeenAt.Kind | Should -Be ([System.DateTimeKind]::Utc) -Because 'pre-fix the bare cast left this Kind=Unspecified, which .ToUniversalTime() reinterprets as local time'
+        $result.AppearsDead | Should -Be $false
+        [math]::Abs($result.ElapsedMinutes - 5) | Should -BeLessThan 2 -Because 'a 5-minute-old heartbeat must read as ~5 minutes elapsed on every host, not 5 minutes plus/minus the host UTC offset'
+    }
+
+    It '#912 external-review fix (G4): a naive -HeartbeatAt and the identical instant Z-suffixed produce the SAME elapsed verdict (offset-sensitive on a non-UTC host, and the pre-fix code diverged there)' {
+        $now = (Get-Date).ToUniversalTime()
+        $instant = $now.AddMinutes(-5)
+
+        $naive = Test-GoalRunInflightAppearsDead -MarkerStatus 'unresolved' -LaunchedAt $now.AddHours(-5) `
+            -HeartbeatAt $instant.ToString('yyyy-MM-ddTHH:mm:ss') -HaltReportExists $false -PrExists $false -Now $now
+        $zSuffixed = Test-GoalRunInflightAppearsDead -MarkerStatus 'unresolved' -LaunchedAt $now.AddHours(-5) `
+            -HeartbeatAt $instant.ToString('yyyy-MM-ddTHH:mm:ssZ') -HaltReportExists $false -PrExists $false -Now $now
+
+        [math]::Abs($naive.ElapsedMinutes - $zSuffixed.ElapsedMinutes) | Should -BeLessThan 1
+    }
+
+    It '#912 external-review fix (G4): an ABSENT -HeartbeatAt still falls back to -LaunchedAt (unchanged safe case -- absence is NOT treated as unparseable)' {
+        $now = (Get-Date).ToUniversalTime()
+
+        $omitted = Test-GoalRunInflightAppearsDead -MarkerStatus 'unresolved' -LaunchedAt $now.AddMinutes(-90) `
+            -HaltReportExists $false -PrExists $false -Now $now -StaleThresholdMinutes 60
+        $emptyString = Test-GoalRunInflightAppearsDead -MarkerStatus 'unresolved' -LaunchedAt $now.AddMinutes(-90) `
+            -HeartbeatAt '' -HaltReportExists $false -PrExists $false -Now $now -StaleThresholdMinutes 60
+
+        $omitted.Reason | Should -Be 'stale-no-terminal-outcome'
+        $emptyString.Reason | Should -Be 'stale-no-terminal-outcome' -Because 'an empty heartbeat was already treated as absent pre-fix and must stay that way -- only genuinely unparseable non-empty content fails closed'
     }
 }
 
@@ -1313,6 +1547,68 @@ Describe 'Clear-GoalRunStageMarker (#912 D6, step 5: the first comment-DELETE pr
         $result.DeletedCommentIds | Should -BeNullOrEmpty
         $script:cgsmDeletedPaths | Should -BeNullOrEmpty -Because 'an ambiguous match set must refuse to guess, never delete any candidate'
     }
+
+    It '#912 external-review fix (G7): a comment that merely MENTIONS the marker mid-prose is not a match -- the single real marker still deletes cleanly instead of the loose substring match wedging restart on a permanent marker-ambiguous refusal' {
+        $realBody = New-GoalRunStageMarkerBody -Issue 912 -Stage 'loop-launched' -ContractHash ('a' * 64) -UpdatedAt '2026-07-26T00:00:00.0000000Z'
+        # Built by concatenation so this test file never itself carries a live
+        # delimited marker literal (handoff-markers.md, Writing about markers
+        # safely). Mid-line, exactly as a maintainer's prose or a pasted
+        # diagnostic message would render it.
+        $proseMention = 'Note: the ' + '<!--' + ' goal-run-stage-912 ' + '-->' + ' marker was posted twice earlier; I cleaned one up manually.'
+        Mock -CommandName Get-GoalRunIssueComments -MockWith {
+            @(
+                [pscustomobject]@{ id = 555; url = 'https://github.com/o/r/issues/912#issuecomment-555'; body = $realBody },
+                [pscustomobject]@{ id = 556; url = 'https://github.com/o/r/issues/912#issuecomment-556'; body = $proseMention }
+            )
+        }
+
+        $result = Clear-GoalRunStageMarker -Issue 912 -Owner 'o' -Repo 'r'
+
+        $result.Success | Should -Be $true -Because 'pre-fix the -like substring match counted the prose comment, pushing the set to 2 and refusing forever'
+        $result.Reason | Should -BeNullOrEmpty
+        $result.DeletedCommentIds | Should -Be @(555)
+        $script:cgsmDeletedPaths | Should -Not -Contain 'repos/o/r/issues/comments/556' -Because 'a prose mention must never be a DELETE target'
+    }
+
+    It '#912 external-review fix (G7): with the real marker already gone, a lone prose mention is not deleted in its place' {
+        $proseMention = 'Reminder: this issue used to carry a ' + '<!--' + ' goal-run-stage-912 ' + '-->' + ' marker before the last restart.'
+        Mock -CommandName Get-GoalRunIssueComments -MockWith {
+            @([pscustomobject]@{ id = 556; url = 'https://github.com/o/r/issues/912#issuecomment-556'; body = $proseMention })
+        }
+
+        $result = Clear-GoalRunStageMarker -Issue 912 -Owner 'o' -Repo 'r'
+
+        $result.Success | Should -Be $true
+        $result.DeletedCommentIds | Should -BeNullOrEmpty
+        $script:cgsmDeletedPaths | Should -BeNullOrEmpty -Because 'pre-fix, a lone prose mention was the single unambiguous match and got hard-DELETEd'
+    }
+
+    It '#912 external-review fix (G6): the ambiguity-refusal stderr message names the marker WITHOUT its HTML-comment delimiters, so pasting it into the issue cannot create the second marker-carrying comment that makes the ambiguity permanent' {
+        $bodyA = New-GoalRunStageMarkerBody -Issue 912 -Stage 'loop-launched' -ContractHash ('a' * 64) -UpdatedAt '2026-07-26T00:00:00.0000000Z'
+        $bodyB = New-GoalRunStageMarkerBody -Issue 912 -Stage 'loop-released' -ContractHash ('a' * 64) -UpdatedAt '2026-07-26T01:00:00.0000000Z'
+        Mock -CommandName Get-GoalRunIssueComments -MockWith {
+            @(
+                [pscustomobject]@{ id = 555; url = 'https://github.com/o/r/issues/912#issuecomment-555'; body = $bodyA },
+                [pscustomobject]@{ id = 556; url = 'https://github.com/o/r/issues/912#issuecomment-556'; body = $bodyB }
+            )
+        }
+
+        $captured = [System.IO.StringWriter]::new()
+        $originalError = [Console]::Error
+        try {
+            [Console]::SetError($captured)
+            Clear-GoalRunStageMarker -Issue 912 -Owner 'o' -Repo 'r' | Out-Null
+        }
+        finally {
+            [Console]::SetError($originalError)
+        }
+        $stderrText = $captured.ToString()
+
+        $delimitedLiteral = '<!--' + ' goal-run-stage-912 ' + '-->'
+        $stderrText | Should -Not -BeNullOrEmpty -Because 'the refusal must still be reported to the operator'
+        $stderrText.Contains($delimitedLiteral) | Should -Be $false -Because 'the delimited literal is live to this function''s own reader; pasting the message would create a second marker-carrying comment'
+        $stderrText.Contains('goal-run-stage-912') | Should -Be $true -Because 'the operator still needs to know WHICH marker is ambiguous -- the fix strips the delimiters, it does not drop the identifier'
+    }
 }
 
 Describe 'Clear-GoalRunActiveState (#912 D6, step 5)' -Tag 'unit' {
@@ -1397,6 +1693,83 @@ Describe 'Invoke-GoalRunRestart (#912 D6, step 5: operator-initiated restart lev
         $result.Reason | Should -Be 'launched-at-unparseable'
         $result.ClearedStageMarker | Should -Be $false
         $result.ClearedActiveState | Should -Be $false
+    }
+
+    It '#912 external-review fix (G4): fails CLOSED with a typed refusal when -HeartbeatAt is NON-NULL but unparseable, instead of the pre-fix raw [datetime] cast throwing out of the operator''s restart lever' {
+        # The half-corrupt case the M6/M17 -LaunchedAt fix did not cover:
+        # goal-run-active.json is valid JSON with a parseable launched_at but
+        # a malformed heartbeat_at. Pre-fix, -HeartbeatAt went raw into
+        # Test-GoalRunInflightAppearsDead's bare [datetime] cast and threw.
+        Mock -CommandName New-GoalRunIssueComment -MockWith { throw 'must not post a report when refusing on an unparseable heartbeat' }
+        Mock -CommandName Clear-GoalRunStageMarker -MockWith { throw 'must not clear the stage marker when refusing on an unparseable heartbeat' }
+        Mock -CommandName Clear-GoalRunActiveState -MockWith { throw 'must not clear active state when refusing on an unparseable heartbeat' }
+
+        $now = (Get-Date).ToUniversalTime()
+        $threw = $false
+        $result = $null
+        try {
+            $result = Invoke-GoalRunRestart -Issue 912 -WorktreePath 'C:\fake\gr-912' -LaunchedAt $now.AddHours(-3) -HeartbeatAt 'not-a-timestamp' -Now $now
+        }
+        catch {
+            $threw = $true
+        }
+
+        $threw | Should -Be $false -Because 'a garbage heartbeat must produce a typed refusal, not an unguarded [datetime] cast throw'
+        $result.Outcome | Should -Be 'refused-unparseable-state'
+        $result.Reason | Should -Be 'heartbeat-at-unparseable' -Because 'the refusal must name WHICH timestamp was unreadable, distinctly from launched-at-unparseable'
+        $result.ClearedStageMarker | Should -Be $false
+        $result.ClearedActiveState | Should -Be $false
+    }
+
+    It '#912 external-review fix (G4): a NAIVE (no timezone suffix) fresh heartbeat still refuses as a live run -- the pre-fix Kind=Unspecified path let the host UTC offset decide' {
+        # Pre-fix: [datetime] on a no-suffix string produced
+        # Kind=Unspecified, and the elapsed math's .ToUniversalTime()
+        # reinterpreted it as LOCAL wall-clock. On a positive-UTC-offset host
+        # that shifts the heartbeat backwards past the stale threshold, so
+        # restart proceeds to clear a LIVE run's markers. Routing through the
+        # shared guard normalizes Unspecified to Utc, making the verdict the
+        # same on every host.
+        Mock -CommandName New-GoalRunIssueComment -MockWith { throw 'must not post a report -- a 1-minute-old heartbeat is a live run' }
+        Mock -CommandName Clear-GoalRunStageMarker -MockWith { throw 'must not clear the stage marker of a live run' }
+        Mock -CommandName Clear-GoalRunActiveState -MockWith { throw 'must not clear active state of a live run' }
+
+        $now = (Get-Date).ToUniversalTime()
+        $naiveFreshHeartbeat = $now.AddMinutes(-1).ToString('yyyy-MM-ddTHH:mm:ss')
+
+        $result = Invoke-GoalRunRestart -Issue 912 -WorktreePath 'C:\fake\gr-912' `
+            -LaunchedAt $now.AddHours(-3).ToString('o') -HeartbeatAt $naiveFreshHeartbeat -Now $now -StaleThresholdMinutes 60
+
+        $result.Outcome | Should -Be 'refused-live-run'
+        $result.ClearedStageMarker | Should -Be $false
+        $result.ClearedActiveState | Should -Be $false
+    }
+
+    It '#912 external-review fix (G2): reports the distinct restarted-partial-active-state-clear-failed outcome when the stage-marker clear SUCCEEDS but the active-state clear fails -- the pre-fix code derived Outcome solely from the marker clear and reported a clean "restarted"' {
+        Mock -CommandName New-GoalRunIssueComment -MockWith { [pscustomobject]@{ Success = $true; CommentId = 1; Url = 'https://example/1' } }
+        Mock -CommandName Clear-GoalRunStageMarker -MockWith { [pscustomobject]@{ Success = $true; DeletedCommentIds = @(555); FailedCommentIds = @() } }
+        Mock -CommandName Clear-GoalRunActiveState -MockWith { $false }
+
+        $now = (Get-Date).ToUniversalTime()
+        $result = Invoke-GoalRunRestart -Issue 912 -WorktreePath 'C:\fake\gr-912' -LaunchedAt $now.AddHours(-2) -Now $now
+
+        $result.Outcome | Should -Be 'restarted-partial-active-state-clear-failed' -Because 'pre-fix this said "restarted", and the agent body then resolved the mutex on that word with no signal that goal-run-active.json had survived'
+        $result.Reason | Should -Be 'active-state-clear-failed'
+        $result.ClearedStageMarker | Should -Be $true -Because 'the stage marker genuinely WAS deleted -- that is what distinguishes this outcome from restarted-partial-marker-clear-failed'
+        $result.ClearedActiveState | Should -Be $false
+    }
+
+    It '#912 external-review fix (G2): a fully-successful restart is still the plain "restarted" outcome -- the new partial outcome does not swallow the clean path' {
+        Mock -CommandName New-GoalRunIssueComment -MockWith { [pscustomobject]@{ Success = $true; CommentId = 1; Url = 'https://example/1' } }
+        Mock -CommandName Clear-GoalRunStageMarker -MockWith { [pscustomobject]@{ Success = $true; DeletedCommentIds = @(555); FailedCommentIds = @() } }
+        Mock -CommandName Clear-GoalRunActiveState -MockWith { $true }
+
+        $now = (Get-Date).ToUniversalTime()
+        $result = Invoke-GoalRunRestart -Issue 912 -WorktreePath 'C:\fake\gr-912' -LaunchedAt $now.AddHours(-2) -Now $now
+
+        $result.Outcome | Should -Be 'restarted'
+        $result.Reason | Should -Be 'operator-restart'
+        $result.ClearedStageMarker | Should -Be $true
+        $result.ClearedActiveState | Should -Be $true
     }
 
     It '#912 review fix (M18): reports BranchNameResolved = $false and a null BranchName on a detached-HEAD worktree instead of recording the literal string "HEAD" as if it were a real branch name' {
