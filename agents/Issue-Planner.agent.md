@@ -103,7 +103,7 @@ On user response: changes → revise and re-present for approval; approval → p
 
 Load `skills/frame-credit-emission/SKILL.md` for the deferred-emission terminal-step contract.
 
-**Draft-scan step (warn-only)**: Before persisting, write the drafted plan prose to a scratch file under `.tmp/` (the repo's gitignored scratch directory — see `.gitignore:3,19-20`), then run `pwsh skills/naming-register-policy/scripts/newcomer-audit.ps1 -Path <scratch-file>` against it. Treat any findings as advisory only — the detector never blocks. Proceed regardless of findings; consider expanding or rephrasing flagged terms first, then post the plan via `gh issue comment` (this phase persists as a GitHub issue comment carrying the `<!-- plan-issue-{ID} -->` marker — not a body edit) as it already does today.
+**Draft-scan step (warn-only)**: Before persisting, write the drafted plan prose to a scratch file under `.tmp/` (the repo's gitignored scratch directory — see `.gitignore:3,19-20`), then run `pwsh skills/naming-register-policy/scripts/newcomer-audit.ps1 -Path <scratch-file>` against it. Treat any findings as advisory only — the detector never blocks. Proceed regardless of findings; consider expanding or rephrasing flagged terms first, then persist the drafted body via `skills/session-memory-contract/scripts/persist-marker.ps1` (family `plan-issue`, upsert-in-place — this phase persists as a GitHub issue comment carrying the `<!-- plan-issue-{ID} -->` marker, not a body edit). The script is the ONLY documented write path for this family — never a hand-composed `gh issue comment` call. See § Burst persistence below for the full canonical-order invocation.
 
 Persist the plan per the platform's persistence conventions (see `## Platform-specific invocation`). The plan YAML frontmatter format is identical across platforms:
 
@@ -129,7 +129,9 @@ For any platform path that writes or re-emits the approved SMC-01 `<!-- plan-iss
 1. `<!-- frame-spine -->` with `spine_schema_version: 2`, a `generated_at` value set at plan creation time, and `slice_comment_id` (863-D3) pointing at the `<!-- frame-slices-{ID} -->` sibling comment created for this plan.
 2. A coverage manifest section with `ac-refs-by-slice:` mapping each slice ID to the acceptance criteria it covers.
 
-The `<!-- frame-slice -->` blocks themselves do NOT go inside the plan comment. Post one bare `<!-- frame-slice -->` block per implementation step — addressed by its `step_id: s{N}` field, same shape as before — into a separate `<!-- frame-slices-{ID} -->` sibling comment (863-D1/863-D2). Create that sibling before finalizing the plan comment's `frame-spine` block, since the sibling's comment id is what `slice_comment_id` points at. Stamp the sibling with `<!-- frame-slices-generated-at: {value} -->` set equal to the spine's `generated_at` (863-D7) — at initial persist and again on every re-persist that touches the spine or any slice, since a stale stamp there is indistinguishable from a genuinely stale slice sibling to the drift check that reads it.
+The `<!-- frame-slice -->` blocks themselves do NOT go inside the plan comment. Post one bare `<!-- frame-slice -->` block per implementation step — addressed by its `step_id: s{N}` field, same shape as before — into a separate `<!-- frame-slices-{ID} -->` sibling comment (863-D1/863-D2), persisted via `skills/session-memory-contract/scripts/persist-marker.ps1` (family `frame-slices`, upsert-in-place). Stamp the sibling with `<!-- frame-slices-generated-at: {value} -->` set equal to the spine's `generated_at` (863-D7) — at initial persist and again on every re-persist that touches the spine or any slice, since a stale stamp there is indistinguishable from a genuinely stale slice sibling to the drift check that reads it.
+
+**Write-back is now script-owned (893-D3/AC5), not agent-composed.** On first persist, leave `slice_comment_id` blank/omitted in the plan comment's `frame-spine` block — you do not yet know the sibling's comment id, and you no longer need to: persist the `plan-issue` comment FIRST (its marker-identity is a precondition the next step checks for), then persist the `frame-slices` sibling; the `frame-slices` family's registered post-step (`frame-slices-spine-splice`) automatically writes the just-landed sibling's comment id back onto the plan comment's `frame-spine.slice_comment_id` scalar via a targeted splice — refusing if the plan comment's marker is missing or if the plan's `generated_at` does not equal the sibling's `frame-slices-generated-at` stamp. Do not hand-splice `slice_comment_id` yourself; the script's post-step is the only documented path for that write-back. On a re-persist where the incoming plan-issue payload omits an existing `slice_comment_id` the current canonical comment already carries, the `plan-issue` family's own post-step (`plan-issue-write-back-preserve`) live-checks and carries it forward instead of dropping it.
 
 The `<!-- phase-containment-ledger-ref: {comment_id} -->` pointer onto the plan comment (863-D11), immediately after the `<!-- plan-issue-{ID} -->` marker, is written by the same helper invocation as the ledger sibling itself — see `### Phase-containment emission (plan-stress-test)` below. Do not hand-author this pointer; it is created once, on first persist, as part of `Invoke-PersistPhaseLedger`'s plan-mode write.
 
@@ -155,7 +157,7 @@ Set `generated_at` when the spine is first created, preserve `generated_at` acro
 
 The spine and coverage manifest are append-only guidance around the existing plan shape: legacy consumers can continue reading the YAML frontmatter and plan steps without understanding frame blocks. The `frame-slices-{ID}` and `phase-containment-ledger-{ID}` siblings are separate durable comments on the same issue (863-D1); legacy consumers that only fetch the `plan-issue-{ID}` comment are unaffected by their existence.
 
-After posting the `<!-- plan-issue-{ID} -->` GitHub issue comment, post the engagement-record marker (see § Named Decisions write-discipline below); immediately after that successful post, post the credit-input marker.
+After persisting the `<!-- plan-issue-{ID} -->` comment — and, when the plan has 3 or more implementation steps, the `<!-- frame-slices-{ID} -->` sibling comment (omit this entirely when the plan emits `spine-omitted: plan-too-small` per § Persist Plan above) — persist the engagement-record marker (see § Named Decisions write-discipline below); immediately after that successful write, persist the credit-input marker — all via the single burst manifest described in § Burst persistence below.
 
 ### Named Decisions write-discipline
 
@@ -179,16 +181,16 @@ If zero load-bearing decisions were captured, the section MUST contain the liter
 
 When persisting or amending the target phase artifact, you MUST monitor the total size of the persisted payload; if the payload size approaches 60,000 bytes, you MUST emit a warning to the terminal.
 
-**Burst order (load-bearing — D6 canonical ordering):**
+### Burst persistence (script-enforced ordering, 893-D4)
 
-1. Post the phase completion artifact described above in this agent body.
-2. **Immediately** post the `<!-- engagement-record-plan-{ISSUE_NUMBER} -->` comment using `capture_session: "normal-plan-v2"`, `schema_version: 2`, and `load_bearing_decisions: [...]` containing one YAML block-scalar mirror entry per decision slug matching the Markdown section exactly. Valid slugs MUST conform to the regex `^[a-z][a-z0-9-]{0,62}[a-z0-9]\z` validated by `Test-EngagementRecordSlug`. You MUST use YAML block-scalar `|-` for all multi-line user-typed fields (`audit_rationale`, `articulation_text`, `engineer_choice`); literal triple-backticks in those fields are strictly rejected.
-   - **If engagement-record emission fails:** emit a terminal warning `⚠️ Engagement-record emission failed for plan-{ISSUE_NUMBER}: {reason}`, HALT the burst, and do NOT post the credit-input marker comment. The phase remains complete (the phase completion artifact is durable), but `same-decision-resume` next session will degrade to v1.1 behavior.
-3. **Only after successful engagement-record emission**, post the credit-input marker (see § Credit-input emission below).
+`skills/session-memory-contract/scripts/persist-marker.ps1` is the ONLY documented write path for this burst — never hand-author any of these comments or call `gh issue comment` directly (mirrors `persist-phase-ledger.ps1`'s established "never by hand-authoring" language).
 
-### Credit-input emission
+Author payload files under `.tmp/issue-{ISSUE_NUMBER}/` with the Write tool (never inline shell strings):
 
-**After successful engagement-record emission** (see § Named Decisions write-discipline above), post a credit-input marker comment (SMC-17 deferred-emission):
+1. **Plan-issue body** — the drafted plan (§ Persist Plan above), with `slice_comment_id` left blank/omitted on first persist (family `plan-issue`, upsert-in-place + `plan-issue-write-back-preserve` post-step).
+2. **Frame-slices body** — the `<!-- frame-slices-{ID} -->` sibling (§ Persist Plan above; family `frame-slices`, upsert-in-place + `frame-slices-spine-splice` post-step, which writes `slice_comment_id` back onto the plan comment automatically after this entry lands — see § Persist Plan's write-back note). **Omit this manifest entry entirely** when the plan emits `spine-omitted: plan-too-small` (fewer than 3 implementation steps, § Persist Plan above) — the burst manifest then contains only plan-issue, engagement-record, and credit-input, in that order.
+3. **Engagement-record body** — `<!-- engagement-record-plan-{ISSUE_NUMBER} -->` using `capture_session: "normal-plan-v2"`, `schema_version: 2`, and `load_bearing_decisions: [...]` containing one YAML block-scalar mirror entry per decision slug matching the Markdown section exactly. Valid slugs MUST conform to the regex `^[a-z][a-z0-9-]{0,62}[a-z0-9]\z` validated by `Test-EngagementRecordSlug`. You MUST use YAML block-scalar `|-` for all multi-line user-typed fields (`audit_rationale`, `articulation_text`, `engineer_choice`); literal triple-backticks in those fields are strictly rejected. (family `engagement-record`)
+4. **Credit-input body** (SMC-17 deferred-emission, family `credit-input`):
 
 ````markdown
 <!-- credit-input-plan-{ISSUE_NUMBER} -->
@@ -200,11 +202,13 @@ evidence: "issue #{ISSUE_NUMBER}; plan completion marker posted"
 ```
 ````
 
-Retain the comment text returned by the post call so Code-Conductor harvest can use the `-InMemoryMarkers` fallback.
+Build a burst manifest JSON array in this canonical order — plan-issue, frame-slices, engagement-record, credit-input (893-D4: "the plan phase's exit sequence necessarily includes one: `plan-issue` first, then the 3-comment burst") when the plan emits a frame-spine, or plan-issue, engagement-record, credit-input when the plan emits `spine-omitted: plan-too-small` — each entry naming its `family`/`number`/`targetSurface`/`marker`/`bodyFile`, then invoke `pwsh skills/session-memory-contract/scripts/persist-marker.ps1 -Owner {owner} -Repo {repo} -BurstManifest <manifest-path>` exactly once. Relay the script's per-entry artifact manifest (landed/not-attempted/failed) in your completion report so Code-Conductor harvest can use the `-InMemoryMarkers` fallback.
+
+**Ordering is now script-enforced** by the burst's preflight-then-execute contract (previously an agent-remembered rule — see `Documents/Design/engagement-record-write-discipline.md` § D6, 893-D4 amendment): the whole-manifest preflight validates every entry (registry lookup, surface match, size cap, payload hygiene, validator adapter) before any network write, so if engagement-record fails **preflight**, nothing in the burst lands — not even plan-issue or frame-slices — and you MUST relay the script's refusal reason as a warning to the user before retrying the whole manifest. If preflight passes and engagement-record instead fails during **execution**, the burst halts before credit-input — the earlier entries in manifest order (plan-issue, and frame-slices when the plan emits it) already landed and stand, the phase is still marked complete, you MUST relay the script's actual halt reason as a warning to the user (the burst's own `persist-marker (burst): FAILED -- {reason}` diagnostic text for the engagement-record entry, not a fixed literal string), credit-input is NOT attempted, and `same-decision-resume` next session degrades to v1.1 behavior. Re-running the same manifest after either kind of halt is safe — already-landed entries no-op via the script's own write-shape idempotency.
 
 ## Phase-specific persistence notes
 
-After all three burst comments are successfully posted, stop — do not take any further action in this turn.
+After the burst manifest reports all entries landed, do not re-invoke `persist-marker.ps1` or attempt any additional burst-manifest marker write in this turn. This restriction is scoped to the burst above; it does not apply to the mandatory `### Phase-containment emission (plan-stress-test)` step below, which persists a separate required artifact through `persist-phase-ledger.ps1` and MUST still run in this turn.
 
 The canonical session-memory handoff artifacts remain `/memories/session/plan-issue-{id}.md` for the plan and `/memories/session/design-issue-{id}.md` for the design snapshot.
 

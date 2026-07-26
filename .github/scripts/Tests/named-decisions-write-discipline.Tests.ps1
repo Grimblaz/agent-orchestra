@@ -27,12 +27,54 @@ BeforeAll {
                 continue
             }
             if ($inSection) {
-                # CF2 fix: stop only on H2 (^## ) headers — never on H3 — so the entire
-                # write-discipline H3 sub-section (including the `### {decision_id}` template
-                # H3 inside it) is captured. Defensive `-notmatch` on the starting H3 retained.
+                # CF2 fix: stop on H2 (^## ) headers. Defensive `-notmatch` on the starting H3 retained.
                 if ($line -match '^##\s+' -and $line -notmatch '^### Named Decisions write-discipline') {
                     break
                 }
+                # 893 fix: also stop at a SIBLING PROSE H3, while still capturing the
+                # `### {decision_id}` placeholder template H3 that lives inside this section.
+                # Discriminator: a template H3's heading text is a `{placeholder}`; a sibling
+                # concern's is real prose (e.g. `### Burst persistence`).
+                #
+                # Why the scope narrowed (issue #893): the burst-persistence contract became a
+                # sibling H3 whose content is LEGITIMATELY phase-divergent and cannot be made
+                # byte-equal by any honest normalization — Experience-Owner and Solution-Designer
+                # persist 3 artifacts, Issue-Planner persists 4 (plan-issue + frame-slices, with
+                # frame-slices conditionally omitted for sub-3-step plans), each with different
+                # marker families, and Solution-Designer's completion entry is additionally gated
+                # on its own `### Pre-post YAML integrity check`. Forcing byte-equivalence there
+                # would require deleting correct behavior. The AC6.2 invariant that issue #576
+                # actually names — that the Named Decisions write-discipline contract itself does
+                # not drift between the three bodies — is fully preserved and still asserted below.
+                # The burst-persistence section keeps its own drift coverage in AC6.2b.
+                if ($line -match '^###\s+' -and $line -notmatch '^###\s+\{') {
+                    break
+                }
+                $sectionLines.Add($line)
+            }
+        }
+        return $sectionLines -join "`n"
+    }
+
+    # Helper scriptblock to extract the `### Burst persistence` sibling H3 (issue #893).
+    # This section is deliberately OUTSIDE the AC6.2 byte-equivalence scope because its content
+    # is legitimately phase-divergent; AC6.2b below asserts the invariants that must still hold
+    # uniformly across all three bodies.
+    $script:GetBurstPersistenceSection = {
+        param([string]$FilePath)
+        $lines = Get-Content $FilePath
+        $sectionLines = [System.Collections.Generic.List[string]]::new()
+        $inSection = $false
+
+        foreach ($line in $lines) {
+            if ($line -match '^###\s+Burst persistence') {
+                $inSection = $true
+                $sectionLines.Add($line)
+                continue
+            }
+            if ($inSection) {
+                if ($line -match '^##\s+') { break }
+                if ($line -match '^###\s+' -and $line -notmatch '^###\s+\{') { break }
                 $sectionLines.Add($line)
             }
         }
@@ -166,6 +208,62 @@ Describe 'AC6.2: Byte-equivalence of write-discipline sections' {
 
         $sdBytes | Should -Be $eoBytes -Because 'Solution-Designer section should match Experience-Owner'
         $ipBytes | Should -Be $eoBytes -Because 'Issue-Planner section should match Experience-Owner'
+    }
+}
+
+Describe 'AC6.2b: Burst-persistence contract uniformity (issue #893)' {
+    # The `### Burst persistence` sibling H3 cannot be byte-equivalent across the three bodies —
+    # Experience-Owner and Solution-Designer persist 3 artifacts, Issue-Planner persists 4
+    # (plan-issue + frame-slices, the latter conditionally omitted for sub-3-step plans), each
+    # with different marker families. These assertions pin the parts that MUST NOT drift, so
+    # narrowing AC6.2's scope does not leave this section unguarded.
+    BeforeAll {
+        $script:BurstSections = @{
+            'Experience-Owner' = & $script:GetBurstPersistenceSection -FilePath $script:ExperienceOwnerPath
+            'Solution-Designer' = & $script:GetBurstPersistenceSection -FilePath $script:SolutionDesignerPath
+            'Issue-Planner' = & $script:GetBurstPersistenceSection -FilePath $script:IssuePlannerPath
+        }
+    }
+
+    It 'every upstream agent body carries a Burst persistence section' {
+        foreach ($agent in $script:BurstSections.Keys) {
+            $script:BurstSections[$agent] | Should -Not -BeNullOrEmpty -Because "$agent must document burst persistence"
+        }
+    }
+
+    It 'every body names persist-marker.ps1 as the ONLY documented write path' {
+        foreach ($agent in $script:BurstSections.Keys) {
+            $section = $script:BurstSections[$agent]
+            $section | Should -Match 'skills/session-memory-contract/scripts/persist-marker\.ps1' -Because "$agent must name the script"
+            $section | Should -Match 'ONLY documented write path' -Because "$agent must pin the sole-write-path framing"
+            $section | Should -Match 'never hand-author' -Because "$agent must forbid hand-authoring"
+        }
+    }
+
+    It 'every body invokes the burst through -BurstManifest exactly once' {
+        foreach ($agent in $script:BurstSections.Keys) {
+            $script:BurstSections[$agent] | Should -Match '-BurstManifest' -Because "$agent must use the manifest entry point"
+        }
+    }
+
+    It 'every body distinguishes a preflight refusal from an execution halt (893 F8)' {
+        foreach ($agent in $script:BurstSections.Keys) {
+            $section = $script:BurstSections[$agent]
+            $section | Should -Match 'nothing in the burst lands' -Because "$agent must state the preflight-refusal semantics"
+            $section | Should -Match '(?s)fails \*\*preflight\*\*.*fails during \*\*execution\*\*' -Because "$agent must distinguish both failure modes"
+        }
+    }
+
+    It 'every body requires relaying the per-entry artifact manifest' {
+        foreach ($agent in $script:BurstSections.Keys) {
+            $script:BurstSections[$agent] | Should -Match 'artifact manifest' -Because "$agent must relay the landed/not-attempted record"
+        }
+    }
+
+    It 'every body halts before credit-input on engagement-record execution failure' {
+        foreach ($agent in $script:BurstSections.Keys) {
+            $script:BurstSections[$agent] | Should -Match 'credit-input is NOT attempted' -Because "$agent must preserve the asymmetric degradation contract"
+        }
     }
 }
 

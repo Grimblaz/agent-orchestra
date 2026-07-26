@@ -44,6 +44,7 @@ Describe 'Invoke-PersistPhaseLedger' {
     BeforeAll {
         $script:CoreLibPath = Join-Path $PSScriptRoot '../../../skills/session-memory-contract/scripts/persist-phase-ledger-core.ps1'
         $script:FindOrUpsertLibPath = Join-Path $PSScriptRoot '../lib/find-or-upsert-comment.ps1'
+        $script:MarkerTransportLibPath = Join-Path $PSScriptRoot '../lib/marker-transport-core.ps1'
         $script:EmissionCoreLibPath = Join-Path $PSScriptRoot '../lib/phase-containment-emission-check-core.ps1'
 
         $script:Owner = 'Grimblaz'
@@ -194,6 +195,7 @@ Describe 'Invoke-PersistPhaseLedger' {
         # does not exist yet, a CommandNotFoundException at the Act line
         # below is itself the sanctioned RED signal.
         if (Test-Path $script:FindOrUpsertLibPath) { . $script:FindOrUpsertLibPath }
+        if (Test-Path $script:MarkerTransportLibPath) { . $script:MarkerTransportLibPath }
         if (Test-Path $script:EmissionCoreLibPath) { . $script:EmissionCoreLibPath }
         if (Test-Path $script:CoreLibPath) { . $script:CoreLibPath }
     }

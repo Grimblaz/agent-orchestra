@@ -93,7 +93,7 @@ Update the GitHub issue body with full design details per `skills/design-explora
 
 Before posting the `design-phase-complete` marker, compare the convergence-sustained ledger — finder findings that survived convergence plus any kept pass-4 cold-read observations, not the bare pre-filter merged ledger from Stage 3 — and the `finding_dispositions:` YAML block about to be posted by both count and identity set over `(finding_id, pass)`. The counts must match exactly, and the identity sets must be equal; missing or extra `(finding_id, pass)` keys are failures even when counts match. If the ledger has zero findings, an empty `entries: []` block passes; the Phase summary still says `all findings dismissed` or `all classified routine` when applicable. If the YAML is malformed, the counts differ, or the identity sets differ, halt and do not post the marker. Use this literal halt template: `YAML integrity check failed: ledger has N finding(s); block has M; missing from block: {ids_or_none}; extra in block: {ids_or_none}`.
 
-Post the `design-phase-complete` marker using this literal template:
+Author the `design-phase-complete` marker payload into a scratch file with the Write tool (never a hand-composed `gh pr comment`/`gh issue comment` — see § Burst persistence below), using this literal template:
 
 ````markdown
 <!-- design-phase-complete-{ISSUE_NUMBER} -->
@@ -141,16 +141,15 @@ If zero load-bearing decisions were captured, the section MUST contain the liter
 
 When persisting or amending the target phase artifact, you MUST monitor the total size of the persisted payload; if the payload size approaches 60,000 bytes, you MUST emit a warning to the terminal.
 
-**Burst order (load-bearing — D6 canonical ordering):**
+### Burst persistence (script-enforced ordering, 893-D4)
 
-1. Post the phase completion artifact described above in this agent body.
-2. **Immediately** post the `<!-- engagement-record-design-{ISSUE_NUMBER} -->` comment using `capture_session: "normal-design-v2"`, `schema_version: 2`, and `load_bearing_decisions: [...]` containing one YAML block-scalar mirror entry per decision slug matching the Markdown section exactly. Valid slugs MUST conform to the regex `^[a-z][a-z0-9-]{0,62}[a-z0-9]\z` validated by `Test-EngagementRecordSlug`. You MUST use YAML block-scalar `|-` for all multi-line user-typed fields (`audit_rationale`, `articulation_text`, `engineer_choice`); literal triple-backticks in those fields are strictly rejected.
-   - **If engagement-record emission fails:** emit a terminal warning `⚠️ Engagement-record emission failed for design-{ISSUE_NUMBER}: {reason}`, HALT the burst, and do NOT post the credit-input marker comment. The phase remains complete (the phase completion artifact is durable), but `same-decision-resume` next session will degrade to v1.1 behavior.
-3. **Only after successful engagement-record emission**, post the credit-input marker (see § Credit-input emission below).
+`skills/session-memory-contract/scripts/persist-marker.ps1` is the ONLY documented write path for this burst — never hand-author any of the three comments below or call `gh issue comment` directly (mirrors `persist-phase-ledger.ps1`'s established "never by hand-authoring" language).
 
-### Credit-input emission
+Author three payload files under `.tmp/issue-{ISSUE_NUMBER}/` with the Write tool (never inline shell strings):
 
-**After successful engagement-record emission** (see § Named Decisions write-discipline above), post a credit-input marker comment (SMC-17 deferred-emission):
+1. **Completion body** — the phase completion artifact described above, after the pre-post YAML integrity check passes (family `design-phase-complete`).
+2. **Engagement-record body** — `<!-- engagement-record-design-{ISSUE_NUMBER} -->` using `capture_session: "normal-design-v2"`, `schema_version: 2`, and `load_bearing_decisions: [...]` containing one YAML block-scalar mirror entry per decision slug matching the Markdown section exactly. Valid slugs MUST conform to the regex `^[a-z][a-z0-9-]{0,62}[a-z0-9]\z` validated by `Test-EngagementRecordSlug`. You MUST use YAML block-scalar `|-` for all multi-line user-typed fields (`audit_rationale`, `articulation_text`, `engineer_choice`); literal triple-backticks in those fields are strictly rejected. (family `engagement-record`)
+3. **Credit-input body** (SMC-17 deferred-emission, family `credit-input`):
 
 ````markdown
 <!-- credit-input-design-{ISSUE_NUMBER} -->
@@ -162,7 +161,9 @@ evidence: "issue #{ISSUE_NUMBER}; design completion marker posted"
 ```
 ````
 
-Retain the comment text returned by the post call so Code-Conductor harvest can use the `-InMemoryMarkers` fallback.
+Build a burst manifest JSON array in this canonical order — completion, engagement-record, credit-input — each entry naming its `family`/`number`/`targetSurface`/`marker`/`bodyFile`, then invoke `pwsh skills/session-memory-contract/scripts/persist-marker.ps1 -Owner {owner} -Repo {repo} -BurstManifest <manifest-path>` exactly once. Relay the script's per-entry artifact manifest (landed/not-attempted/failed) in your completion report so Code-Conductor harvest can use the `-InMemoryMarkers` fallback.
+
+**Ordering is now script-enforced** by the burst's preflight-then-execute contract (previously an agent-remembered rule — see `Documents/Design/engagement-record-write-discipline.md` § D6, 893-D4 amendment): the whole-manifest preflight validates every entry (registry lookup, surface match, size cap, payload hygiene, validator adapter) before any network write, so if engagement-record fails **preflight**, nothing in the burst lands — not even the completion artifact — and you MUST relay the script's refusal reason as a warning to the user before retrying the whole manifest. If preflight passes and engagement-record instead fails during **execution**, the burst halts before credit-input — the completion artifact (entry 1, already executed earlier in manifest order) already landed and stands, the phase is still marked complete, you MUST relay the script's actual halt reason as a warning to the user (the burst's own `persist-marker (burst): FAILED -- {reason}` diagnostic text for the engagement-record entry, not a fixed literal string), credit-input is NOT attempted, and `same-decision-resume` next session degrades to v1.1 behavior. Re-running the same manifest after either kind of halt is safe — already-landed entries no-op via the script's own write-shape idempotency.
 
 ## Completion Gate (Mandatory)
 
@@ -172,7 +173,8 @@ Hard-stop: never conclude without durable artifacts.
 - [ ] **Grounding Evidence** block (with escalation notes when applicable) persisted in the issue body at the placement anchor defined in `skills/design-exploration/SKILL.md`.
 - [ ] **Rejected alternatives documented** with brief rationale.
 - [ ] **Completion comment posted** with the `<!-- design-phase-complete-{ISSUE_NUMBER} -->` marker.
-- [ ] **Credit-input marker** `<!-- credit-input-design-{ISSUE_NUMBER} -->` posted immediately after.
+- [ ] **Engagement-record marker** `<!-- engagement-record-design-{ISSUE_NUMBER} -->` posted next.
+- [ ] **Credit-input marker** `<!-- credit-input-design-{ISSUE_NUMBER} -->` posted last, via the same burst manifest (completion → engagement-record → credit-input).
 - [ ] **YAML integrity check** passed (ledger-finding count equals finding_dispositions entries count, and `(finding_id, pass)` identity sets are equal; halt and surface error if not).
 
 A `Documents/Design/` file is **not** created during design — Doc-Keeper creates it as part of the implementation PR.

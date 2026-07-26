@@ -104,13 +104,13 @@ Use `—` in the Pass column when the prosecution mode does not carry a pass num
 ### Sentinel emission (issue #441, D-new-4)
 
 **Immediately after the judge ruling is finalized** and before any pipeline-metrics persistence,
-write an idempotent sentinel PR comment for the PR being reviewed:
+persist an idempotent sentinel PR comment for the PR being reviewed:
 
 ```text
 <!-- review-judge-produced-{PR} -->
 ```
 
-This sentinel is separate from the judge-rulings comment. On GitHub, post it via `gh pr comment {PR} --body '<!-- review-judge-produced-{PR} -->'`. Use upsert semantics: if the comment already exists (idempotency check via `gh pr view {PR} --json comments`), skip the write.
+This sentinel is separate from the judge-rulings comment. `skills/session-memory-contract/scripts/persist-marker.ps1` is the ONLY documented write path for this marker (family `review-judge-produced`, `post-new`, `sentinel-empty` validator adapter — pins an empty, marker-only payload) — never a hand-composed `gh pr comment` call. The script's own post-new idempotency comparison (compare the candidate against the latest marker match; normalized-identical → no-op) supersedes the separate `gh pr view {PR} --json comments` presence check this section previously directed: pass a body file whose only content is the marker line, and the script either posts a new sentinel or reports a `no-op` action against the already-present one.
 
 **Ordering rule**: sentinel comment → judge-rulings comment. The sentinel must be written first so that the warn-only hook can detect "review completed but credit not yet written" during the window between sentinel emission and PR-body update.
 
@@ -457,9 +457,9 @@ This enables re-review of a PR without re-asking for findings already dispositio
 
 ### Persistence — Ordering
 
-Write in this order (atomic marker first, engagement-record second):
+Write in this order (atomic marker first, engagement-record second). `skills/session-memory-contract/scripts/persist-marker.ps1` is the ONLY documented write path for the `review-dispositions-{PR}` marker (family `review-dispositions`, `post-new`) — never a hand-composed `gh pr comment` call. **`engagement-record-review-{PR}` is a known v1 registry gap and stays hand-authored for now**: the `engagement-record` family registry row declares `TargetSurface: issue` for every phase, but the `review` phase is PR-keyed — a `review`-phase write through the script would be refused by the surface preflight (`persist-marker-core.ps1`'s documented "Known v1 scope gap"). Do not attempt to route `engagement-record-review-{PR}` through the script until that gap is closed; hand-compose it per the existing convention below.
 
-1. **`<!-- review-dispositions-{PR} -->`** — Post as a PR comment. Payload: `schema_version: 4`, `passes_run: [...]`, `entries: [...]` (all findings, routine and load-bearing, one entry per finding), plus the PR-level `external_sources_reconciled` field. v2 added per-entry `severity`, `ac_cross_check`, and `stage` fields; v3 added per-entry `reviewer_source` (the reviewer identity or class — `local` for pipeline-native findings; external identities resolve per § `reviewer_source` Lookup Order above); v4 adds per-entry `internal_match` and the PR-level `external_sources_reconciled` field (see § `internal_match` Writer Rule below). This is the atomic per-finding record.
+1. **`<!-- review-dispositions-{PR} -->`** — Persist via `persist-marker.ps1` (family `review-dispositions`). Payload: `schema_version: 4`, `passes_run: [...]`, `entries: [...]` (all findings, routine and load-bearing, one entry per finding), plus the PR-level `external_sources_reconciled` field. v2 added per-entry `severity`, `ac_cross_check`, and `stage` fields; v3 added per-entry `reviewer_source` (the reviewer identity or class — `local` for pipeline-native findings; external identities resolve per § `reviewer_source` Lookup Order above); v4 adds per-entry `internal_match` and the PR-level `external_sources_reconciled` field (see § `internal_match` Writer Rule below). This is the atomic per-finding record.
 
    ````text
    <!-- review-dispositions-{PR} -->
@@ -503,9 +503,9 @@ Write in this order (atomic marker first, engagement-record second):
    >
    > **`stage` field values**: The `stage` field records which pipeline stage produced this entry: `code-review` for the post-judge disposition gate, `ce` for CE Gate defect deferral. Both stages use the same `ac_cross_check` pre-condition at severity ≥ medium.
    >
-   > **In-session schema audit (before posting)**: Before posting the `review-dispositions-{PR}` comment to the PR, run a warn-only schema check using `.github/scripts/lib/review-dispositions-validator-core.ps1 -PullRequestNumber {PR} -InMemoryMarkers @($rawMarkerText)`. Surface any `findings` as warnings. This catches v4 schema violations (e.g., missing `ac_cross_check` on dismiss/defer entries at severity ≥ medium, or a missing `reviewer_source`) before the marker is committed to the PR timeline. The validator is warn-only and never blocks posting.
+   > **In-session schema audit is now pre-write and blocking (893-D3 amendment, s9)**: `persist-marker.ps1`'s `review-dispositions` family validator adapter invokes `.github/scripts/lib/review-dispositions-validator-core.ps1` **in-process, via the call operator (`&`), with mandatory try/catch containment** — never as a `pwsh -File` subprocess (the original 893-D3 subprocess design is superseded; a subprocess cannot bind that script's `-InMemoryMarkers` array parameter without hitting the recorded #866 flattening trap, since `-InMemoryMarkers` is a top-level array parameter). Any finding the validator returns is converted into a hard pre-write refusal on this write path: v4 schema violations (e.g., missing `ac_cross_check` on dismiss/defer entries at severity ≥ medium, or a missing `reviewer_source`) are refused with the offending field named, before any network write. This is a property of the `persist-marker.ps1` write path only — the standalone validator script's own read-side warn-only contract (SMC-23 detection-at-review) is unchanged for any other caller.
 
-2. **`<!-- engagement-record-review-{PR} -->`** — Post as a separate PR comment (not the same comment as review-dispositions). Payload follows `skills/engagement-record-emission/SKILL.md` shape at `schema_version: 4`, `phase: review`. Load-bearing findings that fired `AskUserQuestion` appear in `load_bearing_decisions[]` with their `engineer_choice` and `audit_rationale`. Routine findings do not appear in the engagement-record.
+2. **`<!-- engagement-record-review-{PR} -->`** — Post as a separate PR comment (not the same comment as review-dispositions), via a hand-composed `gh pr comment` call — **not** `persist-marker.ps1` (see the known v1 registry gap noted above this list). Payload follows `skills/engagement-record-emission/SKILL.md` shape at `schema_version: 4`, `phase: review`. Load-bearing findings that fired `AskUserQuestion` appear in `load_bearing_decisions[]` with their `engineer_choice` and `audit_rationale`. Routine findings do not appear in the engagement-record.
 
    The engagement-record carries the `same-decision-resume` identity; the review-dispositions carries the per-finding outcome record. Never merge the two into a single comment.
 

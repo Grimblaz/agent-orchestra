@@ -3621,6 +3621,74 @@ Describe 'Add-JudgeRulingsBlock - sibling append primitive with entry-level posi
         $result.Success | Should -Be $false
     }
 
+    It "893 (s8, RED): value-recognition rejection names the unrecognized judge_ruling value verbatim ('partial' — a real recorded incident value outside the closed sustained|defense-sustained enum)" {
+        # Mutually exclusive from the window/vocab-gate branch below: the
+        # head here passes the vocab gate (judge_ruling: is well within the
+        # lookahead window), so Get-JudgeRulingsIsolatedRegion succeeds and
+        # the value-recognition scan actually runs and finds 'partial'
+        # unrecognized.
+        $newContentBadEnum = "`n<!-- judge-rulings`n- id: M1`n  judge_ruling: sustained`n- id: M2`n  judge_ruling: partial`n-->`n"
+
+        $tally = Get-DispositionTally -Surface 'plan-stress-test' -Body $newContentBadEnum
+        $tally.ParseStatus | Should -Be 'could-not-verify'
+
+        $script:mockFullNewContent = $newContentBadEnum
+        $result = Add-JudgeRulingsBlock -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 794 -ExpectedMarker '<!-- plan-issue-811' -NewContent $newContentBadEnum
+        $result.Success | Should -Be $false
+        $result.Reason | Should -Match "unrecognized judge_ruling value: 'partial'"
+    }
+
+    It '893 (s8, RED; M27 fix issue #893 s11): window/vocabulary-gate rejection reports the vocabulary-token''s start/end offsets and explains the whole-token-must-fit mechanism (long preamble pushes judge_ruling: past the 400-char window)' {
+        # The window/vocab gate short-circuits BEFORE the value-recognition
+        # scan ever runs (Get-JudgeRulingsIsolatedRegion returns
+        # could-not-verify because no head's own lookahead window contains
+        # real field vocabulary) — this fixture must never reach, let alone
+        # report, a value-recognition message.
+        $longPreamble = 'x' * 450
+        $newContentLongPreamble = "`n<!-- judge-rulings`n$longPreamble`n- id: M1`n  judge_ruling: sustained`n-->`n"
+
+        $tally = Get-DispositionTally -Surface 'plan-stress-test' -Body $newContentLongPreamble
+        $tally.ParseStatus | Should -Be 'could-not-verify'
+
+        $script:mockFullNewContent = $newContentLongPreamble
+        $result = Add-JudgeRulingsBlock -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 794 -ExpectedMarker '<!-- plan-issue-811' -NewContent $newContentLongPreamble
+        $result.Success | Should -Be $false
+        # M27 fix: the message now reports BOTH the token's start and end
+        # offset and explains that the WHOLE token must fit inside the
+        # window (never a raw start-offset-vs-window-size comparison alone,
+        # which could read as self-contradictory when the start offset is
+        # numerically less than the window size but the token's own length
+        # still pushes its end past the close).
+        $result.Reason | Should -Match 'judge_ruling token position \(starts at offset \d+, ends at offset \d+\) leaves insufficient room before the 400-char lookahead window closes'
+        $result.Reason | Should -Not -Match 'unrecognized judge_ruling value'
+    }
+
+    It '893 (s11, M27): a token whose START offset is numerically inside the window but whose END (start + token length) is not still reports the whole-token-must-fit mechanism, never a self-contradictory "found at offset N, outside the 400-char window" claim' {
+        # Preamble sized so the vocab token's START offset lands just under
+        # 400 but its own length pushes the END past the close -- the exact
+        # near-boundary case the old message's raw start-vs-400 comparison
+        # would have reported in a self-contradictory way (e.g. "found at
+        # offset 390, outside the 400-char window").
+        $nearBoundaryPreamble = 'x' * 390
+        $newContentNearBoundary = "`n<!-- judge-rulings`n$nearBoundaryPreamble`n  judge_ruling: sustained`n-->`n"
+
+        $tally = Get-DispositionTally -Surface 'plan-stress-test' -Body $newContentNearBoundary
+        $tally.ParseStatus | Should -Be 'could-not-verify'
+
+        $script:mockFullNewContent = $newContentNearBoundary
+        $result = Add-JudgeRulingsBlock -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 794 -ExpectedMarker '<!-- plan-issue-811' -NewContent $newContentNearBoundary
+        $result.Success | Should -Be $false
+        $result.Reason | Should -Not -Match 'found at offset \d+, outside the'
+        # Tightened to match ONLY the specific M27 whole-token-fit message
+        # (:3328), not the generic fallback (:3339) that explicitly means
+        # "excluded for a reason OTHER than window/length" -- the prior
+        # combined pattern accepted both, so this test could not actually
+        # fail if the M27 branch regressed and fell through to the generic
+        # fallback.
+        $result.Reason | Should -Match 'judge_ruling token position \(starts at offset \d+, ends at offset \d+\) leaves insufficient room before the \d+-char lookahead window closes -- the whole token must fit inside the window for the gate to recognize it'
+        $result.Reason | Should -Not -Match 'no judge-rulings marker head with recognizable field vocabulary'
+    }
+
     It "842 (s3, RED, M17): refuses when Get-DispositionTally's SustainedCount + DefenseSustainedCount disagrees with the raw judge_ruling: entry count assembled (required_fixes: decoy list)" {
         # required_fixes: is a parallel decoy list (PR #775 intake-mode
         # shape) that Get-JudgeRulingsSustainedCountInternal strips BEFORE

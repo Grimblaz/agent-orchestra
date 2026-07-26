@@ -2,6 +2,12 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.4.11] — 2026-07-26
+
+### Added
+
+- Deterministic marker-write primitive (issue #893): new persist-marker.ps1 CLI + persist-marker-core.ps1 registry-driven transport replaces hand-composed gh comment calls for eight durable marker families. Promoted transport core in marker-transport-core.ps1, per-family validator adapters, burst-manifest mode, and a UTF-8 console-encoding fix for non-ASCII payload fidelity (found live by CE Gate). Agent bodies, skill docs, and the marker catalog now name the script as the sole documented write path.
+
 ## [3.4.10] — 2026-07-25
 
 ### Fixed
