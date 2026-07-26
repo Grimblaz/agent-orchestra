@@ -42,21 +42,23 @@
     see .github/scripts/lib/find-or-upsert-comment.ps1 and
     .github/scripts/lib/phase-containment-emission-check-core.ps1 for what
     IS shipped):
-      (a) Find-PPLCommentIdByExactMarker -- a find-only selector matching the
-          marker LINE-ANCHORED AND WHOLE, never Find-OrUpsertComment's -like
-          substring match (which would select a prose mention of the
-          marker).
-      (b) Get-PPLCommentIdFromUrl -- extracts the numeric REST id from a plain
-          html_url STRING (Get-RestCommentId only accepts a comment OBJECT
-          with .url/.id properties and would silently yield $null for a bare
-          string).
+      (a)-(b),(d) Find-PPLCommentIdByExactMarker, Get-PPLCommentIdFromUrl,
+          and Get-PPLCommentBodyById (issue #893, plan slice s2): promoted
+          to .github/scripts/lib/marker-transport-core.ps1 as
+          Find-CommentIdByExactMarker, Get-CommentIdFromUrl, and
+          Get-CommentBodyById -- byte-identical behavior, same call shapes,
+          same single-result lowest-REST-id tie-break. The PPL-prefixed
+          names below are now one-line delegators to those, kept only so
+          this file's own internal call sites and
+          .github/scripts/Tests/persist-phase-ledger.Tests.ps1's mocked
+          assertions never had to change. Set-PPLPointerLineAfterMarker was
+          promoted alongside them, generalized to Set-PointerLineAfterMarker
+          (a future marker-write path needs its CRLF-safe insertion logic
+          for its own, differently-shaped pointer line).
       (c) Set-PPLJudgeRulingsBlockOnComment's span-replace branch -- locates and
           replaces the existing `<!-- judge-rulings ... -->` head+entries
           span in place on re-persist (Add-JudgeRulingsBlock is
           append-only by contract and must never be used for this).
-      (d) Get-PPLCommentBodyById -- reads a comment's current body, feeding both
-          the finding_key dedup decision and the span-replacement above;
-          nothing in the shipped primitives returns a body for a known id.
 
     Dedup rule for phase-containment blocks (finding_key-keyed): a block
     whose finding_key is not yet present in the sibling is appended (via
@@ -77,62 +79,45 @@
 function script:Get-PPLCommentIdFromUrl {
     <#
     .SYNOPSIS
-        Net-new glue (b): extracts the numeric REST comment id from a plain
-        html_url STRING (e.g. Find-OrUpsertComment's return value on the
-        create path). Get-RestCommentId (find-or-upsert-comment.ps1:64-67)
-        only accepts a comment OBJECT exposing .url/.id and would silently
-        cast a bare string to $null via its [long]$c.id fallback.
+        One-line delegator (issue #893, plan slice s2) to the promoted
+        Get-CommentIdFromUrl (.github/scripts/lib/marker-transport-core.ps1)
+        -- byte-identical behavior, kept under this name so every existing
+        internal call site in this file needs no change.
     .OUTPUTS
-        [long] or $null when the url does not carry a trailing
-        #issuecomment-{id} fragment.
+        [long] or $null. See Get-CommentIdFromUrl for the full contract.
     #>
     param([Parameter(Mandatory)][AllowEmptyString()][string]$Url)
-    if ($Url -match '#issuecomment-(\d+)\s*$') { return [long]$Matches[1] }
-    return $null
+    return Get-CommentIdFromUrl @PSBoundParameters
 }
 
 function script:Get-PPLCommentBodyById {
     <#
     .SYNOPSIS
-        Net-new glue (d): reads a comment's current body by numeric REST id.
-        No shipped primitive returns a body for a known id without also
-        mutating it (Add-CommentBlocks/Add-JudgeRulingsBlock's internal GET
-        is not exposed to callers).
+        One-line delegator (issue #893, plan slice s2) to the promoted
+        Get-CommentBodyById (.github/scripts/lib/marker-transport-core.ps1)
+        -- byte-identical behavior, kept under this name so every existing
+        internal call site in this file needs no change.
     .OUTPUTS
-        [string] or $null on any gh/parse failure.
+        [string] or $null. See Get-CommentBodyById for the full contract.
     #>
     param(
         [Parameter(Mandatory)][string]$Owner,
         [Parameter(Mandatory)][string]$Repo,
         [Parameter(Mandatory)][long]$CommentId
     )
-    $getPath = "repos/$Owner/$Repo/issues/comments/$CommentId"
-    $getOutput = & gh api $getPath 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        [Console]::Error.WriteLine("persist-phase-ledger: gh api GET $getPath failed (exit $LASTEXITCODE)")
-        return $null
-    }
-    try {
-        $obj = $getOutput | ConvertFrom-Json -ErrorAction Stop
-        return [string]$obj.body
-    }
-    catch {
-        [Console]::Error.WriteLine("persist-phase-ledger: failed to parse GET response for comment ${CommentId}: $($_.Exception.Message)")
-        return $null
-    }
+    return Get-CommentBodyById @PSBoundParameters
 }
 
 function script:Set-PPLCommentBodyDirect {
     <#
     .SYNOPSIS
-        Raw full-body PATCH for a known numeric comment id. Used only for
-        in-place span replacement (judge-rulings re-persist, same-key/
-        different-content phase-containment block replacement, and plan
-        comment pointer insertion) -- never for the append-only paths, which
-        go through Add-CommentBlocks/Add-JudgeRulingsBlock instead.
+        One-line delegator (issue #893, plan slice s2) to the promoted
+        Set-CommentBodyDirect (.github/scripts/lib/marker-transport-core.ps1)
+        -- byte-identical behavior, kept under this name so every existing
+        internal call site in this file needs no change.
     .OUTPUTS
-        [PSCustomObject] with Success [bool] and Reason [string] (populated
-        only when Success=$false) -- same shape as the Add-* primitives.
+        [PSCustomObject] with Success [bool] and Reason [string]. See
+        Set-CommentBodyDirect for the full contract.
     #>
     param(
         [Parameter(Mandatory)][string]$Owner,
@@ -140,84 +125,23 @@ function script:Set-PPLCommentBodyDirect {
         [Parameter(Mandatory)][long]$CommentId,
         [Parameter(Mandatory)][AllowEmptyString()][string]$NewBody
     )
-    $patchPath = "repos/$Owner/$Repo/issues/comments/$CommentId"
-    $patchTempFile = $null
-    try {
-        $patchTempFile = [System.IO.Path]::GetTempFileName()
-        $patchPayload = @{ body = $NewBody } | ConvertTo-Json -Depth 4 -Compress
-        Set-Content -LiteralPath $patchTempFile -Value $patchPayload -Encoding UTF8 -NoNewline
-        $null = & gh api -X PATCH $patchPath --input $patchTempFile 2>$null
-    }
-    finally {
-        if ($null -ne $patchTempFile -and (Test-Path -LiteralPath $patchTempFile)) {
-            Remove-Item -LiteralPath $patchTempFile -Force -ErrorAction SilentlyContinue
-        }
-    }
-    if ($LASTEXITCODE -ne 0) {
-        [Console]::Error.WriteLine("persist-phase-ledger: gh api PATCH $patchPath failed (exit $LASTEXITCODE)")
-        return [PSCustomObject]@{ Success = $false; Reason = "PATCH failed (exit $LASTEXITCODE)" }
-    }
-
-    # M11 fix (issue #878 judge-sustained review): this function used to
-    # check only $LASTEXITCODE, unlike Add-CommentBlocks' GET-after-PATCH
-    # positive-proof verify. A lightweight version of that same pattern --
-    # re-GET and confirm the write actually landed -- catches a PATCH that
-    # exit-0'd but silently truncated or corrupted the body (the same class
-    # Add-CommentBlocks' own post-write verify exists to catch).
-    $verifyOutput = & gh api $patchPath 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        [Console]::Error.WriteLine("persist-phase-ledger: post-write verify GET $patchPath failed (exit $LASTEXITCODE)")
-        return [PSCustomObject]@{ Success = $false; Reason = "Post-write verify GET failed (exit $LASTEXITCODE)" }
-    }
-    try {
-        $verifyObj = $verifyOutput | ConvertFrom-Json -ErrorAction Stop
-    }
-    catch {
-        [Console]::Error.WriteLine("persist-phase-ledger: failed to parse post-write verify JSON for comment ${CommentId}: $($_.Exception.Message)")
-        return [PSCustomObject]@{ Success = $false; Reason = "Post-write verify response is not valid JSON: $($_.Exception.Message)" }
-    }
-    $verifyBody = [string]$verifyObj.body
-
-    # Exact match is the common case; GitHub's API can benignly normalize
-    # some whitespace on write/read (trailing whitespace, blank-line-run
-    # collapsing -- the same behavior Add-CommentBlocks documents for its
-    # own post-write verify), so an ordinal mismatch alone is not proof of
-    # corruption. Fall back to the same gross-truncation guard
-    # Add-CommentBlocks uses: a benignly-normalized body trims at most a
-    # handful of characters, never a large fraction of the body.
-    if ($verifyBody -ne $NewBody) {
-        $expectedMinLength = [int]($NewBody.Length * 0.5)
-        if ($verifyBody.Length -lt $expectedMinLength) {
-            [Console]::Error.WriteLine("persist-phase-ledger: post-write verify FAILED -- verify body ($($verifyBody.Length) chars) is dramatically shorter than the written body ($($NewBody.Length) chars) for comment $CommentId.")
-            return [PSCustomObject]@{ Success = $false; Reason = "Post-write verify failed: verify body ($($verifyBody.Length) chars) is dramatically shorter than expected ($($NewBody.Length) chars written)" }
-        }
-    }
-
-    return [PSCustomObject]@{ Success = $true; Reason = $null }
+    return Set-CommentBodyDirect @PSBoundParameters
 }
 
 function script:Find-PPLCommentIdByExactMarker {
     <#
     .SYNOPSIS
-        Net-new glue (a): find-only comment selector. Lists comments on the
-        issue and returns the numeric REST id of the one whose body carries
-        the given marker LINE-ANCHORED AND WHOLE (the entire line, modulo
-        surrounding whitespace, must equal the marker exactly).
-    .DESCRIPTION
-        Deliberately NOT Find-OrUpsertComment's -like substring match
-        (find-or-upsert-comment.ps1:129-131), which would select a comment
-        that merely quotes the marker in prose (e.g. inside backticks
-        mid-sentence) -- backticks do not neutralize either reader's raw-text
-        scan (plan-authoring/SKILL.md rule 5), so a prose mention is a real
-        false-positive risk for a substring matcher, not a hypothetical one.
-        Ties (multiple genuine line-anchored matches) resolve to the lowest
-        REST id, mirroring Find-OrUpsertComment's own earliest-id
-        convention. Id extraction reuses Get-RestCommentId
-        (find-or-upsert-comment.ps1) since the LIST payload's `.id` field is
-        a GraphQL node id, not the numeric REST id the PATCH endpoint needs.
+        One-line delegator (issue #893, plan slice s2) to the promoted
+        Find-CommentIdByExactMarker
+        (.github/scripts/lib/marker-transport-core.ps1) -- byte-identical
+        behavior (same `gh issue view` call shape, same single-result
+        lowest-REST-id tie-break), kept under this name so every existing
+        internal call site in this file and
+        .github/scripts/Tests/persist-phase-ledger.Tests.ps1's mocked
+        assertions needed no change.
     .OUTPUTS
-        [PSCustomObject] with Id [long] and Body [string], or $null when no
-        comment's body carries the marker as a whole, standalone line.
+        [PSCustomObject] with Id [long] and Body [string], or $null. See
+        Find-CommentIdByExactMarker for the full contract.
     #>
     param(
         [Parameter(Mandatory)][string]$Owner,
@@ -225,89 +149,31 @@ function script:Find-PPLCommentIdByExactMarker {
         [Parameter(Mandatory)][int]$IssueNumber,
         [Parameter(Mandatory)][string]$Marker
     )
-
-    # M15 fix (issue #878 judge-sustained review): pass -R explicitly, same
-    # as this file's sibling gh-calling functions (Get-PPLCommentBodyById,
-    # Set-PPLCommentBodyDirect) already do. Without it, this call's repo
-    # targeting is derived from cwd instead of the caller-supplied
-    # -Owner/-Repo, so it can silently target the wrong repo when the
-    # current working directory does not match.
-    $listJson = & gh issue view $IssueNumber --json comments -R "$Owner/$Repo" 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        [Console]::Error.WriteLine("persist-phase-ledger: gh issue view $IssueNumber failed (exit $LASTEXITCODE)")
-        return $null
-    }
-
-    $comments = @()
-    if ($listJson) {
-        try {
-            $parsed = $listJson | ConvertFrom-Json -ErrorAction Stop
-            if ($parsed -and $parsed.comments) { $comments = @($parsed.comments) }
-        }
-        catch {
-            [Console]::Error.WriteLine("persist-phase-ledger: failed to parse comments JSON for issue ${IssueNumber}: $($_.Exception.Message)")
-            return $null
-        }
-    }
-
-    $linePattern = "(?m)^\s*$([regex]::Escape($Marker))\s*`$"
-    $matched = @($comments | Where-Object { $_.body -and ([regex]::IsMatch([string]$_.body, $linePattern)) })
-    if ($matched.Count -eq 0) { return $null }
-
-    $pairs = @($matched |
-        ForEach-Object { [PSCustomObject]@{ Comment = $_; RestId = Get-RestCommentId $_ } } |
-        Where-Object { $null -ne $_.RestId })
-    if ($pairs.Count -eq 0) { return $null }
-
-    $target = @($pairs | Sort-Object -Property RestId)[0]
-    return [PSCustomObject]@{ Id = $target.RestId; Body = [string]$target.Comment.body }
+    return Find-CommentIdByExactMarker @PSBoundParameters
 }
 
 function script:Set-PPLPointerLineAfterMarker {
     <#
     .SYNOPSIS
-        Inserts the `<!-- phase-containment-ledger-ref: {id} -->` pointer
-        line immediately after the plan-issue marker line, preserving the
-        rest of the body byte-identical (plan-authoring/SKILL.md:373,
-        863-D11). Adds exactly one blank line on each side of the pointer,
-        matching the existing marker-to-body blank-line convention.
+        One-line delegator (issue #893, plan slice s2) to the promoted,
+        generalized Set-PointerLineAfterMarker
+        (.github/scripts/lib/marker-transport-core.ps1) -- byte-identical
+        behavior. The promoted function takes an arbitrary -PointerLine
+        instead of this function's phase-containment-ledger-specific
+        -SiblingId, so this delegator builds the exact same
+        `<!-- phase-containment-ledger-ref: {id} -->` text this function
+        always produced and forwards it, keeping every existing internal
+        call site in this file unchanged.
     .OUTPUTS
-        [string] the new plan-comment body.
+        [string] the new plan-comment body. See Set-PointerLineAfterMarker
+        for the full contract (CRLF-safe insertion, fallback semantics).
     #>
     param(
         [Parameter(Mandatory)][string]$Body,
         [Parameter(Mandatory)][string]$Marker,
         [Parameter(Mandatory)][long]$SiblingId
     )
-    # Trailing whitespace is deliberately restricted to spaces/tabs only
-    # (never `\s`, which also matches newlines): `\s*$` would let the
-    # greedy-then-backtracking engine swallow the marker's own trailing
-    # blank line into the match itself, shifting $insertPos past it and
-    # silently dropping a newline from the reconstructed body. Stopping the
-    # match at the marker's own line keeps $after starting exactly at the
-    # first newline after the marker, so the blank-line count on each side
-    # of the inserted pointer is fully controlled by this function, not by
-    # how much of the original whitespace the match happened to consume.
-    # M2 fix (issue #878 judge-sustained review): `[ \t]*` alone cannot
-    # bridge a `\r` before `(?m)`'s `$` (which anchors immediately before
-    # `\n`, not before `\r\n`), so a CRLF body (any web-UI-edited comment)
-    # fell through to the "should be unreachable" fallback below, which
-    # prepends a duplicate marker instead of inserting the pointer in place.
-    # `\r?` immediately before the closing `` `$ `` absorbs that single
-    # optional carriage return -- it is the marker line's own line-ending,
-    # not part of a following blank line, so this stays consistent with the
-    # comment above: the match still never crosses into the marker's
-    # trailing blank line.
-    $markerLineMatch = [regex]::Match($Body, "(?m)^\s*$([regex]::Escape($Marker))[ \t]*\r?`$")
-    if (-not $markerLineMatch.Success) {
-        # Defensive fallback (should be unreachable -- the caller already
-        # confirmed the marker's presence via Find-PPLCommentIdByExactMarker).
-        return "$Marker`n`n<!-- phase-containment-ledger-ref: $SiblingId -->`n`n$Body"
-    }
-    $insertPos = $markerLineMatch.Index + $markerLineMatch.Length
-    $before = $Body.Substring(0, $insertPos)
-    $after = $Body.Substring($insertPos) -replace '^(\r?\n)+', ''
-    return $before + "`n`n<!-- phase-containment-ledger-ref: $SiblingId -->`n`n" + $after
+    return Set-PointerLineAfterMarker -Body $Body -Marker $Marker -PointerLine "<!-- phase-containment-ledger-ref: $SiblingId -->"
 }
 
 function script:Set-PPLJudgeRulingsBlockOnComment {
