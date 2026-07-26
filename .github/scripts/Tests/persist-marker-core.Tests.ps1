@@ -24,6 +24,15 @@
     read-back rejecting a corrupted round-trip (a same-length mojibake
     substitution that the old >=50%-length-only guard would have accepted),
     and surface-mismatch refusal.
+
+    s5 addition (ac-refs AC5): covers the two now-populated PostStep
+    dispatches -- 'plan-issue-write-back-preserve' (Context
+    'plan-issue write-back-preserve post-step') and
+    'frame-slices-spine-splice' (Context 'frame-slices spine-splice
+    post-step') -- plus the new frame-slices registry row. Dot-sources the
+    REAL frame-spine-core.ps1 (Get-FSCSpineBlock / Get-FSCScalarValue),
+    mirroring this file's existing marker-transport-core.ps1 /
+    frame-engagement-record-core.ps1 dot-source-before-core convention.
 #>
 
 BeforeDiscovery {
@@ -35,6 +44,7 @@ Describe 'persist-marker-core' {
         $script:CoreLibPath = Join-Path $PSScriptRoot '../../../skills/session-memory-contract/scripts/persist-marker-core.ps1'
         $script:MarkerTransportLibPath = Join-Path $PSScriptRoot '../lib/marker-transport-core.ps1'
         $script:EngagementRecordLibPath = Join-Path $PSScriptRoot '../lib/frame-engagement-record-core.ps1'
+        $script:FrameSpineLibPath = Join-Path $PSScriptRoot '../lib/frame-spine-core.ps1'
         $script:Owner = 'Grimblaz'
         $script:Repo = 'agent-orchestra'
         $script:IssueNumber = 893
@@ -203,6 +213,7 @@ evidence:
         # existing dot-source-before-core convention), then the core itself.
         if (Test-Path $script:MarkerTransportLibPath) { . $script:MarkerTransportLibPath }
         if (Test-Path $script:EngagementRecordLibPath) { . $script:EngagementRecordLibPath }
+        if (Test-Path $script:FrameSpineLibPath) { . $script:FrameSpineLibPath }
         if (Test-Path $script:CoreLibPath) { . $script:CoreLibPath }
 
         # Computed here (per-test, after dot-sourcing above) rather than in
@@ -212,11 +223,12 @@ evidence:
         # dot-sourced the core file that defines it.
         if (Test-Path $script:CoreLibPath) {
             $script:PostNewFamily = @(Get-MarkerFamilyRegistry | Where-Object { $_.WriteShape -eq 'post-new' -and $_.TargetSurface -eq 'issue' })[0]
-            $script:UpsertFamily = @(Get-MarkerFamilyRegistry | Where-Object { $_.WriteShape -eq 'upsert' -and $_.TargetSurface -eq 'issue' })[0]
+            $script:UpsertFamily = @(Get-MarkerFamilyRegistry | Where-Object { $_.WriteShape -eq 'upsert' -and $_.TargetSurface -eq 'issue' -and $_.Family -eq 'plan-issue' })[0]
             $script:EngagementRecordFamily = @(Get-MarkerFamilyRegistry | Where-Object { $_.Family -eq 'engagement-record' })[0]
             $script:ReviewDispositionsFamily = @(Get-MarkerFamilyRegistry | Where-Object { $_.Family -eq 'review-dispositions' })[0]
             $script:CreditInputFamily = @(Get-MarkerFamilyRegistry | Where-Object { $_.Family -eq 'credit-input' })[0]
             $script:SentinelFamily = @(Get-MarkerFamilyRegistry | Where-Object { $_.Family -eq 'review-judge-produced' })[0]
+            $script:FrameSlicesFamily = @(Get-MarkerFamilyRegistry | Where-Object { $_.Family -eq 'frame-slices' })[0]
         }
     }
 
@@ -630,6 +642,384 @@ evidence:
             $result.Success | Should -Be $false
             $result.Reason | Should -Match '(?i)empty.*marker-only|marker-only.*payload'
             $script:ghCallLog.Count | Should -Be 0
+        }
+    }
+
+    Context 'frame-slices registry row (s5)' {
+        It 'is present as an upsert family with the frame-slices-spine-splice PostStep' {
+            $script:FrameSlicesFamily.Family | Should -Be 'frame-slices'
+            $script:FrameSlicesFamily.WriteShape | Should -Be 'upsert'
+            $script:FrameSlicesFamily.TargetSurface | Should -Be 'issue'
+            $script:FrameSlicesFamily.PostStep | Should -Be 'frame-slices-spine-splice'
+        }
+
+        It 'declares plan-issue''s PostStep as plan-issue-write-back-preserve' {
+            $script:UpsertFamily.Family | Should -Be 'plan-issue'
+            $script:UpsertFamily.PostStep | Should -Be 'plan-issue-write-back-preserve'
+        }
+    }
+
+    Context 'plan-issue write-back-preserve post-step (s5)' {
+        BeforeEach {
+            $script:PlanMarker = $script:UpsertFamily.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+        }
+
+        It 'preserves a valid phase-containment-ledger-ref pointer the candidate omits, live-checking the sibling first' {
+            $ledgerMarker = "<!-- phase-containment-ledger-$script:IssueNumber -->"
+            Add-MockComment -Id 500 -Body "$ledgerMarker`n`nSibling content."
+            $existingBody = "$script:PlanMarker`n<!-- phase-containment-ledger-ref: 500 -->`n`nOld plan prose."
+            Add-MockComment -Id 100 -Body $existingBody
+            $candidateBody = "$script:PlanMarker`n`nFresh plan prose, no pointer."
+
+            $result = Invoke-PersistMarkerWrite -Family $script:UpsertFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $script:PlanMarker -Body $candidateBody
+
+            $result.Success | Should -Be $true
+            $script:PatchLog.Count | Should -Be 1
+            $script:PatchLog[0].Body | Should -Match ([regex]::Escape('<!-- phase-containment-ledger-ref: 500 -->'))
+            $result.Confirmation | Should -Match 'phase-containment-ledger-ref pointer'
+        }
+
+        It 'DROPS a stale/forged pointer (target sibling missing its own identity marker) rather than preserving it' {
+            Add-MockComment -Id 501 -Body 'Not a real ledger sibling -- no identity marker.'
+            $existingBody = "$script:PlanMarker`n<!-- phase-containment-ledger-ref: 501 -->`n`nOld plan prose."
+            Add-MockComment -Id 100 -Body $existingBody
+            $candidateBody = "$script:PlanMarker`n`nFresh plan prose, no pointer."
+
+            $result = Invoke-PersistMarkerWrite -Family $script:UpsertFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $script:PlanMarker -Body $candidateBody
+
+            $result.Success | Should -Be $true
+            $script:PatchLog[0].Body | Should -Not -Match ([regex]::Escape('phase-containment-ledger-ref: 501'))
+            $result.Confirmation | Should -Not -Match 'phase-containment-ledger-ref pointer'
+        }
+
+        It 'DROPS a pointer whose target comment no longer exists (GET fails), falling through to self-heal' {
+            $existingBody = "$script:PlanMarker`n<!-- phase-containment-ledger-ref: 9999 -->`n`nOld plan prose."
+            Add-MockComment -Id 100 -Body $existingBody
+            $candidateBody = "$script:PlanMarker`n`nFresh plan prose, no pointer."
+
+            $result = Invoke-PersistMarkerWrite -Family $script:UpsertFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $script:PlanMarker -Body $candidateBody
+
+            $result.Success | Should -Be $true
+            $script:PatchLog[0].Body | Should -Not -Match ([regex]::Escape('phase-containment-ledger-ref: 9999'))
+        }
+
+        It 'preserves slice_comment_id in the frame-spine block when the candidate omits it and the sibling identity marker is valid' {
+            $sliceMarker = "<!-- frame-slices-$script:IssueNumber -->"
+            Add-MockComment -Id 600 -Body "$sliceMarker`n<!-- frame-slices-generated-at: 2026-07-01T00:00:00Z -->`n`nSlices."
+            $existingBody = @"
+$script:PlanMarker
+
+<!-- frame-spine
+spine_schema_version: 2
+generated_at: 2026-07-01T00:00:00Z
+coverage: complete
+slice_comment_id: 600
+ports:
+  implement-code: [s1]
+slices:
+  s1:
+    ac_refs: [AC1]
+    depends_on: []
+    cycle: 1
+-->
+
+Old plan prose.
+"@
+            Add-MockComment -Id 100 -Body $existingBody
+            $candidateBody = @"
+$script:PlanMarker
+
+<!-- frame-spine
+spine_schema_version: 2
+generated_at: 2026-07-02T00:00:00Z
+coverage: complete
+ports:
+  implement-code: [s1]
+slices:
+  s1:
+    ac_refs: [AC1]
+    depends_on: []
+    cycle: 1
+-->
+
+Fresh plan prose.
+"@
+
+            $result = Invoke-PersistMarkerWrite -Family $script:UpsertFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $script:PlanMarker -Body $candidateBody
+
+            $result.Success | Should -Be $true
+            $script:PatchLog[0].Body | Should -Match '(?m)^slice_comment_id:\s*600\s*$'
+            $result.Confirmation | Should -Match 'slice_comment_id \(frame-spine\)'
+        }
+
+        It 'does NOT fabricate a slice_comment_id when the existing (legacy) plan genuinely has none' {
+            $existingBody = @"
+$script:PlanMarker
+
+<!-- frame-spine
+spine_schema_version: 2
+generated_at: 2026-07-01T00:00:00Z
+coverage: complete
+ports:
+  implement-code: [s1]
+slices:
+  s1:
+    ac_refs: [AC1]
+    depends_on: []
+    cycle: 1
+-->
+
+Old plan prose.
+"@
+            Add-MockComment -Id 100 -Body $existingBody
+            $candidateBody = @"
+$script:PlanMarker
+
+<!-- frame-spine
+spine_schema_version: 2
+generated_at: 2026-07-02T00:00:00Z
+coverage: complete
+ports:
+  implement-code: [s1]
+slices:
+  s1:
+    ac_refs: [AC1]
+    depends_on: []
+    cycle: 1
+-->
+
+Fresh plan prose.
+"@
+
+            $result = Invoke-PersistMarkerWrite -Family $script:UpsertFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $script:PlanMarker -Body $candidateBody
+
+            $result.Success | Should -Be $true
+            $script:PatchLog[0].Body | Should -Not -Match 'slice_comment_id'
+        }
+
+        It 'preserves legacy judge-rulings head and phase-containment blocks living directly on the plan comment (no ledger pointer)' {
+            $existingBody = @"
+$script:PlanMarker
+
+Old plan prose.
+
+**Plan Stress-Test**
+
+- Challenge: something - Prosecution: pass - Post-judge ruling: sustained - Maintainer disposition: incorporate
+
+<!-- phase-containment-legacy1 -->
+finding_key: plan-stress-test:$($script:IssueNumber):legacy:M1
+introduced_phase: design
+catchable_phase: plan
+caught_stage: plan-stress-test
+escape_distance: 0
+severity: medium
+systemic_fix_type: instruction
+category: pattern
+apparatus_meta: false
+appended_at: 2026-07-01T00:00:00Z
+<!-- /phase-containment-legacy1 -->
+
+<!-- judge-rulings
+- finding_id: M1
+  judge_ruling: sustained
+-->
+"@
+            Add-MockComment -Id 100 -Body $existingBody
+            $candidateBody = "$script:PlanMarker`n`nFresh plan prose, revised."
+
+            $result = Invoke-PersistMarkerWrite -Family $script:UpsertFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $script:PlanMarker -Body $candidateBody
+
+            $result.Success | Should -Be $true
+            $script:PatchLog[0].Body | Should -Match '<!--\s*judge-rulings'
+            $script:PatchLog[0].Body | Should -Match '<!--\s*phase-containment-legacy1\s*-->'
+            $result.Confirmation | Should -Match 'legacy judge-rulings head'
+            $result.Confirmation | Should -Match 'legacy phase-containment blocks'
+        }
+
+        It 'preserves the **Plan Stress-Test** heading/section when the candidate omits it entirely' {
+            $existingBody = @"
+$script:PlanMarker
+
+Old plan prose.
+
+**Plan Stress-Test**
+
+- Challenge: something - Prosecution: pass - Post-judge ruling: sustained - Maintainer disposition: incorporate
+- Overall confidence: high - clean pass.
+"@
+            Add-MockComment -Id 100 -Body $existingBody
+            $candidateBody = "$script:PlanMarker`n`nFresh plan prose, revised, stress-test summary omitted by mistake."
+
+            $result = Invoke-PersistMarkerWrite -Family $script:UpsertFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $script:PlanMarker -Body $candidateBody
+
+            $result.Success | Should -Be $true
+            $script:PatchLog[0].Body | Should -Match '\*\*Plan Stress-Test\*\*'
+            $result.Confirmation | Should -Match '\*\*Plan Stress-Test\*\* heading/section'
+        }
+
+        It 'skips ALL preservation when -NoPreserve is set, even for an otherwise-valid pointer' {
+            $ledgerMarker = "<!-- phase-containment-ledger-$script:IssueNumber -->"
+            Add-MockComment -Id 500 -Body "$ledgerMarker`n`nSibling content."
+            $existingBody = "$script:PlanMarker`n<!-- phase-containment-ledger-ref: 500 -->`n`nOld plan prose."
+            Add-MockComment -Id 100 -Body $existingBody
+            $candidateBody = "$script:PlanMarker`n`nFresh plan prose, deliberately clearing the pointer."
+
+            $result = Invoke-PersistMarkerWrite -Family $script:UpsertFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $script:PlanMarker -Body $candidateBody -NoPreserve
+
+            $result.Success | Should -Be $true
+            $script:PatchLog[0].Body | Should -Not -Match 'phase-containment-ledger-ref'
+        }
+    }
+
+    Context 'frame-slices spine-splice post-step (s5)' {
+        BeforeEach {
+            $script:SliceMarker = $script:FrameSlicesFamily.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+            $script:PlanMarkerForSplice = "<!-- plan-issue-$script:IssueNumber -->"
+        }
+
+        It 'splices the fresh sibling id into the plan comment''s frame-spine when generated_at matches' {
+            $planBody = @"
+$script:PlanMarkerForSplice
+
+<!-- frame-spine
+spine_schema_version: 2
+generated_at: 2026-07-16T18:00:00Z
+coverage: complete
+ports:
+  implement-code: [s1]
+slices:
+  s1:
+    ac_refs: [AC1]
+    depends_on: []
+    cycle: 1
+-->
+
+Plan prose.
+"@
+            Add-MockComment -Id 100 -Body $planBody
+            $sliceBody = "$script:SliceMarker`n<!-- frame-slices-generated-at: 2026-07-16T18:00:00Z -->`n`n<!-- frame-slice`nid: s1`n-->"
+
+            $result = Invoke-PersistMarkerWrite -Family $script:FrameSlicesFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $script:SliceMarker -Body $sliceBody
+
+            $result.Success | Should -Be $true
+            $result.Action | Should -Be 'created'
+            $newSiblingId = $result.CommentId
+            # Two PATCHes never happen for the plan comment on first create -- the
+            # splice targets the plan comment (id 100), a distinct id from the
+            # freshly-created sibling.
+            $planPatch = @($script:PatchLog | Where-Object { $_.CommentId -eq 100 })
+            $planPatch.Count | Should -Be 1
+            $planPatch[0].Body | Should -Match "(?m)^slice_comment_id:\s*$newSiblingId\s*$"
+        }
+
+        It 'REFUSES (Success=$false) when the issue carries no plan-issue-{ID} marker at all' {
+            $sliceBody = "$script:SliceMarker`n<!-- frame-slices-generated-at: 2026-07-16T18:00:00Z -->`n`n<!-- frame-slice`nid: s1`n-->"
+
+            $result = Invoke-PersistMarkerWrite -Family $script:FrameSlicesFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $script:SliceMarker -Body $sliceBody
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '(?i)plan-issue.*not found|no comment carrying marker'
+            # The sibling write itself still landed -- the refusal is about the
+            # splice-back, not the sibling creation.
+            $script:PostLog.Count | Should -Be 1
+        }
+
+        It 'REFUSES (Success=$false) when the sibling''s frame-slices-generated-at does not equal the plan spine''s generated_at (stale sibling)' {
+            $planBody = @"
+$script:PlanMarkerForSplice
+
+<!-- frame-spine
+spine_schema_version: 2
+generated_at: 2026-07-16T18:00:00Z
+coverage: complete
+ports:
+  implement-code: [s1]
+slices:
+  s1:
+    ac_refs: [AC1]
+    depends_on: []
+    cycle: 1
+-->
+
+Plan prose.
+"@
+            Add-MockComment -Id 100 -Body $planBody
+            $sliceBody = "$script:SliceMarker`n<!-- frame-slices-generated-at: 2020-01-01T00:00:00Z -->`n`n<!-- frame-slice`nid: s1`n-->"
+
+            $result = Invoke-PersistMarkerWrite -Family $script:FrameSlicesFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $script:SliceMarker -Body $sliceBody
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '(?i)generated_at mismatch'
+            $planPatch = @($script:PatchLog | Where-Object { $_.CommentId -eq 100 })
+            $planPatch.Count | Should -Be 0
+        }
+
+        It 'is a no-op (never PATCHes the plan comment) when the plan already carries the correct slice_comment_id' {
+            $planBody = @"
+$script:PlanMarkerForSplice
+
+<!-- frame-spine
+spine_schema_version: 2
+generated_at: 2026-07-16T18:00:00Z
+coverage: complete
+slice_comment_id: 700
+ports:
+  implement-code: [s1]
+slices:
+  s1:
+    ac_refs: [AC1]
+    depends_on: []
+    cycle: 1
+-->
+
+Plan prose.
+"@
+            Add-MockComment -Id 100 -Body $planBody
+            Add-MockComment -Id 700 -Body "$script:SliceMarker`n<!-- frame-slices-generated-at: 2026-07-16T18:00:00Z -->`n`n<!-- frame-slice`nid: s1`n-->"
+            $sliceBody = "$script:SliceMarker`n<!-- frame-slices-generated-at: 2026-07-16T18:00:00Z -->`n`n<!-- frame-slice`nid: s1`nupdated: true`n-->"
+
+            $result = Invoke-PersistMarkerWrite -Family $script:FrameSlicesFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $script:SliceMarker -Body $sliceBody
+
+            $result.Success | Should -Be $true
+            $planPatch = @($script:PatchLog | Where-Object { $_.CommentId -eq 100 })
+            $planPatch.Count | Should -Be 0
+        }
+
+        It 'performs a bounded scalar splice -- every other byte of the plan comment is unchanged' {
+            $planBody = @"
+$script:PlanMarkerForSplice
+
+<!-- frame-spine
+spine_schema_version: 2
+generated_at: 2026-07-16T18:00:00Z
+coverage: complete
+ports:
+  implement-code: [s1]
+slices:
+  s1:
+    ac_refs: [AC1]
+    depends_on: []
+    cycle: 1
+-->
+
+Plan prose that must survive byte-for-byte.
+"@
+            Add-MockComment -Id 100 -Body $planBody
+            $sliceBody = "$script:SliceMarker`n<!-- frame-slices-generated-at: 2026-07-16T18:00:00Z -->`n`n<!-- frame-slice`nid: s1`n-->"
+
+            $result = Invoke-PersistMarkerWrite -Family $script:FrameSlicesFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $script:SliceMarker -Body $sliceBody
+
+            $result.Success | Should -Be $true
+            $planPatch = @($script:PatchLog | Where-Object { $_.CommentId -eq 100 })[0]
+            $newSiblingId = $result.CommentId
+            # Set-MarkerSpineScalarValue inserts an absent scalar immediately
+            # after the generated_at: line -- assert the splice lands exactly
+            # there and every other line, including field order elsewhere in
+            # the block and all prose, is untouched.
+            $expectedBody = $planBody -replace '(?m)^generated_at: 2026-07-16T18:00:00Z\s*$', "generated_at: 2026-07-16T18:00:00Z`nslice_comment_id: $newSiblingId"
+            $planPatch.Body | Should -Be $expectedBody
+            $planPatch.Body | Should -Match 'Plan prose that must survive byte-for-byte\.'
         }
     }
 }

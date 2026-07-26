@@ -98,15 +98,52 @@
     reader looks at the other surface entirely.
 
 .NOTES
-    Non-goals (explicit, per s4's requirement contract): no post-step /
-    write-back-preserve logic (s5); no frame-slices or
-    design-phase-complete finding_dispositions validator wiring (deferred
-    -- see this file's top-of-file s4 addition note); dot-sourcing
+    Non-goals (explicit, per s4's requirement contract): design-phase-complete
+    finding_dispositions validator wiring (deferred -- see this file's
+    top-of-file s4 addition note); dot-sourcing
     .github/scripts/lib/frame-engagement-record-core.ps1 before this file
     is the CALLER's responsibility (mirrors the existing
     marker-transport-core.ps1 convention) -- Invoke-EngagementRecordValidatorAdapter
     calls Read-EngagementRecords unqualified and fails closed with a
     diagnosable message if it is not in scope.
+
+    s5 addition (ac-refs AC5): populates the previously-always-$null
+    PostStep registry field for two families and implements the two named
+    post-steps:
+      - 'plan-issue-write-back-preserve' (plan-issue family, runs BEFORE
+        hygiene/validator/write, mutating the candidate Body): on a
+        re-persist, carries forward every artifact class from the
+        migration-inventory's Section 2 (.tmp/issue-893/migration-inventory.md)
+        that the incoming payload omits but the existing canonical comment
+        carries -- the phase-containment-ledger-ref pointer (live-checked
+        against its target before preserving; dropped on a stale/forged
+        pointer, falling through to persist-phase-ledger-core.ps1's own M1
+        self-heal), the frame-spine slice_comment_id scalar (same
+        live-check discipline against the frame-slices-{ID} sibling), and
+        for legacy pre-863 plans (no ledger pointer at all) the
+        judge-rulings head, phase-containment blocks, and the
+        `**Plan Stress-Test**` heading/section. A -NoPreserve switch lets a
+        maintainer deliberately clear a bad pointer instead of having it
+        carried forward.
+      - 'frame-slices-spine-splice' (frame-slices family, runs AFTER a
+        successful write): writes the just-written sibling's comment id
+        back into the plan comment's frame-spine block as slice_comment_id
+        via a TARGETED SCALAR SPLICE (script:Set-MarkerSpineScalarValue --
+        never a full-body recompose), guarded by a marker-identity
+        precondition (refuses when the plan comment does not carry the
+        expected `<!-- plan-issue-{ID} -->` marker) and by generated_at
+        EQUALITY between the plan's frame-spine block and the sibling's own
+        `frame-slices-generated-at` stamp (a stale-generation sibling is
+        refused, not silently spliced in). A splice-back failure makes the
+        overall Invoke-PersistMarkerWrite result Success=$false even though
+        the sibling write itself already landed -- loud, never swallowed.
+      Both post-steps dot-source .github/scripts/lib/frame-spine-core.ps1's
+      Get-FSCSpineBlock and script:Get-FSCScalarValue to read the frame-spine
+      block (this file calls that parser, per its own non-goal, and never
+      reimplements or modifies its parsing logic). script:Set-MarkerSpineScalarValue
+      is restricted via -ValidateSet to the exact four keys legal at
+      frame-spine-core.ps1:224 (spine_schema_version|generated_at|coverage|
+      slice_comment_id) and is never used to widen that allowlist.
 #>
 
 # ---------------------------------------------------------------------------
@@ -120,10 +157,13 @@ function Get-MarkerFamilyRegistry {
         marker family, driving which surface a family's target number must
         be and which of the two write shapes it uses.
     .DESCRIPTION
-        PostStep is still carried as a reserved field name (always $null in
-        this slice) so s5 (post-steps / write-back-preserve) has a stable
-        place to assign concrete post-step names -- this file never reads
-        or invokes it. ValidatorAdapter is now populated for the families
+        PostStep is a reserved field name that names a post-step function to
+        run (see Invoke-PersistMarkerWrite's PostStep dispatch, s5): $null
+        for every family with no post-step (hygiene/validator-only).
+        's5 populates two rows: plan-issue carries
+        'plan-issue-write-back-preserve' (a pre-write candidate transform)
+        and frame-slices carries 'frame-slices-spine-splice' (a post-write
+        side effect). ValidatorAdapter is now populated for the families
         s4's requirement contract names an adapter for (own-marker/
         cross-marker hygiene runs unconditionally regardless of this
         field's value; see Test-MarkerPayloadHygiene and
@@ -131,16 +171,21 @@ function Get-MarkerFamilyRegistry {
 
         Rows are grounded in already-documented marker families (this
         repo's own CLAUDE.md, skills/session-memory-contract/references/handoff-markers.md,
-        and 893-D3's family table) rather than invented: plan-issue and
-        design-phase-complete are upsert (both are found-or-created once,
-        then repeatedly patched, as persist-phase-ledger-core.ps1's own
-        plan/design modes already do today); experience-owner-complete,
-        review-judge-produced, engagement-record, review-dispositions, and
-        credit-input are post-new (freshly posted completion/sentinel/
-        deferred-emission comments -- CLAUDE.md documents
-        review-judge-produced as "written as a separate PR comment";
-        skills/frame-credit-emission/SKILL.md documents credit-input as
-        posted "immediately after the agent's completion marker comment").
+        and 893-D3's family table) rather than invented: plan-issue,
+        design-phase-complete, and frame-slices (s5) are upsert (all three
+        are found-or-created once, then repeatedly patched -- plan-issue
+        and design-phase-complete as persist-phase-ledger-core.ps1's own
+        plan/design modes already do today; frame-slices per
+        handoff-markers.md's frame-slices-{ID} row: "re-persist reuses the
+        existing sibling ... rather than creating a second one", which
+        post-new's superseded-match-still-posts semantics would violate);
+        experience-owner-complete, review-judge-produced, engagement-record,
+        review-dispositions, and credit-input are post-new (freshly posted
+        completion/sentinel/deferred-emission comments -- CLAUDE.md
+        documents review-judge-produced as "written as a separate PR
+        comment"; skills/frame-credit-emission/SKILL.md documents
+        credit-input as posted "immediately after the agent's completion
+        marker comment").
     .OUTPUTS
         [PSCustomObject[]] one row per family: Family [string], MarkerTemplate
         [string] (placeholder tokens such as '{ID}'/'{PR}'/'{phase}'/'{port}'
@@ -152,8 +197,10 @@ function Get-MarkerFamilyRegistry {
         ValidatorAdapter [string or $null -- one of $null (no adapter,
         hygiene-only), 'sentinel-empty', 'engagement-record',
         'review-dispositions', 'credit-input'; see
-        Invoke-MarkerValidatorAdapter's dispatch switch], PostStep [string,
-        always $null in this slice].
+        Invoke-MarkerValidatorAdapter's dispatch switch], PostStep [string
+        or $null -- one of $null (no post-step), 'plan-issue-write-back-preserve',
+        'frame-slices-spine-splice'; see Invoke-PersistMarkerWrite's
+        PostStep dispatch].
     #>
     return @(
         [PSCustomObject]@{
@@ -166,7 +213,10 @@ function Get-MarkerFamilyRegistry {
             # marker-at-line-start) already run unconditionally for every
             # family, so this row needs no additional named adapter.
             ValidatorAdapter  = $null
-            PostStep          = $null
+            # s5: on re-persist, carries forward artifact classes the fresh
+            # payload omits but the existing canonical comment carries --
+            # see script:Invoke-PlanIssueWriteBackPreserve.
+            PostStep          = 'plan-issue-write-back-preserve'
         }
         [PSCustomObject]@{
             Family            = 'design-phase-complete'
@@ -228,6 +278,26 @@ function Get-MarkerFamilyRegistry {
             WriteShape        = 'post-new'
             ValidatorAdapter  = 'credit-input'
             PostStep          = $null
+        }
+        [PSCustomObject]@{
+            # s5: first family population for frame-slices (deferred at s4 --
+            # see this file's top-of-file s4 addition note). Upsert, not
+            # post-new (handoff-markers.md: "re-persist reuses the existing
+            # sibling ... rather than creating a second one").
+            Family            = 'frame-slices'
+            MarkerTemplate    = '<!-- frame-slices-{ID} -->'
+            TargetSurface     = 'issue'
+            WriteShape        = 'upsert'
+            # 893-D3-equivalent: no payload-shape adapter for this slice --
+            # the universal hygiene checks cover the identity-marker
+            # concern; per-slice frame-slice schema validation is out of
+            # this row's scope (s5's requirement contract names only the
+            # write-back-preserve and spine-splice post-steps).
+            ValidatorAdapter  = $null
+            # s5: after a successful write, splices the sibling's own
+            # comment id back onto the plan comment's frame-spine block as
+            # slice_comment_id -- see script:Invoke-FrameSlicesSpineSplice.
+            PostStep          = 'frame-slices-spine-splice'
         }
     )
 }
@@ -731,6 +801,313 @@ function script:Invoke-MarkerValidatorAdapter {
 }
 
 # ---------------------------------------------------------------------------
+# Post-steps (s5 requirement contract, ac-refs AC5). Dot-source
+# .github/scripts/lib/frame-spine-core.ps1 before this file for
+# Get-FSCSpineBlock / script:Get-FSCScalarValue to be in scope -- the
+# CALLER's responsibility, mirroring this file's existing
+# marker-transport-core.ps1 / frame-engagement-record-core.ps1 convention.
+# ---------------------------------------------------------------------------
+
+function script:ConvertTo-MarkerLFBody {
+    <#
+    .SYNOPSIS
+        CRLF/CR -> LF only, no trimming -- distinct from
+        ConvertTo-MarkerNormalizedText (which also strips per-line trailing
+        whitespace and outer whitespace, unsuitable here because these
+        helpers need the ORIGINAL interior content preserved for extraction
+        and only need line-ending convention neutralized so `(?m)^...$`-style
+        detection regexes cannot miss a match solely because the source body
+        happens to use CRLF).
+    .OUTPUTS
+        [string]
+    #>
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Text)
+    return ($Text -replace "`r`n", "`n") -replace "`r", "`n"
+}
+
+function script:Set-MarkerSpineScalarValue {
+    <#
+    .SYNOPSIS
+        Bounded scalar splice (s5): sets an existing top-level scalar key's
+        value inside a comment body's `<!-- frame-spine ... -->` block in
+        place, or inserts it (immediately after `generated_at:` when
+        present, otherwise at the top of the block) when the key is
+        currently absent -- NEVER a full-body recompose, and never any edit
+        outside the matched scalar line itself. Every other byte of the
+        body, including the rest of the frame-spine block, is untouched.
+    .DESCRIPTION
+        -Name is restricted via -ValidateSet to the exact four keys legal
+        per frame-spine-core.ps1:224's top-level key allowlist regex
+        (`^(spine_schema_version|generated_at|coverage|slice_comment_id):`)
+        -- this helper must never be used, now or later, to write a key
+        outside that set; doing so would silently widen the allowlist by a
+        side door instead of the allowlist regex itself, which this slice's
+        non-goal explicitly forbids touching.
+    .OUTPUTS
+        [string] the updated comment body, or the original body unchanged
+        when no `frame-spine` block is found.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Body,
+        [Parameter(Mandatory)][ValidateSet('spine_schema_version', 'generated_at', 'coverage', 'slice_comment_id')][string]$Name,
+        [Parameter(Mandatory)][string]$Value
+    )
+    $blockMatch = [regex]::Match($Body, '(?s)<!--\s*frame-spine\s*\r?\n(?<payload>.*?)-->')
+    if (-not $blockMatch.Success) { return $Body }
+
+    $payloadGroup = $blockMatch.Groups['payload']
+    $payload = $payloadGroup.Value
+    $scalarPattern = "(?m)^$Name\s*:.*?(?<eol>\r?\n|$)"
+    $scalarMatch = [regex]::Match($payload, $scalarPattern)
+
+    if ($scalarMatch.Success) {
+        $eol = if ($scalarMatch.Groups['eol'].Success -and $scalarMatch.Groups['eol'].Value.Length -gt 0) { $scalarMatch.Groups['eol'].Value } else { "`n" }
+        $newLine = "$Name`: $Value$eol"
+        $newPayload = $payload.Substring(0, $scalarMatch.Index) + $newLine + $payload.Substring($scalarMatch.Index + $scalarMatch.Length)
+    }
+    else {
+        $newLine = "$Name`: $Value`n"
+        $genAtMatch = [regex]::Match($payload, '(?m)^generated_at\s*:.*?(\r?\n|$)')
+        if ($genAtMatch.Success) {
+            $insertPos = $genAtMatch.Index + $genAtMatch.Length
+            $newPayload = $payload.Substring(0, $insertPos) + $newLine + $payload.Substring($insertPos)
+        }
+        else {
+            $newPayload = $newLine + $payload
+        }
+    }
+
+    return $Body.Substring(0, $payloadGroup.Index) + $newPayload + $Body.Substring($payloadGroup.Index + $payloadGroup.Length)
+}
+
+function script:Invoke-PlanIssueWriteBackPreserve {
+    <#
+    .SYNOPSIS
+        's5 pre-write post-step for the plan-issue family (runs BEFORE
+        hygiene/validator/write, inside Invoke-PersistMarkerWrite, and
+        mutates the candidate -Body): on a re-persist, carries forward
+        every artifact class from the migration-inventory's Section 2
+        (.tmp/issue-893/migration-inventory.md, s1's authoritative
+        preserve-set source -- not a guess) that the incoming payload omits
+        but the existing canonical plan-issue comment carries.
+    .DESCRIPTION
+        No-op (nothing to preserve from) on a first persist -- Find-AllCommentsByExactMarker
+        returns zero matches. Four artifact classes, each preserved only
+        when the CANDIDATE lacks it and the EXISTING canonical comment (the
+        earliest/lowest-REST-id match, matching Invoke-MarkerUpsertWrite's
+        own canonical selection) has it:
+          1. The `phase-containment-ledger-ref` pointer line -- live-checked
+             (a real GET, not assumed) against its target sibling's own
+             identity marker before being preserved; a stale or forged
+             pointer is DROPPED (never carried forward), falling through to
+             persist-phase-ledger-core.ps1's own M1 self-heal (which
+             re-discovers a real existing sibling by identity marker when
+             the pointer is missing).
+          2. The frame-spine `slice_comment_id` scalar -- same live-check
+             discipline against the `frame-slices-{ID}` sibling's identity
+             marker, spliced back via script:Set-MarkerSpineScalarValue (a
+             bounded scalar edit, never a full-body recompose). Absence of
+             a value on the EXISTING comment is a valid legacy state and is
+             never fabricated.
+          3.-4. Legacy pre-863 content (only relevant when the existing
+             comment carries NO ledger pointer at all -- the 811-D1 legacy
+             population): the `judge-rulings` head and any `phase-containment`
+             blocks living directly on the plan comment, and the
+             `**Plan Stress-Test**` heading/section. These are direct
+             content, not pointers, so no live-check applies -- they are
+             appended verbatim when the candidate omits them entirely.
+        Detection regexes run against an LF-normalized copy of the existing
+        body (script:ConvertTo-MarkerLFBody) so a CRLF-bodied comment cannot
+        cause a false "not present" miss; content appended into the
+        candidate is joined with plain `n`, matching this file's own
+        established LF-write convention (ConvertTo-MarkerNormalizedText).
+    .OUTPUTS
+        [PSCustomObject] with Body [string] (the possibly-merged candidate)
+        and PreservedClasses [string[]] (human-readable names of every
+        artifact class actually preserved, for the confirmation message --
+        empty array, never $null, when nothing was preserved).
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Owner,
+        [Parameter(Mandatory)][string]$Repo,
+        [Parameter(Mandatory)][int]$Number,
+        [Parameter(Mandatory)][string]$Marker,
+        [Parameter(Mandatory)][string]$Body
+    )
+
+    $preservedClasses = [System.Collections.Generic.List[string]]::new()
+    # No extra @() wrap: Find-AllCommentsByExactMarker's own contract already
+    # guarantees array identity via its internal `return , @(...)` (see that
+    # function's own .OUTPUTS doc) -- wrapping its result in a second @()
+    # here would double-wrap a single-element array output into a 1-element
+    # array WHOSE element is the original array, corrupting .Count and
+    # element access. Every other caller in this file (e.g.
+    # Invoke-MarkerUpsertWrite) assigns the return value directly for the
+    # same reason.
+    $existing = Find-AllCommentsByExactMarker -Owner $Owner -Repo $Repo -IssueNumber $Number -Marker $Marker
+    if ($existing.Count -eq 0) {
+        return [PSCustomObject]@{ Body = $Body; PreservedClasses = [string[]]@() }
+    }
+
+    # Canonical = earliest (lowest REST id) match -- same selector
+    # Invoke-MarkerUpsertWrite itself uses for the upsert comparison target.
+    $existingBody = script:ConvertTo-MarkerLFBody -Text $existing[0].Body
+    $mergedBody = $Body
+
+    # --- 1. phase-containment-ledger-ref pointer (live-checked). ---
+    $pointerPattern = '(?m)^[ \t]*<!--\s*phase-containment-ledger-ref:\s*(?<id>\d+)\s*-->[ \t]*$'
+    $pointerMatch = [regex]::Match($existingBody, $pointerPattern)
+    $candidateHasPointer = [regex]::IsMatch((script:ConvertTo-MarkerLFBody -Text $mergedBody), $pointerPattern)
+    if ($pointerMatch.Success -and -not $candidateHasPointer) {
+        $siblingId = [long]$pointerMatch.Groups['id'].Value
+        $expectedSiblingMarker = "<!-- phase-containment-ledger-$Number -->"
+        $siblingBody = Get-CommentBodyById -Owner $Owner -Repo $Repo -CommentId $siblingId
+        $siblingValid = ($null -ne $siblingBody) -and
+            [regex]::IsMatch((script:ConvertTo-MarkerLFBody -Text $siblingBody), '(?m)^[ \t]*' + [regex]::Escape($expectedSiblingMarker) + '[ \t]*$')
+        if ($siblingValid) {
+            $mergedBody = Set-PointerLineAfterMarker -Body $mergedBody -Marker $Marker -PointerLine "<!-- phase-containment-ledger-ref: $siblingId -->"
+            $preservedClasses.Add('phase-containment-ledger-ref pointer') | Out-Null
+        }
+        # else: stale/forged pointer -- DROP it; fall through to
+        # persist-phase-ledger-core.ps1's own M1 self-heal on its next run.
+    }
+
+    # --- 2. frame-spine slice_comment_id scalar (live-checked). ---
+    $existingSpineBlock = Get-FSCSpineBlock -CommentBody $existingBody
+    if ($null -ne $existingSpineBlock) {
+        $existingSliceCommentId = script:Get-FSCScalarValue -Block $existingSpineBlock -Name 'slice_comment_id'
+        if (-not [string]::IsNullOrWhiteSpace($existingSliceCommentId)) {
+            $candidateSpineBlock = Get-FSCSpineBlock -CommentBody (script:ConvertTo-MarkerLFBody -Text $mergedBody)
+            $candidateSliceCommentId = $null
+            if ($null -ne $candidateSpineBlock) {
+                $candidateSliceCommentId = script:Get-FSCScalarValue -Block $candidateSpineBlock -Name 'slice_comment_id'
+            }
+            if ($null -ne $candidateSpineBlock -and [string]::IsNullOrWhiteSpace($candidateSliceCommentId)) {
+                $expectedSiblingMarker = "<!-- frame-slices-$Number -->"
+                $siblingBody = $null
+                if ($existingSliceCommentId -match '^\d+$') {
+                    $siblingBody = Get-CommentBodyById -Owner $Owner -Repo $Repo -CommentId ([long]$existingSliceCommentId)
+                }
+                $siblingValid = ($null -ne $siblingBody) -and
+                    [regex]::IsMatch((script:ConvertTo-MarkerLFBody -Text $siblingBody), '(?m)^[ \t]*' + [regex]::Escape($expectedSiblingMarker) + '[ \t]*$')
+                if ($siblingValid) {
+                    $mergedBody = script:Set-MarkerSpineScalarValue -Body $mergedBody -Name 'slice_comment_id' -Value $existingSliceCommentId
+                    $preservedClasses.Add('slice_comment_id (frame-spine)') | Out-Null
+                }
+                # else: stale/forged slice_comment_id -- DROP it; the
+                # frame-slices post-step's own spine-splice self-heals this
+                # on the next frame-slices persist.
+            }
+        }
+        # else: existing comment genuinely has no slice_comment_id (a valid
+        # legacy state) -- never fabricated.
+    }
+
+    # --- 3.-4. Legacy pre-863 content: only when the EXISTING comment
+    # carries no ledger pointer at all (811-D1 legacy population). ---
+    $existingHasLedgerPointer = [regex]::IsMatch($existingBody, $pointerPattern)
+    if (-not $existingHasLedgerPointer) {
+        $legacyJudgeMatch = [regex]::Match($existingBody, '(?s)^[ \t]*<!--\s*judge-rulings.*?-->', [System.Text.RegularExpressions.RegexOptions]::Multiline)
+        $candidateHasJudge = [regex]::IsMatch((script:ConvertTo-MarkerLFBody -Text $mergedBody), '(?m)^[ \t]*<!--\s*judge-rulings')
+        if ($legacyJudgeMatch.Success -and -not $candidateHasJudge) {
+            $mergedBody = $mergedBody.TrimEnd() + "`n`n" + $legacyJudgeMatch.Value.Trim()
+            $preservedClasses.Add('legacy judge-rulings head') | Out-Null
+        }
+
+        $legacyContainmentMatches = [regex]::Matches($existingBody, '(?s)<!--\s*phase-containment-[A-Za-z0-9_-]+\s*-->.*?<!--\s*/phase-containment-[A-Za-z0-9_-]+\s*-->')
+        $candidateHasContainment = [regex]::IsMatch((script:ConvertTo-MarkerLFBody -Text $mergedBody), '<!--\s*phase-containment-[A-Za-z0-9_-]+\s*-->')
+        if ($legacyContainmentMatches.Count -gt 0 -and -not $candidateHasContainment) {
+            $blockText = (@($legacyContainmentMatches | ForEach-Object { $_.Value.Trim() })) -join "`n`n"
+            $mergedBody = $mergedBody.TrimEnd() + "`n`n" + $blockText
+            $preservedClasses.Add('legacy phase-containment blocks') | Out-Null
+        }
+    }
+
+    # --- The **Plan Stress-Test** heading/section (writer rule 8: the
+    # heading literal is load-bearing -- do not let it drift). ---
+    $stressTestPattern = '(?ms)^\*\*Plan Stress-Test\*\*.*?(?=^\*\*[A-Za-z]|\z)'
+    $stressTestMatch = [regex]::Match($existingBody, $stressTestPattern)
+    $candidateHasStressTestHeading = [regex]::IsMatch((script:ConvertTo-MarkerLFBody -Text $mergedBody), '(?m)^\*\*Plan Stress-Test\*\*')
+    if ($stressTestMatch.Success -and -not $candidateHasStressTestHeading) {
+        $mergedBody = $mergedBody.TrimEnd() + "`n`n" + $stressTestMatch.Value.Trim()
+        $preservedClasses.Add('**Plan Stress-Test** heading/section') | Out-Null
+    }
+
+    return [PSCustomObject]@{ Body = $mergedBody; PreservedClasses = [string[]]$preservedClasses.ToArray() }
+}
+
+function script:Invoke-FrameSlicesSpineSplice {
+    <#
+    .SYNOPSIS
+        's5 post-write post-step for the frame-slices family (runs AFTER a
+        successful write, inside Invoke-PersistMarkerWrite): splices the
+        just-written frame-slices sibling's own comment id back onto the
+        plan comment's frame-spine block as slice_comment_id.
+    .DESCRIPTION
+        Marker-identity precondition: refuses when the issue carries no
+        comment matching `<!-- plan-issue-{Number} -->` (never guesses a
+        plan comment by any other selector). Generation-equality guard:
+        refuses when the plan's frame-spine `generated_at` does not
+        EQUAL -SiblingBody's own `frame-slices-generated-at` stamp (a
+        stale-generation sibling is refused, not silently spliced in) --
+        mere presence of a stamp is not sufficient. No-op when the plan
+        already carries the correct slice_comment_id. Otherwise, performs a
+        TARGETED SCALAR SPLICE (script:Set-MarkerSpineScalarValue) and
+        writes it via Set-CommentBodyDirect, which already performs its own
+        post-write verify GET -- no separate Test-MarkerReadBack call here,
+        matching persist-phase-ledger-core.ps1's own established splice
+        convention for its analogous pointer/block writes.
+    .OUTPUTS
+        [PSCustomObject] with Success [bool], Reason [string or $null], and
+        Action [string or $null] -- one of 'no-op' or 'spliced' when
+        Success=$true.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Owner,
+        [Parameter(Mandatory)][string]$Repo,
+        [Parameter(Mandatory)][int]$Number,
+        [Parameter(Mandatory)][long]$SiblingCommentId,
+        [Parameter(Mandatory)][string]$SiblingBody
+    )
+
+    $planMarker = "<!-- plan-issue-$Number -->"
+    # See script:Invoke-PlanIssueWriteBackPreserve's identical comment: no
+    # extra @() wrap around Find-AllCommentsByExactMarker's own
+    # array-identity-preserving return.
+    $planMatches = Find-AllCommentsByExactMarker -Owner $Owner -Repo $Repo -IssueNumber $Number -Marker $planMarker
+    if ($planMatches.Count -eq 0) {
+        return [PSCustomObject]@{ Success = $false; Reason = "frame-slices spine-splice REFUSED: no comment carrying marker '$planMarker' found on issue $Number"; Action = $null }
+    }
+    # Canonical = earliest match, matching this file's other upsert-target selectors.
+    $planComment = $planMatches[0]
+
+    $planSpineBlock = Get-FSCSpineBlock -CommentBody $planComment.Body
+    if ($null -eq $planSpineBlock) {
+        return [PSCustomObject]@{ Success = $false; Reason = "frame-slices spine-splice REFUSED: plan comment $($planComment.Id) carries no frame-spine block"; Action = $null }
+    }
+    $planGeneratedAt = script:Get-FSCScalarValue -Block $planSpineBlock -Name 'generated_at'
+
+    $siblingGeneratedAtMatch = [regex]::Match($SiblingBody, '<!--\s*frame-slices-generated-at\s*:\s*(?<value>.*?)\s*-->')
+    $siblingGeneratedAt = if ($siblingGeneratedAtMatch.Success) { $siblingGeneratedAtMatch.Groups['value'].Value } else { $null }
+
+    if ([string]::IsNullOrWhiteSpace($planGeneratedAt) -or [string]::IsNullOrWhiteSpace($siblingGeneratedAt) -or $planGeneratedAt -ne $siblingGeneratedAt) {
+        return [PSCustomObject]@{ Success = $false; Reason = "frame-slices spine-splice REFUSED: generated_at mismatch (plan spine='$planGeneratedAt', sibling stamp='$siblingGeneratedAt') -- refusing to splice a stale-generation slice_comment_id"; Action = $null }
+    }
+
+    $existingSliceCommentId = script:Get-FSCScalarValue -Block $planSpineBlock -Name 'slice_comment_id'
+    if ($existingSliceCommentId -eq "$SiblingCommentId") {
+        return [PSCustomObject]@{ Success = $true; Reason = $null; Action = 'no-op' }
+    }
+
+    $splicedBody = script:Set-MarkerSpineScalarValue -Body $planComment.Body -Name 'slice_comment_id' -Value "$SiblingCommentId"
+    $writeResult = Set-CommentBodyDirect -Owner $Owner -Repo $Repo -CommentId $planComment.Id -NewBody $splicedBody
+    if (-not $writeResult.Success) {
+        return [PSCustomObject]@{ Success = $false; Reason = "frame-slices spine-splice: failed to write slice_comment_id onto plan comment $($planComment.Id): $($writeResult.Reason)"; Action = $null }
+    }
+    return [PSCustomObject]@{ Success = $true; Reason = $null; Action = 'spliced' }
+}
+
+# ---------------------------------------------------------------------------
 # Write shapes.
 # ---------------------------------------------------------------------------
 
@@ -924,6 +1301,12 @@ function Invoke-PersistMarkerWrite {
         from this. Never logged or echoed separately from the confirmation
         line (which names only family, comment id, and action -- not
         payload content) or a length-bounded refusal detail.
+    .PARAMETER NoPreserve
+        Escape hatch for the 'plan-issue-write-back-preserve' post-step
+        (s5): when set, skips ALL write-back preservation for this call, so
+        a maintainer can deliberately clear a bad pointer (or any other
+        preserved artifact) instead of having it silently carried forward
+        forever. No effect on any other family's PostStep.
     .OUTPUTS
         [PSCustomObject] Success [bool], Family [string], CommentId
         [long or $null], Action [string or $null], Confirmation
@@ -938,7 +1321,8 @@ function Invoke-PersistMarkerWrite {
         [Parameter(Mandatory)][int]$Number,
         [Parameter(Mandatory)][ValidateSet('issue', 'pull-request')][string]$TargetSurface,
         [Parameter(Mandatory)][string]$Marker,
-        [Parameter(Mandatory)][string]$Body
+        [Parameter(Mandatory)][string]$Body,
+        [switch]$NoPreserve
     )
 
     $allRows = @(Get-MarkerFamilyRegistry)
@@ -955,6 +1339,17 @@ function Invoke-PersistMarkerWrite {
     }
 
     $target = "$TargetSurface/$Number"
+
+    # s5 pre-write post-step: runs BEFORE hygiene/validator/write so both of
+    # those see the TRUE final candidate, including anything this step
+    # merges in. Only the plan-issue family's PostStep does anything here;
+    # every other family's dispatch below is a no-op.
+    $preservedArtifactClasses = [string[]]@()
+    if ($familyRow.PostStep -eq 'plan-issue-write-back-preserve' -and -not $NoPreserve) {
+        $preserveResult = script:Invoke-PlanIssueWriteBackPreserve -Owner $Owner -Repo $Repo -Number $Number -Marker $Marker -Body $Body
+        $Body = $preserveResult.Body
+        $preservedArtifactClasses = $preserveResult.PreservedClasses
+    }
 
     # 893-D7 payload hygiene -- runs unconditionally for every family,
     # before any network write. See Test-MarkerPayloadHygiene's own
@@ -978,9 +1373,30 @@ function Invoke-PersistMarkerWrite {
 
     $ghType = if ($TargetSurface -eq 'pull-request') { 'pr' } else { 'issue' }
 
-    switch ($familyRow.WriteShape) {
-        'post-new' { return script:Invoke-MarkerPostNewWrite -Owner $Owner -Repo $Repo -Family $Family -Type $ghType -Number $Number -Marker $Marker -Body $Body }
-        'upsert' { return script:Invoke-MarkerUpsertWrite -Owner $Owner -Repo $Repo -Family $Family -Type $ghType -Number $Number -Marker $Marker -Body $Body }
-        default { return script:New-MarkerRefusal -Family $Family -Target $target -Detail "unknown write shape '$($familyRow.WriteShape)' for family '$Family'" }
+    $writeResult = switch ($familyRow.WriteShape) {
+        'post-new' { script:Invoke-MarkerPostNewWrite -Owner $Owner -Repo $Repo -Family $Family -Type $ghType -Number $Number -Marker $Marker -Body $Body }
+        'upsert' { script:Invoke-MarkerUpsertWrite -Owner $Owner -Repo $Repo -Family $Family -Type $ghType -Number $Number -Marker $Marker -Body $Body }
+        default { script:New-MarkerRefusal -Family $Family -Target $target -Detail "unknown write shape '$($familyRow.WriteShape)' for family '$Family'" }
     }
+
+    # s5 post-write post-step: runs AFTER a successful write only. Only the
+    # frame-slices family's PostStep does anything here. A splice-back
+    # failure is reported loud -- it flips the overall result to
+    # Success=$false even though the sibling write itself already landed
+    # (mandatory, not best-effort, per this file's header note).
+    if ($writeResult.Success -and $familyRow.PostStep -eq 'frame-slices-spine-splice') {
+        $spliceResult = script:Invoke-FrameSlicesSpineSplice -Owner $Owner -Repo $Repo -Number $Number -SiblingCommentId $writeResult.CommentId -SiblingBody $Body
+        if (-not $spliceResult.Success) {
+            return [PSCustomObject]@{ Success = $false; Family = $Family; CommentId = $writeResult.CommentId; Action = $writeResult.Action; Confirmation = $writeResult.Confirmation; Reason = $spliceResult.Reason }
+        }
+    }
+
+    # Name every individual preserved artifact class in the confirmation
+    # output (s5 requirement contract validation rule) rather than leaving
+    # a silent preserve invisible to whoever reads the confirmation.
+    if ($preservedArtifactClasses.Count -gt 0 -and $writeResult.Success -and $null -ne $writeResult.Confirmation) {
+        $writeResult.Confirmation = "$($writeResult.Confirmation) (preserved: $($preservedArtifactClasses -join ', '))"
+    }
+
+    return $writeResult
 }
