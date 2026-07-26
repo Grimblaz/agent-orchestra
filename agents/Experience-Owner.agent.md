@@ -94,7 +94,7 @@ Load `skills/frame-credit-emission/SKILL.md` for the deferred-emission terminal-
 
 **Draft-scan step (warn-only)**: Before updating the issue, write the drafted customer-framing prose to a scratch file under `.tmp/` (the repo's gitignored scratch directory — see `.gitignore:3,19-20`), then run `pwsh skills/naming-register-policy/scripts/newcomer-audit.ps1 -Path <scratch-file>` against it. Treat any findings as advisory only — the detector never blocks. Proceed to post regardless of findings; consider expanding or rephrasing flagged terms first.
 
-Update the GitHub issue body per `skills/customer-experience/SKILL.md` (use `## Scenarios` (H2) for the scenario section — Code-Conductor's pre-flight extraction anchors to it), then post:
+Update the GitHub issue body per `skills/customer-experience/SKILL.md` (use `## Scenarios` (H2) for the scenario section — Code-Conductor's pre-flight extraction anchors to it), then author the phase-completion payload into a scratch file with the Write tool (never a hand-composed `gh issue comment`; see § Burst persistence below):
 
 ```markdown
 <!-- experience-owner-complete-{ISSUE_NUMBER} -->
@@ -124,16 +124,15 @@ If zero load-bearing decisions were captured, the section MUST contain the liter
 
 When persisting or amending the target phase artifact, you MUST monitor the total size of the persisted payload; if the payload size approaches 60,000 bytes, you MUST emit a warning to the terminal.
 
-**Burst order (load-bearing — D6 canonical ordering):**
+### Burst persistence (script-enforced ordering, 893-D4)
 
-1. Post the phase completion artifact described above in this agent body.
-2. **Immediately** post the `<!-- engagement-record-experience-{ISSUE_NUMBER} -->` comment using `capture_session: "normal-experience-v2"`, `schema_version: 2`, and `load_bearing_decisions: [...]` containing one YAML block-scalar mirror entry per decision slug matching the Markdown section exactly. Valid slugs MUST conform to the regex `^[a-z][a-z0-9-]{0,62}[a-z0-9]\z` validated by `Test-EngagementRecordSlug`. You MUST use YAML block-scalar `|-` for all multi-line user-typed fields (`audit_rationale`, `articulation_text`, `engineer_choice`); literal triple-backticks in those fields are strictly rejected.
-   - **If engagement-record emission fails:** emit a terminal warning `⚠️ Engagement-record emission failed for experience-{ISSUE_NUMBER}: {reason}`, HALT the burst, and do NOT post the credit-input marker comment. The phase remains complete (the phase completion artifact is durable), but `same-decision-resume` next session will degrade to v1.1 behavior.
-3. **Only after successful engagement-record emission**, post the credit-input marker (see § Credit-input emission below).
+`skills/session-memory-contract/scripts/persist-marker.ps1` is the ONLY documented write path for this burst — never hand-author any of the three comments below or call `gh issue comment` directly (mirrors `persist-phase-ledger.ps1`'s established "never by hand-authoring" language).
 
-### Credit-input emission
+Author three payload files under `.tmp/issue-{ISSUE_NUMBER}/` with the Write tool (never inline shell strings):
 
-**After successful engagement-record emission** (see § Named Decisions write-discipline above), post a credit-input marker comment (SMC-17 deferred-emission):
+1. **Completion body** — the phase completion artifact described above (family `experience-owner-complete`).
+2. **Engagement-record body** — `<!-- engagement-record-experience-{ISSUE_NUMBER} -->` using `capture_session: "normal-experience-v2"`, `schema_version: 2`, and `load_bearing_decisions: [...]` containing one YAML block-scalar mirror entry per decision slug matching the Markdown section exactly. Valid slugs MUST conform to the regex `^[a-z][a-z0-9-]{0,62}[a-z0-9]\z` validated by `Test-EngagementRecordSlug`. You MUST use YAML block-scalar `|-` for all multi-line user-typed fields (`audit_rationale`, `articulation_text`, `engineer_choice`); literal triple-backticks in those fields are strictly rejected. (family `engagement-record`)
+3. **Credit-input body** (SMC-17 deferred-emission, family `credit-input`):
 
 ````markdown
 <!-- credit-input-experience-{ISSUE_NUMBER} -->
@@ -145,7 +144,9 @@ evidence: "issue #{ISSUE_NUMBER}; experience completion marker posted"
 ```
 ````
 
-Retain the comment text returned by the post call so Code-Conductor harvest can use the `-InMemoryMarkers` fallback.
+Build a burst manifest JSON array in this canonical order — completion, engagement-record, credit-input — each entry naming its `family`/`number`/`targetSurface`/`marker`/`bodyFile`, then invoke `pwsh skills/session-memory-contract/scripts/persist-marker.ps1 -Owner {owner} -Repo {repo} -BurstManifest <manifest-path>` exactly once. Relay the script's per-entry artifact manifest (landed/not-attempted/failed) in your completion report so Code-Conductor harvest can use the `-InMemoryMarkers` fallback.
+
+**Ordering is now script-enforced** by the burst's halt-on-first-failure execution (previously an agent-remembered rule — see `Documents/Design/engagement-record-write-discipline.md` § D6, 893-D4 amendment): if engagement-record emission fails, the burst halts before credit-input — the completion artifact (entry 1) already landed and stands, the phase is still marked complete, you MUST relay the script's `⚠️ Engagement-record emission failed for experience-{ISSUE_NUMBER}: {reason}` warning, credit-input is NOT attempted, and `same-decision-resume` next session degrades to v1.1 behavior. Re-running the same manifest after a halt is safe — already-landed entries no-op via the script's own write-shape idempotency.
 
 ## Upstream Completion Gate (Mandatory)
 
