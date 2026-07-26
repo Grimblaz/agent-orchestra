@@ -290,6 +290,125 @@ Describe 'marker-transport-core' {
             $thrown | Should -Not -BeNullOrEmpty
             $thrown.Exception.Message | Should -Match ([regex]::Escape("repos/$script:Owner/$script:Repo/issues/$script:IssueNumber/comments"))
         }
+
+        It 'Find-AllCommentsByExactMarker preserves the original exception as InnerException rather than a bare-string rethrow (P7, issue #893 PR #917 post-fix)' {
+            $thrown = $null
+            try {
+                Find-AllCommentsByExactMarker -Owner $script:Owner -Repo $script:Repo -IssueNumber $script:IssueNumber -Marker $script:Marker
+            }
+            catch {
+                $thrown = $_
+            }
+
+            $thrown | Should -Not -BeNullOrEmpty
+            $thrown.Exception.InnerException | Should -Not -BeNullOrEmpty
+            $thrown.Exception.InnerException | Should -BeOfType ([System.Management.Automation.CommandNotFoundException])
+        }
+    }
+
+    Context 'gh non-zero exit under PSNativeCommandUseErrorActionPreference=$true -- must not be mislabeled as a launch failure (P4, issue #893 PR #917 post-fix)' -Skip:(-not $IsWindows) {
+        <#
+        Windows-only real external-process seam (mirrors the M2 large-body
+        Context's own real `.cmd` fixture rationale above): a
+        `function global:gh` mock is an in-process function call and can
+        NEVER raise a NativeCommandExitException regardless of
+        $PSNativeCommandUseErrorActionPreference -- that preference only
+        converts a REAL external process's non-zero exit into a
+        terminating error. Only a genuinely-spawned `.cmd` process
+        reproduces the defense's own live repro shape (EAP=Stop +
+        PSNativeCommandUseErrorActionPreference=$true, both supported real
+        configs) that re-collapsed the exit-code/stderr 404 classification
+        the six F2 catch blocks sit above.
+        #>
+        BeforeAll {
+            $script:P4SavedPath = $env:PATH
+
+            # Defined in BeforeAll (Run phase), not directly in the Context
+            # body (Discovery phase only) -- a function defined at
+            # Discovery time does not survive into the Run-phase scope each
+            # It executes in.
+            function script:New-P4GhStub {
+                param([Parameter(Mandatory)][string]$StderrText, [int]$ExitCode = 1)
+                $stubLines = @('@echo off', "1>&2 echo $StderrText", "exit /b $ExitCode")
+                Set-Content -LiteralPath (Join-Path $script:P4MockDir 'gh.cmd') -Value $stubLines -Encoding ASCII
+                $env:PATH = "$script:P4MockDir$([System.IO.Path]::PathSeparator)$script:P4SavedPath"
+            }
+        }
+
+        AfterAll {
+            $env:PATH = $script:P4SavedPath
+        }
+
+        BeforeEach {
+            Remove-Item Function:gh -ErrorAction SilentlyContinue
+            $script:P4MockDir = Join-Path $TestDrive "gh-p4-mock-$([guid]::NewGuid().ToString('N'))"
+            New-Item -ItemType Directory -Path $script:P4MockDir -Force | Out-Null
+        }
+
+        AfterEach {
+            $env:PATH = $script:P4SavedPath
+            . ([scriptblock]::Create('function global:gh {}'))
+        }
+
+        It 'Get-CommentBodyByIdWithStatus still classifies a genuine confirmed-404 as Status=not-found (not Status=error) when the non-zero exit surfaces as a terminating NativeCommandExitException' {
+            script:New-P4GhStub -StderrText 'Not Found (HTTP 404)'
+            $PSNativeCommandUseErrorActionPreference = $true
+            $ErrorActionPreference = 'Stop'
+
+            $result = Get-CommentBodyByIdWithStatus -Owner $script:Owner -Repo $script:Repo -CommentId 999999
+
+            $result.Status | Should -Be 'not-found'
+        }
+
+        It 'Get-CommentBodyByIdWithStatus reports Status=error for a genuine non-404 gh exit without mislabeling it a native-process launch failure' {
+            script:New-P4GhStub -StderrText 'gh: unexpected error connecting to api.github.com'
+            $PSNativeCommandUseErrorActionPreference = $true
+            $ErrorActionPreference = 'Stop'
+
+            $result = Get-CommentBodyByIdWithStatus -Owner $script:Owner -Repo $script:Repo -CommentId 500
+
+            $result.Status | Should -Be 'error'
+            $result.ErrorMessage | Should -Not -Match '(?i)launch failure'
+        }
+
+        It 'Get-CommentBodyById does not mislabel a genuine non-zero gh exit as a launch failure and still returns $null (its documented any-failure contract)' {
+            script:New-P4GhStub -StderrText 'gh: unexpected error connecting to api.github.com'
+            $PSNativeCommandUseErrorActionPreference = $true
+            $ErrorActionPreference = 'Stop'
+
+            $result = $null
+            { $result = Get-CommentBodyById -Owner $script:Owner -Repo $script:Repo -CommentId 500 } | Should -Not -Throw
+            $result | Should -BeNullOrEmpty
+        }
+
+        It 'Find-CommentIdByExactMarker does not mislabel a genuine non-zero gh exit as a launch failure and still returns $null (its documented no-match/failure contract)' {
+            script:New-P4GhStub -StderrText 'gh: unexpected error connecting to api.github.com'
+            $PSNativeCommandUseErrorActionPreference = $true
+            $ErrorActionPreference = 'Stop'
+
+            $result = $null
+            { $result = Find-CommentIdByExactMarker -Owner $script:Owner -Repo $script:Repo -IssueNumber $script:IssueNumber -Marker $script:Marker } | Should -Not -Throw
+            $result | Should -BeNullOrEmpty
+        }
+
+        It 'Find-AllCommentsByExactMarker throws without mislabeling a genuine non-zero gh exit as a launch failure, and preserves the original exception as InnerException (P4 + P7)' {
+            script:New-P4GhStub -StderrText 'gh: rate limit exceeded'
+            $PSNativeCommandUseErrorActionPreference = $true
+            $ErrorActionPreference = 'Stop'
+
+            $thrown = $null
+            try {
+                Find-AllCommentsByExactMarker -Owner $script:Owner -Repo $script:Repo -IssueNumber $script:IssueNumber -Marker $script:Marker
+            }
+            catch {
+                $thrown = $_
+            }
+
+            $thrown | Should -Not -BeNullOrEmpty
+            $thrown.Exception.Message | Should -Not -Match '(?i)launch failure'
+            $thrown.Exception.InnerException | Should -Not -BeNullOrEmpty
+            $thrown.Exception.InnerException | Should -BeOfType ([System.Management.Automation.NativeCommandExitException])
+        }
     }
 
     Context 'New-MarkerComment: large-body native invocation (M2, issue #893 s11)' -Skip:(-not $IsWindows) {

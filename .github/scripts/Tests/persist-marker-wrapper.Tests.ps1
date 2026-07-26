@@ -393,6 +393,31 @@ exit 0
             $outputText | Should -Match 'persist-marker \(burst\): FAILED' -Because $outputText
             $outputText | Should -Not -Match 'FullyQualifiedErrorId|CategoryInfo' -Because "an uncaught PowerShell terminating error dumps these diagnostic headers; the documented contract is a diagnosable burst-level FAILED report: $outputText"
         }
+
+        It 'P5: the burst-mode single-catch block also emits the per-entry artifacts line the -not $result.Success path already uses, via Format-PersistMarkerArtifacts (structural/AST check, issue #893 PR #917 post-fix)' {
+            # Three agent bodies instruct relaying the artifact manifest on
+            # every halt -- the adjacent `-not $result.Success` path already
+            # does this (script:Format-PersistMarkerArtifacts), but this
+            # single-catch block (the ONLY path reachable when
+            # Invoke-PersistMarkerBurstFromManifest itself throws uncaught,
+            # rather than returning its own documented Success=$false
+            # shape) dropped it entirely. Verified structurally (AST) rather
+            # than via a live end-to-end repro: after P1-P3 closed every
+            # known uncaught-throw path reachable from a manifest a caller
+            # controls, this catch block is a defense-in-depth backstop for
+            # a FUTURE unguarded throw, not something a live scenario can
+            # currently trigger through the documented interface --
+            # Get-PersistMarkerFallbackArtifacts (persist-marker-core.ps1)
+            # carries its own direct unit coverage for the artifact-building
+            # logic itself.
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:WrapperPath, [ref]$null, [ref]$null)
+            $tryStatements = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.TryStatementAst] }, $true)
+            $burstDispatchTry = @($tryStatements | Where-Object { $_.Extent.Text -match 'Invoke-PersistMarkerBurstFromManifest' })
+            $burstDispatchTry.Count | Should -Be 1 -Because 'exactly one try/catch should wrap the burst dispatch call'
+
+            $catchBody = $burstDispatchTry[0].CatchClauses[0].Body.Extent.Text
+            $catchBody | Should -Match 'Format-PersistMarkerArtifacts' -Because "the catch block must relay the same per-entry artifact manifest the -not `$result.Success path already emits: $catchBody"
+        }
     }
 }
 

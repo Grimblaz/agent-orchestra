@@ -683,6 +683,41 @@ evidence: issue-893-plan-marker-posted
         }
     }
 
+    Context 'Get-PersistMarkerFallbackArtifacts: best-effort per-entry artifact manifest for the wrapper burst catch block (P5, issue #893 PR #917 post-fix)' {
+        It 'reports every entry in a readable, parseable manifest as not-attempted' {
+            $markerA = $script:GoodFamilyA.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+            $bodyPath = script:New-ScratchBodyFile -Name 'body-fallback-1.md' -Content "$markerA`n`nBody."
+            $entries = @(
+                @{ family = $script:GoodFamilyA.Family; number = $script:IssueNumber; targetSurface = 'issue'; marker = $markerA; bodyFile = $bodyPath }
+                @{ family = $script:GoodFamilyA.Family; number = $script:IssueNumber; targetSurface = 'issue'; marker = $markerA; bodyFile = $bodyPath }
+            )
+            $manifestPath = script:New-ManifestFile -Entries $entries
+
+            $artifacts = script:Get-PersistMarkerFallbackArtifacts -ManifestPath $manifestPath
+
+            $artifacts.Count | Should -Be 2
+            $artifacts['entry-1'] | Should -Be 'not-attempted'
+            $artifacts['entry-2'] | Should -Be 'not-attempted'
+        }
+
+        It 'returns an empty ordered dictionary, never throwing, for a manifest path that does not exist' {
+            $missingPath = Join-Path $script:ScratchRoot 'does-not-exist.json'
+
+            $artifacts = $null
+            { $artifacts = script:Get-PersistMarkerFallbackArtifacts -ManifestPath $missingPath } | Should -Not -Throw
+            $artifacts.Count | Should -Be 0
+        }
+
+        It 'returns an empty ordered dictionary, never throwing, for a manifest that is not parseable JSON' {
+            $badPath = Join-Path $script:ScratchRoot 'bad-fallback.json'
+            [System.IO.File]::WriteAllText($badPath, '{ not valid json ][')
+
+            $artifacts = $null
+            { $artifacts = script:Get-PersistMarkerFallbackArtifacts -ManifestPath $badPath } | Should -Not -Throw
+            $artifacts.Count | Should -Be 0
+        }
+    }
+
     Context 'Invoke-PersistMarkerBurstFromManifest: manifest parsing + malformed refusal' {
         It 'M22: length-bounds an echoed $ManifestPath in a refusal message, never dumping it unbounded' {
             # A deeply-nested scratch-root subdirectory whose resolved path
@@ -846,6 +881,109 @@ evidence: issue-893-plan-marker-posted
             $result.Success | Should -Be $false
             $result.Reason | Should -Match '(?i)entry 1'
             $result.Reason | Should -Match '(?i)number'
+            $script:PostLog.Count | Should -Be 0
+        }
+
+        It 'P1: refuses a manifest entry whose number is a STRING-typed decimal value ("123.5"), never falling into the bare [int64] string cast (issue #893 PR #917 post-fix)' {
+            $markerA = $script:GoodFamilyA.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+            $bodyPath = script:New-ScratchBodyFile -Name 'body-number-string-decimal.md' -Content "$markerA`n`nBody."
+            $entries = @(
+                @{ family = $script:GoodFamilyA.Family; number = '123.5'; targetSurface = 'issue'; marker = $markerA; bodyFile = $bodyPath }
+            )
+            $manifestPath = script:New-ManifestFile -Entries $entries
+
+            $result = Invoke-PersistMarkerBurstFromManifest -Owner $script:Owner -Repo $script:Repo -ManifestPath $manifestPath -ScratchRoot $script:ScratchRoot
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '(?i)entry 1'
+            $result.Reason | Should -Match '(?i)number'
+            $result.Reason | Should -Not -Match '124'
+            $script:PostLog.Count | Should -Be 0
+        }
+
+        It 'P1: refuses a manifest entry whose number is a STRING-typed hex-prefixed value ("0x10"), never silently coerced to a different issue number (issue #893 PR #917 post-fix)' {
+            $markerA = $script:GoodFamilyA.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+            $bodyPath = script:New-ScratchBodyFile -Name 'body-number-string-hex.md' -Content "$markerA`n`nBody."
+            $entries = @(
+                @{ family = $script:GoodFamilyA.Family; number = '0x10'; targetSurface = 'issue'; marker = $markerA; bodyFile = $bodyPath }
+            )
+            $manifestPath = script:New-ManifestFile -Entries $entries
+
+            $result = Invoke-PersistMarkerBurstFromManifest -Owner $script:Owner -Repo $script:Repo -ManifestPath $manifestPath -ScratchRoot $script:ScratchRoot
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '(?i)entry 1'
+            $result.Reason | Should -Match '(?i)number'
+            $script:PostLog.Count | Should -Be 0
+        }
+
+        It 'P1: refuses a manifest entry whose number is a STRING-typed exponent value ("1e3"), never silently coerced to a different issue number (issue #893 PR #917 post-fix)' {
+            $markerA = $script:GoodFamilyA.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+            $bodyPath = script:New-ScratchBodyFile -Name 'body-number-string-exp.md' -Content "$markerA`n`nBody."
+            $entries = @(
+                @{ family = $script:GoodFamilyA.Family; number = '1e3'; targetSurface = 'issue'; marker = $markerA; bodyFile = $bodyPath }
+            )
+            $manifestPath = script:New-ManifestFile -Entries $entries
+
+            $result = Invoke-PersistMarkerBurstFromManifest -Owner $script:Owner -Repo $script:Repo -ManifestPath $manifestPath -ScratchRoot $script:ScratchRoot
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '(?i)entry 1'
+            $result.Reason | Should -Match '(?i)number'
+            $script:PostLog.Count | Should -Be 0
+        }
+
+        It 'P1: accepts a manifest entry whose number is a whitespace-padded plain-digit STRING (" 12 "), trimmed then parsed normally (issue #893 PR #917 post-fix)' {
+            $markerA = $script:GoodFamilyA.MarkerTemplate -replace '\{ID\}', '12'
+            $bodyPath = script:New-ScratchBodyFile -Name 'body-number-string-padded.md' -Content "$markerA`n`nBody."
+            $entries = @(
+                @{ family = $script:GoodFamilyA.Family; number = ' 12 '; targetSurface = 'issue'; marker = $markerA; bodyFile = $bodyPath }
+            )
+            $manifestPath = script:New-ManifestFile -Entries $entries
+
+            $result = Invoke-PersistMarkerBurstFromManifest -Owner $script:Owner -Repo $script:Repo -ManifestPath $manifestPath -ScratchRoot $script:ScratchRoot
+
+            $result.Success | Should -Be $true
+            ($script:ghCallLog -join "`n") | Should -Match 'issue comment 12 --body-file'
+        }
+
+        It 'P2: refuses a manifest entry whose number is a whole-valued double outside Int64 range, never throwing an uncaught exception (issue #893 PR #917 post-fix)' {
+            $markerA = $script:GoodFamilyA.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+            $bodyPath = script:New-ScratchBodyFile -Name 'body-number-huge-double.md' -Content "$markerA`n`nBody."
+            $entries = @(
+                @{ family = $script:GoodFamilyA.Family; number = 1e20; targetSurface = 'issue'; marker = $markerA; bodyFile = $bodyPath }
+            )
+            $manifestPath = script:New-ManifestFile -Entries $entries
+
+            # Direct call (no wrapping script block): an uncaught exception
+            # here is itself a legitimate RED failure pre-fix, exactly the
+            # "refuses, never throws" contract violation P2 exists to close
+            # -- wrapping the call in a `{ } | Should -Not -Throw` script
+            # block would run it in a child scope where the `$result`
+            # assignment never propagates back out, masking the real
+            # failure behind an unrelated "$result.Success is $null" report.
+            $result = Invoke-PersistMarkerBurstFromManifest -Owner $script:Owner -Repo $script:Repo -ManifestPath $manifestPath -ScratchRoot $script:ScratchRoot
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '(?i)entry 1'
+            $result.Reason | Should -Match '(?i)number'
+            $script:PostLog.Count | Should -Be 0
+        }
+
+        It 'P3: refuses a manifest entry whose number exceeds Int32 range with the standard diagnosable refusal, not a raw .NET parameter-binding error (issue #893 PR #917 post-fix)' {
+            $markerA = $script:GoodFamilyA.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+            $bodyPath = script:New-ScratchBodyFile -Name 'body-number-out-of-int32.md' -Content "$markerA`n`nBody."
+            $entries = @(
+                @{ family = $script:GoodFamilyA.Family; number = 3000000000; targetSurface = 'issue'; marker = $markerA; bodyFile = $bodyPath }
+            )
+            $manifestPath = script:New-ManifestFile -Entries $entries
+
+            $result = Invoke-PersistMarkerBurstFromManifest -Owner $script:Owner -Repo $script:Repo -ManifestPath $manifestPath -ScratchRoot $script:ScratchRoot
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '(?i)entry 1'
+            $result.Reason | Should -Match '(?i)number'
+            $result.Reason | Should -Not -Match '(?i)Cannot convert value'
             $script:PostLog.Count | Should -Be 0
         }
 

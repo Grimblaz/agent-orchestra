@@ -159,6 +159,15 @@ if ($PSCmdlet.ParameterSetName -eq 'Burst') {
     }
     catch {
         [Console]::Error.WriteLine("persist-marker (burst): FAILED -- $($_.Exception.Message)")
+        # P5 fix (PR #917 post-fix review): the adjacent `-not $result.Success`
+        # path below already emits a per-entry artifact manifest line; this
+        # catch previously dropped it entirely, even though three agent
+        # bodies instruct relaying the artifact manifest on every halt.
+        # Best-effort reconstruct it (script:Get-PersistMarkerFallbackArtifacts,
+        # persist-marker-core.ps1) so a caught exception's output is
+        # structurally consistent with a returned-failure's output.
+        $fallbackArtifacts = script:Get-PersistMarkerFallbackArtifacts -ManifestPath $BurstManifest
+        [Console]::Error.WriteLine("persist-marker (burst): artifacts -- $(script:Format-PersistMarkerArtifacts -Artifacts $fallbackArtifacts)")
         exit 1
     }
 

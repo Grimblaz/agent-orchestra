@@ -1922,6 +1922,14 @@ function Resolve-MarkerScratchBoundedPath {
         comparison not available cross-platform via Get-Item alone) --
         deliberately not implemented in this slice; a hard-linked leaf file
         under the scratch root can still be read through this bound.
+
+        Scope note (P8, PR #917 post-fix review): this reparse-point check
+        covers the scratch root itself and every descendant path segment
+        below it, and INTENTIONALLY nothing above the scratch root --
+        an ancestor directory of the scratch root being a reparse point
+        cannot cause an escape (the containment comparison below still
+        evaluates against the scratch root's own fully-resolved,
+        already-dereferenced path), so there is no gap to close there.
     .OUTPUTS
         [PSCustomObject] InBounds [bool], ResolvedPath [string or $null],
         Reason [string or $null] (populated only when InBounds=$false).
@@ -2466,6 +2474,57 @@ function Invoke-PersistMarkerBurst {
     return [PSCustomObject]@{ Success = $true; Reason = $null; Results = [object[]]$results.ToArray(); Artifacts = $artifacts }
 }
 
+function script:Get-PersistMarkerFallbackArtifacts {
+    <#
+    .SYNOPSIS
+        P5 fix (PR #917 post-fix review): best-effort per-entry artifact
+        manifest for persist-marker.ps1's burst-mode single-catch block --
+        reached ONLY when Invoke-PersistMarkerBurstFromManifest itself
+        throws uncaught (rather than returning its own documented
+        Success=$false refusal/failure shape). The adjacent
+        `-not $result.Success` path in that same wrapper already emits a
+        per-entry artifact line via Format-PersistMarkerArtifacts; this
+        catch block previously dropped it entirely, even though three agent
+        bodies instruct relaying the artifact manifest on every halt.
+    .DESCRIPTION
+        Every entry the manifest carries is reported 'not-attempted':
+        Invoke-PersistMarkerBurstFromManifest's own documented execution
+        shape (whole-manifest preflight, THEN ordered halt-on-first-failure
+        execution) means no entry can genuinely have landed if the call
+        itself never returned a result at all -- this never claims
+        'landed' or 'failed' knowledge the catch block doesn't actually
+        have.
+
+        Best-effort and DELIBERATELY never throws: the manifest may itself
+        be unreadable or unparseable (plausibly the same underlying cause
+        that made the caller throw in the first place), in which case this
+        returns an empty ordered dictionary rather than raising a SECOND
+        exception out of an already-failing path.
+        Format-PersistMarkerArtifacts (persist-marker.ps1) already renders
+        an empty dictionary as '(no artifact manifest)'.
+    .OUTPUTS
+        [System.Collections.Specialized.OrderedDictionary] keyed
+        'entry-1'..'entry-N' (1-based, manifest order), each value
+        'not-attempted'. Empty (never $null, never throws) when the
+        manifest cannot be read, parsed, or counted.
+    #>
+    param([Parameter(Mandatory)][string]$ManifestPath)
+    $fallback = [ordered]@{}
+    try {
+        if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) { return $fallback }
+        $rawManifest = Get-Content -LiteralPath $ManifestPath -Raw -ErrorAction Stop
+        $parsed = $rawManifest | ConvertFrom-Json -ErrorAction Stop
+        $entries = @($parsed)
+        for ($i = 0; $i -lt $entries.Count; $i++) {
+            $fallback["entry-$($i + 1)"] = 'not-attempted'
+        }
+    }
+    catch {
+        return [ordered]@{}
+    }
+    return $fallback
+}
+
 function Invoke-PersistMarkerBurstFromManifest {
     <#
     .SYNOPSIS
@@ -2594,11 +2653,51 @@ function Invoke-PersistMarkerBurstFromManifest {
         if ($rawNumberValue -is [bool]) {
             return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (malformed manifest '$echoedManifestPath', entry $entryIndex): field 'number' must be a whole number, got a JSON boolean ($(script:ConvertTo-MarkerRefusalEcho -Value ([string]$rawNumberValue)))"; Results = [object[]]@(); Artifacts = [ordered]@{} }
         }
+        elseif ($rawNumberValue -is [string]) {
+            # P1 fix (PR #917 post-fix review): a STRING-typed number
+            # ("123.5", "0x10", "1e3", a JSON-quoted digit sequence) was
+            # falling into the `else` branch's bare [int64] cast below,
+            # which silently COERCES rather than refuses -- .NET's [int64]
+            # string conversion accepts decimal-point, hex-prefix, and
+            # exponent-notation strings and reinterprets them into an
+            # entirely different issue/PR number (e.g. "123.5" -> 124,
+            # "0x10" -> 16, "1e3" -> 1000) -- the exact defect class F5 was
+            # written to close, just reached through a quoted value instead
+            # of a bare JSON number. Agent-authored burst manifests are
+            # hand-authored JSON, so a quoted number is a realistic
+            # authoring slip (the same class the noPreserve field guard
+            # above already handles). Only a whole, non-negative, plain
+            # digit sequence (after trimming incidental whitespace) is
+            # accepted; anything else (decimal point, hex prefix, exponent,
+            # sign, or any non-digit character) is refused before any cast
+            # is attempted -- no string ever reaches a bare cast.
+            $trimmedNumberValue = $rawNumberValue.Trim()
+            if ($trimmedNumberValue -notmatch '^\d+$') {
+                return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (malformed manifest '$echoedManifestPath', entry $entryIndex): field 'number' must be a whole number, got a quoted/non-numeric string value ($(script:ConvertTo-MarkerRefusalEcho -Value $rawNumberValue)) -- never silently coerced"; Results = [object[]]@(); Artifacts = [ordered]@{} }
+            }
+            try {
+                $number = [int64]$trimmedNumberValue
+            }
+            catch {
+                return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (malformed manifest '$echoedManifestPath', entry $entryIndex): field 'number' is not a valid integer ($(script:ConvertTo-MarkerRefusalEcho -Value $rawNumberValue))"; Results = [object[]]@(); Artifacts = [ordered]@{} }
+            }
+        }
         elseif ($rawNumberValue -is [double] -or $rawNumberValue -is [single] -or $rawNumberValue -is [decimal]) {
             if ($rawNumberValue -ne [Math]::Truncate($rawNumberValue)) {
                 return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (malformed manifest '$echoedManifestPath', entry $entryIndex): field 'number' must be a whole number, got a fractional value ($(script:ConvertTo-MarkerRefusalEcho -Value ([string]$rawNumberValue))) -- never silently rounded"; Results = [object[]]@(); Artifacts = [ordered]@{} }
             }
-            $number = [int64]$rawNumberValue
+            # P2 fix (PR #917 post-fix review): this cast was OUTSIDE any
+            # try/catch -- a whole-valued double outside Int64's range
+            # (e.g. 1e20, which passes the truncation check above since it
+            # IS whole) threw an uncaught OverflowException here, escaping
+            # this function's own documented "refuses, never throws"
+            # contract. Guarded the same way the `else` branch already is.
+            try {
+                $number = [int64]$rawNumberValue
+            }
+            catch {
+                return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (malformed manifest '$echoedManifestPath', entry $entryIndex): field 'number' is out of range for a valid integer ($(script:ConvertTo-MarkerRefusalEcho -Value ([string]$rawNumberValue)))"; Results = [object[]]@(); Artifacts = [ordered]@{} }
+            }
         }
         else {
             try {
@@ -2610,6 +2709,22 @@ function Invoke-PersistMarkerBurstFromManifest {
         }
         if ($number -le 0) {
             return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (malformed manifest '$echoedManifestPath', entry $entryIndex): field 'number' must be a positive integer, got ($(script:ConvertTo-MarkerRefusalEcho -Value ([string]$rawNumberValue)))"; Results = [object[]]@(); Artifacts = [ordered]@{} }
+        }
+        # P3 fix (PR #917 post-fix review): F5 widened the accepted numeric
+        # type from [int] to [int64], but every downstream `-Number`
+        # parameter consuming this value (Invoke-PersistMarkerWrite and its
+        # own callers, both here and in persist-marker.ps1 /
+        # marker-transport-core.ps1) is still declared [int]. An admitted
+        # int64 value outside Int32's range (e.g. 3000000000, a realistic
+        # hand-authoring slip -- an accidental extra digit) previously leaked
+        # a raw, undiagnosable .NET parameter-binding error ("Cannot convert
+        # value ... to type System.Int32") instead of this function's own
+        # clean, documented refusal shape. GitHub issue/PR numbers never
+        # exceed Int32.MaxValue in practice, so this is a real, not merely
+        # defensive, upper bound -- alongside the existing -le 0 lower bound
+        # (GitHub issue/PR numbers start at 1).
+        if ($number -gt [int]::MaxValue) {
+            return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (malformed manifest '$echoedManifestPath', entry $entryIndex): field 'number' exceeds the maximum supported issue/PR number ($([int]::MaxValue)), got ($(script:ConvertTo-MarkerRefusalEcho -Value ([string]$rawNumberValue)))"; Results = [object[]]@(); Artifacts = [ordered]@{} }
         }
 
         $bodyFileResult = Read-MarkerScratchBoundedBodyFile -BodyFile ([string]$rawEntry.bodyFile) -ScratchRoot $ScratchRoot

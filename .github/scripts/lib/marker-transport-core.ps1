@@ -100,6 +100,46 @@ catch {
     [Console]::Error.WriteLine("marker-transport-core: console UTF-8 pin failed: $($_.Exception.Message)")
 }
 
+function script:Test-MarkerNativeLaunchFailure {
+    <#
+    .SYNOPSIS
+        P4 fix (PR #917 post-fix review): type-discriminates a caught
+        exception from an `& gh ...` native invocation. The six F2 catch
+        blocks below originally assumed ANY caught exception meant `gh`
+        itself failed to launch (e.g. absent from PATH) and hardcoded that
+        message unconditionally -- but a genuinely-launched `gh` process
+        that merely exits non-zero can ALSO reach these catch blocks when
+        $PSNativeCommandUseErrorActionPreference=$true converts that
+        non-zero exit into a terminating NativeCommandExitException. In
+        Get-CommentBodyByIdWithStatus specifically, that mislabeling
+        short-circuited straight to Status='error' ABOVE the existing
+        exit-code/stderr 404-classification logic, re-collapsing the exact
+        404-vs-transient distinction M19 built this function to separate.
+    .DESCRIPTION
+        Only a genuine launch failure -- the process could not even start
+        -- is a true "native-process launch failure":
+        CommandNotFoundException (the command could not be resolved on
+        PATH) or ApplicationFailedException (present on some platforms for
+        a launch-time OS failure). Anything else, most commonly a
+        NativeCommandExitException (the process launched, ran, and exited
+        non-zero under $PSNativeCommandUseErrorActionPreference=$true), is
+        NOT a launch failure and must not be reported as one.
+    .OUTPUTS
+        [PSCustomObject] IsLaunchFailure [bool], ExitCode [int or $null]
+        (populated when the underlying exception exposes one, e.g.
+        NativeCommandExitException.ExitCode).
+    #>
+    param([Parameter(Mandatory)]$ErrorRecord)
+    $ex = $ErrorRecord.Exception
+    $exTypeName = $ex.GetType().Name
+    $isLaunchFailure = ($ex -is [System.Management.Automation.CommandNotFoundException]) -or ($exTypeName -eq 'ApplicationFailedException')
+    $exitCode = $null
+    if ($null -ne $ex.PSObject.Properties['ExitCode']) {
+        $exitCode = $ex.ExitCode
+    }
+    return [PSCustomObject]@{ IsLaunchFailure = $isLaunchFailure; ExitCode = $exitCode; ExceptionTypeName = $exTypeName }
+}
+
 # ---------------------------------------------------------------------------
 # Promoted (byte-identical behavior vs. the PPL-prefixed originals; see
 # persist-phase-ledger-core.ps1's own comments for the delegators that now
@@ -161,7 +201,19 @@ function Get-CommentBodyById {
         $getOutput = & gh api $getPath 2>$null
     }
     catch {
-        [Console]::Error.WriteLine("marker-transport-core: gh api GET $getPath threw a native-process launch failure: $($_.Exception.Message)")
+        # P4 fix (PR #917 post-fix review): type-discriminate rather than
+        # hardcoding "launch failure" for any caught exception -- see
+        # Test-MarkerNativeLaunchFailure's own doc comment. This function's
+        # contract ($null on any failure) does not change; only the
+        # logged message stops mislabeling a genuine non-zero `gh` exit.
+        $classification = script:Test-MarkerNativeLaunchFailure -ErrorRecord $_
+        if ($classification.IsLaunchFailure) {
+            [Console]::Error.WriteLine("marker-transport-core: gh api GET $getPath threw a native-process launch failure: $($_.Exception.Message)")
+        }
+        else {
+            $exitNote = if ($null -ne $classification.ExitCode) { ", exit $($classification.ExitCode)" } else { '' }
+            [Console]::Error.WriteLine("marker-transport-core: gh api GET $getPath threw a non-launch exception ($($classification.ExceptionTypeName)$exitNote): $($_.Exception.Message)")
+        }
         return $null
     }
     if ($LASTEXITCODE -ne 0) {
@@ -219,8 +271,27 @@ function Get-CommentBodyByIdWithStatus {
             $getOutput = & gh api $getPath 2>$stderrFile
         }
         catch {
-            [Console]::Error.WriteLine("marker-transport-core: gh api GET $getPath threw a native-process launch failure: $($_.Exception.Message)")
-            return [PSCustomObject]@{ Status = 'error'; Body = $null; ErrorMessage = "gh api GET $getPath threw a native-process launch failure: $($_.Exception.Message)" }
+            # P4 fix (PR #917 post-fix review): the catch previously
+            # short-circuited straight to Status='error' for ANY caught
+            # exception, sitting ABOVE the exit-code/stderr 404
+            # classification below and re-collapsing the exact
+            # 404-vs-transient distinction M19 built this function to
+            # separate. Only a genuine launch failure (`gh` never started)
+            # gets that early Status='error' return now. Anything else --
+            # most commonly a NativeCommandExitException raised when
+            # $PSNativeCommandUseErrorActionPreference=$true converts `gh`'s
+            # own non-zero exit into a terminating error -- falls through to
+            # the SAME exit-code/stderr classification the non-exception
+            # non-zero-exit path already uses below: $LASTEXITCODE and the
+            # stderr file captured via `2>$stderrFile` are both still valid
+            # at this point (PowerShell sets $LASTEXITCODE and flushes the
+            # native stderr redirection before raising the exception).
+            $classification = script:Test-MarkerNativeLaunchFailure -ErrorRecord $_
+            if ($classification.IsLaunchFailure) {
+                [Console]::Error.WriteLine("marker-transport-core: gh api GET $getPath threw a native-process launch failure: $($_.Exception.Message)")
+                return [PSCustomObject]@{ Status = 'error'; Body = $null; ErrorMessage = "gh api GET $getPath threw a native-process launch failure: $($_.Exception.Message)" }
+            }
+            $getOutput = $null
         }
         $exitCode = $LASTEXITCODE
         if ($exitCode -ne 0) {
@@ -289,8 +360,16 @@ function Set-CommentBodyDirect {
         }
     }
     if ($null -ne $patchLaunchException) {
-        [Console]::Error.WriteLine("marker-transport-core: gh api PATCH $patchPath threw a native-process launch failure: $($patchLaunchException.Exception.Message)")
-        return [PSCustomObject]@{ Success = $false; Reason = "PATCH threw a native-process launch failure: $($patchLaunchException.Exception.Message)" }
+        # P4 fix (PR #917 post-fix review): type-discriminate rather than
+        # hardcoding "launch failure" for any caught exception.
+        $patchClassification = script:Test-MarkerNativeLaunchFailure -ErrorRecord $patchLaunchException
+        if ($patchClassification.IsLaunchFailure) {
+            [Console]::Error.WriteLine("marker-transport-core: gh api PATCH $patchPath threw a native-process launch failure: $($patchLaunchException.Exception.Message)")
+            return [PSCustomObject]@{ Success = $false; Reason = "PATCH threw a native-process launch failure: $($patchLaunchException.Exception.Message)" }
+        }
+        $exitNote = if ($null -ne $patchClassification.ExitCode) { ", exit $($patchClassification.ExitCode)" } else { '' }
+        [Console]::Error.WriteLine("marker-transport-core: gh api PATCH $patchPath threw a non-launch exception ($($patchClassification.ExceptionTypeName)$exitNote): $($patchLaunchException.Exception.Message)")
+        return [PSCustomObject]@{ Success = $false; Reason = "PATCH threw a non-launch exception ($($patchClassification.ExceptionTypeName)$exitNote): $($patchLaunchException.Exception.Message)" }
     }
     if ($LASTEXITCODE -ne 0) {
         [Console]::Error.WriteLine("marker-transport-core: gh api PATCH $patchPath failed (exit $LASTEXITCODE)")
@@ -304,8 +383,16 @@ function Set-CommentBodyDirect {
         $verifyOutput = & gh api $patchPath 2>$null
     }
     catch {
-        [Console]::Error.WriteLine("marker-transport-core: post-write verify GET $patchPath threw a native-process launch failure: $($_.Exception.Message)")
-        return [PSCustomObject]@{ Success = $false; Reason = "Post-write verify GET threw a native-process launch failure: $($_.Exception.Message)" }
+        # P4 fix (PR #917 post-fix review): type-discriminate rather than
+        # hardcoding "launch failure" for any caught exception.
+        $verifyClassification = script:Test-MarkerNativeLaunchFailure -ErrorRecord $_
+        if ($verifyClassification.IsLaunchFailure) {
+            [Console]::Error.WriteLine("marker-transport-core: post-write verify GET $patchPath threw a native-process launch failure: $($_.Exception.Message)")
+            return [PSCustomObject]@{ Success = $false; Reason = "Post-write verify GET threw a native-process launch failure: $($_.Exception.Message)" }
+        }
+        $exitNote = if ($null -ne $verifyClassification.ExitCode) { ", exit $($verifyClassification.ExitCode)" } else { '' }
+        [Console]::Error.WriteLine("marker-transport-core: post-write verify GET $patchPath threw a non-launch exception ($($verifyClassification.ExceptionTypeName)$exitNote): $($_.Exception.Message)")
+        return [PSCustomObject]@{ Success = $false; Reason = "Post-write verify GET threw a non-launch exception ($($verifyClassification.ExceptionTypeName)$exitNote): $($_.Exception.Message)" }
     }
     if ($LASTEXITCODE -ne 0) {
         [Console]::Error.WriteLine("marker-transport-core: post-write verify GET $patchPath failed (exit $LASTEXITCODE)")
@@ -370,7 +457,18 @@ function Find-CommentIdByExactMarker {
         $listJson = & gh issue view $IssueNumber --json comments -R "$Owner/$Repo" 2>$null
     }
     catch {
-        [Console]::Error.WriteLine("marker-transport-core: gh issue view $IssueNumber threw a native-process launch failure: $($_.Exception.Message)")
+        # P4 fix (PR #917 post-fix review): type-discriminate rather than
+        # hardcoding "launch failure" for any caught exception. This
+        # function's contract ($null on any failure) does not change; only
+        # the logged message stops mislabeling a genuine non-zero `gh` exit.
+        $classification = script:Test-MarkerNativeLaunchFailure -ErrorRecord $_
+        if ($classification.IsLaunchFailure) {
+            [Console]::Error.WriteLine("marker-transport-core: gh issue view $IssueNumber threw a native-process launch failure: $($_.Exception.Message)")
+        }
+        else {
+            $exitNote = if ($null -ne $classification.ExitCode) { ", exit $($classification.ExitCode)" } else { '' }
+            [Console]::Error.WriteLine("marker-transport-core: gh issue view $IssueNumber threw a non-launch exception ($($classification.ExceptionTypeName)$exitNote): $($_.Exception.Message)")
+        }
         return $null
     }
     if ($LASTEXITCODE -ne 0) {
@@ -557,7 +655,25 @@ function Find-AllCommentsByExactMarker {
         $listOutput = & gh api --paginate $apiPath 2>$null
     }
     catch {
-        throw "marker-transport-core: gh api --paginate $apiPath threw a native-process launch failure: $($_.Exception.Message)"
+        # P4 fix (PR #917 post-fix review): type-discriminate rather than
+        # hardcoding "launch failure" for any caught exception.
+        # P7 fix (PR #917 post-fix review): re-throw via
+        # [System.Management.Automation.RuntimeException]::new($msg,
+        # $_.Exception) instead of a bare string `throw`, which creates a
+        # fresh RuntimeException and discards the original exception's type
+        # and stack. Passing $_.Exception as the inner exception preserves
+        # it on .InnerException, keeping type-discrimination ability for
+        # any future caller (this also supports Test-MarkerNativeLaunchFailure's
+        # own pattern elsewhere in this file).
+        $classification = script:Test-MarkerNativeLaunchFailure -ErrorRecord $_
+        $msg = if ($classification.IsLaunchFailure) {
+            "marker-transport-core: gh api --paginate $apiPath threw a native-process launch failure: $($_.Exception.Message)"
+        }
+        else {
+            $exitNote = if ($null -ne $classification.ExitCode) { ", exit $($classification.ExitCode)" } else { '' }
+            "marker-transport-core: gh api --paginate $apiPath threw a non-launch exception ($($classification.ExceptionTypeName)$exitNote): $($_.Exception.Message)"
+        }
+        throw [System.Management.Automation.RuntimeException]::new($msg, $_.Exception)
     }
     if ($LASTEXITCODE -ne 0) {
         throw "marker-transport-core: gh api --paginate $apiPath failed (exit $LASTEXITCODE)"
