@@ -34,9 +34,80 @@ Describe 'persist-marker-core' {
     BeforeAll {
         $script:CoreLibPath = Join-Path $PSScriptRoot '../../../skills/session-memory-contract/scripts/persist-marker-core.ps1'
         $script:MarkerTransportLibPath = Join-Path $PSScriptRoot '../lib/marker-transport-core.ps1'
+        $script:EngagementRecordLibPath = Join-Path $PSScriptRoot '../lib/frame-engagement-record-core.ps1'
         $script:Owner = 'Grimblaz'
         $script:Repo = 'agent-orchestra'
         $script:IssueNumber = 893
+        $script:PrNumber = 5000
+
+        # --- Static YAML fixtures for the s4 validator-adapter contexts. ---
+        $script:EngagementRecordValidYaml = @'
+```yaml
+schema_version: 2
+phase: plan
+capture_session: "test-session"
+load_bearing_decisions:
+  - decision_id: sample-decision
+    classification: load-bearing
+    articulation_status: complete
+```
+'@
+        $script:EngagementRecordInvalidYaml = @'
+```yaml
+schema_version: 2
+phase: plan
+capture_session: "test-session"
+load_bearing_decisions:
+  - decision_id: Not_A_Valid_Slug
+    classification: load-bearing
+    articulation_status: complete
+```
+'@
+        $script:ReviewDispositionsValidYaml = @'
+```yaml
+schema_version: 1
+passes_run: [1]
+entries:
+  - stable_finding_key: "src/example.ts:10:sample-finding"
+    pass: 1
+    disposition: dismiss
+    classification: routine
+    disposition_rationale: "Not applicable in this context."
+```
+'@
+        $script:ReviewDispositionsInvalidYaml = @'
+```yaml
+schema_version: 1
+passes_run: [1]
+entries:
+  - stable_finding_key: "src/example.ts:10:sample-finding"
+    pass: 1
+    disposition: dismiss
+    classification: routine
+```
+'@
+        $script:CreditInputValidYaml = @'
+```yaml
+port: plan
+adapter: skills/plan-authoring/adapters/plan-adapter.md
+evidence: issue-893-plan-marker-posted
+```
+'@
+        $script:CreditInputInvalidPortYaml = @'
+```yaml
+port: bogus-port
+adapter: skills/plan-authoring/adapters/plan-adapter.md
+evidence: issue-893-plan-marker-posted
+```
+'@
+        $script:CreditInputNestedEvidenceYaml = @'
+```yaml
+port: plan
+adapter: skills/plan-authoring/adapters/plan-adapter.md
+evidence:
+  summary: nested mapping not allowed
+```
+'@
     }
 
     BeforeEach {
@@ -126,8 +197,12 @@ Describe 'persist-marker-core' {
         # calls to Find-AllCommentsByExactMarker / New-MarkerComment /
         # Get-CommentIdFromUrl / Get-CommentBodyById / Set-CommentBodyDirect
         # resolve to the genuine, already-shipped implementations), then the
-        # core itself.
+        # real engagement-record function library (so
+        # Invoke-EngagementRecordValidatorAdapter's unqualified
+        # Read-EngagementRecords call resolves -- mirrors this file's own
+        # existing dot-source-before-core convention), then the core itself.
         if (Test-Path $script:MarkerTransportLibPath) { . $script:MarkerTransportLibPath }
+        if (Test-Path $script:EngagementRecordLibPath) { . $script:EngagementRecordLibPath }
         if (Test-Path $script:CoreLibPath) { . $script:CoreLibPath }
 
         # Computed here (per-test, after dot-sourcing above) rather than in
@@ -138,6 +213,10 @@ Describe 'persist-marker-core' {
         if (Test-Path $script:CoreLibPath) {
             $script:PostNewFamily = @(Get-MarkerFamilyRegistry | Where-Object { $_.WriteShape -eq 'post-new' -and $_.TargetSurface -eq 'issue' })[0]
             $script:UpsertFamily = @(Get-MarkerFamilyRegistry | Where-Object { $_.WriteShape -eq 'upsert' -and $_.TargetSurface -eq 'issue' })[0]
+            $script:EngagementRecordFamily = @(Get-MarkerFamilyRegistry | Where-Object { $_.Family -eq 'engagement-record' })[0]
+            $script:ReviewDispositionsFamily = @(Get-MarkerFamilyRegistry | Where-Object { $_.Family -eq 'review-dispositions' })[0]
+            $script:CreditInputFamily = @(Get-MarkerFamilyRegistry | Where-Object { $_.Family -eq 'credit-input' })[0]
+            $script:SentinelFamily = @(Get-MarkerFamilyRegistry | Where-Object { $_.Family -eq 'review-judge-produced' })[0]
         }
     }
 
@@ -356,6 +435,200 @@ Describe 'persist-marker-core' {
 
             $result.Success | Should -Be $false
             $result.Reason | Should -Match '(?i)unknown|registry'
+            $script:ghCallLog.Count | Should -Be 0
+        }
+    }
+
+    Context 'Refusal message shape (893-D6)' {
+        It 'formats every refusal as "persist-marker: REFUSED ({family}, {target}): {detail}"' {
+            $result = Invoke-PersistMarkerWrite -Family 'not-a-real-family' -Owner $script:Owner -Repo $script:Repo -Number 999 -TargetSurface 'issue' -Marker '<!-- not-a-real-family-999 -->' -Body 'x'
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '^persist-marker: REFUSED \(not-a-real-family, issue/999\): '
+        }
+
+        It 'length-bounds an echoed oversized field value in a refusal detail rather than dumping it verbatim' {
+            $marker = $script:CreditInputFamily.MarkerTemplate -replace '\{port\}', 'plan' -replace '\{ID\}', "$script:IssueNumber"
+            $oversizedPort = 'x' * 200
+            $body = "$marker`n`n``````yaml`nport: $oversizedPort`nadapter: skills/plan-authoring/adapters/plan-adapter.md`nevidence: issue-893-plan-marker-posted`n``````"
+
+            $result = Invoke-PersistMarkerWrite -Family $script:CreditInputFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $marker -Body $body
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Not -Match ([regex]::Escape($oversizedPort))
+            $result.Reason | Should -Match '\.\.\.\(\+\d+ more chars, truncated\)'
+            $script:ghCallLog.Count | Should -Be 0
+        }
+    }
+
+    Context 'Payload hygiene: 893-D7 (s9 amendment -- both rules refuse, never warn)' {
+        It 'refuses when the candidate carries its own family marker at a non-line-1 position, without issuing any gh calls' {
+            $marker = $script:PostNewFamily.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+            $body = "$marker`n`nSome content.`n$marker`n`nMore content, marker repeated below line 1."
+
+            $result = Invoke-PersistMarkerWrite -Family $script:PostNewFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $marker -Body $body
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '(?i)non-line-1'
+            $result.Reason | Should -Match '^persist-marker: REFUSED \('
+            $script:ghCallLog.Count | Should -Be 0
+        }
+
+        It 'refuses when the candidate carries another registered family''s live marker literal at line start, without issuing any gh calls' {
+            $marker = $script:PostNewFamily.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+            $otherMarker = $script:UpsertFamily.MarkerTemplate -replace '\{ID\}', '42'
+            $body = "$marker`n`nSome content.`n$otherMarker`n`nA decoy live marker from a different family."
+
+            $result = Invoke-PersistMarkerWrite -Family $script:PostNewFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $marker -Body $body
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '(?i)another registered family'
+            $escapedOtherFamily = [regex]::Escape($script:UpsertFamily.Family)
+            $result.Reason | Should -Match $escapedOtherFamily
+            $script:ghCallLog.Count | Should -Be 0
+        }
+
+        It 'does NOT refuse an inert-rendered (HTML-entity-escaped) mention of another family''s marker at line start (false-positive guard)' {
+            $marker = $script:PostNewFamily.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+            $inertMention = ($script:UpsertFamily.MarkerTemplate -replace '\{ID\}', '42') -replace '<!--', '&lt;!--' -replace '-->', '--&gt;'
+            $body = "$marker`n`nExample of the marker syntax:`n$inertMention`n`nRest of the body."
+
+            $result = Invoke-PersistMarkerWrite -Family $script:PostNewFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $marker -Body $body
+
+            $result.Success | Should -Be $true
+            $result.Action | Should -Be 'posted'
+        }
+    }
+
+    Context 'engagement-record validator adapter' {
+        It 'passes a well-formed candidate through to the write' {
+            $marker = $script:EngagementRecordFamily.MarkerTemplate -replace '\{phase\}', 'plan' -replace '\{ID\}', "$script:IssueNumber"
+            $body = "$marker`n`n$script:EngagementRecordValidYaml"
+
+            $result = Invoke-PersistMarkerWrite -Family $script:EngagementRecordFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $marker -Body $body
+
+            $result.Success | Should -Be $true
+            $result.Action | Should -Be 'posted'
+        }
+
+        It 'refuses a malformed candidate (invalid decision_id slug), naming it, without issuing any gh calls' {
+            $marker = $script:EngagementRecordFamily.MarkerTemplate -replace '\{phase\}', 'plan' -replace '\{ID\}', "$script:IssueNumber"
+            $body = "$marker`n`n$script:EngagementRecordInvalidYaml"
+
+            $result = Invoke-PersistMarkerWrite -Family $script:EngagementRecordFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $marker -Body $body
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match 'Not_A_Valid_Slug'
+            $script:ghCallLog.Count | Should -Be 0
+        }
+
+        It 'fails closed (refuses) when Read-EngagementRecords is not in scope (adapter infrastructure failure)' {
+            Remove-Item Function:Read-EngagementRecords -ErrorAction SilentlyContinue
+
+            $marker = $script:EngagementRecordFamily.MarkerTemplate -replace '\{phase\}', 'plan' -replace '\{ID\}', "$script:IssueNumber"
+            $body = "$marker`n`n$script:EngagementRecordValidYaml"
+
+            $result = Invoke-PersistMarkerWrite -Family $script:EngagementRecordFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $marker -Body $body
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '(?i)infrastructure failure'
+            $script:ghCallLog.Count | Should -Be 0
+        }
+    }
+
+    Context 'review-dispositions validator adapter' {
+        It 'passes a well-formed candidate through to the write' {
+            $marker = $script:ReviewDispositionsFamily.MarkerTemplate -replace '\{PR\}', "$script:PrNumber"
+            $body = "$marker`n`n$script:ReviewDispositionsValidYaml"
+
+            $result = Invoke-PersistMarkerWrite -Family $script:ReviewDispositionsFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:PrNumber -TargetSurface 'pull-request' -Marker $marker -Body $body
+
+            $result.Success | Should -Be $true
+            $result.Action | Should -Be 'posted'
+        }
+
+        It 'refuses a malformed candidate (missing disposition_rationale), naming it, without issuing any gh calls' {
+            $marker = $script:ReviewDispositionsFamily.MarkerTemplate -replace '\{PR\}', "$script:PrNumber"
+            $body = "$marker`n`n$script:ReviewDispositionsInvalidYaml"
+
+            $result = Invoke-PersistMarkerWrite -Family $script:ReviewDispositionsFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:PrNumber -TargetSurface 'pull-request' -Marker $marker -Body $body
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '(?i)disposition_rationale'
+            $script:ghCallLog.Count | Should -Be 0
+        }
+
+        It 'fails closed (refuses) when the validator script cannot be found (adapter infrastructure failure)' {
+            $originalPath = $script:ReviewDispositionsValidatorScriptPath
+            $script:ReviewDispositionsValidatorScriptPath = Join-Path $PSScriptRoot 'does-not-exist-review-dispositions-validator-core.ps1'
+            try {
+                $marker = $script:ReviewDispositionsFamily.MarkerTemplate -replace '\{PR\}', "$script:PrNumber"
+                $body = "$marker`n`n$script:ReviewDispositionsValidYaml"
+
+                $result = Invoke-PersistMarkerWrite -Family $script:ReviewDispositionsFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:PrNumber -TargetSurface 'pull-request' -Marker $marker -Body $body
+
+                $result.Success | Should -Be $false
+                $result.Reason | Should -Match '(?i)infrastructure failure'
+                $script:ghCallLog.Count | Should -Be 0
+            }
+            finally {
+                $script:ReviewDispositionsValidatorScriptPath = $originalPath
+            }
+        }
+    }
+
+    Context 'credit-input validator adapter (in-core)' {
+        It 'passes a well-formed candidate through to the write' {
+            $marker = $script:CreditInputFamily.MarkerTemplate -replace '\{port\}', 'plan' -replace '\{ID\}', "$script:IssueNumber"
+            $body = "$marker`n`n$script:CreditInputValidYaml"
+
+            $result = Invoke-PersistMarkerWrite -Family $script:CreditInputFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $marker -Body $body
+
+            $result.Success | Should -Be $true
+            $result.Action | Should -Be 'posted'
+        }
+
+        It 'refuses a candidate with an invalid port, without issuing any gh calls' {
+            $marker = $script:CreditInputFamily.MarkerTemplate -replace '\{port\}', 'plan' -replace '\{ID\}', "$script:IssueNumber"
+            $body = "$marker`n`n$script:CreditInputInvalidPortYaml"
+
+            $result = Invoke-PersistMarkerWrite -Family $script:CreditInputFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $marker -Body $body
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '(?i)invalid port'
+            $script:ghCallLog.Count | Should -Be 0
+        }
+
+        It 'refuses a candidate whose evidence field is a nested mapping, without issuing any gh calls' {
+            $marker = $script:CreditInputFamily.MarkerTemplate -replace '\{port\}', 'plan' -replace '\{ID\}', "$script:IssueNumber"
+            $body = "$marker`n`n$script:CreditInputNestedEvidenceYaml"
+
+            $result = Invoke-PersistMarkerWrite -Family $script:CreditInputFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $marker -Body $body
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '(?i)nested mapping'
+            $script:ghCallLog.Count | Should -Be 0
+        }
+    }
+
+    Context 'sentinel-empty validator adapter' {
+        It 'passes a marker-only candidate through to the write' {
+            $marker = $script:SentinelFamily.MarkerTemplate -replace '\{PR\}', "$script:PrNumber"
+
+            $result = Invoke-PersistMarkerWrite -Family $script:SentinelFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:PrNumber -TargetSurface 'pull-request' -Marker $marker -Body $marker
+
+            $result.Success | Should -Be $true
+            $result.Action | Should -Be 'posted'
+        }
+
+        It 'refuses a candidate carrying extra content beyond the marker, without issuing any gh calls' {
+            $marker = $script:SentinelFamily.MarkerTemplate -replace '\{PR\}', "$script:PrNumber"
+            $body = "$marker`n`nUnexpected extra content."
+
+            $result = Invoke-PersistMarkerWrite -Family $script:SentinelFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:PrNumber -TargetSurface 'pull-request' -Marker $marker -Body $body
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '(?i)empty.*marker-only|marker-only.*payload'
             $script:ghCallLog.Count | Should -Be 0
         }
     }
