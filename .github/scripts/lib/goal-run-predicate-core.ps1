@@ -122,8 +122,9 @@ function Invoke-GoalRunPredicateEvaluate {
     # heartbeat refresh happened at post-loop chain-stage boundaries -- so a
     # genuinely live multi-hour in-loop run crossed the 60-minute stale
     # threshold and Test-GoalRunInflightAppearsDead misclassified it dead,
-    # letting triage-dead-run offer a resume that relaunched the still-running
-    # vendor loop. Refreshing heartbeat_at here keeps a live loop seen as live.
+    # letting adopt-and-resume offer a resume that relaunched the
+    # still-running vendor loop. Refreshing heartbeat_at here keeps a live
+    # loop seen as live.
     # Best-effort: a heartbeat-write failure (e.g. a not-yet-written state file
     # on the very first iteration) must NEVER change the predicate verdict, so
     # it is caught and recorded without affecting the disposition below.

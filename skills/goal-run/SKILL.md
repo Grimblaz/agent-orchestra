@@ -28,23 +28,24 @@ A goal-run invocation must survive a crash or a second concurrent launch attempt
 
 ## Stage-Machine Contract
 
-The stage-machine's top-level vocabulary is a fixed four-value sequence (`$script:GoalRunStageOrder` in [goal-run-stage-core.ps1](../../.github/scripts/lib/goal-run-stage-core.ps1)):
+The stage-machine's WRITTEN marker vocabulary — the value actually persisted to the `goal-run-stage-{Issue}` comment — is a fixed four-value sequence (`$script:GoalRunStageOrder` in [goal-run-stage-core.ps1](../../.github/scripts/lib/goal-run-stage-core.ps1)):
 
 `pre-loop -> loop-launched -> loop-released -> chain-dispatched`
 
 `pre-loop` is the implicit starting state — no marker is ever posted for it on its own, and (M17 fix) the stage-marker writer's own `ValidateSet` excludes it, reconciling it against the reader's `ExplicitStageMarker` `ValidateSet` (`Resolve-GoalRunResumeStage`), which never accepted it either. A single `<!-- goal-run-stage-{issue} -->` issue comment is upserted in place (never appended-to) and always reflects the latest completed stage. This is deliberately the coarse top-level enum a resumed invocation switches on; finer-grained per-attempt history (why a run deviated, what it checkpointed) lives in the typed run log and the mutex marker, not here. Since the M10 fix, this marker also carries the provisioned worktree path (`-WorktreePath` on `Set-GoalRunStageMarker`), so a resuming invocation reads it directly off the marker instead of an undefined "most recent worktree" filesystem search.
 
-`Resolve-GoalRunResumeStage` decides where a resumed invocation re-enters, in this precedence (highest wins):
+`Resolve-GoalRunResumeStage`'s returned `.ResumeStage` vocabulary is a superset of the four written values above: it adds a fifth, resolver-only value, `loop-interrupted`, that is never itself written to the stage marker — the function derives it purely from the durable signals below when an earlier session's `loop-launched` marker never reached `loop-released`. `Resolve-GoalRunResumeStage` decides where a resumed invocation re-enters, in this precedence (highest wins):
 
 1. Contract hash not verified against the launch-pinned value -> `blocked` (not a stage to execute — report and stop; the contract needs plan-side remediation).
 2. Terminal emissions already verified on a known PR -> `complete` (nothing left to do).
-3. An explicit stage marker is present -> resume from the stage it names.
-4. No explicit marker, but the typed run log has a `checkpoint`/`deviation`/`experience-observation` entry -> the loop ran even without an explicit marker write (e.g. a crash between launch and the next marker).
-5. `goal-run-active.json` exists but no run-log evidence -> the worktree was provisioned but the loop was never launched.
-6. A mutex marker exists but nothing else -> crash mid `pre-loop`.
-7. Nothing present -> fresh launch.
+3. Explicit stage marker is `chain-dispatched` or `loop-released` -> resume at `chain-dispatched` (the loop already released; only the chain remains).
+4. Explicit stage marker is `loop-launched` -> resolve to `loop-interrupted`, not literally `loop-launched`: a prior session launched the vendor loop and this resuming session has no live transcript to read a release verdict from, so the loop's true outcome must be reconstructed from durable state (see `agents/Goal-Run.agent.md`'s `### loop-interrupted (resume without a transcript)` section).
+5. No explicit marker, but the typed run log has a `checkpoint`/`deviation`/`experience-observation` entry -> also `loop-interrupted`, for the same reason — the loop ran even though no explicit marker was ever written (e.g. a crash between launch and the next marker).
+6. `goal-run-active.json` exists but no run-log evidence -> `loop-launched` — the worktree was provisioned but the loop itself was never launched.
+7. A mutex marker exists but nothing else -> `pre-loop` (crash mid `pre-loop`).
+8. Nothing present -> `pre-loop` (fresh launch).
 
-`blocked` and `complete` are terminal reports, not stages a resumer executes.
+`blocked` and `complete` are terminal reports, not stages a resumer executes — report and stop. `loop-interrupted`, unlike those two, IS a stage a resumer executes: its stage-machine section re-validates the committed worktree state directly, then either discovers the interrupted loop's work was already satisfied, relaunches the loop in the same worktree if it is genuinely dead, or reports a still-live run under a different session — it never just reports and stops.
 
 ## Halt Model And Precedence
 

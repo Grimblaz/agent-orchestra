@@ -1033,7 +1033,9 @@ function Resolve-GoalRunInvocationAction {
           (iv)  -AppearsDead is $true AND -TerminalOutcomePresent is $true
                 -> 'resolve-and-report-complete'.
           (v)   -AppearsDead is $true, no terminal outcome ->
-                'adopt-and-resume' (triage-dead-run retired).
+                'adopt-and-resume' -- the sole action once staleness is
+                confirmed with nothing terminal recorded; there is no
+                separate report-only dead-run outcome anymore.
     .OUTPUTS
         [pscustomobject]@{ Action; Reason }
         Action is one of: 'launch-new' | 'refuse-resume-existing' |

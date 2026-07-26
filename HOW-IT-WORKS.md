@@ -84,7 +84,7 @@ flowchart LR
 
 ### The resume story
 
-Re-entering `/goal-run {issue}` on an in-flight run first checks for an unresolved `goal-run-inflight-{issue}` marker. If one exists and the run still looks alive, the harness refuses to launch a duplicate and reports what is already in flight; if the marker looks dead (no recent heartbeat, no halt report, no PR), it offers to resume or hand off to manual triage rather than silently launching a second run.
+Re-entering `/goal-run {issue}` on an in-flight run first checks for an unresolved `goal-run-inflight-{issue}` marker. If one exists and the heartbeat still looks fresh, the harness refuses to launch a duplicate (`refuse-resume-existing`) and reports what is already in flight. If the marker looks dead (no recent heartbeat) and a terminal outcome — a halt report or a PR — already exists, the run genuinely finished, so the harness resolves that marker and reports the outcome (`resolve-and-report-complete`) instead of launching anything. Otherwise — the marker looks dead with no terminal outcome yet, or the operator explicitly passed the `adopt` lever (`/goal-run {issue} adopt`) — the harness adopts the marker and resumes the run in place (`adopt-and-resume`) rather than leaving it stranded.
 
 Once it is clear no run is already live, the harness resolves exactly where to resume by checking a fixed precedence of signals — highest-precedence check first:
 
@@ -95,9 +95,11 @@ flowchart TD
     R1 -- yes --> R2{Terminal emissions already verified on a known PR?}
     R2 -- yes --> RC["complete -- nothing left to do"]
     R2 -- no --> R3{Explicit stage marker present?}
-    R3 -- yes --> RS["Resume from the named stage"]
+    R3 -- yes --> R3a{Marker names loop-launched?}
+    R3a -- yes --> RS4["loop-interrupted -- resume without a transcript<br/>(reconstruct the interrupted loop's outcome from durable state)"]
+    R3a -- no --> RS["Resume at chain-dispatched<br/>(marker names loop-released or chain-dispatched)"]
     R3 -- no --> R4{Run log has a checkpoint/deviation entry?}
-    R4 -- yes --> RS
+    R4 -- yes --> RS4
     R4 -- no --> R5{goal-run-active.json exists?}
     R5 -- yes --> RS2["Resume at loop-launched<br/>(worktree provisioned, loop never launched)"]
     R5 -- no --> R6{Mutex marker exists?}
@@ -105,11 +107,11 @@ flowchart TD
     R6 -- no --> RF["Fresh launch"]
 ```
 
-`blocked` and `complete` are reports, not stages the resumer executes — a `blocked` contract needs plan-side remediation (typically a `/plan` re-approval) before any resume can proceed, and `complete` means the run already produced a verified, correctly-classed PR.
+`blocked` and `complete` are reports, not stages the resumer executes — a `blocked` contract needs plan-side remediation (typically a `/plan` re-approval) before any resume can proceed, and `complete` means the run already produced a verified, correctly-classed PR. `loop-interrupted`, unlike those two, is a stage the resumer actually runs — it re-validates the committed worktree state and either discovers the work was already done, relaunches the loop in the same worktree, or reports a still-live run under a different session.
 
 ### Reading a halt report
 
-Every in-run non-happy path in goal-run ends the same way: once the run is launched, a stage or chain halt always produces exactly one typed `<!-- goal-halt-report-{issue} -->` comment with one of five `halt_reason` values. When more than one condition is true at once, this precedence decides the reported reason (highest wins): `invariant-conflict > unachievable-target > gate-input-needed > budget-exhausted > chain-stage-failure`. (The two pre-launch outcomes are the exception: `refuse-resume-existing` and `triage-dead-run` fire before a run is launched and produce plain-text refusal/triage reporting, not a typed halt-report comment.)
+Every in-run non-happy path in goal-run ends the same way: once the run is launched, a stage or chain halt always produces exactly one typed `<!-- goal-halt-report-{issue} -->` comment with one of five `halt_reason` values. When more than one condition is true at once, this precedence decides the reported reason (highest wins): `invariant-conflict > unachievable-target > gate-input-needed > budget-exhausted > chain-stage-failure`. (The pre-launch actions are the exception: `refuse-resume-existing`, `adopt-and-resume`, and `resolve-and-report-complete` are decided before a run is (re-)launched and produce plain-text reporting — or, for `adopt-and-resume`, an adopted marker plus a resumed run — not a typed halt-report comment.)
 
 | `halt_reason` | Plain language | Typically triggered by | Who acts next |
 | --- | --- | --- | --- |

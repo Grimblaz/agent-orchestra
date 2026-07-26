@@ -712,7 +712,7 @@ Describe 'Resolve-GoalRunInvocationAction' -Tag 'unit' {
         $result.Action | Should -Be 'refuse-resume-existing'
     }
 
-    It '#912 D2/D3: adopts and resumes when an unresolved marker exists, appears dead, and no terminal outcome is present (triage-dead-run retired)' {
+    It '#912 D2/D3: adopts and resumes when an unresolved marker exists, appears dead, and no terminal outcome is present (sole action, no separate report-only dead-run outcome)' {
         $marker = [pscustomobject]@{ CommentId = 100 }
         $result = Resolve-GoalRunInvocationAction -ExistingUnresolvedMarker $marker -AppearsDead $true
         $result.Action | Should -Be 'adopt-and-resume'
