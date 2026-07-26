@@ -47,7 +47,7 @@ Build handshakes from [../../subagent-env-handshake/SKILL.md](../../subagent-env
 
 Select prosecution shape from the adapter contract.
 
-- `standard`: emit `Dispatching prosecution panel (5-pass, 2 generalist + 3 specialist)...`, then dispatch five Code-Critic prosecution passes in one parallel tool-use block with `subagent_type: code-critic`. Prepend the per-pass handshake block, then the authoritative selector `Review mode selector: "Use code review perspectives"`, then the resolved review target context. Keep selector text outside quoted or carried material. Apply the role→tier map at Agent-tool call time (not in the Code-Critic shell — the shell stays `model: opus`):
+- `standard`: emit `Dispatching prosecution panel (5-pass, 2 generalist + 3 specialist)...`, then dispatch five Code-Critic prosecution passes in one parallel tool-use block with `subagent_type: code-critic`. Prepend the per-pass handshake block, then the authoritative selector `Review mode selector: "Use code review perspectives"`, then the resolved review target context. Keep selector text outside quoted or carried material. Apply the role→tier map at Agent-tool call time (not in the Code-Critic shell — the shell stays `model: opus`, which alias-resolves to `claude-opus-5` per `Documents/Design/agent-body-architecture.md` § Per-agent model + reasoning routing):
   - Pass 1 — **generalist-A**: full 6-perspective sweep; set `model: sonnet` on the Agent tool call
   - Pass 2 — **generalist-B**: full 6-perspective sweep; set `model: fable` on the Agent tool call
   - Pass 3 — **spec-correctness specialist**: edge cases, boundary violations, logic errors; set `model: opus` on the Agent tool call

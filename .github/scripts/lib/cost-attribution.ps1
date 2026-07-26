@@ -555,6 +555,43 @@ function Add-NullCostEventReason {
     }
 }
 
+function Test-SyntheticZeroUsageEvent {
+    <#
+    .SYNOPSIS
+        Returns $true when an event is Claude Code's zero-usage '<synthetic>' marker
+        rather than a real, unresolvable model.
+    .DESCRIPTION
+        Issue #487 (post-render fix): '<synthetic>' is the marker Claude Code puts in
+        message.model for assistant messages it injects itself — API-error notices,
+        "No response requested." status lines, model-unavailable notices. It is not a
+        model, it has no rate, and it can never resolve against the rate table. Every
+        such event carries all-zero usage, so the true cost contribution is exactly
+        0.00 rather than unknown.
+
+        The guard is deliberately narrow on both axes. Exact literal only, with no
+        angle-bracket heuristic: a bracketed string is not inherently a non-model, and
+        a broader rule could silently suppress a real unknown model. All-zero usage is
+        required too, so if a future Claude Code release ever emits this marker with
+        real tokens, the event still surfaces loudly through the normal unknown-model
+        path instead of silently dropping real cost.
+
+        Shared by both callers that need this exact carve-out: the bucket-level
+        Add-CostToBucket guard (issue #487) and the totals-level unknown-model branch
+        in Get-CostAttribution (issue #905). Their surrounding null semantics
+        intentionally differ after issue #905 (bucket-level stays conditional/erasable;
+        totals-level is a one-way latch) — only this shared predicate is common.
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [AllowNull()][string]$Model,
+        [Parameter(Mandatory)][hashtable]$Usage
+    )
+
+    return ($Model -eq '<synthetic>' -and
+        0 -eq ($Usage['input'] + $Usage['output'] + $Usage['cache_creation'] + $Usage['cache_read']))
+}
+
 function Add-CostToBucket {
     <#
     .SYNOPSIS
@@ -580,28 +617,15 @@ function Add-CostToBucket {
         return
     }
 
-    # Issue #487 (post-render fix): '<synthetic>' is the marker Claude Code puts in
-    # message.model for assistant messages it injects itself — API-error notices,
-    # "No response requested." status lines, model-unavailable notices. It is not a
-    # model, it has no rate, and it can never resolve against the rate table. Every
-    # such event carries all-zero usage, so the true cost contribution is exactly
-    # 0.00 rather than unknown.
-    #
-    # Without this guard the marker fell through to the unknown_key branch below,
-    # which did two dishonest things: it told maintainers to add a
-    # cost-rate-table.json row for a non-model (a false-actionable instruction that
-    # can never resolve), and via Add-NullCostEventToBucket it rewrote a
+    # Issue #487 (post-render fix): without this guard the marker fell through to the
+    # unknown_key branch below, which did two dishonest things: it told maintainers to
+    # add a cost-rate-table.json row for a non-model (a false-actionable instruction
+    # that can never resolve), and via Add-NullCostEventToBucket it rewrote a
     # genuinely-0.00 bucket cost to $null. Both are the misleading-null class that
-    # issue #487 exists to eliminate, so the event is not counted as a null-cost
-    # event at all: a synthetic marker is not an unknown model at any layer.
-    #
-    # The guard is deliberately narrow on both axes. Exact literal only, with no
-    # angle-bracket heuristic: a bracketed string is not inherently a non-model, and
-    # a broader rule could silently suppress a real unknown model. All-zero usage is
-    # required too, so if a future Claude Code release ever emits this marker with
-    # real tokens, the event still surfaces loudly through the normal unknown-model
-    # path instead of silently dropping real cost.
-    if ($Model -eq '<synthetic>' -and 0 -eq ($Usage['input'] + $Usage['output'] + $Usage['cache_creation'] + $Usage['cache_read'])) {
+    # issue #487 exists to eliminate, so the event is not counted as a null-cost event
+    # at all: a synthetic marker is not an unknown model at any layer. See
+    # Test-SyntheticZeroUsageEvent for the full carve-out reasoning.
+    if (Test-SyntheticZeroUsageEvent -Model $Model -Usage $Usage) {
         return
     }
 
@@ -626,21 +650,48 @@ function Add-CostToBucket {
 }
 
 function Test-CostContributionRateUnavailable {
+    <#
+    .SYNOPSIS
+        Encodes the 3-way rate-resolution decision (empty/null model; lookup key absent from
+        the rate table; lookup key present but rates resolve to null) as a single [bool].
+    .DESCRIPTION
+        The primary [bool] contract is unchanged for the existing caller (Add-ProviderContributionToPortBucket),
+        which calls this with no optional parameters. The optional -ReasonCode and -ResolvedCostEstimate
+        [ref] parameters (issue #905 fix M17) let a second caller (the Get-CostAttribution totals block)
+        extract the same 3-way decision without duplicating the ContainsKey/rate-resolution logic inline,
+        while still being able to tell 'empty_model' / 'unknown_key' / 'rate_unavailable' apart for its
+        own differential (latching vs non-latching) handling.
+    #>
     [CmdletBinding()]
     [OutputType([bool])]
     param(
         [Parameter(Mandatory)][hashtable]$Usage,
         [AllowNull()][string]$Model,
         [string]$Provider = 'claude',
-        [Parameter(Mandatory)][hashtable]$RatesByProviderModel
+        [Parameter(Mandatory)][hashtable]$RatesByProviderModel,
+        [ref]$ReasonCode,
+        [ref]$ResolvedCostEstimate
     )
 
-    if ($null -eq $Model -or [string]::IsNullOrWhiteSpace($Model)) { return $true }
+    if ($null -eq $Model -or [string]::IsNullOrWhiteSpace($Model)) {
+        if ($null -ne $ReasonCode) { $ReasonCode.Value = 'empty_model' }
+        return $true
+    }
 
     $lookupKey = Get-CostRateLookupKey -Provider $Provider -Model $Model
-    if (-not $RatesByProviderModel.ContainsKey($lookupKey)) { return $true }
+    if (-not $RatesByProviderModel.ContainsKey($lookupKey)) {
+        if ($null -ne $ReasonCode) { $ReasonCode.Value = 'unknown_key' }
+        return $true
+    }
 
-    return ($null -eq (Get-CostEstimateFromUsage -Usage $Usage -Rates $RatesByProviderModel[$lookupKey]))
+    $costEstimate = Get-CostEstimateFromUsage -Usage $Usage -Rates $RatesByProviderModel[$lookupKey]
+    if ($null -eq $costEstimate) {
+        if ($null -ne $ReasonCode) { $ReasonCode.Value = 'rate_unavailable' }
+        return $true
+    }
+
+    if ($null -ne $ResolvedCostEstimate) { $ResolvedCostEstimate.Value = $costEstimate }
+    return $false
 }
 
 function Add-ProviderContributionToPortBucket {
@@ -836,6 +887,10 @@ function Get-CostAttribution {
         tokens            = @{ input = 0; output = 0; cache_creation = 0; cache_read = 0 }
         cost_estimate_usd = 0.0
     }
+    # One-way latch for the totals-level unresolvable-cost decision (issue #905). Function-local
+    # rather than a $totals key because it is read/written only within this function's own loop
+    # and was never part of the documented Get-CostAttribution return contract (see #905 fix M1).
+    $costLatchedNull = $false
     $costAttributionWarnings = [System.Collections.Generic.List[string]]::new()
     $nullCostEventTracker = @{
         UnknownModels       = [System.Collections.Generic.HashSet[string]]::new()
@@ -1042,17 +1097,41 @@ function Get-CostAttribution {
         # Accumulate into totals regardless of bucket
         Add-TokensToAccumulator -Accumulator $totals['tokens'] -Usage $usage
         if ($null -ne $model -and -not [string]::IsNullOrWhiteSpace($model)) {
-            $lookupKey = Get-CostRateLookupKey -Provider $provider -Model $model
-            if ($ratesByProviderModel.ContainsKey($lookupKey)) {
-                $rates = $ratesByProviderModel[$lookupKey]
-                $costEstimate = Get-CostEstimateFromUsage -Usage $usage -Rates $rates
-                if ($null -eq $costEstimate) {
+            # issue #905 fix M17: the ContainsKey/rate-resolution decision itself is delegated to
+            # Test-CostContributionRateUnavailable (the same 3-way decision Add-CostToBucket uses)
+            # instead of being re-implemented inline. -ReasonCode distinguishes 'unknown_key' from
+            # 'rate_unavailable' so the differential latch behavior below is preserved exactly;
+            # -ResolvedCostEstimate carries the already-computed cost out on the available path so
+            # the rate lookup is not repeated.
+            $reasonCode = $null
+            $resolvedCostEstimate = $null
+            $rateUnavailable = Test-CostContributionRateUnavailable -Usage $usage -Model $model -Provider $provider -RatesByProviderModel $ratesByProviderModel -ReasonCode ([ref]$reasonCode) -ResolvedCostEstimate ([ref]$resolvedCostEstimate)
+
+            if ($rateUnavailable) {
+                if ($reasonCode -eq 'unknown_key') {
+                    # issue #905: unknown model/provider key — no rate-table row exists at all.
+                    # Mirror the '<synthetic>' zero-usage carve-out from Add-CostToBucket via the
+                    # shared Test-SyntheticZeroUsageEvent predicate: a zero-usage synthetic marker
+                    # still totals a real 0.00, never null. Any other unresolvable model latches the
+                    # run total to null permanently — a one-way latch, since a later priced event
+                    # must not silently paper over an earlier unknown-cost event (or vice versa).
+                    $isSyntheticZeroUsage = Test-SyntheticZeroUsageEvent -Model $model -Usage $usage
+                    if (-not $isSyntheticZeroUsage) {
+                        $costLatchedNull = $true
+                        $totals['cost_estimate_usd'] = $null
+                    }
+                }
+                elseif ($reasonCode -eq 'rate_unavailable') {
+                    # rate-table row exists but rates resolve to null (e.g. every copilot-* row).
+                    # Deliberately non-latching: unlike unknown_key, this must not permanently null
+                    # a later priced event's contribution.
                     if ($totals['cost_estimate_usd'] -eq 0.0) { $totals['cost_estimate_usd'] = $null }
                 }
-                else {
-                    if ($null -eq $totals['cost_estimate_usd']) { $totals['cost_estimate_usd'] = 0.0 }
-                    $totals['cost_estimate_usd'] += $costEstimate
-                }
+                # 'empty_model' is unreachable here — the outer if-guard above already excludes it.
+            }
+            elseif (-not $costLatchedNull) {
+                if ($null -eq $totals['cost_estimate_usd']) { $totals['cost_estimate_usd'] = 0.0 }
+                $totals['cost_estimate_usd'] += $resolvedCostEstimate
             }
         }
     }

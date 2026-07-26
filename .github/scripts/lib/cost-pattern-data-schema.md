@@ -92,7 +92,7 @@ Object. Sum across all ports and orchestrator overhead.
 | `tokens.output` | integer | Total output tokens for the session. |
 | `tokens.cache_creation` | integer | Total cache-creation tokens for the session. |
 | `tokens.cache_read` | integer | Total cache-read tokens for the session. |
-| `cost_estimate_usd` | number | Total estimated cost in USD for the session. |
+| `cost_estimate_usd` | number \| null | Total estimated cost in USD for the session. Already nullable pre-#905 for an all-unpriced-Copilot session; post-#905 an unrecognized-model event one-way-latches this field to `null` for the rest of the session even when other, priced events still contribute non-null numbers to their own port buckets — see `cost-rate-table.md` § Update procedure. Distinct from this latched-null state: an event with no model identifier at all is silently excluded from this field's accumulation (pre-existing, unchanged by #905) without nulling it, so a non-null total is not an unconditional guarantee of completeness — it can still be understated by that event's real cost. |
 
 ## `anomaly_flags[]` — Anomaly Detection Results
 

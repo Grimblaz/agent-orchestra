@@ -7,7 +7,36 @@ when copy-pasting a new row.
 ## Update procedure
 
 When a PR's Cost Pattern block shows a null or `—` USD cell, or the rendered null-event
-Note names an unknown model, use this flow:
+Note names an unknown model, use this flow. One entry condition worth recognizing on
+sight (issue #905): the **total** row can show `—` while individual **per-port** rows
+still show real numbers. This happens when one event in the session carries an
+unrecognized model — the totals rollup one-way-latches `totals.cost_estimate_usd` to
+null the moment it sees that event — while other, priced events in the same session
+still contribute non-null numbers to their own port buckets. A blank total next to
+populated port rows is not a rendering bug; it means **at least one** unresolvable
+model showed up somewhere in the session — the latch fires on the first such event and
+stays latched, so a session with two or more unresolvable models produces the identical
+blank total as a session with exactly one. And port rows still show numbers — but the
+port that contained the unresolved-model event is itself understated by that event's
+cost, so summing the port column does not recover the true total: `Add-NullCostEventToBucket`
+(`cost-attribution.ps1:470`) only nulls a port bucket if it is still exactly `0.0` at the
+moment the unresolved event lands; a bucket that already accumulated priced cost keeps
+that prior (now understated) number instead of going null. Concretely, a port with a
+priced event ($5.0175 real) followed by one unresolved-model event on 500k+ tokens still
+shows `$0.0175` — a ~287x understatement — with no visual signal that it's wrong.
+
+When `totals.cost_estimate_usd` latches to null, the run also drops out of downstream
+cost tracking with no explicit flag: `cost-baseline-harvest.ps1:632` skips any entry whose
+`totals.cost_estimate_usd` is null when building the rolling baseline sample, so the PR is
+silently evicted from the rolling baseline rather than recorded at $0; and
+`cost-anomaly.ps1:351` skips the total-cost metric for that run the same way, with no
+"could not evaluate" record. Below three baseline samples, the median comparison silently
+disappears from the PR body. Per maintainer disposition, this is accepted as a documented
+limitation rather than a code fix in this round: the schema's `excluded_from_rolling_baseline`
+field does **not** currently reflect this specific exclusion reason — it is computed from
+session-completeness signals only, unrelated to cost-attribution — so a latched-null PR may
+show `excluded_from_rolling_baseline: false` while still being dropped from the baseline
+sample. Wiring that field to also reflect a null-cost exclusion is out of scope here.
 
 1. Open the PR's Cost Pattern Note. When the walker cannot price an event, the Note names
    the exact model(s) responsible (sanitized for safe display), provider-qualified — for example
@@ -15,9 +44,9 @@ Note names an unknown model, use this flow:
 2. **The printed `{provider}/{model}` string is NOT the JSON key to use.** The lookup key
    the walker actually builds at runtime is `(provider, model)`, resolved from each rate
    entry's `provider` field (defaults to `claude` when absent) and `model` field (defaults
-   to the JSON key itself when absent) — see `New-CostRateTableEntry` and
-   `Get-CostRateLookupKey` (`cost-attribution.ps1:256-288`). Which JSON shape to add depends
-   on the printed provider:
+   to the JSON key itself when absent) — see `Get-CostRateLookupKey`
+   (`cost-attribution.ps1:295`) and `New-CostRateTableEntry` (`cost-attribution.ps1:306`).
+   Which JSON shape to add depends on the printed provider:
    - **`claude/{model}`** (the common case): key the new row by the **bare model name only**
      — drop the `claude/` prefix. Do not add explicit `model`/`provider` fields; both default
      correctly (`provider` -> `claude`, `model` -> the JSON key). Compare the existing
@@ -76,6 +105,26 @@ If you are reconciling this table against an actual invoice before 2026-08-31, b
 introductory discount exists — invoiced amounts may run lower than this table's estimate
 until the discount expires.
 
+**Fast-mode falsifier** (same falsifier class as the cache-write TTL note above): Opus 5
+fast mode bills at $10.00 / $50.00 input/output per MTok — double the $5.00 / $25.00
+standard rate documented for `claude-opus-5` in this table — under the **same** model
+string. The vendor's fast-mode table lists Claude Opus 5 and Claude Opus 4.8 together at
+this same $10/$50 rate, so `claude-opus-4-8` (identical $5.00/$25.00/$10.00/$0.50 standard
+rates in this table) carries the identical exposure and is named alongside `claude-opus-5`
+here. The vendor source also states caching multipliers apply on top of fast-mode pricing,
+not in place of it: under fast mode, `cache_creation_per_mtok` is $20.00 (not $10.00) and
+`cache_read_per_mtok` is $1.00 (not $0.50) for both models — both also exactly 2x their
+standard-rate value. This matters more than the input/output columns suggest: this repo's
+own reference fixture (the `#813`-shaped fixture in `cost-attribution.Tests.ps1`) is
+cache-read-dominated (tens of thousands of cache-read tokens against ~200 input tokens), so
+for a session shaped like that fixture, the un-quantified cache columns are where nearly all
+real spend actually lives. This table has no fast-mode-vs-standard distinction, so a session
+that ran in fast mode prices at roughly half its actual billed rate with no signal that the
+discount (or in this case, the premium) applied. If fast mode becomes a meaningful share of
+usage, split the schema the same way the TTL falsifier proposes: add a fast-mode rate
+variant and have the walker read which mode applied from the usage event, rather than
+pricing every `claude-opus-5` / `claude-opus-4-8` event at the standard rate.
+
 ## Provider-extension procedure
 
 The rate-table *schema* is already provider-aware: any rate entry may carry a `provider`
@@ -98,7 +147,7 @@ entries:
 ```
 
 Adding the rate row alone is not enough to make that provider's events actually resolve,
-though. `Get-EventProvider` (`cost-attribution.ps1:253-272`) only accepts providers listed in
+though. `Get-EventProvider` (`cost-attribution.ps1:219`) only accepts providers listed in
 `$script:CostAttributionKnownEventProviders` (currently `@('claude', 'copilot')`, defined at
 `cost-attribution.ps1:54`); an event whose provider is not on that allowlist falls through to
 the `claude` default before the `(provider, model)` lookup ever runs, so a rate row for an

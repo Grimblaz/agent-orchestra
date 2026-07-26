@@ -1,8 +1,8 @@
 {
   "version": "1",
-  "rates_as_of": "2026-07-14",
-  "rate_source_url": "https://www.anthropic.com/pricing#api",
-  "source_citation": "https://www.anthropic.com/pricing#api",
+  "rates_as_of": "2026-07-25",
+  "rate_source_url": "https://platform.claude.com/docs/en/docs/about-claude/pricing",
+  "source_citation": "https://platform.claude.com/docs/en/docs/about-claude/pricing",
   "fallback_behavior": "warn-and-null",
   "rates": {
     "claude-opus-4-7": {
@@ -12,6 +12,12 @@
       "cache_read_per_mtok": 0.50
     },
     "claude-opus-4-8": {
+      "input_per_mtok": 5.00,
+      "output_per_mtok": 25.00,
+      "cache_creation_per_mtok": 10.00,
+      "cache_read_per_mtok": 0.50
+    },
+    "claude-opus-5": {
       "input_per_mtok": 5.00,
       "output_per_mtok": 25.00,
       "cache_creation_per_mtok": 10.00,
