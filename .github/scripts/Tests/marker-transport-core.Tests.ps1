@@ -70,11 +70,12 @@ Describe 'marker-transport-core' {
             }
 
             # POST: gh issue comment <N> --body <text> -R <owner>/<repo>
-            if ($joined -match '^(issue|pr) comment \d+ --body') {
+            if ($joined -match '^(issue|pr) comment \d+ --body-file') {
                 $newId = $script:NextCommentId
                 $script:NextCommentId++
-                $bodyIdx = [Array]::IndexOf($Args, '--body')
-                $bodyText = $Args[$bodyIdx + 1]
+                $bodyFileIdx = [Array]::IndexOf($Args, '--body-file')
+                $bodyFilePath = $Args[$bodyFileIdx + 1]
+                $bodyText = Get-Content -LiteralPath $bodyFilePath -Raw
                 Add-MockComment -Id $newId -Body $bodyText
                 $script:PostLog.Add([PSCustomObject]@{ Body = $bodyText })
                 $global:LASTEXITCODE = 0
@@ -172,6 +173,65 @@ Describe 'marker-transport-core' {
             $result = New-MarkerComment -Type issue -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -Body $script:Marker
 
             $result | Should -BeNullOrEmpty
+        }
+    }
+
+    Context 'New-MarkerComment: large-body native invocation (M2, issue #893 s11)' {
+        BeforeAll {
+            $script:SavedPath = $env:PATH
+        }
+
+        AfterAll {
+            $env:PATH = $script:SavedPath
+        }
+
+        It 'succeeds for a 50,000-char body against a REAL external gh process seam -- the Windows command-line length limit (well under 65,536, the size-cap band this defect lived in) previously crashed the native process launch uncaught when the body was passed as a raw argv element' {
+            # Real external-command seam (a .cmd batch file, genuinely
+            # spawned as a child OS process via Win32 CreateProcess) --
+            # never the `function global:gh` mock used by every other test
+            # in this file, which is an in-process function call and could
+            # never reproduce an OS command-line-length crash regardless of
+            # implementation. `.ps1`-resolved shims are ALSO unsuitable here
+            # (PowerShell dispatches a resolved .ps1 command in-process, not
+            # via CreateProcess) -- only a real external executable/batch
+            # file goes through the OS argv-length-limited process launch
+            # this defect actually lived in.
+            $mockDir = Join-Path $TestDrive 'gh-real-process-mock'
+            New-Item -ItemType Directory -Path $mockDir -Force | Out-Null
+            $callLogPath = Join-Path $mockDir 'calls.log'
+            $ghMockContent = @"
+@echo off
+echo %*>>"$callLogPath"
+echo https://github.com/mock/mock/issues/1#issuecomment-95000
+exit /b 0
+"@
+            Set-Content -LiteralPath (Join-Path $mockDir 'gh.cmd') -Value $ghMockContent -Encoding ASCII
+
+            Remove-Item Function:gh -ErrorAction SilentlyContinue
+            $env:PATH = "$mockDir$([System.IO.Path]::PathSeparator)$script:SavedPath"
+
+            $largeBody = "$script:Marker`n`n" + ('x' * 50000)
+
+            $result = $null
+            try {
+                $result = New-MarkerComment -Type issue -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -Body $largeBody
+            }
+            finally {
+                # Restore the in-process mock immediately so no later test
+                # in this Describe accidentally spawns a real process.
+                . ([scriptblock]::Create('function global:gh {}'))
+            }
+
+            $result | Should -Not -BeNullOrEmpty -Because 'a large body must succeed, not crash the native gh invocation uncaught'
+            (Test-Path -LiteralPath $callLogPath) | Should -Be $true
+
+            # Positive proof the FIX actually changed the invocation shape
+            # (never a raw --body argv element for a body this size): the
+            # logged argv line gh.cmd received must stay short (a
+            # --body-file PATH, not the 50,000-char body inline).
+            $loggedArgvLine = (Get-Content -LiteralPath $callLogPath -Raw).Trim()
+            $loggedArgvLine.Length | Should -BeLessThan 1000 -Because "the real argv gh.cmd received was: $loggedArgvLine"
+            $loggedArgvLine | Should -Match '--body-file'
         }
     }
 }

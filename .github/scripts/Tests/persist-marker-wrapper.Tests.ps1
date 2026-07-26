@@ -176,8 +176,8 @@ if ($a.Count -ge 2 -and $a[0] -eq 'api' -and ($a -contains '-X') -and ($a -conta
 }
 
 if ($a.Count -ge 4 -and ($a[0] -eq 'issue' -or $a[0] -eq 'pr') -and $a[1] -eq 'comment') {
-    $bodyIdx = [Array]::IndexOf([string[]]$a, '--body')
-    $bodyText = $a[$bodyIdx + 1]
+    $bodyFileIdx = [Array]::IndexOf([string[]]$a, '--body-file')
+    $bodyText = Get-Content -LiteralPath $a[$bodyFileIdx + 1] -Raw
     $nextId = 91000
     if (Test-Path -LiteralPath $counterPath) { $nextId = [int](Get-Content -LiteralPath $counterPath -Raw) }
     Set-Content -LiteralPath $counterPath -Value ($nextId + 1) -NoNewline
@@ -416,11 +416,12 @@ evidence: "malformed-port-fixture"
                 return (@{ html_url = "https://github.com/$script:Owner/$script:Repo/issues/$script:IssueNumber#issuecomment-$id" } | ConvertTo-Json)
             }
 
-            if ($joined -match '^(issue|pr) comment \d+ --body') {
+            if ($joined -match '^(issue|pr) comment \d+ --body-file') {
                 $newId = $script:NextCommentId
                 $script:NextCommentId++
-                $bodyIdx = [Array]::IndexOf($Args, '--body')
-                $bodyText = $Args[$bodyIdx + 1]
+                $bodyFileIdx = [Array]::IndexOf($Args, '--body-file')
+                $bodyFilePath = $Args[$bodyFileIdx + 1]
+                $bodyText = Get-Content -LiteralPath $bodyFilePath -Raw
                 Add-MockComment -Id $newId -Body $bodyText
                 $script:PostLog.Add([PSCustomObject]@{ Body = $bodyText })
                 $global:LASTEXITCODE = 0
@@ -477,7 +478,15 @@ evidence: "malformed-port-fixture"
 
     Context 'Set-CommentBodyDirect: temp-file lifetime on an abnormal-exit PATCH' {
         It 'removes its --input temp file even when the gh PATCH call itself throws mid-write' {
-            $designFamily = @(Get-MarkerFamilyRegistry | Where-Object { $_.Family -eq 'design-phase-complete' })[0]
+            # M9 (issue #893 s11): 'design-phase-complete' is now a post-new
+            # family (matching the catalog's documented append-only
+            # history), so it no longer exercises a PATCH at all -- this
+            # test's actual subject is Set-CommentBodyDirect's PATCH
+            # temp-file lifetime, which requires an UPSERT family. 'plan-issue'
+            # is the vehicle now: its write-back-preserve pre-write post-step
+            # is a genuine no-op here (a bare marker + prose body carries no
+            # frame-spine block and no ledger pointer to preserve).
+            $designFamily = @(Get-MarkerFamilyRegistry | Where-Object { $_.Family -eq 'plan-issue' })[0]
             $marker = ($designFamily.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber")
             Add-MockComment -Id 92500 -Body "$marker`n`nOriginal body."
             $script:SimulatePatchThrowIds.Add(92500) | Out-Null
@@ -492,7 +501,15 @@ evidence: "malformed-port-fixture"
         }
 
         It 'a clean retry after the abnormal-exit write succeeds normally, proving no leaked lock/state corrupts the next run' {
-            $designFamily = @(Get-MarkerFamilyRegistry | Where-Object { $_.Family -eq 'design-phase-complete' })[0]
+            # M9 (issue #893 s11): 'design-phase-complete' is now a post-new
+            # family (matching the catalog's documented append-only
+            # history), so it no longer exercises a PATCH at all -- this
+            # test's actual subject is Set-CommentBodyDirect's PATCH
+            # temp-file lifetime, which requires an UPSERT family. 'plan-issue'
+            # is the vehicle now: its write-back-preserve pre-write post-step
+            # is a genuine no-op here (a bare marker + prose body carries no
+            # frame-spine block and no ledger pointer to preserve).
+            $designFamily = @(Get-MarkerFamilyRegistry | Where-Object { $_.Family -eq 'plan-issue' })[0]
             $marker = ($designFamily.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber")
             Add-MockComment -Id 92600 -Body "$marker`n`nOriginal body."
             $script:SimulatePatchThrowIds.Add(92600) | Out-Null
@@ -647,6 +664,50 @@ Describe 'persist-marker s9 prose/contract drift guard (s7 requirement contract 
     It 'every rewritten surface still frames persist-marker.ps1 as the ONLY documented write path' {
         foreach ($p in $script:RewrittenDocs) {
             $script:RewrittenDocsText[$p] | Should -Match '(?i)ONLY documented write path' -Because "$p must preserve the 'ONLY documented write path' framing -- this is the exact claim s9 was tasked with establishing"
+        }
+    }
+
+    It 'every [persist-marker]-attributed family row in handoff-markers.md''s catalog matches the live registry''s WriteShape and TargetSurface (M9 drift guard, issue #893 s11)' {
+        # M9 (issue #893 s11): design-phase-complete's WriteShape drifted
+        # from the catalog (registry said upsert; catalog said post-new)
+        # while every OTHER existing AC13 assertion above stayed green --
+        # none of them check WriteShape/TargetSurface at all, only family
+        # NAMES and quoted params/literals. This extension closes that
+        # blind spot generically: parsed straight from the catalog's own
+        # '(family `X`, `Y`)' attribution shape, never a hardcoded
+        # family-by-family list, so a family added later with a drifted
+        # WriteShape/TargetSurface fails this test loud too.
+        $catalogPath = Join-Path $script:RepoRoot 'skills/session-memory-contract/references/handoff-markers.md'
+        $catalogText = $script:RewrittenDocsText[$catalogPath]
+
+        # Matches one catalog bullet line at a time: a marker literal ending
+        # '-{ID}' or '-{PR}' immediately before the closing '-->', tagged
+        # **[persist-marker]**, followed by '(family `name`, `write-shape`'.
+        # Every non-review-phase engagement-record row and every other
+        # persist-marker row ends its marker literal in '-{ID}'; only
+        # review-dispositions and review-judge-produced end in '-{PR}' --
+        # the review-phase engagement-record row is deliberately excluded
+        # (tagged **[hand-authored -- known v1 registry gap]**, not
+        # **[persist-marker]**), matching the registry's own documented
+        # scope gap.
+        $catalogRowPattern = '(?m)^-\s+`<!--.*?-\{(ID|PR)\}\s*-->`\s+\*\*\[persist-marker\]\*\*\s*\(family\s+`([a-z][a-z-]*)`,\s*`([a-z][a-z-]*)`'
+        $catalogRows = @([regex]::Matches($catalogText, $catalogRowPattern))
+        $catalogRows.Count | Should -BeGreaterThan 0 -Because 'at least one [persist-marker] catalog row must exist for this guard to be meaningful'
+
+        $liveRegistryByFamily = @{}
+        foreach ($row in (Get-MarkerFamilyRegistry)) { $liveRegistryByFamily[$row.Family] = $row }
+
+        foreach ($m in $catalogRows) {
+            $placeholderToken = $m.Groups[1].Value
+            $family = $m.Groups[2].Value
+            $catalogWriteShapeToken = $m.Groups[3].Value
+            $expectedWriteShape = if ($catalogWriteShapeToken -eq 'upsert-in-place') { 'upsert' } else { $catalogWriteShapeToken }
+            $expectedSurface = if ($placeholderToken -eq 'PR') { 'pull-request' } else { 'issue' }
+
+            $liveRegistryByFamily.ContainsKey($family) | Should -Be $true -Because "handoff-markers.md attributes family '$family' to persist-marker.ps1 but no live Get-MarkerFamilyRegistry row exists"
+            $liveRow = $liveRegistryByFamily[$family]
+            $liveRow.WriteShape | Should -Be $expectedWriteShape -Because "handoff-markers.md documents family '$family' as '$catalogWriteShapeToken' but the live registry declares WriteShape='$($liveRow.WriteShape)' -- this is exactly the M9 drift class (issue #893 s11)"
+            $liveRow.TargetSurface | Should -Be $expectedSurface -Because "handoff-markers.md's '$family' marker template implies TargetSurface='$expectedSurface' (from its '-{$placeholderToken}' placeholder) but the live registry declares TargetSurface='$($liveRow.TargetSurface)'"
         }
     }
 }

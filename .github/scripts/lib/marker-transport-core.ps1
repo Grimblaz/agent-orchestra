@@ -305,6 +305,20 @@ function New-MarkerComment {
         the given body, with no search and no upsert semantics (contrast
         Find-OrUpsertComment, which always lists and searches for an
         existing match first).
+    .DESCRIPTION
+        M2 fix (issue #893 s11): the body is written to a temp file and
+        passed via `--body-file`, mirroring Set-CommentBodyDirect's own
+        `--input`-tempfile approach -- never inlined as a raw `--body`
+        argv element. A body in the 32,768-65,536 char band (admitted by
+        this file's own size cap, enforced by
+        script:Test-MarkerCandidatePreflight) previously exceeded Windows'
+        ~32,767-char command-line length limit when passed as a literal
+        argv element, crashing the native process launch with an uncaught
+        exception instead of the promised refusal/fail-open contract. The
+        native invocation itself is now wrapped in try/catch so any launch
+        failure (oversized argv or otherwise) becomes the SAME fail-open
+        $null return every other failure path in this function already
+        uses, never an uncaught exception.
     .OUTPUTS
         [string] the raw POST output (an html_url on current gh versions)
         on success, or $null when the POST fails (fail-open, matching this
@@ -317,8 +331,29 @@ function New-MarkerComment {
         [Parameter(Mandatory)][int]$Number,
         [Parameter(Mandatory)][string]$Body
     )
-    $postArgs = @($Type, 'comment', $Number, '--body', $Body, '-R', "$Owner/$Repo")
-    $postOutput = & gh @postArgs 2>$null
+    $bodyTempFile = $null
+    $postOutput = $null
+    $launchFailed = $false
+    try {
+        $bodyTempFile = [System.IO.Path]::GetTempFileName()
+        Set-Content -LiteralPath $bodyTempFile -Value $Body -Encoding UTF8 -NoNewline
+        $postArgs = @($Type, 'comment', $Number, '--body-file', $bodyTempFile, '-R', "$Owner/$Repo")
+        try {
+            $postOutput = & gh @postArgs 2>$null
+        }
+        catch {
+            [Console]::Error.WriteLine("marker-transport-core: gh $Type comment $Number threw a native-process launch failure: $($_.Exception.Message)")
+            $launchFailed = $true
+        }
+    }
+    finally {
+        if ($null -ne $bodyTempFile -and (Test-Path -LiteralPath $bodyTempFile)) {
+            Remove-Item -LiteralPath $bodyTempFile -Force -ErrorAction SilentlyContinue
+        }
+    }
+    if ($launchFailed) {
+        return $null
+    }
     if ($LASTEXITCODE -ne 0) {
         [Console]::Error.WriteLine("marker-transport-core: gh $Type comment $Number failed (exit $LASTEXITCODE)")
         return $null

@@ -188,11 +188,12 @@ evidence:
             }
 
             # POST: gh issue comment <N> --body <text>  (or gh pr comment)
-            if ($joined -match '^(issue|pr) comment \d+ --body') {
+            if ($joined -match '^(issue|pr) comment \d+ --body-file') {
                 $newId = $script:NextCommentId
                 $script:NextCommentId++
-                $bodyIdx = [Array]::IndexOf($Args, '--body')
-                $bodyText = $Args[$bodyIdx + 1]
+                $bodyFileIdx = [Array]::IndexOf($Args, '--body-file')
+                $bodyFilePath = $Args[$bodyFileIdx + 1]
+                $bodyText = Get-Content -LiteralPath $bodyFilePath -Raw
                 Add-MockComment -Id $newId -Body $bodyText
                 $script:PostLog.Add([PSCustomObject]@{ Body = $bodyText })
                 $global:LASTEXITCODE = 0
@@ -258,6 +259,19 @@ evidence:
 
             @($rows | Where-Object { $_.WriteShape -eq 'post-new' }).Count | Should -BeGreaterThan 0
             @($rows | Where-Object { $_.WriteShape -eq 'upsert' }).Count | Should -BeGreaterThan 0
+        }
+
+        It 'design-phase-complete is post-new (append-only history), matching handoff-markers.md''s documented catalog entry, not upsert-in-place (M9, issue #893 s11)' {
+            # skills/session-memory-contract/references/handoff-markers.md:15
+            # documents this family as post-new -- the registry previously
+            # declared upsert, real behavioral drift (upsert PATCHes in
+            # place; post-new appends, preserving history) confirmed live
+            # by the suite's own printed 'comment ... updated' output before
+            # this fix.
+            $row = @(Get-MarkerFamilyRegistry | Where-Object { $_.Family -eq 'design-phase-complete' })[0]
+
+            $row | Should -Not -BeNullOrEmpty
+            $row.WriteShape | Should -Be 'post-new'
         }
     }
 
@@ -474,15 +488,51 @@ evidence:
     }
 
     Context 'Payload hygiene: 893-D7 (s9 amendment -- both rules refuse, never warn)' {
-        It 'refuses when the candidate carries its own family marker at a non-line-1 position, without issuing any gh calls' {
+        It 'refuses when the candidate carries its own family marker more than once (also at line 1), naming the NUMERIC line offset of the extra occurrence (M3/M7, issue #893 s11)' {
             $marker = $script:PostNewFamily.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
             $body = "$marker`n`nSome content.`n$marker`n`nMore content, marker repeated below line 1."
 
             $result = Invoke-PersistMarkerWrite -Family $script:PostNewFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $marker -Body $body
 
             $result.Success | Should -Be $false
-            $result.Reason | Should -Match '(?i)non-line-1'
+            $result.Reason | Should -Match '(?i)more than once'
+            $result.Reason | Should -Match '(?i)double-marker'
+            # M7: the offset must be a real, correctly-computed line NUMBER
+            # (line 4, 0-based index 3) -- not a stringified array like
+            # "0 3" produced by the old pipe-through-Where-Object bug.
+            $result.Reason | Should -Match '(?<!\d)line 4(?!\d)'
             $result.Reason | Should -Match '^persist-marker: REFUSED \('
+            $script:ghCallLog.Count | Should -Be 0
+        }
+
+        It 'refuses when the candidate is missing its own family marker entirely (M3, issue #893 s11)' {
+            $marker = $script:PostNewFamily.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+            # Candidate body carries no occurrence of $marker at all -- a
+            # marker-less body would post/patch unfindably, silently
+            # breaking idempotency on every later run.
+            $body = "Some content with no marker at all.`n`nMore content."
+
+            $result = Invoke-PersistMarkerWrite -Family $script:PostNewFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $marker -Body $body
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '(?i)missing.*marker|marker.*missing'
+            $result.Reason | Should -Match '^persist-marker: REFUSED \('
+            $script:ghCallLog.Count | Should -Be 0
+        }
+
+        It 'refuses when the candidate carries its own family marker exactly once but NOT at line 1, naming the numeric line it actually landed on (M3/M7, issue #893 s11)' {
+            $marker = $script:PostNewFamily.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+            $body = "Some preamble content.`n`n$marker`n`nBody content after the marker."
+
+            $result = Invoke-PersistMarkerWrite -Family $script:PostNewFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $marker -Body $body
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '(?i)missing from line 1'
+            # Single occurrence, wrong position -- must NOT be misdiagnosed as
+            # a double-marker-emission case.
+            $result.Reason | Should -Not -Match '(?i)double-marker|more than once'
+            # $marker is on line 3 (0-based index 2).
+            $result.Reason | Should -Match '(?<!\d)line 3(?!\d)'
             $script:ghCallLog.Count | Should -Be 0
         }
 
@@ -509,6 +559,30 @@ evidence:
 
             $result.Success | Should -Be $true
             $result.Action | Should -Be 'posted'
+        }
+
+        It 'refuses when the candidate carries a LIVE but unregistered family''s marker literal at line start -- frame-credit-ledger (M8, issue #893 s11)' {
+            $marker = $script:PostNewFamily.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+            $body = "$marker`n`nSome content.`n<!-- frame-credit-ledger-42 -->`n`nA decoy live marker from a family with no write-registry row."
+
+            $result = Invoke-PersistMarkerWrite -Family $script:PostNewFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $marker -Body $body
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '(?i)another registered family'
+            $result.Reason | Should -Match 'frame-credit-ledger'
+            $script:ghCallLog.Count | Should -Be 0
+        }
+
+        It 'refuses when the candidate carries a LIVE but unregistered family''s marker literal at line start -- phase-containment-ledger (M8, issue #893 s11)' {
+            $marker = $script:PostNewFamily.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+            $body = "$marker`n`nSome content.`n<!-- phase-containment-ledger-42 -->`n`nA decoy live marker from a family with no write-registry row."
+
+            $result = Invoke-PersistMarkerWrite -Family $script:PostNewFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $marker -Body $body
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '(?i)another registered family'
+            $result.Reason | Should -Match 'phase-containment-ledger'
+            $script:ghCallLog.Count | Should -Be 0
         }
     }
 
@@ -911,6 +985,92 @@ Plan prose.
             $planPatch = @($script:PatchLog | Where-Object { $_.CommentId -eq 100 })
             $planPatch.Count | Should -Be 1
             $planPatch[0].Body | Should -Match "(?m)^slice_comment_id:\s*$newSiblingId\s*$"
+        }
+
+        It 'REFUSES (Success=$false) when the PATCHed plan comment''s read-back is subtly corrupted, even though the PATCH itself exit-0''d and the inherited >=50%-length truncation guard alone would miss it (M5, issue #893 s11)' {
+            # Mojibake-style corruption LENGTHENS text rather than shortening
+            # it -- Set-CommentBodyDirect's own inherited truncation guard
+            # only refuses on GROSS shortening, so it stays green here. Only
+            # a SEPARATE, dedicated Test-MarkerReadBack call (normalized
+            # EQUALITY, not a length heuristic) can catch this class -- the
+            # exact fix M5 adds, mirroring both write shapes' own read-back
+            # discipline.
+            $planBody = @"
+$script:PlanMarkerForSplice
+
+<!-- frame-spine
+spine_schema_version: 2
+generated_at: 2026-07-16T18:00:00Z
+coverage: complete
+ports:
+  implement-code: [s1]
+slices:
+  s1:
+    ac_refs: [AC1]
+    depends_on: []
+    cycle: 1
+-->
+
+Plan prose.
+"@
+            Add-MockComment -Id 100 -Body $planBody
+            $script:CorruptReadBackIds.Add(100) | Out-Null
+            $sliceBody = "$script:SliceMarker`n<!-- frame-slices-generated-at: 2026-07-16T18:00:00Z -->`n`n<!-- frame-slice`nid: s1`n-->"
+
+            $result = Invoke-PersistMarkerWrite -Family $script:FrameSlicesFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $script:SliceMarker -Body $sliceBody
+
+            # The sibling write itself still landed -- the refusal is about
+            # the splice-back read-back, not the sibling creation.
+            $script:PostLog.Count | Should -Be 1
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '(?i)read-back'
+        }
+
+        It 'splices into a frame-spine block using the canonical parser''s OTHER legal form -- a self-closing HTML-comment open tag followed by the payload as plain text (M6, issue #893 s11)' {
+            # frame-spine-core.ps1's own Get-FSCCommentBlockPayloads accepts
+            # TWO legal block forms (its regex has two alternation
+            # branches). Set-MarkerSpineScalarValue's narrower regex
+            # previously matched only the "open-tag-then-newline" form
+            # (`<!-- frame-spine\n...-->`), so this SECOND form -- a
+            # self-closing open tag `<!-- frame-spine -->` followed by the
+            # payload as plain text up to a trailing `-->` -- would silently
+            # fail to match, returning the body UNCHANGED while the caller
+            # still reported the splice as a success.
+            $planBody = @"
+$script:PlanMarkerForSplice
+
+<!-- frame-spine -->
+spine_schema_version: 2
+generated_at: 2026-07-16T18:00:00Z
+coverage: complete
+ports:
+  implement-code: [s1]
+slices:
+  s1:
+    ac_refs: [AC1]
+    depends_on: []
+    cycle: 1
+-->
+
+Plan prose that must survive.
+"@
+            Add-MockComment -Id 100 -Body $planBody
+            $sliceBody = "$script:SliceMarker`n<!-- frame-slices-generated-at: 2026-07-16T18:00:00Z -->`n`n<!-- frame-slice`nid: s1`n-->"
+
+            $result = Invoke-PersistMarkerWrite -Family $script:FrameSlicesFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $script:SliceMarker -Body $sliceBody
+
+            $result.Success | Should -Be $true
+            $newSiblingId = $result.CommentId
+            $planPatch = @($script:PatchLog | Where-Object { $_.CommentId -eq 100 })
+            # The splice must have ACTUALLY happened -- a silent no-op would
+            # report Action='spliced'/Success=$true while never PATCHing the
+            # plan comment at all (Set-MarkerSpineScalarValue returning the
+            # body unchanged short-circuits the "already carries the correct
+            # slice_comment_id" no-op branch upstream, since the value never
+            # changes from absent to present).
+            $planPatch.Count | Should -Be 1
+            $planPatch[0].Body | Should -Match "(?m)^slice_comment_id:\s*$newSiblingId\s*$"
+            $planPatch[0].Body | Should -Match 'Plan prose that must survive\.'
         }
 
         It 'REFUSES (Success=$false) when the issue carries no plan-issue-{ID} marker at all' {

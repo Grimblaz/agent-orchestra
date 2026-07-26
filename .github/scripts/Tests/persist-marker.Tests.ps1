@@ -76,6 +76,7 @@ evidence: issue-893-plan-marker-posted
         $script:PatchLog = [System.Collections.Generic.List[object]]::new()
         $script:PostLog = [System.Collections.Generic.List[object]]::new()
         $script:CorruptReadBackIds = [System.Collections.Generic.HashSet[long]]::new()
+        $script:PaginateFailureNumbers = [System.Collections.Generic.HashSet[int]]::new()
 
         function script:Add-MockComment {
             param([Parameter(Mandatory)][long]$Id, [Parameter(Mandatory)][string]$Body)
@@ -88,7 +89,11 @@ evidence: issue-893-plan-marker-posted
             $joined = $Args -join ' '
             $script:ghCallLog.Add($joined)
 
-            if ($joined -match '^api --paginate repos/[^/]+/[^/]+/issues/\d+/comments$') {
+            if ($joined -match '^api --paginate repos/[^/]+/[^/]+/issues/(\d+)/comments$') {
+                if ($script:PaginateFailureNumbers -and $script:PaginateFailureNumbers.Contains([int]$Matches[1])) {
+                    $global:LASTEXITCODE = 1
+                    return ''
+                }
                 $payload = @($script:mockComments | ForEach-Object {
                         @{ id = $_.Id; body = $_.body; url = $_.url }
                     }) | ConvertTo-Json -Depth 8
@@ -121,11 +126,12 @@ evidence: issue-893-plan-marker-posted
                 return (@{ html_url = "https://github.com/$script:Owner/$script:Repo/issues/$script:IssueNumber#issuecomment-$id" } | ConvertTo-Json)
             }
 
-            if ($joined -match '^(issue|pr) comment \d+ --body') {
+            if ($joined -match '^(issue|pr) comment \d+ --body-file') {
                 $newId = $script:NextCommentId
                 $script:NextCommentId++
-                $bodyIdx = [Array]::IndexOf($Args, '--body')
-                $bodyText = $Args[$bodyIdx + 1]
+                $bodyFileIdx = [Array]::IndexOf($Args, '--body-file')
+                $bodyFilePath = $Args[$bodyFileIdx + 1]
+                $bodyText = Get-Content -LiteralPath $bodyFilePath -Raw
                 Add-MockComment -Id $newId -Body $bodyText
                 $script:PostLog.Add([PSCustomObject]@{ Body = $bodyText })
                 $global:LASTEXITCODE = 0
@@ -213,6 +219,30 @@ evidence: issue-893-plan-marker-posted
             $result.Success | Should -Be $false
             $result.Reason | Should -Match '(?i)does not exist'
         }
+
+        It 'refuses a bodyFile reached through a junction inside the scratch root whose target is OUTSIDE it (M1, issue #893 s11)' {
+            # Real reparse-point spoof: the junction itself lives inside the
+            # scratch root (so Resolve-Path's traversed-path string passes
+            # the string-prefix containment check unchanged), but its target
+            # is outside -- Resolve-Path does not dereference reparse points,
+            # so the un-walked containment check alone would wrongly admit
+            # this read. No elevation required: junctions (unlike symlinks)
+            # do not require Administrator on Windows.
+            $secretDir = Join-Path $TestDrive 'outside-secret'
+            New-Item -ItemType Directory -Path $secretDir -Force | Out-Null
+            $secretFile = Join-Path $secretDir 'secret.md'
+            [System.IO.File]::WriteAllText($secretFile, 'top secret contents')
+
+            $junctionPath = Join-Path $script:ScratchRoot 'link-out'
+            New-Item -ItemType Junction -Path $junctionPath -Target $secretDir | Out-Null
+            $viaJunction = Join-Path $junctionPath 'secret.md'
+
+            $result = Read-MarkerScratchBoundedBodyFile -BodyFile $viaJunction -ScratchRoot $script:ScratchRoot
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '(?i)junction|symlink|reparse'
+            $result.Body | Should -Be $null
+        }
     }
 
     Context 'Invoke-PersistMarkerWrite: size cap' {
@@ -291,6 +321,66 @@ evidence: issue-893-plan-marker-posted
             $result.Artifacts['entry-3'] | Should -Be 'not-attempted'
             $script:PostLog.Count | Should -Be 2
             ($script:PostLog | Where-Object { $_.Body -match 'Entry three' }).Count | Should -Be 0
+        }
+    }
+
+    Context 'Invoke-PersistMarkerBurst: stale-value fail-open on a parameter-binding failure (M4/N1, issue #893 s11)' {
+        It 'refuses the whole manifest with zero writes when entry 2''s manifest JSON carries an invalid targetSurface value (M4 common-case, explicit up-front enum validation)' {
+            $markerA = $script:GoodFamilyA.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+            $body1 = script:New-ScratchBodyFile -Name 'entry1.md' -Content "$markerA`n`nEntry one, valid."
+            $body2 = script:New-ScratchBodyFile -Name 'entry2.md' -Content "$markerA`n`nEntry two, bad targetSurface."
+            $entries = @(
+                @{ family = $script:GoodFamilyA.Family; number = $script:IssueNumber; targetSurface = 'issue'; marker = $markerA; bodyFile = $body1 }
+                @{ family = $script:GoodFamilyA.Family; number = $script:IssueNumber; targetSurface = 'pr'; marker = $markerA; bodyFile = $body2 }
+            )
+            $manifestPath = script:New-ManifestFile -Entries $entries
+
+            $result = Invoke-PersistMarkerBurstFromManifest -Owner $script:Owner -Repo $script:Repo -ManifestPath $manifestPath -ScratchRoot $script:ScratchRoot
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '(?i)entry 2'
+            $result.Reason | Should -Match '(?i)targetSurface'
+            $result.Reason | Should -Match "'pr'"
+            $script:PostLog.Count | Should -Be 0
+            $script:PatchLog.Count | Should -Be 0
+        }
+
+        It 'never reports a false "landed" status for an entry whose write call itself throws (N1: this is STRICTLY WORSE than a null-result -- the executor loop must not read a PRIOR iteration''s stale $writeResult)' {
+            # Entry 1 is completely valid and genuinely lands. Entry 2
+            # targets a DIFFERENT issue number whose paginated
+            # Find-AllCommentsByExactMarker lookup is made to throw (a real,
+            # already-documented failure mode of that function -- see
+            # marker-transport-core.ps1's own "throws rather than returning
+            # an empty/partial result" contract) -- both entries pass the
+            # network-free preflight cleanly (this is NOT a ValidateSet
+            # binding failure, which the preflight loop's own fix now
+            # catches upstream of the executor loop entirely), so this
+            # isolates the EXECUTOR loop's own stale-$writeResult bug: if
+            # $writeResult is not reset before entry 2's call, and the throw
+            # is not caught, entry 2 would either crash the whole burst
+            # uncaught or (in a narrower non-terminating variant) silently
+            # inherit entry 1's successful result object.
+            $markerA = $script:GoodFamilyA.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+            $markerB = $script:GoodFamilyA.MarkerTemplate -replace '\{ID\}', "$($script:IssueNumber + 1)"
+            $script:PaginateFailureNumbers.Add($script:IssueNumber + 1) | Out-Null
+
+            $entries = @(
+                [PSCustomObject]@{ Family = $script:GoodFamilyA.Family; Number = $script:IssueNumber; TargetSurface = 'issue'; Marker = $markerA; Body = "$markerA`n`nEntry one, genuinely lands."; NoPreserve = $false }
+                [PSCustomObject]@{ Family = $script:GoodFamilyA.Family; Number = ($script:IssueNumber + 1); TargetSurface = 'issue'; Marker = $markerB; Body = "$markerB`n`nEntry two, write call throws, must never be reported landed."; NoPreserve = $false }
+            )
+
+            $result = Invoke-PersistMarkerBurst -Owner $script:Owner -Repo $script:Repo -Entries $entries
+
+            # Entry 1 genuinely posted -- exactly once.
+            $script:PostLog.Count | Should -Be 1
+            $result.Artifacts['entry-1'] | Should -Be 'landed'
+
+            # N1's exact failure mode: entry 2 must NEVER be reported
+            # 'landed' by inheriting entry 1's stale successful $writeResult.
+            $result.Artifacts['entry-2'] | Should -Not -Be 'landed'
+            $result.Artifacts['entry-2'] | Should -Be 'failed'
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '(?i)entry 2'
         }
     }
 

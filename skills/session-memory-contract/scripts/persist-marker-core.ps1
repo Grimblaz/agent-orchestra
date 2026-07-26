@@ -262,7 +262,20 @@ function Get-MarkerFamilyRegistry {
             Family            = 'design-phase-complete'
             MarkerTemplate    = '<!-- design-phase-complete-{ID} -->'
             TargetSurface     = 'issue'
-            WriteShape        = 'upsert'
+            # M9 fix (issue #893 s11): was 'upsert' -- real behavioral drift
+            # against skills/session-memory-contract/references/handoff-markers.md:15,
+            # which documents this family as post-new (append-only
+            # completion-history, mirroring experience-owner-complete and
+            # review-judge-produced). Confirmed against Solution-Designer's
+            # own design-phase-complete usage
+            # (agents/Solution-Designer.agent.md): the completion marker is
+            # posted once per phase completion and persist-phase-ledger.ps1
+            # -Mode design appends phase-containment blocks directly onto
+            # the caller-supplied -DesignCommentId afterward -- nothing in
+            # that flow re-persists/PATCHes the completion marker itself, so
+            # post-new (never overwriting prior history) is the behavior the
+            # design actually intends; upsert was the bug.
+            WriteShape        = 'post-new'
             # 893-D3 also names a finding_dispositions schema check "when
             # block present" for this family -- deferred, not this slice's
             # scope (s4's requirement contract names only the
@@ -527,6 +540,21 @@ function script:ConvertTo-MarkerFamilyLineStartPattern {
     return '(?m)^\s*' + $withWildcards
 }
 
+# M8 fix (issue #893 s11): cross-family hygiene must also protect markers
+# that are LIVE today but carry no write-registry row of their own -- this
+# file's own write path never posts either family (persist-phase-ledger.ps1
+# writes phase-containment-ledger-{ID}; the pre-PR hook writes
+# frame-credit-ledger-{PR}), so a candidate accidentally embedding one of
+# these literals would otherwise pass hygiene clean and become a self-DoS on
+# that family's next find-or-upsert read (the recorded self-DoS class this
+# whole check exists to close). Defense-corrected scope (893 s11 M8):
+# 'code-review-complete' is retired and 'design-issue' has no active writer
+# on the current Claude pipeline, so neither is included here.
+$script:MarkerHygieneOnlyFamilies = @(
+    [PSCustomObject]@{ Family = 'frame-credit-ledger'; MarkerTemplate = '<!-- frame-credit-ledger-{PR} -->' }
+    [PSCustomObject]@{ Family = 'phase-containment-ledger'; MarkerTemplate = '<!-- phase-containment-ledger-{ID} -->' }
+)
+
 function script:Test-MarkerPayloadHygiene {
     <#
     .SYNOPSIS
@@ -534,15 +562,21 @@ function script:Test-MarkerPayloadHygiene {
         exact bytes about to be written) -- never the raw payload. Two
         distinct rules, both refuse (s9 amends 893-D7, which originally
         warned on the second rule):
-          1. own-family: the candidate carries its OWN family's marker at a
-             line-start position OTHER than line 1 -- a legitimate candidate
-             carries the marker exactly once, on line 1 (the line the
-             caller composed it on); any additional line-start occurrence
-             signals accidental double-marker emission.
+          1. own-family: the candidate must carry its OWN family's marker
+             EXACTLY ONCE, at line-start position 0 (line 1) -- refuses when
+             the marker is missing entirely (M3, issue #893 s11 -- a
+             marker-less candidate would post/patch unfindably, silently
+             breaking idempotency), present but at the wrong line (missing
+             from line 1), or present at line 1 plus at least one additional
+             line-start occurrence (double-marker emission).
           2. cross-family: the candidate carries any OTHER registered
              family's live marker literal at line start (the recorded
              self-DoS class -- a live marker literal inside prose makes an
-             issue carry two matching comments for that OTHER family).
+             issue carry two matching comments for that OTHER family). The
+             cross-family scan covers both the caller-supplied write
+             -Registry AND $script:MarkerHygieneOnlyFamilies (M8, issue #893
+             s11) -- live marker families with no write-registry row of
+             their own.
         Inert-rendered mentions (no literal '<!--'/'-->' bytes present, e.g.
         an HTML-entity-escaped example inside a code fence) never trigger
         either rule -- see ConvertTo-MarkerFamilyLineStartPattern.
@@ -557,13 +591,37 @@ function script:Test-MarkerPayloadHygiene {
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Registry
     )
 
-    $ownIndexes = @(script:Get-MarkerLineStartMatchIndexes -Body $Body -Literal $Marker | Where-Object { $_ -gt 0 })
-    if ($ownIndexes.Count -gt 0) {
-        $lineNumber = $ownIndexes[0] + 1
-        return "candidate carries its own family's marker at a non-line-1 position (line $lineNumber) -- the script emits the marker exactly once; this indicates accidental double-marker emission"
+    # M7 fix (issue #893 s11): assign the function's return value to a
+    # variable FIRST, then filter with Where-Object on the ASSIGNED
+    # variable -- never pipe the function call directly into Where-Object.
+    # Get-MarkerLineStartMatchIndexes returns via `return , @($indexes)` so
+    # that exactly ONE pipeline object (the whole int[] array) is emitted at
+    # the function-return boundary; piping that single-object emission
+    # straight into `| Where-Object { $_ -gt 0 }` makes Where-Object's $_
+    # bind to the WHOLE ARRAY once (not once per int), so `$_ -gt 0`
+    # array-filters and, if any element is >0, Where-Object emits the
+    # ENTIRE unfiltered array back out -- silently corrupting `$ownIndexes[0]`
+    # into the array object itself (string-interpolated as a
+    # space-joined garbage offset like "line 0 5 1") instead of an integer.
+    # Assigning to $allOwnIndexes first, THEN piping that variable into
+    # Where-Object, restores normal per-element pipeline enumeration.
+    $allOwnIndexes = script:Get-MarkerLineStartMatchIndexes -Body $Body -Literal $Marker
+
+    $hasLine1 = ($allOwnIndexes.Count -gt 0 -and $allOwnIndexes[0] -eq 0)
+    if (-not $hasLine1) {
+        if ($allOwnIndexes.Count -eq 0) {
+            return 'candidate is missing its own family''s marker entirely -- a legitimate candidate carries the marker exactly once, at line 1; a marker-less body would post/patch unfindably, silently breaking idempotency'
+        }
+        $lineNumber = $allOwnIndexes[0] + 1
+        return "candidate's own family marker is missing from line 1 -- found instead at line $lineNumber; a legitimate candidate carries the marker exactly once, on line 1"
+    }
+    if ($allOwnIndexes.Count -gt 1) {
+        $extraLineNumber = $allOwnIndexes[1] + 1
+        return "candidate carries its own family's marker more than once (also at line $extraLineNumber) -- the script emits the marker exactly once, on line 1; this indicates accidental double-marker emission"
     }
 
-    foreach ($row in $Registry) {
+    $crossFamilyRows = @($Registry) + @($script:MarkerHygieneOnlyFamilies)
+    foreach ($row in $crossFamilyRows) {
         if ($row.Family -eq $Family) { continue }
         if ([string]::IsNullOrWhiteSpace($row.MarkerTemplate)) { continue }
         $pattern = script:ConvertTo-MarkerFamilyLineStartPattern -MarkerTemplate $row.MarkerTemplate
@@ -892,7 +950,19 @@ function script:Set-MarkerSpineScalarValue {
         [Parameter(Mandatory)][ValidateSet('spine_schema_version', 'generated_at', 'coverage', 'slice_comment_id')][string]$Name,
         [Parameter(Mandatory)][string]$Value
     )
-    $blockMatch = [regex]::Match($Body, '(?s)<!--\s*frame-spine\s*\r?\n(?<payload>.*?)-->')
+    # M6 fix (issue #893 s11): the canonical parser
+    # (frame-spine-core.ps1:67, script:Get-FSCCommentBlockPayloads) accepts
+    # TWO legal block forms via alternation -- (1) a self-closing open tag
+    # '<!-- frame-spine -->' followed by the payload as plain text up to a
+    # trailing '-->', and (2) the 'open-tag-then-newline' form
+    # '<!-- frame-spine\n...-->'. The old pattern here matched ONLY form
+    # (2), so a form-(1) block would silently fail to match, returning the
+    # body UNCHANGED while the caller still reported the splice as a
+    # success. Both alternatives are mirrored here (never re-implemented
+    # narrower) so this helper can never silently no-op against a shape
+    # Get-FSCSpineBlock itself already accepts.
+    $blockPattern = '(?s)<!--\s*frame-spine\s*-->\s*\n(?<payload>.*?)\n\s*-->|<!--\s*frame-spine(?:\s*\n|\s+)(?<payload>.*?)\n?\s*-->'
+    $blockMatch = [regex]::Match($Body, $blockPattern)
     if (-not $blockMatch.Success) { return $Body }
 
     $payloadGroup = $blockMatch.Groups['payload']
@@ -917,7 +987,22 @@ function script:Set-MarkerSpineScalarValue {
         }
     }
 
-    return $Body.Substring(0, $payloadGroup.Index) + $newPayload + $Body.Substring($payloadGroup.Index + $payloadGroup.Length)
+    $updatedBody = $Body.Substring(0, $payloadGroup.Index) + $newPayload + $Body.Substring($payloadGroup.Index + $payloadGroup.Length)
+
+    # M6 post-condition (issue #893 s11): re-read -Name back off the
+    # UPDATED body through the CANONICAL parser (Get-FSCSpineBlock /
+    # script:Get-FSCScalarValue -- never this file's own splice regex) and
+    # fail loud if it does not equal -Value. This is the safety net for a
+    # THIRD, currently-unknown block shape the canonical parser might accept
+    # that neither alternation branch above matches: such a shape would
+    # still turn into a loud failure here instead of a silent no-op.
+    $verifyBlock = Get-FSCSpineBlock -CommentBody $updatedBody
+    $verifyValue = if ($null -ne $verifyBlock) { script:Get-FSCScalarValue -Block $verifyBlock -Name $Name } else { $null }
+    if ($verifyValue -ne $Value) {
+        throw "persist-marker-core: Set-MarkerSpineScalarValue post-condition failed -- '$Name' reads back as '$(script:ConvertTo-MarkerRefusalEcho -Value $verifyValue)' after the splice, expected '$(script:ConvertTo-MarkerRefusalEcho -Value $Value)'"
+    }
+
+    return $updatedBody
 }
 
 function script:Test-MarkerSiblingIdentity {
@@ -1055,8 +1140,20 @@ function script:Invoke-PlanIssueWriteBackPreserve {
                     $siblingValid = script:Test-MarkerSiblingIdentity -Owner $Owner -Repo $Repo -CommentId ([long]$existingSliceCommentId) -ExpectedMarker $expectedSiblingMarker
                 }
                 if ($siblingValid) {
-                    $mergedBody = script:Set-MarkerSpineScalarValue -Body $mergedBody -Name 'slice_comment_id' -Value $existingSliceCommentId
-                    $preservedClasses.Add('slice_comment_id (frame-spine)') | Out-Null
+                    # M6 note (issue #893 s11): Set-MarkerSpineScalarValue
+                    # can now throw on its own post-condition failure -- this
+                    # is a pre-write MERGE step, not the write itself, so a
+                    # splice failure here must not crash the whole write;
+                    # treat it the same as a stale/forged pointer (drop the
+                    # preservation for this artifact class, never fabricate
+                    # a merge that didn't actually happen).
+                    try {
+                        $mergedBody = script:Set-MarkerSpineScalarValue -Body $mergedBody -Name 'slice_comment_id' -Value $existingSliceCommentId
+                        $preservedClasses.Add('slice_comment_id (frame-spine)') | Out-Null
+                    }
+                    catch {
+                        [Console]::Error.WriteLine("persist-marker-core: plan-issue-write-back-preserve could not splice slice_comment_id -- $($_.Exception.Message)")
+                    }
                 }
                 # else: stale/forged slice_comment_id -- DROP it; the
                 # frame-slices post-step's own spine-splice self-heals this
@@ -1116,11 +1213,17 @@ function script:Invoke-FrameSlicesSpineSplice {
         stale-generation sibling is refused, not silently spliced in) --
         mere presence of a stamp is not sufficient. No-op when the plan
         already carries the correct slice_comment_id. Otherwise, performs a
-        TARGETED SCALAR SPLICE (script:Set-MarkerSpineScalarValue) and
-        writes it via Set-CommentBodyDirect, which already performs its own
-        post-write verify GET -- no separate Test-MarkerReadBack call here,
-        matching persist-phase-ledger-core.ps1's own established splice
-        convention for its analogous pointer/block writes.
+        TARGETED SCALAR SPLICE (script:Set-MarkerSpineScalarValue), writes
+        it via Set-CommentBodyDirect (whose own post-write verify is the
+        inherited >=50%-length truncation guard only), and THEN calls
+        script:Test-MarkerReadBack for the stricter normalized-equality
+        check (M5 fix, issue #893 s11) -- a throw from that call is
+        converted to Success=$false, exactly like both write shapes above
+        already do. This deliberately departs from
+        persist-phase-ledger-core.ps1's own splice convention (which relies
+        on the truncation guard alone): the truncation guard cannot prove
+        byte-faithfulness, because mojibake corruption LENGTHENS text rather
+        than shortening it.
     .OUTPUTS
         [PSCustomObject] with Success [bool], Reason [string or $null], and
         Action [string or $null] -- one of 'no-op' or 'spliced' when
@@ -1163,11 +1266,32 @@ function script:Invoke-FrameSlicesSpineSplice {
         return [PSCustomObject]@{ Success = $true; Reason = $null; Action = 'no-op' }
     }
 
-    $splicedBody = script:Set-MarkerSpineScalarValue -Body $planComment.Body -Name 'slice_comment_id' -Value "$SiblingCommentId"
+    try {
+        $splicedBody = script:Set-MarkerSpineScalarValue -Body $planComment.Body -Name 'slice_comment_id' -Value "$SiblingCommentId"
+    }
+    catch {
+        return [PSCustomObject]@{ Success = $false; Reason = "frame-slices spine-splice: $($_.Exception.Message)"; Action = $null }
+    }
     $writeResult = Set-CommentBodyDirect -Owner $Owner -Repo $Repo -CommentId $planComment.Id -NewBody $splicedBody
     if (-not $writeResult.Success) {
         return [PSCustomObject]@{ Success = $false; Reason = "frame-slices spine-splice: failed to write slice_comment_id onto plan comment $($planComment.Id): $($writeResult.Reason)"; Action = $null }
     }
+
+    # M5 fix (issue #893 s11): Set-CommentBodyDirect's own post-write verify
+    # is the inherited >=50%-length truncation guard ONLY -- it cannot prove
+    # byte-faithfulness, because mojibake corruption LENGTHENS text rather
+    # than shortening it (the same rationale that made Test-MarkerReadBack's
+    # normalized-equality check the PRIMARY gate for both write shapes
+    # above). Call it here too so the splice-back gets the identical
+    # read-back discipline, converting a throw into Success=$false rather
+    # than reporting the splice as landed on a corrupted write.
+    try {
+        $null = script:Test-MarkerReadBack -Owner $Owner -Repo $Repo -CommentId $planComment.Id -ExpectedBody $splicedBody
+    }
+    catch {
+        return [PSCustomObject]@{ Success = $false; Reason = "frame-slices spine-splice: $($_.Exception.Message)"; Action = $null }
+    }
+
     return [PSCustomObject]@{ Success = $true; Reason = $null; Action = 'spliced' }
 }
 
@@ -1387,6 +1511,30 @@ function script:Get-MarkerScratchRoot {
     return (Join-Path $repoRoot '.tmp')
 }
 
+function script:Test-MarkerPathSegmentIsReparsePoint {
+    <#
+    .SYNOPSIS
+        M1 fix (issue #893 s11): true reparse-point (symlink/junction)
+        detection for one path segment. Resolve-Path canonicalizes a
+        *traversed* path string but does NOT dereference reparse points --
+        a junction living INSIDE the scratch root whose TARGET is outside it
+        still produces a resolved-path string that starts with the scratch
+        root's own prefix, defeating the string-containment check alone.
+    .DESCRIPTION
+        `(Get-Item -Force).LinkType` is non-null/non-empty for a symbolic
+        link or a directory junction (both are NTFS reparse points) and
+        $null for an ordinary file or directory -- this is the cheap,
+        built-in signal; no `fsutil` subprocess needed for this class.
+    .OUTPUTS
+        [bool] $true when -Segment is itself a reparse point.
+    #>
+    param([Parameter(Mandatory)][string]$Segment)
+    if (-not (Test-Path -LiteralPath $Segment)) { return $false }
+    $item = Get-Item -LiteralPath $Segment -Force -ErrorAction SilentlyContinue
+    if ($null -eq $item) { return $false }
+    return (-not [string]::IsNullOrEmpty($item.LinkType))
+}
+
 function Resolve-MarkerScratchBoundedPath {
     <#
     .SYNOPSIS
@@ -1394,10 +1542,13 @@ function Resolve-MarkerScratchBoundedPath {
         critical -- this is what keeps the recommended
         `Bash(pwsh*persist-marker.ps1*)`-style allowlist entry safe rather
         than an arbitrary-file-read-to-public-comment primitive): resolves
-        -Path via Resolve-Path (symlink-aware canonicalization; requires the
-        target to exist -- every caller here needs to read the file's
-        content anyway, so non-existence is itself a refusal) and checks
-        segment-boundary containment inside the canonicalized -ScratchRoot.
+        -Path via Resolve-Path (traversal-aware canonicalization of '.'/'..'
+        segments; requires the target to exist -- every caller here needs to
+        read the file's content anyway, so non-existence is itself a
+        refusal), checks segment-boundary containment inside the
+        canonicalized -ScratchRoot, and then walks every path segment from
+        -ScratchRoot down to the leaf refusing on any symlink or junction
+        (893 s11 M1 fix -- see script:Test-MarkerPathSegmentIsReparsePoint).
     .DESCRIPTION
         Never a raw string-prefix test on the UNRESOLVED input -- that is
         spoofable both by relative-traversal payloads
@@ -1406,6 +1557,25 @@ function Resolve-MarkerScratchBoundedPath {
         check would wrongly admit. The trailing-separator comparison below
         (StartsWith($rootWithSep)) is what rejects the sibling-directory
         case even after both sides are canonicalized.
+
+        Resolve-Path alone is NOT symlink-aware: it canonicalizes the
+        TRAVERSED path string (collapsing '.'/'..' segments) without ever
+        dereferencing a reparse point, so a junction placed INSIDE the
+        scratch root whose target lives OUTSIDE it would still pass the
+        string-containment check above undetected. The per-segment walk
+        below is what actually closes that gap -- every directory component
+        between the scratch root and the leaf is checked via
+        script:Test-MarkerPathSegmentIsReparsePoint and refused if it is a
+        reparse point, regardless of where its target resolves.
+
+        Known residual limitation (accepted, not solved here): a HARD LINK
+        is not a reparse point (NTFS hard links are ordinary directory
+        entries pointing at the same file record), so `LinkType` does not
+        detect it. Cheaply detecting a hard link would require an
+        `fsutil hardlink list` subprocess per read (or a native file-index
+        comparison not available cross-platform via Get-Item alone) --
+        deliberately not implemented in this slice; a hard-linked leaf file
+        under the scratch root can still be read through this bound.
     .OUTPUTS
         [PSCustomObject] InBounds [bool], ResolvedPath [string or $null],
         Reason [string or $null] (populated only when InBounds=$false).
@@ -1425,6 +1595,23 @@ function Resolve-MarkerScratchBoundedPath {
     if (-not $inBounds) {
         return [PSCustomObject]@{ InBounds = $false; ResolvedPath = $resolvedPath; Reason = "path resolves outside the scratch root '$resolvedScratchRoot': $(script:ConvertTo-MarkerRefusalEcho -Value $resolvedPath)" }
     }
+
+    # M1 (893 s11): walk every segment from the scratch root down to the
+    # leaf, refusing on the first reparse point found -- a junction/symlink
+    # anywhere along the path defeats the string-containment check above
+    # regardless of depth.
+    if ($resolvedPath.Length -gt $resolvedScratchRoot.Length) {
+        $relative = $resolvedPath.Substring($resolvedScratchRoot.Length).TrimStart('/', '\')
+        $relativeSegments = @($relative -split '[\\/]' | Where-Object { $_.Length -gt 0 })
+        $walked = $resolvedScratchRoot
+        foreach ($segment in $relativeSegments) {
+            $walked = Join-Path $walked $segment
+            if (script:Test-MarkerPathSegmentIsReparsePoint -Segment $walked) {
+                return [PSCustomObject]@{ InBounds = $false; ResolvedPath = $resolvedPath; Reason = "path traverses a symlink or junction at '$(script:ConvertTo-MarkerRefusalEcho -Value $walked)' -- reparse points are refused regardless of where their target resolves" }
+            }
+        }
+    }
+
     return [PSCustomObject]@{ InBounds = $true; ResolvedPath = $resolvedPath; Reason = $null }
 }
 
@@ -1736,21 +1923,51 @@ function Invoke-PersistMarkerBurst {
     }
 
     # --- Whole-manifest preflight: network-free, zero writes on any refusal. ---
+    # M4/N1 fix (issue #893 s11): a ValidateSet-binding failure on
+    # -TargetSurface (or any other bound parameter) inside
+    # Test-MarkerCandidatePreflight is a genuine PowerShell footgun -- it can
+    # leave $refusal holding whatever it was on the PREVIOUS iteration
+    # (silently un-assigned) rather than $null or a thrown exception,
+    # because the assignment statement itself never completes. $refusal is
+    # explicitly reset to $null at the TOP of every iteration, BEFORE the
+    # call, so an un-assigned iteration can never inherit a stale prior
+    # value; the call is also wrapped in try/catch so a binding (or any
+    # other) failure becomes an explicit synthesized refusal instead of
+    # either silently inheriting stale state or crashing uncaught.
     for ($i = 0; $i -lt $Entries.Count; $i++) {
         $entry = $Entries[$i]
-        $refusal = script:Test-MarkerCandidatePreflight -Family $entry.Family -TargetSurface $entry.TargetSurface -Number $entry.Number -Marker $entry.Marker -Body $entry.Body
+        $refusal = $null
+        try {
+            $refusal = script:Test-MarkerCandidatePreflight -Family $entry.Family -TargetSurface $entry.TargetSurface -Number $entry.Number -Marker $entry.Marker -Body $entry.Body
+        }
+        catch {
+            $refusal = script:New-MarkerRefusal -Family "$($entry.Family)" -Target "$($entry.TargetSurface)/$($entry.Number)" -Detail "entry could not be validated -- $($_.Exception.Message)"
+        }
         if ($null -ne $refusal) {
             return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (burst preflight, entry $($i + 1) of $($Entries.Count), family '$($entry.Family)'): $($refusal.Reason)"; Results = [object[]]@(); Artifacts = $artifacts }
         }
     }
 
     # --- Execution: manifest order, halt-on-first-failure. ---
+    # M4/N1 fix (issue #893 s11): same root cause, executor-loop shape --
+    # $writeResult is explicitly reset to $null at the top of every
+    # iteration and the write call is wrapped in try/catch, so a
+    # parameter-binding failure on any entry AFTER the first can never be
+    # misread as the PRIOR entry's stale successful result (N1's exact
+    # defect: a false 'landed' status and overall Success=$true for an
+    # entry that never actually wrote).
     $results = [System.Collections.Generic.List[object]]::new()
     for ($i = 0; $i -lt $Entries.Count; $i++) {
         $entry = $Entries[$i]
         $noPreserve = [bool]$entry.NoPreserve
-        $writeResult = Invoke-PersistMarkerWrite -Family $entry.Family -Owner $Owner -Repo $Repo -Number $entry.Number `
-            -TargetSurface $entry.TargetSurface -Marker $entry.Marker -Body $entry.Body -NoPreserve:$noPreserve
+        $writeResult = $null
+        try {
+            $writeResult = Invoke-PersistMarkerWrite -Family $entry.Family -Owner $Owner -Repo $Repo -Number $entry.Number `
+                -TargetSurface $entry.TargetSurface -Marker $entry.Marker -Body $entry.Body -NoPreserve:$noPreserve
+        }
+        catch {
+            $writeResult = [PSCustomObject]@{ Success = $false; Family = "$($entry.Family)"; CommentId = $null; Action = $null; Confirmation = $null; Reason = "persist-marker: entry could not be written -- $($_.Exception.Message)" }
+        }
         $results.Add($writeResult)
         if ($writeResult.Success) {
             $artifacts["entry-$($i + 1)"] = 'landed'
@@ -1824,6 +2041,18 @@ function Invoke-PersistMarkerBurstFromManifest {
             if ($null -eq $value -or ([string]$value).Trim().Length -eq 0) {
                 return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (malformed manifest '$ManifestPath', entry $entryIndex): missing required field '$field'"; Results = [object[]]@(); Artifacts = [ordered]@{} }
             }
+        }
+
+        # M4 fix (issue #893 s11): explicit enum validation HERE, before
+        # targetSurface ever reaches a ValidateSet-bound parameter
+        # downstream (Test-MarkerCandidatePreflight / Invoke-PersistMarkerWrite)
+        # -- this is what makes the common case (a malformed targetSurface
+        # value on any entry, not just entry 1) a clean, diagnosable
+        # manifest-level refusal instead of relying on exception containment
+        # deeper in the call chain.
+        $targetSurfaceValue = [string]$rawEntry.targetSurface
+        if ($targetSurfaceValue -notin @('issue', 'pull-request')) {
+            return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (malformed manifest '$ManifestPath', entry $entryIndex): field 'targetSurface' must be 'issue' or 'pull-request', got '$(script:ConvertTo-MarkerRefusalEcho -Value $targetSurfaceValue)'"; Results = [object[]]@(); Artifacts = [ordered]@{} }
         }
 
         try {
