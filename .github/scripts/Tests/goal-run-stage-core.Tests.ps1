@@ -834,3 +834,270 @@ Describe 'Invoke-GoalRunLaunchChain and Test-GoalRunTerminalEmissionsVerified (s
         $handle.Arm | Should -Be 'in-session'
     }
 }
+
+Describe 'Goal-run restart report body round-trip (#912 D6, step 5)' -Tag 'unit' {
+
+    It 'builds and parses a restart report body symmetrically' {
+        $body = New-GoalRunRestartReportBody -Issue 912 -WorktreePath 'C:\fake\gr-912-abc' -BranchName 'goal-run/issue-912-abc' -ClearedAt '2026-07-26T00:00:00.0000000Z'
+        $parsed = ConvertFrom-GoalRunRestartReportBody -Body $body
+        $parsed.Parsed | Should -Be $true
+        $parsed.Issue | Should -Be 912
+        $parsed.WorktreePath | Should -Be 'C:\fake\gr-912-abc'
+        $parsed.BranchName | Should -Be 'goal-run/issue-912-abc'
+        $parsed.ClearedAt | Should -Be '2026-07-26T00:00:00.0000000Z'
+    }
+
+    It 'reports Parsed = $false for a body with no restart-report marker' {
+        $parsed = ConvertFrom-GoalRunRestartReportBody -Body 'not a restart report at all'
+        $parsed.Parsed | Should -Be $false
+    }
+
+    It 'renders "unknown" for BranchName when the live branch resolution failed, never a blank field' {
+        $body = New-GoalRunRestartReportBody -Issue 912 -WorktreePath 'C:\fake\gr-912-abc' -ClearedAt '2026-07-26T00:00:00.0000000Z'
+        $body | Should -Match '\*\*branch_name\*\*:\s*unknown'
+        $parsed = ConvertFrom-GoalRunRestartReportBody -Body $body
+        $parsed.BranchName | Should -Be 'unknown'
+    }
+}
+
+Describe 'Clear-GoalRunStageMarker (#912 D6, step 5: the first comment-DELETE primitive)' -Tag 'unit' {
+
+    BeforeEach {
+        $script:cgsmDeletedPaths = [System.Collections.Generic.List[string]]::new()
+        $script:cgsmExitCode = 0
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            if ($joined -match '^api -X DELETE (\S+)$') {
+                $script:cgsmDeletedPaths.Add($Matches[1])
+                $global:LASTEXITCODE = $script:cgsmExitCode
+                return ''
+            }
+            $global:LASTEXITCODE = 0
+            return ''
+        }
+    }
+
+    AfterEach {
+        Remove-Item Function:gh -ErrorAction SilentlyContinue
+    }
+
+    It 'deletes the single live stage-marker comment via gh api -X DELETE' {
+        $body = New-GoalRunStageMarkerBody -Issue 912 -Stage 'loop-launched' -ContractHash ('a' * 64) -UpdatedAt '2026-07-26T00:00:00.0000000Z'
+        Mock -CommandName Get-GoalRunIssueComments -MockWith {
+            @([pscustomobject]@{ id = 555; url = 'https://github.com/o/r/issues/912#issuecomment-555'; body = $body })
+        }
+
+        $result = Clear-GoalRunStageMarker -Issue 912 -Owner 'o' -Repo 'r'
+
+        $result.Success | Should -Be $true
+        $result.DeletedCommentIds | Should -Be @(555)
+        $script:cgsmDeletedPaths | Should -Contain 'repos/o/r/issues/comments/555'
+    }
+
+    It 'reports success with zero deletions when no stage marker comment exists' {
+        Mock -CommandName Get-GoalRunIssueComments -MockWith { @() }
+
+        $result = Clear-GoalRunStageMarker -Issue 912 -Owner 'o' -Repo 'r'
+
+        $result.Success | Should -Be $true
+        $result.DeletedCommentIds | Should -BeNullOrEmpty
+        $script:cgsmDeletedPaths | Should -BeNullOrEmpty
+    }
+
+    It 'reports failure and lists the failed comment id when the gh api DELETE call fails, without throwing' {
+        $body = New-GoalRunStageMarkerBody -Issue 912 -Stage 'loop-launched' -ContractHash ('a' * 64) -UpdatedAt '2026-07-26T00:00:00.0000000Z'
+        Mock -CommandName Get-GoalRunIssueComments -MockWith {
+            @([pscustomobject]@{ id = 555; url = 'https://github.com/o/r/issues/912#issuecomment-555'; body = $body })
+        }
+        $script:cgsmExitCode = 1
+
+        $result = Clear-GoalRunStageMarker -Issue 912 -Owner 'o' -Repo 'r'
+
+        $result.Success | Should -Be $false
+        $result.FailedCommentIds | Should -Be @(555)
+    }
+
+    It 'falls back to the {owner}/{repo} gh api placeholder template when -Owner/-Repo are omitted' {
+        $body = New-GoalRunStageMarkerBody -Issue 912 -Stage 'loop-launched' -ContractHash ('a' * 64) -UpdatedAt '2026-07-26T00:00:00.0000000Z'
+        Mock -CommandName Get-GoalRunIssueComments -MockWith {
+            @([pscustomobject]@{ id = 555; url = 'https://github.com/o/r/issues/912#issuecomment-555'; body = $body })
+        }
+
+        Clear-GoalRunStageMarker -Issue 912 | Out-Null
+
+        $script:cgsmDeletedPaths | Should -Contain 'repos/{owner}/{repo}/issues/comments/555'
+    }
+}
+
+Describe 'Clear-GoalRunActiveState (#912 D6, step 5)' -Tag 'unit' {
+
+    It 'deletes goal-run-active.json when it exists' {
+        $worktreePath = Join-Path $TestDrive 'cgas-exists'
+        New-Item -ItemType Directory -Path $worktreePath -Force | Out-Null
+        New-GoalRunActiveState -WorktreePath $worktreePath -Ceilings @{} -Baseline @{} -Arm 'in-session' -ExecutorSessionId 'sess-1' -ContractHash ('a' * 64) | Out-Null
+
+        $result = Clear-GoalRunActiveState -WorktreePath $worktreePath
+
+        $result | Should -Be $true
+        (Test-Path -LiteralPath (Join-Path $worktreePath 'goal-run-active.json')) | Should -Be $false
+    }
+
+    It 'reports $true (nothing to do) when the file never existed, without throwing' {
+        $worktreePath = Join-Path $TestDrive 'cgas-absent'
+        New-Item -ItemType Directory -Path $worktreePath -Force | Out-Null
+
+        { Clear-GoalRunActiveState -WorktreePath $worktreePath } | Should -Not -Throw
+        Clear-GoalRunActiveState -WorktreePath $worktreePath | Should -Be $true
+    }
+}
+
+Describe 'Invoke-GoalRunRestart (#912 D6, step 5: operator-initiated restart lever, capture-then-clear)' -Tag 'unit' {
+
+    BeforeEach {
+        $script:grrOrder = [System.Collections.Generic.List[string]]::new()
+        $script:grrCapturedReportBody = $null
+    }
+
+    It 'refuses when the heartbeat is fresh, and never posts a report or clears anything (live-run protection)' {
+        Mock -CommandName New-GoalRunIssueComment -MockWith { throw 'must not post a report when refusing' }
+        Mock -CommandName Clear-GoalRunStageMarker -MockWith { throw 'must not clear the stage marker when refusing' }
+        Mock -CommandName Clear-GoalRunActiveState -MockWith { throw 'must not clear active state when refusing' }
+
+        $now = (Get-Date).ToUniversalTime()
+        $result = Invoke-GoalRunRestart -Issue 912 -WorktreePath 'C:\fake\gr-912' -LaunchedAt $now.AddHours(-3) -HeartbeatAt $now.AddMinutes(-5) -Now $now
+
+        $result.Outcome | Should -Be 'refused-live-run'
+        $result.ClearedStageMarker | Should -Be $false
+        $result.ClearedActiveState | Should -Be $false
+    }
+
+    It 'proceeds to capture-then-clear when the heartbeat is past the stale threshold' {
+        Mock -CommandName New-GoalRunIssueComment -MockWith { [pscustomobject]@{ Success = $true; CommentId = 1; Url = 'https://example/1' } }
+        Mock -CommandName Clear-GoalRunStageMarker -MockWith { [pscustomobject]@{ Success = $true; DeletedCommentIds = @(); FailedCommentIds = @() } }
+        Mock -CommandName Clear-GoalRunActiveState -MockWith { $true }
+
+        $now = (Get-Date).ToUniversalTime()
+        $result = Invoke-GoalRunRestart -Issue 912 -WorktreePath 'C:\fake\gr-912' -LaunchedAt $now.AddHours(-2) -Now $now
+
+        $result.Outcome | Should -Be 'restarted'
+    }
+
+    It 'proceeds to capture-then-clear when -LaunchedAt is omitted -- no active-state evidence means nothing to refuse against' {
+        Mock -CommandName New-GoalRunIssueComment -MockWith { [pscustomobject]@{ Success = $true; CommentId = 1; Url = 'https://example/1' } }
+        Mock -CommandName Clear-GoalRunStageMarker -MockWith { [pscustomobject]@{ Success = $true; DeletedCommentIds = @(); FailedCommentIds = @() } }
+        Mock -CommandName Clear-GoalRunActiveState -MockWith { $true }
+
+        $result = Invoke-GoalRunRestart -Issue 912 -WorktreePath 'C:\fake\gr-912'
+
+        $result.Outcome | Should -Not -Be 'refused-live-run'
+    }
+
+    It '#912 fixture (a): captures the worktree path and branch into the durable report comment BEFORE clearing either artifact' {
+        $repoRoot = Join-Path $TestDrive 'grr-repo'
+        script:New-GRSTestRepo -Path $repoRoot
+        $worktreePath = Join-Path $TestDrive 'grr-worktree'
+        $branchName = 'goal-run/issue-912-fixturetoken'
+        & git -C $repoRoot worktree add -b $branchName $worktreePath 2>&1 | Out-Null
+
+        try {
+            Mock -CommandName New-GoalRunIssueComment -MockWith {
+                param($Issue, $Body, $Owner, $Repo)
+                $script:grrOrder.Add('report')
+                $script:grrCapturedReportBody = $Body
+                return [pscustomobject]@{ Success = $true; CommentId = 999; Url = 'https://example/999' }
+            }
+            Mock -CommandName Clear-GoalRunStageMarker -MockWith {
+                $script:grrOrder.Add('clear-marker')
+                return [pscustomobject]@{ Success = $true; DeletedCommentIds = @(555); FailedCommentIds = @() }
+            }
+            Mock -CommandName Clear-GoalRunActiveState -MockWith {
+                $script:grrOrder.Add('clear-active')
+                return $true
+            }
+
+            $now = (Get-Date).ToUniversalTime()
+            $result = Invoke-GoalRunRestart -Issue 912 -WorktreePath $worktreePath -LaunchedAt $now.AddHours(-2) -Now $now
+
+            $result.Outcome | Should -Be 'restarted'
+            $result.BranchName | Should -Be $branchName
+            $script:grrCapturedReportBody | Should -Match ([regex]::Escape($branchName))
+            $script:grrCapturedReportBody | Should -Match ([regex]::Escape($worktreePath))
+            $script:grrOrder[0] | Should -Be 'report'
+            $script:grrOrder | Should -Contain 'clear-marker'
+            $script:grrOrder | Should -Contain 'clear-active'
+            $script:grrOrder.IndexOf('report') | Should -BeLessThan $script:grrOrder.IndexOf('clear-marker')
+            $script:grrOrder.IndexOf('report') | Should -BeLessThan $script:grrOrder.IndexOf('clear-active')
+        }
+        finally {
+            script:Remove-GRSTestWorktree -RepoRoot $repoRoot -WorktreePath $worktreePath
+        }
+    }
+
+    It 'reports report-post-failed and clears nothing when the durable report comment itself fails to post' {
+        Mock -CommandName New-GoalRunIssueComment -MockWith { [pscustomobject]@{ Success = $false; CommentId = $null; Url = $null } }
+        Mock -CommandName Clear-GoalRunStageMarker -MockWith { throw 'must not clear the stage marker when the report failed to post' }
+        Mock -CommandName Clear-GoalRunActiveState -MockWith { throw 'must not clear active state when the report failed to post' }
+
+        $now = (Get-Date).ToUniversalTime()
+        $result = Invoke-GoalRunRestart -Issue 912 -WorktreePath 'C:\fake\gr-912' -LaunchedAt $now.AddHours(-2) -Now $now
+
+        $result.Outcome | Should -Be 'report-post-failed'
+        $result.ClearedStageMarker | Should -Be $false
+        $result.ClearedActiveState | Should -Be $false
+    }
+
+    It '#912 fixture (b)+(c): restart is refused on a fresh heartbeat, and once stale, clears both artifacts so the next invocation resolves pre-loop' {
+        $tempRoot = Join-Path $TestDrive 'grr-fixture-worktree'
+        New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+        $staleTimestamp = (Get-Date).ToUniversalTime().AddHours(-2).ToString('o')
+        $stateJson = @{
+            ceilings            = @{}
+            baseline            = @{}
+            arm                 = 'in-session'
+            executor_session_id = 'sess-1'
+            contract_hash       = ('a' * 64)
+            launched_at         = $staleTimestamp
+            heartbeat_at        = $staleTimestamp
+            teardown_deferred   = $false
+        } | ConvertTo-Json -Depth 10
+        Set-Content -LiteralPath (Join-Path $tempRoot 'goal-run-active.json') -Value $stateJson -Encoding utf8 -NoNewline
+
+        $script:grrFixtureStageComments = @(
+            [pscustomobject]@{
+                id   = 555
+                url  = 'https://github.com/o/r/issues/912#issuecomment-555'
+                body = (New-GoalRunStageMarkerBody -Issue 912 -Stage 'loop-launched' -ContractHash ('a' * 64) -UpdatedAt $staleTimestamp -WorktreePath $tempRoot)
+            }
+        )
+        Mock -CommandName Get-GoalRunIssueComments -MockWith { $script:grrFixtureStageComments }
+        Mock -CommandName New-GoalRunIssueComment -MockWith { [pscustomobject]@{ Success = $true; CommentId = 999; Url = 'https://example/999' } }
+
+        $stageMarkerBefore = Get-GoalRunStageMarker -Issue 912
+        $activeStateBefore = Get-GoalRunActiveState -WorktreePath $tempRoot
+
+        # (b) fresh heartbeat is refused.
+        $refused = Invoke-GoalRunRestart -Issue 912 -WorktreePath $stageMarkerBefore.WorktreePath -LaunchedAt $activeStateBefore.launched_at -HeartbeatAt (Get-Date).ToUniversalTime().AddMinutes(-1)
+        $refused.Outcome | Should -Be 'refused-live-run'
+        (Test-Path -LiteralPath (Join-Path $tempRoot 'goal-run-active.json')) | Should -Be $true -Because 'a refused restart clears nothing'
+
+        # Now genuinely stale -- clears both durable artifacts. The stage
+        # marker "delete" is simulated by emptying the mocked comment list,
+        # mirroring what a real `gh api -X DELETE` would leave observable.
+        $script:grrFixtureStageComments = @()
+        $restarted = Invoke-GoalRunRestart -Issue 912 -WorktreePath $stageMarkerBefore.WorktreePath -LaunchedAt $activeStateBefore.launched_at -HeartbeatAt $activeStateBefore.heartbeat_at
+        $restarted.Outcome | Should -Be 'restarted'
+
+        (Test-Path -LiteralPath (Join-Path $tempRoot 'goal-run-active.json')) | Should -Be $false
+
+        # (c) the next invocation's durable-artifact reads resolve pre-loop.
+        $stageMarkerAfter = Get-GoalRunStageMarker -Issue 912
+        $stageMarkerAfter.Found | Should -Be $false
+        $activeStatePresentAfter = Test-Path -LiteralPath (Join-Path $tempRoot 'goal-run-active.json')
+
+        $resume = Resolve-GoalRunResumeStage -ContractHashVerified $true -InflightMarkerPresent $false `
+            -ActiveStatePresent $activeStatePresentAfter -RunLogHasCheckpoint $false -ExplicitStageMarker $stageMarkerAfter.Stage
+        $resume.ResumeStage | Should -Be 'pre-loop'
+        $resume.Reason | Should -Be 'fresh-launch'
+    }
+}

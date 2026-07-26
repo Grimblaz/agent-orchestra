@@ -46,6 +46,13 @@
          New-GoalRunExecutorSessionHandle, Invoke-GoalRunLaunchChain,
          Test-GoalRunTerminalEmissionsVerified
 
+      7. Operator-initiated restart (#912 D6, step 5): capture-then-clear
+         New-GoalRunRestartReportBody, ConvertFrom-GoalRunRestartReportBody,
+         Clear-GoalRunStageMarker (the first comment-DELETE primitive in
+         this codebase -- no clear/remove primitive existed before this
+         step), Clear-GoalRunActiveState, Invoke-GoalRunRestart
+         (orchestrates the liveness gate then capture-before-clear)
+
     Chain-stage marker vocabulary (new in this step -- no earlier #874 step
     defined it): a single `<!-- goal-run-stage-{Issue} -->` comment, upserted
     in place (never appended-to), always reflecting the LATEST completed
@@ -1230,4 +1237,302 @@ function Test-GoalRunTerminalEmissionsVerified {
     )
 
     return [pscustomobject]@{ Verified = $false; Reason = 'not-implemented-pending-step6' }
+}
+
+# ---------------------------------------------------------------------------
+# 7. Operator-initiated restart (#912 D6, step 5): capture-then-clear
+# ---------------------------------------------------------------------------
+
+function New-GoalRunRestartReportBody {
+    <#
+    .SYNOPSIS
+        #912 D6 (step 5): the durable capture-before-clear report body.
+        Posted via New-GoalRunIssueComment (always POSTs a new comment,
+        never upserts) so a history of restarts survives across repeated
+        invocations -- the same always-post rationale the inflight mutex
+        marker already relies on for the concurrent-launch audit trail.
+    .DESCRIPTION
+        This is the ONLY durable record of the branch name once the stage
+        marker is cleared: New-GoalRunWorktree mints a fresh GUID-suffixed
+        branch per launch (goal-run-worktree-core.ps1:279-281) and neither
+        goal-run-active.json nor the inflight marker ever store it. The
+        branch name is resolved live, from the still-intact worktree, by
+        the caller (Invoke-GoalRunRestart below) BEFORE this body is built.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)][int]$Issue,
+        [Parameter(Mandatory)][string]$WorktreePath,
+        [string]$BranchName,
+        [Parameter(Mandatory)][string]$ClearedAt
+    )
+
+    $branchDisplay = if ([string]::IsNullOrWhiteSpace($BranchName)) { 'unknown' } else { $BranchName }
+
+    $lines = @(
+        "<!-- goal-run-restart-report-$Issue -->",
+        '## Goal-run restart report',
+        '',
+        '- **schema_version**: 1',
+        "- **issue**: $Issue",
+        "- **worktree_path**: $WorktreePath",
+        "- **branch_name**: $branchDisplay",
+        "- **cleared_at**: $ClearedAt",
+        '',
+        'This run was restarted by an explicit operator `/goal-run {issue} restart` command. The worktree above was NOT deleted -- recover any committed work by hand from the branch name recorded here, then relaunch with a plain `/goal-run {issue}`.'
+    )
+    return ($lines -join "`n")
+}
+
+function ConvertFrom-GoalRunRestartReportBody {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Body
+    )
+
+    if ($Body -notmatch '<!-- goal-run-restart-report-(\d+) -->') {
+        return [pscustomobject]@{ Parsed = $false; Issue = $null; WorktreePath = $null; BranchName = $null; ClearedAt = $null }
+    }
+
+    $issue = [int]$Matches[1]
+    $worktreePath = if ($Body -match '(?m)^-\s+\*\*worktree_path\*\*:\s*(.+)$') { $Matches[1].Trim() } else { $null }
+    $branchName = if ($Body -match '(?m)^-\s+\*\*branch_name\*\*:\s*(\S+)') { $Matches[1] } else { $null }
+    $clearedAt = if ($Body -match '(?m)^-\s+\*\*cleared_at\*\*:\s*(\S+)') { $Matches[1] } else { $null }
+
+    return [pscustomobject]@{ Parsed = $true; Issue = $issue; WorktreePath = $worktreePath; BranchName = $branchName; ClearedAt = $clearedAt }
+}
+
+function Clear-GoalRunStageMarker {
+    <#
+    .SYNOPSIS
+        #912 D6 (step 5): deletes the goal-run-stage-{Issue} marker comment
+        outright. Set-GoalRunStageMarker (above) only ever upserts in
+        place -- no clear/remove primitive existed anywhere in this
+        codebase before this step, and `gh api -X DELETE` appears nowhere
+        under .github/scripts/lib/ prior to this function.
+    .DESCRIPTION
+        Finds every live comment whose body carries the
+        <!-- goal-run-stage-{Issue} --> marker (Set-GoalRunStageMarker's
+        upsert-in-place design means normally at most one exists -- this
+        defends against a legacy duplicate the same way
+        Get-GoalRunStageMarker's own `-Last 1` read does) and issues a
+        `gh api -X DELETE repos/{owner}/{repo}/issues/comments/{id}` for
+        each match. Fail-open per this file's existing gh-wrapper
+        convention: a failed delete is reported to stderr and does not
+        throw or stop the remaining deletes.
+    .OUTPUTS
+        [pscustomobject]@{ Success; DeletedCommentIds; FailedCommentIds }
+        Success is $true only when every matched comment id was deleted
+        (or there were zero matches to delete in the first place).
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][int]$Issue,
+        [string]$Owner,
+        [string]$Repo
+    )
+
+    $marker = "<!-- goal-run-stage-$Issue -->"
+    $comments = Get-GoalRunIssueComments -Issue $Issue -Owner $Owner -Repo $Repo
+    $matched = @($comments | Where-Object { $_.body -and ($_.body -like "*$marker*") })
+
+    $deleted = [System.Collections.Generic.List[long]]::new()
+    $failed = [System.Collections.Generic.List[long]]::new()
+    $ownerSegment = if ($Owner) { $Owner } else { '{owner}' }
+    $repoSegment = if ($Repo) { $Repo } else { '{repo}' }
+
+    foreach ($c in $matched) {
+        $commentId = $null
+        if ($c.url -and ($c.url -match '#issuecomment-(\d+)$')) { $commentId = [long]$Matches[1] }
+        elseif ($c.id) { try { $commentId = [long]$c.id } catch { $commentId = $null } }
+        if (-not $commentId) { continue }
+
+        $deletePath = "repos/$ownerSegment/$repoSegment/issues/comments/$commentId"
+        & gh api -X DELETE $deletePath 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            $deleted.Add($commentId)
+        }
+        else {
+            [Console]::Error.WriteLine("Clear-GoalRunStageMarker: gh api DELETE $deletePath failed (exit $LASTEXITCODE)")
+            $failed.Add($commentId)
+        }
+    }
+
+    return [pscustomobject]@{
+        Success           = ($failed.Count -eq 0)
+        DeletedCommentIds = $deleted.ToArray()
+        FailedCommentIds  = $failed.ToArray()
+    }
+}
+
+function Clear-GoalRunActiveState {
+    <#
+    .SYNOPSIS
+        #912 D6 (step 5): deletes goal-run-active.json at the worktree
+        root, if present. Never throws -- mirrors Get-GoalRunActiveState's
+        own never-throw-on-missing-file contract.
+    .DESCRIPTION
+        Clearing this file is not optional alongside the stage marker:
+        Resolve-GoalRunResumeStage's -ActiveStatePresent rung 6 still
+        resolves to 'loop-launched' on the very next invocation if this
+        file survives, even with the stage marker gone -- restart would
+        silently fail to reach 'pre-loop' otherwise. Uses the same
+        $script:GoalRunActiveStateFileName constant goal-run-worktree-
+        core.ps1 defines (visible here because this file dot-sources it
+        at the top) rather than a second hardcoded literal.
+    .OUTPUTS
+        [bool] $true when the file is confirmed absent afterward
+        (including when it never existed), $false when a delete was
+        attempted and failed.
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)][string]$WorktreePath
+    )
+
+    $statePath = Join-Path $WorktreePath $script:GoalRunActiveStateFileName
+    if (-not (Test-Path -LiteralPath $statePath)) {
+        return $true
+    }
+    try {
+        Remove-Item -LiteralPath $statePath -Force -ErrorAction Stop
+        return -not (Test-Path -LiteralPath $statePath)
+    }
+    catch {
+        [Console]::Error.WriteLine("Clear-GoalRunActiveState: failed to remove $statePath -- $($_.Exception.Message)")
+        return $false
+    }
+}
+
+function Invoke-GoalRunRestart {
+    <#
+    .SYNOPSIS
+        #912 D6 (step 5): the operator-initiated `/goal-run {issue}
+        restart` lever. Refuses while the run appears live (fresh
+        heartbeat); otherwise captures the worktree path and branch into a
+        durable report comment BEFORE clearing anything, then clears BOTH
+        the stage marker comment and the worktree's goal-run-active.json
+        file.
+    .DESCRIPTION
+        Capture-then-clear is the single most load-bearing ordering this
+        function exists to guarantee (see the requirement contract): the
+        stage marker is the only durable carrier of the worktree path, and
+        New-GoalRunWorktree always mints a fresh GUID-suffixed branch, so
+        clearing the marker before recording the branch would orphan every
+        commit the interrupted loop made with no way to find it again.
+        This function only ever runs from the explicit operator `restart`
+        argument text (see agents/Goal-Run.agent.md's Operator Restart
+        section) -- never inferred from any halt or harness state.
+
+        Liveness reuses Test-GoalRunInflightAppearsDead's elapsed-time math
+        (Delegation Instead Of Duplication -- see implementation-discipline
+        methodology) rather than re-deriving a second stale-threshold
+        calculation. -MarkerStatus is pinned to 'unresolved' and
+        -HaltReportExists/-PrExists to $false because neither the "marker
+        already resolved" bypass nor the terminal-outcome distinction that
+        function's own callers need applies to a restart decision -- only
+        the heartbeat-vs-now elapsed check matters here. When -LaunchedAt
+        is omitted (the active-state file is already gone -- e.g. a prior
+        restart attempt cleared it but the marker delete failed), there is
+        no heartbeat evidence to protect against, so the liveness gate
+        cannot refuse and this proceeds straight to capture-then-clear.
+
+        Clearing BOTH artifacts is required, not optional: clearing only
+        the stage marker still leaves Resolve-GoalRunResumeStage landing on
+        'loop-launched' via -ActiveStatePresent (rung 6), because the
+        active-state file alone is sufficient to fire that rung; only
+        clearing both artifacts reaches the true 'pre-loop' resume state.
+
+        Never deletes the worktree directory itself -- restart's non-goals
+        explicitly exclude worktree teardown; the operator recovers
+        committed work from the reported branch by hand.
+    .OUTPUTS
+        [pscustomobject]@{ Outcome; Reason; ReportUrl; BranchName;
+        WorktreePath; ClearedStageMarker; ClearedActiveState }
+        Outcome is one of: 'refused-live-run' | 'report-post-failed' |
+        'restarted'.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][int]$Issue,
+        [Parameter(Mandatory)][string]$WorktreePath,
+        # Nullable by design -- see .DESCRIPTION for the no-active-state case.
+        $LaunchedAt,
+        $HeartbeatAt,
+        [int]$StaleThresholdMinutes = 60,
+        [string]$Owner,
+        [string]$Repo,
+        [string]$GitCliPath = 'git',
+        [datetime]$Now = (Get-Date).ToUniversalTime()
+    )
+
+    if ($null -ne $LaunchedAt) {
+        $appears = Test-GoalRunInflightAppearsDead -MarkerStatus 'unresolved' -LaunchedAt ([datetime]$LaunchedAt) `
+            -HeartbeatAt $HeartbeatAt -HaltReportExists $false -PrExists $false -Now $Now -StaleThresholdMinutes $StaleThresholdMinutes
+        $appearsDead = $appears.AppearsDead
+    }
+    else {
+        # No active-state evidence at all -- nothing live to refuse against.
+        $appearsDead = $true
+    }
+
+    if (-not $appearsDead) {
+        return [pscustomobject]@{
+            Outcome            = 'refused-live-run'
+            Reason             = 'fresh-heartbeat'
+            ReportUrl          = $null
+            BranchName         = $null
+            WorktreePath       = $WorktreePath
+            ClearedStageMarker = $false
+            ClearedActiveState = $false
+        }
+    }
+
+    # Capture BEFORE clearing anything -- resolve the branch name live from
+    # the still-intact worktree (restart never deletes the worktree itself).
+    $branchName = $null
+    try {
+        $branchOutput = & $GitCliPath -C $WorktreePath rev-parse --abbrev-ref HEAD 2>$null
+        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($branchOutput)) {
+            $branchName = ($branchOutput | Out-String).Trim()
+        }
+    }
+    catch {
+        $branchName = $null
+    }
+
+    $clearedAt = $Now.ToString('o')
+    $reportBody = New-GoalRunRestartReportBody -Issue $Issue -WorktreePath $WorktreePath -BranchName $branchName -ClearedAt $clearedAt
+    $report = New-GoalRunIssueComment -Issue $Issue -Body $reportBody -Owner $Owner -Repo $Repo
+    if (-not $report.Success) {
+        return [pscustomobject]@{
+            Outcome            = 'report-post-failed'
+            Reason             = 'restart-report-post-failed'
+            ReportUrl          = $null
+            BranchName         = $branchName
+            WorktreePath       = $WorktreePath
+            ClearedStageMarker = $false
+            ClearedActiveState = $false
+        }
+    }
+
+    # Only clear once the report has landed -- capture-then-clear, never the
+    # reverse, per the requirement contract's single most load-bearing rule.
+    $clearedMarker = Clear-GoalRunStageMarker -Issue $Issue -Owner $Owner -Repo $Repo
+    $clearedState = Clear-GoalRunActiveState -WorktreePath $WorktreePath
+
+    return [pscustomobject]@{
+        Outcome            = 'restarted'
+        Reason             = 'operator-restart'
+        ReportUrl          = $report.Url
+        BranchName         = $branchName
+        WorktreePath       = $WorktreePath
+        ClearedStageMarker = $clearedMarker.Success
+        ClearedActiveState = $clearedState
+    }
 }
