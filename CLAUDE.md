@@ -105,24 +105,22 @@ The `session-startup` skill also owns a Claude-only active-assist drift check. W
 
 ### For maintainers
 
-Supported Claude plugin CLI surface:
-
-```text
-claude plugin list
-claude plugin marketplace list
-claude plugin marketplace update
-claude plugin marketplace add <source>
-claude plugin marketplace remove <name>
-claude plugin update <plugin@marketplace>
-claude plugin install <plugin@marketplace>
-claude plugin uninstall <plugin@marketplace>
-```
+The supported Claude plugin CLI surface (list/install/uninstall/update plus the marketplace subcommands) is cataloged in [README.md § For maintainers](README.md#for-maintainers) and [skills/plugin-release-hygiene/SKILL.md](skills/plugin-release-hygiene/SKILL.md).
 
 ## Quality-first, shift-left
 
 Quality is the first constraint — ahead of speed and token cost; when they conflict, the methodology checkpoint wins (hence engagement gates and adversarial review are non-overridable by pacing directives). We shift defects **left**: the earlier in the pipeline (experience → design → plan → implementation) a defect is caught, the cheaper it is to fix, so every phase and review stage exists to catch a class before it reaches the next. Run the full methodology now — do not pre-emptively skip a stage because it "probably won't find anything."
 
 We remove later checks **only with evidence, never on a cost argument**: a stage earns relaxation only when its *irreducible-catch rate* (defects catchable **only** at that stage) trends to ~0 over a large-enough sample. The instrument is the **phase-containment ledger** — the per-finding record of where a defect was introduced, the earliest phase it was catchable, and where it was caught ([Documents/Design/phase-containment-ledger.md](Documents/Design/phase-containment-ledger.md)); governance lives in umbrella #761. So annotate every sustained finding, and retire later steps once they demonstrably catch nothing new.
+
+## Chunked delivery: design to the seams, plan to the contract
+
+Full doctrine and rationale: [Documents/Design/chunked-delivery.md](Documents/Design/chunked-delivery.md). Two load-bearing detail bounds — enforcing only one recreates the waterfall failure mode one level down:
+
+1. **The parent design stops at the seams**: the design decides chunk boundaries — interfaces, data shapes, spanning invariants, chunk sequence — and never a chunk's internals.
+2. **The chunk plan is a contract, not a recipe**: each chunk's goal-contract states targets, invariants, evidence obligations, halt conditions, and budget, then stops. The planner must not pre-solve unknowns inside the chunk — plan-phase discovery is read-only grounding for checkable targets; an unknown that could void a target or boundary escalates as a parent design gap instead.
+
+Operating rules: chunks are **plan-only sub-issues** of a designed parent (no worth-it check, experience, design, or standards re-litigation — they inherit, and inheritance is **loaded, not assumed**: the child links its parent and the planner's first act is reading the parent design and amendments; one chunk = one sub-issue = one goal-contract = one `/goal-run` = one PR, never PR-level splits since harness plumbing is issue-scoped); design gaps route up as single parent amendments, not sideways into child design phases; walking skeleton first; chunk-plan panel depth relaxes only via phase-containment-ledger evidence, never on a cost argument.
 
 ## Engagement-gate non-overridability
 
