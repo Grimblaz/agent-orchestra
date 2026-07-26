@@ -69,6 +69,19 @@ Describe 'marker-transport-core' {
                 return $payload
             }
 
+            # GET by numeric id (no -X): gh api repos/<o>/<r>/issues/comments/<id>
+            if ($Args.Count -ge 2 -and $Args[0] -eq 'api' -and $Args[1] -match '^repos/[^/]+/[^/]+/issues/comments/(\d+)$' -and ($Args -notcontains '-X')) {
+                $id = [long]$Matches[1]
+                $c = $script:mockComments | Where-Object { $_.Id -eq $id }
+                if (-not $c) {
+                    Write-Error 'gh: Not Found (HTTP 404)'
+                    $global:LASTEXITCODE = 1
+                    return ''
+                }
+                $global:LASTEXITCODE = 0
+                return (@{ id = $c.Id; body = $c.body; url = $c.url } | ConvertTo-Json -Depth 8)
+            }
+
             # POST: gh issue comment <N> --body <text> -R <owner>/<repo>
             if ($joined -match '^(issue|pr) comment \d+ --body-file') {
                 $newId = $script:NextCommentId
@@ -173,6 +186,47 @@ Describe 'marker-transport-core' {
             $result = New-MarkerComment -Type issue -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -Body $script:Marker
 
             $result | Should -BeNullOrEmpty
+        }
+    }
+
+    Context 'Get-CommentBodyByIdWithStatus: distinguishes confirmed-404 from a transient failure (M19, issue #893 s11)' {
+        It 'returns Status=ok with the body on a successful GET' {
+            Add-MockComment -Id 500 -Body "$script:Marker`n`nSibling content."
+
+            $result = Get-CommentBodyByIdWithStatus -Owner $script:Owner -Repo $script:Repo -CommentId 500
+
+            $result.Status | Should -Be 'ok'
+            $result.Body | Should -Match ([regex]::Escape($script:Marker))
+            $result.ErrorMessage | Should -BeNullOrEmpty
+        }
+
+        It 'returns Status=not-found (never error/throw) on a confirmed HTTP 404' {
+            function global:gh {
+                param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+                Write-Error 'gh: Not Found (HTTP 404)'
+                $global:LASTEXITCODE = 1
+                return ''
+            }
+
+            $result = Get-CommentBodyByIdWithStatus -Owner $script:Owner -Repo $script:Repo -CommentId 999999
+
+            $result.Status | Should -Be 'not-found'
+            $result.Body | Should -BeNullOrEmpty
+        }
+
+        It 'returns Status=error (distinct from not-found) on a transient failure whose message carries no HTTP 404' {
+            function global:gh {
+                param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+                Write-Error 'gh: unexpected error connecting to api.github.com'
+                $global:LASTEXITCODE = 1
+                return ''
+            }
+
+            $result = Get-CommentBodyByIdWithStatus -Owner $script:Owner -Repo $script:Repo -CommentId 500
+
+            $result.Status | Should -Be 'error'
+            $result.Body | Should -BeNullOrEmpty
+            $result.ErrorMessage | Should -Not -BeNullOrEmpty
         }
     }
 

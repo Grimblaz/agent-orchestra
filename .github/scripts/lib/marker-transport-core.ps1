@@ -130,6 +130,65 @@ function Get-CommentBodyById {
     }
 }
 
+function Get-CommentBodyByIdWithStatus {
+    <#
+    .SYNOPSIS
+        M19 fix (issue #893 s11): richer sibling of Get-CommentBodyById that
+        distinguishes a confirmed-absent/wrong target (HTTP 404) from any
+        OTHER GET failure (network blip, rate limit, auth, transient 5xx,
+        etc.) -- Get-CommentBodyById's own "$null on any failure" contract
+        collapses both into the identical signal, which let
+        Test-MarkerSiblingIdentity (persist-marker-core.ps1) silently treat
+        a transient GET failure exactly the same as "this pointer's target
+        genuinely doesn't carry the expected marker", dropping a LIVE
+        sibling pointer on nothing more than a network blip.
+    .DESCRIPTION
+        Captures `gh`'s stderr (rather than discarding it via `2>$null` like
+        Get-CommentBodyById does) so a genuine HTTP 404 ("Not Found") can be
+        distinguished, by message content, from every other non-zero-exit
+        failure. `gh api`'s own error text for a missing resource always
+        includes the literal HTTP status, so this is a real signal, not a
+        guess.
+    .OUTPUTS
+        [PSCustomObject] Status ['ok'|'not-found'|'error'], Body [string or
+        $null] (populated only when Status='ok'), ErrorMessage [string or
+        $null] (populated only when Status='error').
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Owner,
+        [Parameter(Mandatory)][string]$Repo,
+        [Parameter(Mandatory)][long]$CommentId
+    )
+    $getPath = "repos/$Owner/$Repo/issues/comments/$CommentId"
+    $stderrFile = [System.IO.Path]::GetTempFileName()
+    try {
+        $getOutput = & gh api $getPath 2>$stderrFile
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -ne 0) {
+            $stderrText = Get-Content -LiteralPath $stderrFile -Raw -ErrorAction SilentlyContinue
+            if ($null -eq $stderrText) { $stderrText = '' }
+            if ($stderrText -match '(?i)HTTP 404|Not Found \(HTTP 404\)|404 Not Found') {
+                return [PSCustomObject]@{ Status = 'not-found'; Body = $null; ErrorMessage = $null }
+            }
+            [Console]::Error.WriteLine("marker-transport-core: gh api GET $getPath failed (exit $exitCode): $stderrText")
+            return [PSCustomObject]@{ Status = 'error'; Body = $null; ErrorMessage = "gh api GET $getPath failed (exit ${exitCode}): $stderrText" }
+        }
+        try {
+            $obj = $getOutput | ConvertFrom-Json -ErrorAction Stop
+            return [PSCustomObject]@{ Status = 'ok'; Body = [string]$obj.body; ErrorMessage = $null }
+        }
+        catch {
+            [Console]::Error.WriteLine("marker-transport-core: failed to parse GET response for comment ${CommentId}: $($_.Exception.Message)")
+            return [PSCustomObject]@{ Status = 'error'; Body = $null; ErrorMessage = "failed to parse GET response for comment ${CommentId}: $($_.Exception.Message)" }
+        }
+    }
+    finally {
+        if (Test-Path -LiteralPath $stderrFile) {
+            Remove-Item -LiteralPath $stderrFile -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 function Set-CommentBodyDirect {
     <#
     .SYNOPSIS

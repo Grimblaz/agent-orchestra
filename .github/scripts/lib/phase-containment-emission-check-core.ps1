@@ -3247,9 +3247,25 @@ function script:Get-JudgeRulingsCouldNotVerifyDetail {
         This function re-derives which branch fired by calling the same
         read-only, side-effect-free scanning primitives
         (Get-RealJudgeRulingsHeadMatches, Get-JudgeRulingsIsolatedRegion,
-        Test-JudgeRulingValueRecognized) those functions already use, so the
-        diagnosis is grounded in the identical decision logic rather than a
-        second, independently-drifting copy of it.
+        Test-JudgeRulingValueRecognized) those functions already use where
+        it can. M26 fix (issue #893 s11): the window/vocab-gate branch below
+        (no real head found) does NOT reuse Get-RealJudgeRulingsHeadMatches'
+        own internal window-arithmetic verbatim -- it hand-derives a
+        first-raw-head-candidate diagnosis via its own, separately-written
+        offset computation, because Get-RealJudgeRulingsHeadMatches itself
+        only ever reports pass/fail, never WHERE the nearest vocabulary
+        token sits relative to the window boundary. That hand-derivation is
+        therefore a second, independently-maintained piece of logic, not a
+        literally-shared one -- this docstring previously overclaimed full
+        sharing ("grounded in the identical decision logic ... not a
+        second, independently-drifting copy of it"), which is honest only
+        for the value-recognition branch below (that branch DOES call the
+        real Test-JudgeRulingValueRecognized predicate verbatim). A future
+        refactor could extract the window-arithmetic into a third shared
+        helper reused by both Get-RealJudgeRulingsHeadMatches and this
+        function; until then, a change to one's window/offset arithmetic
+        can drift out of sync with the other's, and a maintainer touching
+        either should check both.
 
         This function NEVER changes any accept/reject verdict. It is called
         only from Add-JudgeRulingsBlock's existing
@@ -3262,14 +3278,16 @@ function script:Get-JudgeRulingsCouldNotVerifyDetail {
         'plan-stress-test'.
     .OUTPUTS
         [string] — a human-readable diagnostic detail. One of:
-          "judge_ruling token found at offset N, outside the M-char
-          lookahead window" (window/vocab-gate branch, first raw head
-          candidate present but no vocabulary within its window)
+          "judge_ruling token position ... leaves insufficient room before
+          the M-char lookahead window closes" (window/vocab-gate branch,
+          M27 fix, issue #893 s11 -- see the branch's own comment for why a
+          raw offset-vs-window-size comparison alone was misleading)
           "unrecognized judge_ruling value: 'X'" (value-recognition branch)
           A generic fallback description for the remaining edge cases (no
           head at all; duplicate/unclosed/ambiguous region; vocabulary that
-          survived the gate via a non-judge_ruling token) that the two named
-          formats above do not cover.
+          survived the gate via a non-judge_ruling token; a head excluded
+          for a reason other than window/length, e.g. a block-scalar span)
+          that the two named formats above do not cover.
     #>
     param(
         [Parameter(Mandatory)][AllowEmptyString()][string]$Body
@@ -3288,10 +3306,37 @@ function script:Get-JudgeRulingsCouldNotVerifyDetail {
             $afterHead = $Body.Substring($firstHead.Index + $firstHead.Length)
             $vocabMatch = [regex]::Match($afterHead, $script:JudgeRulingsVocabGatePattern)
             if ($vocabMatch.Success) {
-                return "judge_ruling token found at offset $($vocabMatch.Index), outside the $($script:JudgeRulingsLookaheadWindow)-char lookahead window"
+                # M27 fix (issue #893 s11): the real gate
+                # (Get-RealJudgeRulingsHeadMatches) requires the vocab
+                # token's MATCH TO FIT ENTIRELY inside the bounded window
+                # substring -- a token whose START offset is numerically
+                # less than $script:JudgeRulingsLookaheadWindow can still
+                # fail the gate if its END extends past the window, because
+                # [regex]::IsMatch runs against the ALREADY-TRUNCATED window
+                # substring, not the unbounded body. The prior message
+                # compared the raw start offset against the window size,
+                # which reads as self-contradictory whenever that start
+                # offset is < the window size (e.g. "found at offset 390,
+                # outside the 400-char window") -- report the real
+                # mechanism instead: the token must fit ENTIRELY before the
+                # window closes, so a token starting close enough to the
+                # boundary that its own length pushes it past the close is
+                # correctly excluded even though its start offset alone
+                # looks like it should fit.
+                $tokenEnd = $vocabMatch.Index + $vocabMatch.Length
+                if ($tokenEnd -gt $script:JudgeRulingsLookaheadWindow) {
+                    return "judge_ruling token position (starts at offset $($vocabMatch.Index), ends at offset $tokenEnd) leaves insufficient room before the $($script:JudgeRulingsLookaheadWindow)-char lookahead window closes -- the whole token must fit inside the window for the gate to recognize it"
+                }
+                # The token's span DOES fit within the raw window bound, yet
+                # the real gate still excluded this head -- some other
+                # gate mechanism is responsible (e.g. the head candidate
+                # falls inside a block-scalar span, CM4's exclusion), not a
+                # window/offset issue at all. Fall through to the generic
+                # description below rather than asserting a window-size
+                # cause this diagnosis cannot actually confirm.
             }
         }
-        return 'no judge-rulings marker head with recognizable field vocabulary was found'
+        return 'no judge-rulings marker head with recognizable field vocabulary was found (or was excluded for a reason other than window/length, e.g. a block-scalar span)'
     }
 
     # A real head passed the window/vocab gate. Region isolation can still

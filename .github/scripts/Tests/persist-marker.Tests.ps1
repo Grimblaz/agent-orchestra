@@ -77,6 +77,7 @@ evidence: issue-893-plan-marker-posted
         $script:PostLog = [System.Collections.Generic.List[object]]::new()
         $script:CorruptReadBackIds = [System.Collections.Generic.HashSet[long]]::new()
         $script:PaginateFailureNumbers = [System.Collections.Generic.HashSet[int]]::new()
+        $script:simulateTransientGetFailure = @()
 
         function script:Add-MockComment {
             param([Parameter(Mandatory)][long]$Id, [Parameter(Mandatory)][string]$Body)
@@ -103,8 +104,23 @@ evidence: issue-893-plan-marker-posted
 
             if ($Args.Count -ge 2 -and $Args[0] -eq 'api' -and $Args[1] -match '^repos/[^/]+/[^/]+/issues/comments/(\d+)$' -and ($Args -notcontains '-X')) {
                 $id = [long]$Matches[1]
+                # M19 (issue #893 s11): a TRANSIENT failure (network blip) is
+                # distinguishable from a confirmed HTTP 404 absence by
+                # message text, mirroring real `gh api` behavior.
+                # simulateTransientGetFailure models the transient case (no
+                # "HTTP 404" in the message); a genuinely-missing mock
+                # comment models the confirmed-404 case.
+                if ($script:simulateTransientGetFailure -contains $id) {
+                    Write-Error "gh: unexpected error connecting to api.github.com"
+                    $global:LASTEXITCODE = 1
+                    return ''
+                }
                 $c = $script:mockComments | Where-Object { $_.Id -eq $id }
-                if (-not $c) { $global:LASTEXITCODE = 1; return '' }
+                if (-not $c) {
+                    Write-Error "gh: Not Found (HTTP 404)"
+                    $global:LASTEXITCODE = 1
+                    return ''
+                }
                 $global:LASTEXITCODE = 0
                 $returnedBody = $c.body
                 if ($script:CorruptReadBackIds.Contains($id)) {
@@ -150,6 +166,8 @@ evidence: issue-893-plan-marker-posted
         if (Test-Path $script:CoreLibPath) {
             $script:GoodFamilyA = @(Get-MarkerFamilyRegistry | Where-Object { $_.Family -eq 'experience-owner-complete' })[0]
             $script:CreditInputFamily = @(Get-MarkerFamilyRegistry | Where-Object { $_.Family -eq 'credit-input' })[0]
+            $script:PlanIssueFamily = @(Get-MarkerFamilyRegistry | Where-Object { $_.Family -eq 'plan-issue' })[0]
+            $script:FrameSlicesFamily = @(Get-MarkerFamilyRegistry | Where-Object { $_.Family -eq 'frame-slices' })[0]
         }
 
         # --- Isolated scratch root under Pester's per-test TestDrive. ---
@@ -211,6 +229,17 @@ evidence: issue-893-plan-marker-posted
             $result.Reason | Should -Match '(?i)scratch root'
         }
 
+        It 'M21: refuses (never throws) a bodyFile path that resolves inside the scratch root but is a DIRECTORY, not readable content' {
+            $dirPath = Join-Path $script:ScratchRoot 'a-directory'
+            New-Item -ItemType Directory -Path $dirPath -Force | Out-Null
+
+            { $script:result = Read-MarkerScratchBoundedBodyFile -BodyFile $dirPath -ScratchRoot $script:ScratchRoot } | Should -Not -Throw
+
+            $script:result.Success | Should -Be $false
+            $script:result.Body | Should -Be $null
+            $script:result.Reason | Should -Match '(?i)could not be read|REFUSED'
+        }
+
         It 'refuses a bodyFile path that does not exist' {
             $missing = Join-Path $script:ScratchRoot 'does-not-exist.md'
 
@@ -257,6 +286,39 @@ evidence: issue-893-plan-marker-posted
             $script:PostLog.Count | Should -Be 0
             $script:PatchLog.Count | Should -Be 0
         }
+
+        It 'M23: ACCEPTS an astral-plane (surrogate-pair) emoji-heavy body whose UTF-16 .Length exceeds the cap but whose real Unicode CODEPOINT count does not' {
+            $marker = $script:GoodFamilyA.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+            # U+1F600 (grinning face) is outside the Basic Multilingual
+            # Plane -- each occurrence is a 2-UTF-16-code-unit surrogate
+            # pair but exactly ONE Unicode codepoint. 40,000 repeats: raw
+            # [string]::Length = 80,000 (would have been wrongly refused by
+            # the old UTF-16-code-unit count, well over the 65,536 cap) but
+            # the real codepoint count is only 40,000 -- comfortably under
+            # the cap.
+            $emoji = [char]::ConvertFromUtf32(0x1F600)
+            $emojiBody = $marker + "`n`n" + ($emoji * 40000)
+            $emojiBody.Length | Should -BeGreaterThan 65536 -Because 'the raw UTF-16 .Length must exceed the cap for this test to be meaningful'
+
+            $result = Invoke-PersistMarkerWrite -Family $script:GoodFamilyA.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $marker -Body $emojiBody
+
+            $result.Success | Should -Be $true
+            $script:PostLog.Count | Should -Be 1
+        }
+
+        It 'M23: still refuses when the real Unicode CODEPOINT count (not just raw .Length) exceeds the cap' {
+            $marker = $script:GoodFamilyA.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+            $emoji = [char]::ConvertFromUtf32(0x1F600)
+            # 70,000 codepoints -- genuinely over the cap by codepoint count,
+            # not merely by raw UTF-16 unit count.
+            $emojiBody = $marker + "`n`n" + ($emoji * 70000)
+
+            $result = Invoke-PersistMarkerWrite -Family $script:GoodFamilyA.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $marker -Body $emojiBody
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '65,?536'
+            $script:PostLog.Count | Should -Be 0
+        }
     }
 
     Context 'Invoke-PersistMarkerBurst: whole-manifest preflight' {
@@ -278,6 +340,51 @@ evidence: issue-893-plan-marker-posted
             $result.Artifacts['entry-1'] | Should -Be 'not-attempted'
             $result.Artifacts['entry-2'] | Should -Be 'not-attempted'
             $result.Artifacts['entry-3'] | Should -Be 'not-attempted'
+        }
+    }
+
+    Context 'Invoke-PersistMarkerBurst: preview-merges plan-issue write-back-preserve during preflight (M11, issue #893 s11)' {
+        It 'refuses the WHOLE burst with zero writes when a plan-issue entry''s preserve merge would push it over the size cap -- even though its RAW candidate body is tiny and an earlier entry would otherwise have already landed' {
+            $markerA = $script:GoodFamilyA.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+            $planMarker = $script:PlanIssueFamily.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+
+            # Existing (legacy, no ledger pointer) plan-issue comment carries a
+            # huge **Plan Stress-Test** section that write-back-preserve would
+            # carry forward onto any candidate that omits it.
+            $giantStressSection = "**Plan Stress-Test**`n`n" + ('x' * 70000)
+            Add-MockComment -Id 100 -Body "$planMarker`n`nOld plan prose.`n`n$giantStressSection"
+
+            $entries = @(
+                [PSCustomObject]@{ Family = $script:GoodFamilyA.Family; Number = $script:IssueNumber; TargetSurface = 'issue'; Marker = $markerA; Body = "$markerA`n`nEntry one, would otherwise land first."; NoPreserve = $false }
+                [PSCustomObject]@{ Family = $script:PlanIssueFamily.Family; Number = $script:IssueNumber; TargetSurface = 'issue'; Marker = $planMarker; Body = "$planMarker`n`nFresh, tiny plan prose -- omits the stress-test section by mistake."; NoPreserve = $false }
+            )
+
+            $result = Invoke-PersistMarkerBurst -Owner $script:Owner -Repo $script:Repo -Entries $entries
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '65,?536'
+            # M11's whole point: this must be a PREFLIGHT refusal (entry 1
+            # never attempted, zero writes) rather than entry 1 landing before
+            # the entry-2 preserve-triggered violation surfaces at execution.
+            $script:PostLog.Count | Should -Be 0
+            $script:PatchLog.Count | Should -Be 0
+            $result.Artifacts['entry-1'] | Should -Be 'not-attempted'
+            $result.Artifacts['entry-2'] | Should -Be 'not-attempted'
+        }
+
+        It 'still lets a plan-issue entry through preflight when -NoPreserve would skip the merge that WOULD have overflowed the size cap' {
+            $planMarker = $script:PlanIssueFamily.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+            $giantStressSection = "**Plan Stress-Test**`n`n" + ('x' * 70000)
+            Add-MockComment -Id 100 -Body "$planMarker`n`nOld plan prose.`n`n$giantStressSection"
+
+            $entries = @(
+                [PSCustomObject]@{ Family = $script:PlanIssueFamily.Family; Number = $script:IssueNumber; TargetSurface = 'issue'; Marker = $planMarker; Body = "$planMarker`n`nFresh, tiny plan prose, deliberately not preserving."; NoPreserve = $true }
+            )
+
+            $result = Invoke-PersistMarkerBurst -Owner $script:Owner -Repo $script:Repo -Entries $entries
+
+            $result.Success | Should -Be $true
+            $result.Artifacts['entry-1'] | Should -Be 'landed'
         }
     }
 
@@ -384,6 +491,45 @@ evidence: issue-893-plan-marker-posted
         }
     }
 
+    Context 'Invoke-PersistMarkerBurst: distinct landed-postfix-failed artifact status (M18, issue #893 s11)' {
+        It 'records ''landed-postfix-failed'', not ''failed'', for a frame-slices entry whose comment write landed but whose spine-splice PostStep failed' {
+            $sliceMarker = $script:FrameSlicesFamily.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+            # Deliberately NO plan-issue comment exists on this issue --
+            # Invoke-FrameSlicesSpineSplice's marker-identity precondition
+            # refuses (it can never find a `<!-- plan-issue-{Number} -->`
+            # comment to splice into), but New-MarkerComment's POST for the
+            # frame-slices sibling itself still succeeds first.
+            $entries = @(
+                [PSCustomObject]@{ Family = $script:FrameSlicesFamily.Family; Number = $script:IssueNumber; TargetSurface = 'issue'; Marker = $sliceMarker; Body = "$sliceMarker`n<!-- frame-slices-generated-at: 2026-07-01T00:00:00Z -->`n`nSlices."; NoPreserve = $false }
+            )
+
+            $result = Invoke-PersistMarkerBurst -Owner $script:Owner -Repo $script:Repo -Entries $entries
+
+            $result.Success | Should -Be $false
+            $result.Artifacts['entry-1'] | Should -Be 'landed-postfix-failed'
+            $result.Artifacts['entry-1'] | Should -Not -Be 'failed'
+            # The underlying comment write itself DID land.
+            $script:PostLog.Count | Should -Be 1
+        }
+
+        It 'still records plain ''failed'' (never ''landed-postfix-failed'') for a genuine execution-time failure where nothing usable landed' {
+            $markerA = $script:GoodFamilyA.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+            # entry's freshly-assigned comment id (90000) is corrupted at
+            # read-back time -- the write itself never gets confirmed as
+            # landed (Action stays $null on this failure path).
+            $script:CorruptReadBackIds.Add(90000) | Out-Null
+            $entries = @(
+                [PSCustomObject]@{ Family = $script:GoodFamilyA.Family; Number = $script:IssueNumber; TargetSurface = 'issue'; Marker = $markerA; Body = "$markerA`n`nEntry with several e characters, corrupted at read-back."; NoPreserve = $false }
+            )
+
+            $result = Invoke-PersistMarkerBurst -Owner $script:Owner -Repo $script:Repo -Entries $entries
+
+            $result.Success | Should -Be $false
+            $result.Artifacts['entry-1'] | Should -Be 'failed'
+            $result.Artifacts['entry-1'] | Should -Not -Be 'landed-postfix-failed'
+        }
+    }
+
     Context 'Invoke-PersistMarkerBurst: re-run convergence after a mid-burst halt' {
         It 'a re-run of the same manifest converges without duplicate posts' {
             # Distinct markers per entry (varying {ID}) -- a realistic burst
@@ -427,7 +573,56 @@ evidence: issue-893-plan-marker-posted
         }
     }
 
+    Context 'Invoke-PersistMarkerBurstFromManifest: -BurstManifest path scratch-root bounding (M13, issue #893 s11)' {
+        It 'refuses a -BurstManifest path that resolves OUTSIDE the scratch root, before ever opening it' {
+            $markerA = $script:GoodFamilyA.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+            $bodyPath = script:New-ScratchBodyFile -Name 'body-outside-manifest.md' -Content "$markerA`n`nBody."
+            $entries = @(
+                @{ family = $script:GoodFamilyA.Family; number = $script:IssueNumber; targetSurface = 'issue'; marker = $markerA; bodyFile = $bodyPath }
+            )
+            $outsideManifestPath = Join-Path $TestDrive 'outside-burst.json'
+            (ConvertTo-Json -InputObject $entries -Depth 10 -AsArray) | Set-Content -LiteralPath $outsideManifestPath
+
+            $result = Invoke-PersistMarkerBurstFromManifest -Owner $script:Owner -Repo $script:Repo -ManifestPath $outsideManifestPath -ScratchRoot $script:ScratchRoot
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '(?i)scratch root|out of bounds'
+            $script:PostLog.Count | Should -Be 0
+        }
+
+        It 'accepts a -BurstManifest path that resolves inside the scratch root (regression)' {
+            $markerA = $script:GoodFamilyA.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+            $bodyPath = script:New-ScratchBodyFile -Name 'body-inside-manifest.md' -Content "$markerA`n`nBody."
+            $entries = @(
+                @{ family = $script:GoodFamilyA.Family; number = $script:IssueNumber; targetSurface = 'issue'; marker = $markerA; bodyFile = $bodyPath }
+            )
+            $manifestPath = script:New-ManifestFile -Entries $entries
+
+            $result = Invoke-PersistMarkerBurstFromManifest -Owner $script:Owner -Repo $script:Repo -ManifestPath $manifestPath -ScratchRoot $script:ScratchRoot
+
+            $result.Success | Should -Be $true
+            $script:PostLog.Count | Should -Be 1
+        }
+    }
+
     Context 'Invoke-PersistMarkerBurstFromManifest: manifest parsing + malformed refusal' {
+        It 'M22: length-bounds an echoed $ManifestPath in a refusal message, never dumping it unbounded' {
+            # A deeply-nested scratch-root subdirectory whose resolved path
+            # comfortably exceeds the 80-char field-value cap.
+            $deepDir = $script:ScratchRoot
+            1..15 | ForEach-Object { $deepDir = Join-Path $deepDir "segment-$_-with-some-extra-length-padding" }
+            New-Item -ItemType Directory -Path $deepDir -Force | Out-Null
+            $manifestPath = Join-Path $deepDir 'bad.json'
+            [System.IO.File]::WriteAllText($manifestPath, '{ not valid json ][')
+
+            $result = Invoke-PersistMarkerBurstFromManifest -Owner $script:Owner -Repo $script:Repo -ManifestPath $manifestPath -ScratchRoot $script:ScratchRoot
+
+            $result.Success | Should -Be $false
+            $manifestPath.Length | Should -BeGreaterThan 80
+            $result.Reason | Should -Match '\.\.\.\(\+\d+ more chars, truncated\)'
+            $result.Reason | Should -Not -Match ([regex]::Escape($manifestPath))
+        }
+
         It 'refuses a manifest file that is not parseable JSON, naming the manifest path' {
             $manifestPath = Join-Path $script:ScratchRoot 'bad.json'
             [System.IO.File]::WriteAllText($manifestPath, '{ not valid json ][')
@@ -453,6 +648,61 @@ evidence: issue-893-plan-marker-posted
             $result.Success | Should -Be $false
             $result.Reason | Should -Match '(?i)entry 2'
             $result.Reason | Should -Match '(?i)marker'
+            $script:PostLog.Count | Should -Be 0
+        }
+
+        It 'M12: a JSON-quoted noPreserve string "false" is treated as $false (preserve still runs), never silently coerced to $true' {
+            $planMarker = $script:PlanIssueFamily.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+            $ledgerMarker = "<!-- phase-containment-ledger-$script:IssueNumber -->"
+            Add-MockComment -Id 500 -Body "$ledgerMarker`n`nSibling content."
+            Add-MockComment -Id 100 -Body "$planMarker`n<!-- phase-containment-ledger-ref: 500 -->`n`nOld plan prose."
+            $bodyPath = script:New-ScratchBodyFile -Name 'plan-body.md' -Content "$planMarker`n`nFresh plan prose, no pointer."
+            # Hand-authoring slip: the manifest JSON-quotes the boolean as a
+            # string rather than emitting a bare JSON `false` literal. The
+            # OLD `[bool]$rawEntry.noPreserve` cast coerced ANY non-empty
+            # string (including "false") to $true, silently disabling all
+            # write-back preservation.
+            $entries = @(
+                @{ family = $script:PlanIssueFamily.Family; number = $script:IssueNumber; targetSurface = 'issue'; marker = $planMarker; bodyFile = $bodyPath; noPreserve = 'false' }
+            )
+            $manifestPath = script:New-ManifestFile -Entries $entries
+
+            $result = Invoke-PersistMarkerBurstFromManifest -Owner $script:Owner -Repo $script:Repo -ManifestPath $manifestPath -ScratchRoot $script:ScratchRoot
+
+            $result.Success | Should -Be $true
+            $script:PatchLog[0].Body | Should -Match ([regex]::Escape('<!-- phase-containment-ledger-ref: 500 -->'))
+        }
+
+        It 'M12: an uppercase-mixed noPreserve string "TRUE" is recognized case-insensitively and skips preservation' {
+            $planMarker = $script:PlanIssueFamily.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+            $ledgerMarker = "<!-- phase-containment-ledger-$script:IssueNumber -->"
+            Add-MockComment -Id 500 -Body "$ledgerMarker`n`nSibling content."
+            Add-MockComment -Id 100 -Body "$planMarker`n<!-- phase-containment-ledger-ref: 500 -->`n`nOld plan prose."
+            $bodyPath = script:New-ScratchBodyFile -Name 'plan-body2.md' -Content "$planMarker`n`nFresh plan prose, no pointer."
+            $entries = @(
+                @{ family = $script:PlanIssueFamily.Family; number = $script:IssueNumber; targetSurface = 'issue'; marker = $planMarker; bodyFile = $bodyPath; noPreserve = 'TRUE' }
+            )
+            $manifestPath = script:New-ManifestFile -Entries $entries
+
+            $result = Invoke-PersistMarkerBurstFromManifest -Owner $script:Owner -Repo $script:Repo -ManifestPath $manifestPath -ScratchRoot $script:ScratchRoot
+
+            $result.Success | Should -Be $true
+            $script:PatchLog[0].Body | Should -Not -Match 'phase-containment-ledger-ref'
+        }
+
+        It 'M12: refuses a manifest entry whose noPreserve is a non-boolean JSON value (a number), naming the entry index and offending value' {
+            $markerA = $script:GoodFamilyA.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+            $bodyPath = script:New-ScratchBodyFile -Name 'body-noPreserve-numeric.md' -Content "$markerA`n`nBody."
+            $entries = @(
+                @{ family = $script:GoodFamilyA.Family; number = $script:IssueNumber; targetSurface = 'issue'; marker = $markerA; bodyFile = $bodyPath; noPreserve = 1 }
+            )
+            $manifestPath = script:New-ManifestFile -Entries $entries
+
+            $result = Invoke-PersistMarkerBurstFromManifest -Owner $script:Owner -Repo $script:Repo -ManifestPath $manifestPath -ScratchRoot $script:ScratchRoot
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '(?i)entry 1'
+            $result.Reason | Should -Match '(?i)noPreserve'
             $script:PostLog.Count | Should -Be 0
         }
 

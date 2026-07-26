@@ -710,4 +710,64 @@ Describe 'persist-marker s9 prose/contract drift guard (s7 requirement contract 
             $liveRow.TargetSurface | Should -Be $expectedSurface -Because "handoff-markers.md's '$family' marker template implies TargetSurface='$expectedSurface' (from its '-{$placeholderToken}' placeholder) but the live registry declares TargetSurface='$($liveRow.TargetSurface)'"
         }
     }
+
+    It 'M30 (issue #893 s11): no rewritten surface carries a NEW, non-negated `gh (issue|pr) comment` invocation near a migrated family''s marker literal, excluding the documented [hand-authored] exceptions' {
+        # M30 fix: the prior AC13 guards above only ever check that the
+        # pinned "ONLY documented write path" phrase is STILL PRESENT
+        # somewhere in each rewritten surface -- none of them detect a NEW
+        # hand-composed write instruction added ELSEWHERE in an
+        # already-covered file that would directly contradict that framing
+        # (e.g. a later paragraph telling the agent to just run `gh issue
+        # comment` for a marker family this repo migrated to
+        # persist-marker.ps1). This scans every migrated family's marker
+        # literal for a nearby `gh (issue|pr) comment` invocation that is
+        # NOT preceded, within the same proximity window, by an explicit
+        # negation/prohibition cue ("never", "not", "no longer", "stays
+        # hand-authored", etc.) -- excluding the two s9-carved-out
+        # [hand-authored] exceptions (engagement-record-review-{PR},
+        # design-issue-{ID}), which legitimately still document a direct
+        # `gh pr comment` call.
+        $negationPattern = '(?i)(never|\bnot\b|no longer|isn''t|doesn''t|won''t|stays hand-authored)'
+        $ghCommandPattern = '`gh (issue|pr) comment'
+        $proximityWindow = 300
+        $excludedLiteralPattern = 'engagement-record-review-|design-issue-'
+
+        # Prose docs always cite a family's MarkerTemplate in its abstract
+        # placeholder form (literal `{ID}`/`{PR}` text), never a substituted
+        # concrete number -- match the template LITERALLY (escaped, no
+        # wildcarding): the wildcarded form ConvertTo-MarkerFamilyLineStartPattern
+        # uses is for scanning LIVE comment bodies with a real substituted
+        # id, which is not what these prose surfaces ever contain.
+        $migratedFamilyPatterns = @(Get-MarkerFamilyRegistry | ForEach-Object {
+                [regex]::Escape($_.MarkerTemplate)
+            })
+
+        $violations = [System.Collections.Generic.List[string]]::new()
+        foreach ($p in $script:RewrittenDocs) {
+            $text = $script:RewrittenDocsText[$p]
+            $ghMatches = [regex]::Matches($text, $ghCommandPattern)
+            foreach ($ghMatch in $ghMatches) {
+                $windowStart = [Math]::Max(0, $ghMatch.Index - $proximityWindow)
+                $windowLength = [Math]::Min($text.Length, $ghMatch.Index + $proximityWindow) - $windowStart
+                $window = $text.Substring($windowStart, $windowLength)
+
+                $nearMigratedMarker = $false
+                foreach ($fp in $migratedFamilyPatterns) {
+                    if ($window -match $fp) { $nearMigratedMarker = $true; break }
+                }
+                if (-not $nearMigratedMarker) { continue }
+                if ($window -match $excludedLiteralPattern) { continue }
+
+                # Negation must appear BEFORE the gh-command match (within
+                # the window) to count as a genuine prohibition rather than
+                # an unrelated negation word elsewhere in the same window.
+                $beforeText = $text.Substring($windowStart, $ghMatch.Index - $windowStart)
+                if ($beforeText -match $negationPattern) { continue }
+
+                $violations.Add("$p (offset $($ghMatch.Index)): ...$($window.Substring([Math]::Max(0, $ghMatch.Index - $windowStart - 40), [Math]::Min(80, $window.Length)))...") | Out-Null
+            }
+        }
+
+        $violations | Should -BeNullOrEmpty -Because "a gh (issue|pr) comment invocation was found near a migrated family's marker literal without an explicit negation/prohibition nearby and without being one of the documented [hand-authored] exceptions -- this is exactly the M30 (issue #893 s11) contradicting-instruction class: $($violations -join '; ')"
+    }
 }

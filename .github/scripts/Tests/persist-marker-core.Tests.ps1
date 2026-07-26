@@ -131,6 +131,11 @@ evidence:
         $script:simulatePatchFailure = @()
         $script:simulateGetFailure = @()
         $script:CorruptReadBackIds = [System.Collections.Generic.HashSet[long]]::new()
+        # M20 (issue #893 s11): FlakyReadBackIds models a corruption that
+        # clears itself after N GETs -- e.g. eventual-consistency/caching --
+        # as opposed to CorruptReadBackIds' PERMANENT corruption. Value =
+        # remaining corrupted-read count for that id, decremented on each GET.
+        $script:FlakyReadBackIds = [System.Collections.Generic.Dictionary[long, int]]::new()
 
         function script:Add-MockComment {
             param([Parameter(Mandatory)][long]$Id, [Parameter(Mandatory)][string]$Body)
@@ -156,9 +161,24 @@ evidence:
             # GET by numeric id (no -X): gh api repos/<o>/<r>/issues/comments/<id>
             if ($Args.Count -ge 2 -and $Args[0] -eq 'api' -and $Args[1] -match '^repos/[^/]+/[^/]+/issues/comments/(\d+)$' -and ($Args -notcontains '-X')) {
                 $id = [long]$Matches[1]
-                if ($script:simulateGetFailure -contains $id) { $global:LASTEXITCODE = 1; return '' }
+                # M19 (issue #893 s11): a TRANSIENT failure (network blip,
+                # rate limit) is distinguishable, by message text, from a
+                # confirmed HTTP 404 absence -- real `gh api` always includes
+                # the literal HTTP status in its error text. simulateGetFailure
+                # models the transient case (no "HTTP 404" in the message);
+                # a genuinely-missing mock comment models the confirmed-404
+                # case.
+                if ($script:simulateGetFailure -contains $id) {
+                    Write-Error "gh: unexpected error connecting to api.github.com"
+                    $global:LASTEXITCODE = 1
+                    return ''
+                }
                 $c = $script:mockComments | Where-Object { $_.Id -eq $id }
-                if (-not $c) { $global:LASTEXITCODE = 1; return '' }
+                if (-not $c) {
+                    Write-Error "gh: Not Found (HTTP 404)"
+                    $global:LASTEXITCODE = 1
+                    return ''
+                }
                 $global:LASTEXITCODE = 0
                 $returnedBody = $c.body
                 if ($script:CorruptReadBackIds.Contains($id)) {
@@ -168,6 +188,10 @@ evidence:
                     # (mojibake corruption LENGTHENS/holds length, never
                     # shortens it).
                     $returnedBody = $returnedBody -replace 'e', "ë"
+                }
+                if ($script:FlakyReadBackIds.ContainsKey($id) -and $script:FlakyReadBackIds[$id] -gt 0) {
+                    $returnedBody = $returnedBody -replace 'e', "ë"
+                    $script:FlakyReadBackIds[$id] = $script:FlakyReadBackIds[$id] - 1
                 }
                 return (@{ id = $c.Id; body = $returnedBody; url = $c.url } | ConvertTo-Json -Depth 8)
             }
@@ -362,6 +386,36 @@ evidence:
 
             $result.Success | Should -Be $false
             $result.Reason | Should -Match '(?i)read-back|normalized'
+        }
+
+        It 'M20: attempts a same-call repair-PATCH after a read-back failure, converging to Success=$true and posting only ONE comment (never accreting a duplicate) when the corruption clears' {
+            $marker = $script:PostNewFamily.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+            $body = "$marker`n`nA sentence with several letter e characters in it."
+
+            # The just-created comment's FIRST read-back GET is corrupted
+            # (models an eventual-consistency blip), then clears -- the
+            # underlying stored body was always correct.
+            $script:FlakyReadBackIds[$script:NextCommentId] = 1
+
+            $result = Invoke-PersistMarkerWrite -Family $script:PostNewFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $marker -Body $body
+
+            $result.Success | Should -Be $true
+            $result.Confirmation | Should -Match '(?i)repair-PATCH'
+            # Exactly one comment posted -- the repair converges WITHIN this
+            # call rather than requiring an external retry that would have
+            # posted a second, accreting duplicate comment.
+            $script:PostLog.Count | Should -Be 1
+        }
+
+        It 'M20: on a PERSISTENT read-back mismatch, the repair-PATCH attempt also fails and the call still reports failure (never a false Success)' {
+            $marker = $script:PostNewFamily.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+            $body = "$marker`n`nA sentence with several letter e characters in it."
+            $script:CorruptReadBackIds.Add($script:NextCommentId) | Out-Null
+
+            $result = Invoke-PersistMarkerWrite -Family $script:PostNewFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $marker -Body $body
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '(?i)repair-PATCH attempt also failed'
         }
     }
 
@@ -584,6 +638,37 @@ evidence:
             $result.Reason | Should -Match 'phase-containment-ledger'
             $script:ghCallLog.Count | Should -Be 0
         }
+
+        It 'M15: recognizes the candidate''s OWN family marker at line 1 even when prefixed by a zero-width space (U+200B), never a false "missing" refusal' {
+            $marker = $script:PostNewFamily.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+            $zwsp = [char]0x200B
+            $body = "$zwsp$marker`n`nSome content, but line 1 starts with an invisible zero-width space."
+
+            $result = Invoke-PersistMarkerWrite -Family $script:PostNewFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $marker -Body $body
+
+            $result.Success | Should -Be $true
+        }
+
+        It 'M15: still refuses a decoy cross-family marker whose leading whitespace is a zero-width space (U+200B), never a silent hygiene bypass' {
+            $marker = $script:PostNewFamily.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+            $otherMarker = $script:UpsertFamily.MarkerTemplate -replace '\{ID\}', '42'
+            $zwsp = [char]0x200B
+            # `\s` does not match `\p{Cf}` (Unicode "format" category, e.g.
+            # zero-width space) -- the old `^\s*` anchor would have let this
+            # decoy slip past the cross-family scan even though a
+            # substring-based downstream reader (find-or-upsert-comment.ps1's
+            # `-like` matcher) still finds it, recreating the exact
+            # self-DoS class this hygiene rule exists to close.
+            $body = "$marker`n`nSome content.`n$zwsp$otherMarker`n`nA decoy live marker prefixed by an invisible zero-width space."
+
+            $result = Invoke-PersistMarkerWrite -Family $script:PostNewFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $marker -Body $body
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '(?i)another registered family'
+            $escapedOtherFamily = [regex]::Escape($script:UpsertFamily.Family)
+            $result.Reason | Should -Match $escapedOtherFamily
+            $script:ghCallLog.Count | Should -Be 0
+        }
     }
 
     Context 'engagement-record validator adapter' {
@@ -606,6 +691,44 @@ evidence:
             $result.Success | Should -Be $false
             $result.Reason | Should -Match 'Not_A_Valid_Slug'
             $script:ghCallLog.Count | Should -Be 0
+        }
+
+        It 'M22: echoes the library validator''s own warning at the WIDER 400-char library-message cap, not the narrow 80-char field-value cap' {
+            $marker = $script:EngagementRecordFamily.MarkerTemplate -replace '\{phase\}', 'plan' -replace '\{ID\}', "$script:IssueNumber"
+            # An intentionally huge decision_id -- well over 80 chars but
+            # under 400 -- so the resulting library warning text (which
+            # echoes decision_id verbatim inside a fixed template) exceeds
+            # the narrow $script:MarkerRefusalEchoCap (80) but should still
+            # come through UNTRUNCATED under the wider library-message cap
+            # (400).
+            $longSlug = 'x' * 200
+            $yamlFence = @'
+```yaml
+schema_version: 2
+phase: plan
+capture_session: "test-session"
+load_bearing_decisions:
+  - decision_id: {SLUG}
+    classification: load-bearing
+    articulation_status: complete
+```
+'@ -replace '\{SLUG\}', $longSlug
+            $body = "$marker`n`n$yamlFence"
+
+            $result = Invoke-PersistMarkerWrite -Family $script:EngagementRecordFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $marker -Body $body
+
+            $result.Success | Should -Be $false
+            # The full 200-char slug must appear VERBATIM and INTACT -- the
+            # narrow 80-char field-value cap would have truncated the
+            # message before even finishing the fixed "...decision_id
+            # slug: '" prefix (already ~88 chars), showing NONE of the
+            # slug's characters. Under the wider 400-char library-message
+            # cap, the whole slug survives; only the trailing (less
+            # load-bearing) regex-description text gets cut off, still
+            # producing a truncation marker since the FULL message (prefix +
+            # 200-char slug + regex description) exceeds 400 chars overall.
+            $result.Reason | Should -Match $longSlug
+            $result.Reason | Should -Match '\.\.\.\(\+\d+ more chars, truncated\)'
         }
 
         It 'fails closed (refuses) when Read-EngagementRecords is not in scope (adapter infrastructure failure)' {
@@ -695,6 +818,33 @@ evidence:
             $result.Reason | Should -Match '(?i)nested mapping'
             $script:ghCallLog.Count | Should -Be 0
         }
+
+        It 'M24: ignores a MID-LINE decoy ```yaml occurrence (not anchored at line start) and correctly parses the REAL, later, line-anchored fenced block' {
+            $marker = $script:CreditInputFamily.MarkerTemplate -replace '\{port\}', 'plan' -replace '\{ID\}', "$script:IssueNumber"
+            # The decoy sits mid-sentence (not at column 0) -- the OLD
+            # unanchored regex would have matched THIS occurrence first
+            # (first-match-wins, scanning the whole body regardless of line
+            # position), extracting garbage ("decoy: not-real-yaml") instead
+            # of the real, later, properly fenced block.
+            $decoyProse = 'Note: a payload example looks like ```yaml decoy: not-real-yaml``` embedded in a sentence.'
+            $body = "$marker`n`n$decoyProse`n`n$script:CreditInputValidYaml"
+
+            $result = Invoke-PersistMarkerWrite -Family $script:CreditInputFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $marker -Body $body
+
+            $result.Success | Should -Be $true
+            $result.Action | Should -Be 'posted'
+        }
+
+        It 'M24: refuses (never silently picks one) when the candidate carries TWO genuine, line-anchored fenced ```yaml blocks' {
+            $marker = $script:CreditInputFamily.MarkerTemplate -replace '\{port\}', 'plan' -replace '\{ID\}', "$script:IssueNumber"
+            $body = "$marker`n`n$script:CreditInputValidYaml`n`n$script:CreditInputInvalidPortYaml"
+
+            $result = Invoke-PersistMarkerWrite -Family $script:CreditInputFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $marker -Body $body
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '(?i)more than one'
+            $script:ghCallLog.Count | Should -Be 0
+        }
     }
 
     Context 'sentinel-empty validator adapter' {
@@ -764,6 +914,21 @@ evidence:
             $result.Success | Should -Be $true
             $script:PatchLog[0].Body | Should -Not -Match ([regex]::Escape('phase-containment-ledger-ref: 501'))
             $result.Confirmation | Should -Not -Match 'phase-containment-ledger-ref pointer'
+        }
+
+        It 'M19: ABORTS the whole write (never silently drops the pointer) when the sibling GET fails with a TRANSIENT error, not a confirmed 404' {
+            $script:simulateGetFailure = @(9998)
+            $existingBody = "$script:PlanMarker`n<!-- phase-containment-ledger-ref: 9998 -->`n`nOld plan prose."
+            Add-MockComment -Id 100 -Body $existingBody
+            $candidateBody = "$script:PlanMarker`n`nFresh plan prose, no pointer."
+
+            $result = Invoke-PersistMarkerWrite -Family $script:UpsertFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $script:PlanMarker -Body $candidateBody
+
+            # A transient failure must ABORT (refuse) the write, not silently
+            # drop the pointer and proceed as if it were confirmed stale.
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '(?i)transport failure'
+            $script:PatchLog.Count | Should -Be 0
         }
 
         It 'DROPS a pointer whose target comment no longer exists (GET fails), falling through to self-heal' {
@@ -930,6 +1095,139 @@ Old plan prose.
             $result.Success | Should -Be $true
             $script:PatchLog[0].Body | Should -Match '\*\*Plan Stress-Test\*\*'
             $result.Confirmation | Should -Match '\*\*Plan Stress-Test\*\* heading/section'
+        }
+
+        It 'M10: does NOT carry forward the **Plan Stress-Test** section when the existing comment carries a ledger pointer (modern, non-legacy plan)' {
+            $ledgerMarker = "<!-- phase-containment-ledger-$script:IssueNumber -->"
+            Add-MockComment -Id 500 -Body "$ledgerMarker`n`nSibling content."
+            $existingBody = @"
+$script:PlanMarker
+<!-- phase-containment-ledger-ref: 500 -->
+
+Old plan prose.
+
+**Plan Stress-Test**
+
+- Challenge: something - Prosecution: pass - Post-judge ruling: sustained - Maintainer disposition: incorporate
+"@
+            Add-MockComment -Id 100 -Body $existingBody
+            $candidateBody = "$script:PlanMarker`n<!-- phase-containment-ledger-ref: 500 -->`n`nFresh plan prose, revised."
+
+            $result = Invoke-PersistMarkerWrite -Family $script:UpsertFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $script:PlanMarker -Body $candidateBody
+
+            $result.Success | Should -Be $true
+            $script:PatchLog[0].Body | Should -Not -Match '\*\*Plan Stress-Test\*\*'
+            $result.Confirmation | Should -Not -Match '\*\*Plan Stress-Test\*\* heading/section'
+        }
+
+        It 'M10: bounds the stress-test capture at a following `## ` heading, never duplicating it, even on a legacy (no-pointer) plan' {
+            $existingBody = @"
+$script:PlanMarker
+
+Old plan prose.
+
+**Plan Stress-Test**
+
+- Challenge: something - Prosecution: pass - Post-judge ruling: sustained - Maintainer disposition: incorporate
+
+## Named Decisions
+
+<!-- named-decisions:begin -->
+### D1 - Something load-bearing
+<!-- named-decisions:end -->
+"@
+            Add-MockComment -Id 100 -Body $existingBody
+            # Candidate already carries a FRESH `## Named Decisions` section of
+            # its own -- an unbounded stress-test capture (running to
+            # end-of-body because no further `**Bold**` heading follows) would
+            # append the OLD named-decisions text after this fresh one,
+            # duplicating the heading (the exact live #893 production repro
+            # from the prosecution ledger).
+            $candidateBody = @"
+$script:PlanMarker
+
+Fresh plan prose, revised, stress-test summary omitted by mistake.
+
+## Named Decisions
+
+<!-- named-decisions:begin -->
+### D1 - Something load-bearing (revised)
+<!-- named-decisions:end -->
+"@
+
+            $result = Invoke-PersistMarkerWrite -Family $script:UpsertFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $script:PlanMarker -Body $candidateBody
+
+            $result.Success | Should -Be $true
+            $script:PatchLog[0].Body | Should -Match '\*\*Plan Stress-Test\*\*'
+            # The preserved slice must not swallow the existing trailing
+            # ## Named Decisions section -- the heading must appear exactly
+            # once (the candidate's own fresh copy), never duplicated.
+            ([regex]::Matches($script:PatchLog[0].Body, '## Named Decisions')).Count | Should -Be 1
+        }
+
+        It 'M14: REFUSES a candidate-SUPPLIED phase-containment-ledger-ref pointer that fails its own live sibling-identity check (forged/stale)' {
+            # Note: no sibling comment 777 is registered at all -- the
+            # candidate's own pointer targets a comment that doesn't carry
+            # the expected identity marker.
+            $existingBody = "$script:PlanMarker`n`nOld plan prose (no pointer)."
+            Add-MockComment -Id 100 -Body $existingBody
+            $candidateBody = "$script:PlanMarker`n<!-- phase-containment-ledger-ref: 777 -->`n`nFresh plan prose with a forged pointer."
+
+            $result = Invoke-PersistMarkerWrite -Family $script:UpsertFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $script:PlanMarker -Body $candidateBody
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '(?i)candidate-supplied'
+            $result.Reason | Should -Match '777'
+            $script:PatchLog.Count | Should -Be 0
+        }
+
+        It 'M14: accepts a candidate-SUPPLIED phase-containment-ledger-ref pointer whose target genuinely carries the expected identity marker' {
+            $ledgerMarker = "<!-- phase-containment-ledger-$script:IssueNumber -->"
+            Add-MockComment -Id 500 -Body "$ledgerMarker`n`nReal sibling content."
+            $existingBody = "$script:PlanMarker`n`nOld plan prose (no pointer)."
+            Add-MockComment -Id 100 -Body $existingBody
+            $candidateBody = "$script:PlanMarker`n<!-- phase-containment-ledger-ref: 500 -->`n`nFresh plan prose with a genuine pointer."
+
+            $result = Invoke-PersistMarkerWrite -Family $script:UpsertFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $script:PlanMarker -Body $candidateBody
+
+            $result.Success | Should -Be $true
+            $script:PatchLog[0].Body | Should -Match ([regex]::Escape('phase-containment-ledger-ref: 500'))
+        }
+
+        It 'M14: REFUSES a candidate-SUPPLIED slice_comment_id that fails its own live sibling-identity check (forged/stale)' {
+            $existingBody = @"
+$script:PlanMarker
+
+Old plan prose.
+"@
+            Add-MockComment -Id 100 -Body $existingBody
+            # No sibling comment 888 exists at all.
+            $candidateBody = @"
+$script:PlanMarker
+
+<!-- frame-spine
+spine_schema_version: 2
+generated_at: 2026-07-02T00:00:00Z
+coverage: complete
+slice_comment_id: 888
+ports:
+  implement-code: [s1]
+slices:
+  s1:
+    ac_refs: [AC1]
+    depends_on: []
+    cycle: 1
+-->
+
+Fresh plan prose with a forged slice_comment_id.
+"@
+
+            $result = Invoke-PersistMarkerWrite -Family $script:UpsertFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $script:PlanMarker -Body $candidateBody
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '(?i)candidate-supplied'
+            $result.Reason | Should -Match '888'
+            $script:PatchLog.Count | Should -Be 0
         }
 
         It 'skips ALL preservation when -NoPreserve is set, even for an otherwise-valid pointer' {

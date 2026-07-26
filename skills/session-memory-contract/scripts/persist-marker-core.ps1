@@ -167,11 +167,30 @@
         EXACT SAME validation a single write already ran, on every burst
         entry, before any network write -- this is what makes "a manifest
         containing any invalid payload writes nothing at all" true at
-        INVOCATION scope. Deliberately does NOT re-run the
-        'plan-issue-write-back-preserve' PostStep (that step performs its
-        own live GET calls and is therefore not network-free); a PostStep's
-        live mutation stays a per-write, execution-time concern exercised
-        by the write itself, not predicted by this preflight.
+        INVOCATION scope. This helper itself stays network-free -- it never
+        runs the 'plan-issue-write-back-preserve' PostStep internally.
+        M11 fix (issue #893 s11): Invoke-PersistMarkerBurst's own preflight
+        LOOP (not this helper) now runs script:Invoke-PlanIssueWriteBackPreserve
+        itself (a live-read-only step -- it only performs GETs, never a
+        write) for any plan-issue-family entry BEFORE calling this helper,
+        and validates the PREVIEW-MERGED body rather than the raw entry
+        body -- mirroring exactly what Invoke-PersistMarkerWrite itself does
+        (PostStep merge, then preflight, in that order) so a preserve-
+        triggered size/hygiene violation surfaces at whole-manifest-preflight
+        time, before any earlier burst entry has been allowed to land,
+        instead of only at execution time after earlier entries already
+        wrote. Residual, accepted risk: if an EARLIER entry in the SAME
+        burst mutates state this preview's live GET depends on (e.g. an
+        earlier frame-slices entry creating the very sibling a later
+        plan-issue entry's pointer-preserve check reads), the preview merge
+        -- computed before any entry in the burst has written -- can
+        diverge from what the real execution-time merge later observes.
+        Invoke-PersistMarkerWrite's own preflight call always re-validates
+        the TRUE final candidate at write time regardless of this preview,
+        so a preview/execution divergence can at most produce a burst-
+        preflight false PASS here (execution then still fails safely later,
+        exactly as before this fix) -- it can never produce a false
+        REFUSAL of an otherwise-valid burst.
       - Invoke-PersistMarkerBurst / Invoke-PersistMarkerBurstFromManifest:
         ordered multi-write burst. Preflights every entry first (zero
         writes on any refusal), then executes Invoke-PersistMarkerWrite per
@@ -436,6 +455,20 @@ function script:Test-MarkerReadBack {
 # sensitive field being dumped verbatim (s4 requirement contract).
 $script:MarkerRefusalEchoCap = 80
 
+# M22 fix (issue #893 s11): a SEPARATE, larger cap for a narrow class of
+# values this file did not author -- a validator LIBRARY's own already-
+# bounded, reviewed diagnostic prose (e.g. Read-EngagementRecords' or
+# review-dispositions-validator-core.ps1's own formatted finding messages).
+# Prior to this fix these sites were deliberately left completely uncapped
+# (per this file's own now-superseded rationale that capping them at the
+# standard 80-char field-value cap would truncate useful diagnostic
+# legibility); the s11 prosecution/defense correctly identified that as a
+# real 893-D6 inconsistency -- EVERY echoed value must be length-bounded,
+# full stop. This wider cap (per the original s4 contract's own suggested
+# resolution) keeps that legibility while still guaranteeing no site can
+# dump an unbounded value verbatim.
+$script:MarkerLibraryMessageEchoCap = 400
+
 function script:ConvertTo-MarkerRefusalEcho {
     <#
     .SYNOPSIS
@@ -451,6 +484,25 @@ function script:ConvertTo-MarkerRefusalEcho {
     if ($Value.Length -le $script:MarkerRefusalEchoCap) { return $Value }
     $overflow = $Value.Length - $script:MarkerRefusalEchoCap
     return "$($Value.Substring(0, $script:MarkerRefusalEchoCap))...(+$overflow more chars, truncated)"
+}
+
+function script:ConvertTo-MarkerLibraryMessageEcho {
+    <#
+    .SYNOPSIS
+        M22 fix (issue #893 s11): length-bounds a validator LIBRARY's own
+        already-formatted diagnostic message before it is echoed inside a
+        refusal, using the wider $script:MarkerLibraryMessageEchoCap (400
+        chars) rather than the standard $script:MarkerRefusalEchoCap (80
+        chars) -- long enough to preserve a reviewed library message's
+        legibility, but never unbounded.
+    .OUTPUTS
+        [string]
+    #>
+    param([Parameter(Mandatory)][AllowNull()][AllowEmptyString()][string]$Value)
+    if ($null -eq $Value) { return '<null>' }
+    if ($Value.Length -le $script:MarkerLibraryMessageEchoCap) { return $Value }
+    $overflow = $Value.Length - $script:MarkerLibraryMessageEchoCap
+    return "$($Value.Substring(0, $script:MarkerLibraryMessageEchoCap))...(+$overflow more chars, truncated)"
 }
 
 function script:New-MarkerRefusal {
@@ -497,7 +549,15 @@ function script:Get-MarkerLineStartMatchIndexes {
     )
     $normalized = ($Body -replace "`r`n", "`n") -replace "`r", "`n"
     $lines = $normalized -split "`n"
-    $pattern = '^\s*' + [regex]::Escape($Literal)
+    # M15 fix (issue #893 s11): the leading-whitespace anchor widens to also
+    # absorb `\p{Cf}` (Unicode "format" category -- zero-width space U+200B,
+    # BOM/ZWNBSP U+FEFF, etc.), not just `\s`. `\s` does not match `\p{Cf}`,
+    # so a marker prefixed by an invisible format character previously
+    # bypassed this line-start check even though downstream substring-based
+    # readers (`-like`, grep) still match it -- an inverted trust
+    # relationship where the gate was anchored MORE strictly than the
+    # readers it exists to protect.
+    $pattern = '^[\s\p{Cf}]*' + [regex]::Escape($Literal)
     $indexes = [System.Collections.Generic.List[int]]::new()
     for ($i = 0; $i -lt $lines.Count; $i++) {
         if ($lines[$i] -match $pattern) {
@@ -527,7 +587,7 @@ function script:ConvertTo-MarkerFamilyLineStartPattern {
         "Writing about markers safely") never contains the literal '<!--'
         bytes this pattern anchors on, so it never matches.
     .OUTPUTS
-        [string] a regex pattern (multiline, '(?m)^\s*' anchored).
+        [string] a regex pattern (multiline, '(?m)^[\s\p{Cf}]*' anchored).
     #>
     param([Parameter(Mandatory)][string]$MarkerTemplate)
     $escaped = [regex]::Escape($MarkerTemplate)
@@ -537,7 +597,11 @@ function script:ConvertTo-MarkerFamilyLineStartPattern {
     # '\{ID\}'. Matching only the opening escape here is deliberate, not a
     # typo.
     $withWildcards = $escaped -replace '\\\{[A-Za-z]+\}', '[\w-]+'
-    return '(?m)^\s*' + $withWildcards
+    # M15 fix (issue #893 s11): same `\p{Cf}` widening as
+    # script:Get-MarkerLineStartMatchIndexes above -- see that function's
+    # comment for the full rationale (zero-width/invisible Unicode bypassing
+    # a `\s`-only leading-whitespace anchor).
+    return '(?m)^[\s\p{Cf}]*' + $withWildcards
 }
 
 # M8 fix (issue #893 s11): cross-family hygiene must also protect markers
@@ -647,18 +711,38 @@ function script:Get-MarkerYamlPayload {
         review-dispositions-validator-core.ps1: prefer a fenced ```yaml
         block; otherwise fall back to everything after the marker's closing
         '-->'.
+    .DESCRIPTION
+        M24 fix (issue #893 s11): both the opening ` ```yaml ` and closing
+        ` ``` ` fences are now anchored to LINE START (`(?m)^`), and the
+        opening fence's leading-whitespace/newline-handling is explicit --
+        the prior regex ( ` ```yaml\s*([\s\S]*?)``` ` ) was unanchored and
+        matched the FIRST occurrence anywhere in the body, including inside
+        an unrelated prose sentence or a decoy fence positioned earlier in
+        the payload. Additionally: when the body carries MORE than one
+        candidate fenced-yaml block, this now REFUSES (Ambiguous=$true)
+        rather than silently picking whichever the regex happened to match
+        first -- a decoy fence earlier in the payload must never cause the
+        real, later block to be silently skipped.
     .OUTPUTS
-        [string] (possibly empty).
+        [PSCustomObject] Payload [string or $null] (possibly empty when
+        Ambiguous=$false), Ambiguous [bool] (true when 2+ candidate fenced
+        ```yaml blocks are present -- Payload is $null in that case; the
+        caller must refuse rather than guess which block is authoritative).
     #>
     param([Parameter(Mandatory)][string]$Body)
-    if ($Body -match '```yaml\s*([\s\S]*?)```') {
-        return $Matches[1].Trim()
+    $fencePattern = '(?m)^```yaml[ \t]*\r?\n([\s\S]*?)^```[ \t]*\r?$'
+    $fenceMatches = [regex]::Matches($Body, $fencePattern)
+    if ($fenceMatches.Count -gt 1) {
+        return [PSCustomObject]@{ Payload = $null; Ambiguous = $true }
+    }
+    if ($fenceMatches.Count -eq 1) {
+        return [PSCustomObject]@{ Payload = $fenceMatches[0].Groups[1].Value.Trim(); Ambiguous = $false }
     }
     $closeIdx = $Body.IndexOf('-->')
     if ($closeIdx -ge 0) {
-        return $Body.Substring($closeIdx + 3).Trim()
+        return [PSCustomObject]@{ Payload = $Body.Substring($closeIdx + 3).Trim(); Ambiguous = $false }
     }
-    return $Body.Trim()
+    return [PSCustomObject]@{ Payload = $Body.Trim(); Ambiguous = $false }
 }
 
 function script:Invoke-SentinelEmptyValidatorAdapter {
@@ -708,12 +792,16 @@ function script:Invoke-EngagementRecordValidatorAdapter {
         refusal rather than propagating or being silently treated as "no
         findings".
 
-        Echo-cap scope note: the captured warning text is Read-EngagementRecords'
-        OWN already-bounded diagnostic prose (a fixed template plus one
-        interpolated field, authored by reviewed library code) -- passed
-        through here VERBATIM, uncapped, so the offending field/value it
-        names (893-D6) stays legible. $script:MarkerRefusalEchoCap governs
-        values THIS file echoes directly from raw payload content (see
+        Echo-cap scope note (M22 fix, issue #893 s11): the captured warning
+        text is Read-EngagementRecords' OWN already-bounded diagnostic prose
+        (a fixed template plus one interpolated field, authored by reviewed
+        library code) -- routed through script:ConvertTo-MarkerLibraryMessageEcho,
+        a WIDER dedicated cap than $script:MarkerRefusalEchoCap, so the
+        offending field/value it names (893-D6) stays legible while still
+        never being echoed unbounded (every echoed value must be
+        length-bounded, no exceptions -- an uncapped site was itself the
+        s11 finding). $script:MarkerRefusalEchoCap governs values THIS file
+        echoes directly from raw payload content (see
         Invoke-CreditInputValidatorAdapter, Test-MarkerPayloadHygiene,
         Invoke-SentinelEmptyValidatorAdapter) or unpredictable exception
         text (the infrastructure-failure branch below), not a trusted
@@ -738,7 +826,8 @@ function script:Invoke-EngagementRecordValidatorAdapter {
     }
     $warningList = @($warnings)
     if ($warningList.Count -gt 0) {
-        return script:New-MarkerRefusal -Family $Family -Target $Target -Detail "engagement-record validator flagged the candidate: $([string]$warningList[0])"
+        $echoedWarning = script:ConvertTo-MarkerLibraryMessageEcho -Value ([string]$warningList[0])
+        return script:New-MarkerRefusal -Family $Family -Target $Target -Detail "engagement-record validator flagged the candidate: $echoedWarning"
     }
     return $null
 }
@@ -794,14 +883,17 @@ function script:Invoke-ReviewDispositionsValidatorAdapter {
     if ($null -eq $result) {
         return script:New-MarkerRefusal -Family $Family -Target $Target -Detail 'review-dispositions validator adapter returned an unparseable (null) result'
     }
-    # Echo-cap scope note: findings[0].message is review-dispositions-validator-core.ps1's
-    # OWN already-bounded diagnostic prose (Add-RdvFinding's fixed
-    # templates), passed through verbatim so the offending field/value it
-    # names (893-D6) stays legible -- see Invoke-EngagementRecordValidatorAdapter's
+    # Echo-cap scope note (M22 fix, issue #893 s11): findings[0].message is
+    # review-dispositions-validator-core.ps1's OWN already-bounded
+    # diagnostic prose (Add-RdvFinding's fixed templates), routed through
+    # script:ConvertTo-MarkerLibraryMessageEcho (a wider dedicated cap) so
+    # the offending field/value it names (893-D6) stays legible while never
+    # being echoed unbounded -- see Invoke-EngagementRecordValidatorAdapter's
     # identical rationale.
     $findings = @($result.findings)
     if ($findings.Count -gt 0) {
-        return script:New-MarkerRefusal -Family $Family -Target $Target -Detail "review-dispositions validator flagged the candidate: $([string]$findings[0].message)"
+        $echoedFinding = script:ConvertTo-MarkerLibraryMessageEcho -Value ([string]$findings[0].message)
+        return script:New-MarkerRefusal -Family $Family -Target $Target -Detail "review-dispositions validator flagged the candidate: $echoedFinding"
     }
     return $null
 }
@@ -834,7 +926,14 @@ function script:Invoke-CreditInputValidatorAdapter {
         [Parameter(Mandatory)][string]$Target,
         [Parameter(Mandatory)][string]$Body
     )
-    $yamlContent = script:Get-MarkerYamlPayload -Body $Body
+    $yamlExtraction = script:Get-MarkerYamlPayload -Body $Body
+    # M24 fix (issue #893 s11): refuse (never silently pick one) when the
+    # body carries more than one candidate fenced ```yaml block -- see
+    # script:Get-MarkerYamlPayload's own doc comment.
+    if ($yamlExtraction.Ambiguous) {
+        return script:New-MarkerRefusal -Family $Family -Target $Target -Detail 'credit-input payload carries more than one fenced ```yaml block -- refusing rather than guessing which is authoritative'
+    }
+    $yamlContent = $yamlExtraction.Payload
     if ([string]::IsNullOrWhiteSpace($yamlContent)) {
         return script:New-MarkerRefusal -Family $Family -Target $Target -Detail 'credit-input payload has no YAML content after the marker'
     }
@@ -1018,9 +1117,24 @@ function script:Test-MarkerSiblingIdentity {
         id string is numeric before casting to [long]) -- this helper only
         centralizes the GET + line-anchored marker match that both call
         sites performed identically.
+
+        M19 fix (issue #893 s11): uses Get-CommentBodyByIdWithStatus (not
+        Get-CommentBodyById) so a TRANSPORT failure (network blip, rate
+        limit, auth, transient 5xx) can be distinguished from a confirmed
+        HTTP 404 absence. The prior Get-CommentBodyById-based implementation
+        collapsed both into the same "GET returned nothing" signal, so a
+        live pointer got silently DROPPED (treated exactly like a
+        genuinely-stale/forged one) on nothing more than a transient GET
+        failure. Now: a confirmed-absent/wrong target still returns $false
+        (the caller drops the pointer, correct behavior); a TRANSPORT
+        failure instead THROWS, so the caller aborts the whole write rather
+        than silently dropping a pointer it was never actually able to
+        verify one way or the other.
     .OUTPUTS
         [bool] $true only when the comment exists and its LF-normalized body
-        carries -ExpectedMarker as a whole, standalone line.
+        carries -ExpectedMarker as a whole, standalone line; $false when the
+        comment is confirmed absent (HTTP 404) or exists but lacks the
+        marker. Throws on a transport failure (never a confirmed absence).
     #>
     param(
         [Parameter(Mandatory)][string]$Owner,
@@ -1028,9 +1142,14 @@ function script:Test-MarkerSiblingIdentity {
         [Parameter(Mandatory)][long]$CommentId,
         [Parameter(Mandatory)][string]$ExpectedMarker
     )
-    $siblingBody = Get-CommentBodyById -Owner $Owner -Repo $Repo -CommentId $CommentId
-    return ($null -ne $siblingBody) -and
-        [regex]::IsMatch((script:ConvertTo-MarkerLFBody -Text $siblingBody), '(?m)^[ \t]*' + [regex]::Escape($ExpectedMarker) + '[ \t]*$')
+    $fetchResult = Get-CommentBodyByIdWithStatus -Owner $Owner -Repo $Repo -CommentId $CommentId
+    if ($fetchResult.Status -eq 'error') {
+        throw "persist-marker-core: Test-MarkerSiblingIdentity transport failure fetching sibling comment $CommentId -- $(script:ConvertTo-MarkerRefusalEcho -Value $fetchResult.ErrorMessage)"
+    }
+    if ($fetchResult.Status -eq 'not-found') {
+        return $false
+    }
+    return [regex]::IsMatch((script:ConvertTo-MarkerLFBody -Text $fetchResult.Body), '(?m)^[ \t]*' + [regex]::Escape($ExpectedMarker) + '[ \t]*$')
 }
 
 function script:Invoke-PlanIssueWriteBackPreserve {
@@ -1075,10 +1194,14 @@ function script:Invoke-PlanIssueWriteBackPreserve {
         candidate is joined with plain `n`, matching this file's own
         established LF-write convention (ConvertTo-MarkerNormalizedText).
     .OUTPUTS
-        [PSCustomObject] with Body [string] (the possibly-merged candidate)
-        and PreservedClasses [string[]] (human-readable names of every
-        artifact class actually preserved, for the confirmation message --
-        empty array, never $null, when nothing was preserved).
+        [PSCustomObject] with Body [string] (the possibly-merged candidate),
+        PreservedClasses [string[]] (human-readable names of every artifact
+        class actually preserved, for the confirmation message -- empty
+        array, never $null, when nothing was preserved), and Refusal
+        [string or $null] (M14, issue #893 s11 -- populated only when a
+        CANDIDATE-SUPPLIED pointer/scalar, not an inherited one, fails its
+        own live sibling-identity check; the caller must refuse the whole
+        write rather than proceed when this is non-null).
     #>
     param(
         [Parameter(Mandatory)][string]$Owner,
@@ -1099,7 +1222,7 @@ function script:Invoke-PlanIssueWriteBackPreserve {
     # same reason.
     $existing = Find-AllCommentsByExactMarker -Owner $Owner -Repo $Repo -IssueNumber $Number -Marker $Marker
     if ($existing.Count -eq 0) {
-        return [PSCustomObject]@{ Body = $Body; PreservedClasses = [string[]]@() }
+        return [PSCustomObject]@{ Body = $Body; PreservedClasses = [string[]]@(); Refusal = $null }
     }
 
     # Canonical = earliest (lowest REST id) match -- same selector
@@ -1110,8 +1233,28 @@ function script:Invoke-PlanIssueWriteBackPreserve {
     # --- 1. phase-containment-ledger-ref pointer (live-checked). ---
     $pointerPattern = '(?m)^[ \t]*<!--\s*phase-containment-ledger-ref:\s*(?<id>\d+)\s*-->[ \t]*$'
     $pointerMatch = [regex]::Match($existingBody, $pointerPattern)
-    $candidateHasPointer = [regex]::IsMatch((script:ConvertTo-MarkerLFBody -Text $mergedBody), $pointerPattern)
-    if ($pointerMatch.Success -and -not $candidateHasPointer) {
+    $candidatePointerMatch = [regex]::Match((script:ConvertTo-MarkerLFBody -Text $mergedBody), $pointerPattern)
+    $candidateHasPointer = $candidatePointerMatch.Success
+    if ($candidateHasPointer) {
+        # M14 fix (issue #893 s11): a CANDIDATE-SUPPLIED pointer (already
+        # present in the incoming payload, not inherited from the existing
+        # comment) was never live-checked before -- only the
+        # preserve-decision path below (which only fires when the candidate
+        # OMITS the pointer) ran Test-MarkerSiblingIdentity. Run the exact
+        # same live check here too and REFUSE (never silently write through)
+        # a forged/stale candidate-supplied pointer.
+        $candidateSiblingId = [long]$candidatePointerMatch.Groups['id'].Value
+        $expectedCandidateSiblingMarker = "<!-- phase-containment-ledger-$Number -->"
+        $candidateSiblingValid = script:Test-MarkerSiblingIdentity -Owner $Owner -Repo $Repo -CommentId $candidateSiblingId -ExpectedMarker $expectedCandidateSiblingMarker
+        if (-not $candidateSiblingValid) {
+            return [PSCustomObject]@{
+                Body             = $Body
+                PreservedClasses = [string[]]@()
+                Refusal          = "candidate-supplied phase-containment-ledger-ref pointer ($candidateSiblingId) does not carry the expected sibling identity marker '$expectedCandidateSiblingMarker' -- refusing a forged/stale pointer rather than writing it through unvalidated"
+            }
+        }
+    }
+    elseif ($pointerMatch.Success) {
         $siblingId = [long]$pointerMatch.Groups['id'].Value
         $expectedSiblingMarker = "<!-- phase-containment-ledger-$Number -->"
         $siblingValid = script:Test-MarkerSiblingIdentity -Owner $Owner -Repo $Repo -CommentId $siblingId -ExpectedMarker $expectedSiblingMarker
@@ -1125,6 +1268,28 @@ function script:Invoke-PlanIssueWriteBackPreserve {
 
     # --- 2. frame-spine slice_comment_id scalar (live-checked). ---
     $existingSpineBlock = Get-FSCSpineBlock -CommentBody $existingBody
+    # M14 fix (issue #893 s11): validate a CANDIDATE-SUPPLIED slice_comment_id
+    # regardless of whether the existing comment carries one -- the prior
+    # code only ever live-checked an INHERITED value (the preserve-decision
+    # branch below, which only runs when the candidate lacks a value).
+    $candidateSpineBlockForValidation = Get-FSCSpineBlock -CommentBody (script:ConvertTo-MarkerLFBody -Text $mergedBody)
+    if ($null -ne $candidateSpineBlockForValidation) {
+        $candidateSuppliedSliceCommentId = script:Get-FSCScalarValue -Block $candidateSpineBlockForValidation -Name 'slice_comment_id'
+        if (-not [string]::IsNullOrWhiteSpace($candidateSuppliedSliceCommentId)) {
+            $expectedSliceSiblingMarker = "<!-- frame-slices-$Number -->"
+            $candidateSliceValid = $false
+            if ($candidateSuppliedSliceCommentId -match '^\d+$') {
+                $candidateSliceValid = script:Test-MarkerSiblingIdentity -Owner $Owner -Repo $Repo -CommentId ([long]$candidateSuppliedSliceCommentId) -ExpectedMarker $expectedSliceSiblingMarker
+            }
+            if (-not $candidateSliceValid) {
+                return [PSCustomObject]@{
+                    Body             = $Body
+                    PreservedClasses = [string[]]@()
+                    Refusal          = "candidate-supplied slice_comment_id ($candidateSuppliedSliceCommentId) does not carry the expected sibling identity marker '$expectedSliceSiblingMarker' -- refusing a forged/stale pointer rather than writing it through unvalidated"
+                }
+            }
+        }
+    }
     if ($null -ne $existingSpineBlock) {
         $existingSliceCommentId = script:Get-FSCScalarValue -Block $existingSpineBlock -Name 'slice_comment_id'
         if (-not [string]::IsNullOrWhiteSpace($existingSliceCommentId)) {
@@ -1182,19 +1347,32 @@ function script:Invoke-PlanIssueWriteBackPreserve {
             $mergedBody = $mergedBody.TrimEnd() + "`n`n" + $blockText
             $preservedClasses.Add('legacy phase-containment blocks') | Out-Null
         }
+
+        # M10 fix (issue #893 s11): the **Plan Stress-Test** heading/section
+        # preserve is scoped INSIDE this same legacy (no-ledger-pointer) gate
+        # -- this function's own class 3.-4. doc comment above and the s5
+        # requirement contract both already document this carry-forward as
+        # legacy-only, but the code previously ran unconditionally, outside
+        # this gate. On a modern (ledger-pointer-carrying) plan re-persist,
+        # that let the capture regex's lazy "up to the next bold heading or
+        # end-of-body" fallthrough capture and duplicate unrelated trailing
+        # content (e.g. `## Named Decisions`) whenever no further
+        # `**Bold**`-style heading followed the stress-test section.
+        # Additionally bounded (defense-in-depth): the pattern below now also
+        # stops at a `## ` Markdown heading or a `<!-- named-decisions:begin
+        # -->` sentinel, so even a legacy body whose stress-test section is
+        # immediately followed by one of those (rather than another `**Bold**`
+        # heading) cannot over-capture past it.
+        $stressTestPattern = '(?ms)^\*\*Plan Stress-Test\*\*.*?(?=^\*\*[A-Za-z]|^##[ \t]|<!--\s*named-decisions:begin|\z)'
+        $stressTestMatch = [regex]::Match($existingBody, $stressTestPattern)
+        $candidateHasStressTestHeading = [regex]::IsMatch((script:ConvertTo-MarkerLFBody -Text $mergedBody), '(?m)^\*\*Plan Stress-Test\*\*')
+        if ($stressTestMatch.Success -and -not $candidateHasStressTestHeading) {
+            $mergedBody = $mergedBody.TrimEnd() + "`n`n" + $stressTestMatch.Value.Trim()
+            $preservedClasses.Add('**Plan Stress-Test** heading/section') | Out-Null
+        }
     }
 
-    # --- The **Plan Stress-Test** heading/section (writer rule 8: the
-    # heading literal is load-bearing -- do not let it drift). ---
-    $stressTestPattern = '(?ms)^\*\*Plan Stress-Test\*\*.*?(?=^\*\*[A-Za-z]|\z)'
-    $stressTestMatch = [regex]::Match($existingBody, $stressTestPattern)
-    $candidateHasStressTestHeading = [regex]::IsMatch((script:ConvertTo-MarkerLFBody -Text $mergedBody), '(?m)^\*\*Plan Stress-Test\*\*')
-    if ($stressTestMatch.Success -and -not $candidateHasStressTestHeading) {
-        $mergedBody = $mergedBody.TrimEnd() + "`n`n" + $stressTestMatch.Value.Trim()
-        $preservedClasses.Add('**Plan Stress-Test** heading/section') | Out-Null
-    }
-
-    return [PSCustomObject]@{ Body = $mergedBody; PreservedClasses = [string[]]$preservedClasses.ToArray() }
+    return [PSCustomObject]@{ Body = $mergedBody; PreservedClasses = [string[]]$preservedClasses.ToArray(); Refusal = $null }
 }
 
 function script:Invoke-FrameSlicesSpineSplice {
@@ -1343,7 +1521,37 @@ function script:Invoke-MarkerCreateComment {
         $null = script:Test-MarkerReadBack -Owner $Owner -Repo $Repo -CommentId $newId -ExpectedBody $Body
     }
     catch {
-        return [PSCustomObject]@{ Success = $false; Family = $Family; CommentId = $newId; Action = $null; Confirmation = $null; Reason = $_.Exception.Message }
+        # M20 fix (issue #893 s11): a PERSISTENT normalized-body mismatch on
+        # a freshly-created comment (as opposed to a merely transient GET
+        # failure during THIS verify call, which self-heals on the caller's
+        # next retry via Find-AllCommentsByExactMarker's own live
+        # re-compare) leaves the corrupted comment sitting on the issue
+        # forever. Every SUBSEQUENT external retry then compares the
+        # candidate against that still-mismatched "latest"/"canonical"
+        # match and posts yet ANOTHER new comment, accreting duplicates
+        # without bound. Attempt exactly ONE same-call repair-PATCH of the
+        # just-created comment (re-writing the intended -Body verbatim)
+        # before giving up, so a genuinely corrupted write self-heals
+        # immediately rather than requiring an unbounded number of external
+        # retries, each adding one more duplicate.
+        $originalReadBackMessage = $_.Exception.Message
+        $repairSucceeded = $false
+        try {
+            $repairPatch = Set-CommentBodyDirect -Owner $Owner -Repo $Repo -CommentId $newId -NewBody $Body
+            if ($repairPatch.Success) {
+                $null = script:Test-MarkerReadBack -Owner $Owner -Repo $Repo -CommentId $newId -ExpectedBody $Body
+                $repairSucceeded = $true
+            }
+        }
+        catch {
+            $repairSucceeded = $false
+        }
+        if ($repairSucceeded) {
+            $confirmation = "persist-marker-core: family '$Family' comment $newId $Action (after a read-back-failure repair-PATCH)"
+            Write-Host $confirmation
+            return [PSCustomObject]@{ Success = $true; Family = $Family; CommentId = $newId; Action = $Action; Confirmation = $confirmation; Reason = $null }
+        }
+        return [PSCustomObject]@{ Success = $false; Family = $Family; CommentId = $newId; Action = $null; Confirmation = $null; Reason = "$originalReadBackMessage (repair-PATCH attempt also failed)" }
     }
 
     $confirmation = "persist-marker-core: family '$Family' comment $newId $Action"
@@ -1481,6 +1689,33 @@ function script:Invoke-MarkerUpsertWrite {
 # oversized composed candidate never surfaces as a raw transport/HTTP error
 # from `gh`.
 $script:MarkerBodySizeCap = 65536
+
+function script:Get-MarkerBodyCodepointCount {
+    <#
+    .SYNOPSIS
+        M23 fix (issue #893 s11): counts -Body by Unicode CODEPOINT (a.k.a.
+        Unicode scalar value / "rune"), not by .NET [string]::Length's raw
+        UTF-16 CODE UNIT count. A character outside the Basic Multilingual
+        Plane (most emoji, many CJK extension characters) is stored as a
+        UTF-16 SURROGATE PAIR -- two code units for one real character --
+        so the raw .Length-based size check previously refused an
+        astral-plane/emoji-heavy body at roughly HALF its real allowance,
+        working against AC1's non-ASCII-fidelity intent. Runs a single
+        codepoint-count pass; a multi-codepoint grapheme cluster (e.g. a ZWJ
+        emoji sequence or a flag) still counts as multiple codepoints here
+        -- deliberately NOT grapheme-cluster ("text element") counting,
+        which would be a MORE lenient count than this fix's scope covers
+        and risks under-counting relative to whatever GitHub's own REST API
+        actually enforces server-side.
+    .OUTPUTS
+        [int]
+    #>
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Body)
+    $count = 0
+    $enumerator = $Body.EnumerateRunes()
+    while ($enumerator.MoveNext()) { $count++ }
+    return $count
+}
 
 function script:Get-MarkerScratchRoot {
     <#
@@ -1636,7 +1871,20 @@ function Read-MarkerScratchBoundedBodyFile {
     if (-not $bounded.InBounds) {
         return [PSCustomObject]@{ Success = $false; Body = $null; Reason = "persist-marker: REFUSED (-BodyFile out of bounds): $($bounded.Reason)" }
     }
-    $body = Get-Content -LiteralPath $bounded.ResolvedPath -Raw -ErrorAction Stop
+    # M21 fix (issue #893 s11): this function documents "Refuses (never
+    # throws)", but Get-Content -ErrorAction Stop DOES throw uncaught for a
+    # directory path (a directory resolves inside the scratch root and
+    # passes the bounds check above, but is not readable CONTENT) or a
+    # permission/lock error -- neither is an out-of-bounds condition, so
+    # neither was covered by the check above. Wrap the read so every failure
+    # mode returns the documented refusal shape instead of propagating an
+    # uncaught exception to the caller.
+    try {
+        $body = Get-Content -LiteralPath $bounded.ResolvedPath -Raw -ErrorAction Stop
+    }
+    catch {
+        return [PSCustomObject]@{ Success = $false; Body = $null; Reason = "persist-marker: REFUSED (-BodyFile could not be read): $(script:ConvertTo-MarkerRefusalEcho -Value $_.Exception.Message)" }
+    }
     if ($null -eq $body) { $body = '' }
     return [PSCustomObject]@{ Success = $true; Body = $body; Reason = $null }
 }
@@ -1695,14 +1943,17 @@ function script:Test-MarkerCandidatePreflight {
     .DESCRIPTION
         Extracted so Invoke-PersistMarkerBurst's whole-manifest preflight
         can run the EXACT SAME validation a single write already runs, on
-        every burst entry, without duplicating the logic and without also
-        running the PostStep dispatch: 'plan-issue-write-back-preserve'
-        performs its own live GET calls and is therefore NOT network-free,
-        so it is deliberately excluded here. s6 scope: the whole-manifest
-        preflight validates what s4's validator-adapter contract already
-        guarantees is payload-only; a PostStep's live mutation stays a
-        per-write, execution-time concern, exercised by the write itself
-        (Invoke-PersistMarkerWrite), never predicted by this preflight.
+        every burst entry, without duplicating the logic. This helper itself
+        never runs the PostStep dispatch -- it validates whatever -Body it
+        is given. M11 fix (issue #893 s11): Invoke-PersistMarkerBurst's own
+        preflight loop now runs script:Invoke-PlanIssueWriteBackPreserve
+        itself (live-read-only, before calling this helper) for a
+        plan-issue-family entry and passes THIS FUNCTION the resulting
+        preview-merged body, rather than skipping preserve prediction
+        entirely -- see that loop's own comment for the full rationale and
+        the residual, accepted preview/execution-divergence risk. This
+        function's own contract is unchanged: it stays a pure, network-free
+        validation of whatever -Body its caller supplies.
     .OUTPUTS
         [PSCustomObject] a refusal result (script:New-MarkerRefusal shape),
         or $null when the candidate is clean.
@@ -1722,8 +1973,13 @@ function script:Test-MarkerCandidatePreflight {
     $familyRow = $resolved.Row
     $target = "$TargetSurface/$Number"
 
-    if ($Body.Length -gt $script:MarkerBodySizeCap) {
-        return script:New-MarkerRefusal -Family $Family -Target $target -Detail "composed body is $($Body.Length) chars, exceeding GitHub's $($script:MarkerBodySizeCap)-char comment cap"
+    # M23 fix (issue #893 s11): count by Unicode codepoint (script:Get-MarkerBodyCodepointCount),
+    # not by [string]::Length's raw UTF-16 code-unit count -- see that
+    # function's own doc comment for why a surrogate-pair-heavy body was
+    # previously refused at roughly half its real allowance.
+    $bodyCodepointCount = script:Get-MarkerBodyCodepointCount -Body $Body
+    if ($bodyCodepointCount -gt $script:MarkerBodySizeCap) {
+        return script:New-MarkerRefusal -Family $Family -Target $target -Detail "composed body is $bodyCodepointCount chars, exceeding GitHub's $($script:MarkerBodySizeCap)-char comment cap"
     }
 
     $hygieneDetail = script:Test-MarkerPayloadHygiene -Family $Family -Marker $Marker -Body $Body -Registry $allRows
@@ -1817,7 +2073,28 @@ function Invoke-PersistMarkerWrite {
     # every other family's dispatch below is a no-op.
     $preservedArtifactClasses = [string[]]@()
     if ($familyRow.PostStep -eq 'plan-issue-write-back-preserve' -and -not $NoPreserve) {
-        $preserveResult = script:Invoke-PlanIssueWriteBackPreserve -Owner $Owner -Repo $Repo -Number $Number -Marker $Marker -Body $Body
+        # M19 fix (issue #893 s11): script:Test-MarkerSiblingIdentity (called
+        # inside Invoke-PlanIssueWriteBackPreserve) now THROWS on a transport
+        # failure rather than treating it the same as a confirmed-absent
+        # sibling -- wrap the call so that throw becomes a diagnosable
+        # refusal (aborting the write, per 893-D6) instead of an uncaught
+        # exception crashing the caller (e.g. the single-write CLI wrapper,
+        # which has no top-level try/catch of its own).
+        try {
+            $preserveResult = script:Invoke-PlanIssueWriteBackPreserve -Owner $Owner -Repo $Repo -Number $Number -Marker $Marker -Body $Body
+        }
+        catch {
+            return script:New-MarkerRefusal -Family $Family -Target $target -Detail "write-back-preserve aborted: $($_.Exception.Message)"
+        }
+        # M14 fix (issue #893 s11): a non-null Refusal means the CANDIDATE
+        # itself (not an inherited/preserved value) carried a
+        # forged/stale phase-containment-ledger-ref pointer or
+        # slice_comment_id scalar that failed its live sibling-identity
+        # check -- refuse the whole write here rather than silently writing
+        # it through unvalidated.
+        if ($null -ne $preserveResult.Refusal) {
+            return script:New-MarkerRefusal -Family $Family -Target $target -Detail $preserveResult.Refusal
+        }
         $Body = $preserveResult.Body
         $preservedArtifactClasses = $preserveResult.PreservedClasses
     }
@@ -1903,8 +2180,13 @@ function Invoke-PersistMarkerBurst {
         manifest order), each value one of 'not-attempted' (preflight
         refused the whole manifest, or execution halted before this entry
         was reached), 'landed' (write succeeded), 'failed' (write attempted
-        and failed) -- mirrors persist-phase-ledger-core.ps1's own
-        landed/not-attempted artifact-manifest shape
+        and failed -- nothing landed), 'landed-postfix-failed' (M18, issue
+        #893 s11 -- the underlying comment write itself DID land, but a
+        PostStep that runs after it, e.g. frame-slices-spine-splice, failed;
+        distinct from 'failed' so the operator can tell "nothing written"
+        from "written but incomplete" without having to cross-reference
+        Results[].CommentId/Reason by hand) -- mirrors persist-phase-ledger-core.ps1's
+        own landed/not-attempted artifact-manifest shape
         (script:New-PPLPersistPhaseLedgerArtifactManifest).
     #>
     param(
@@ -1934,11 +2216,44 @@ function Invoke-PersistMarkerBurst {
     # value; the call is also wrapped in try/catch so a binding (or any
     # other) failure becomes an explicit synthesized refusal instead of
     # either silently inheriting stale state or crashing uncaught.
+    # M11 fix (issue #893 s11): resolve the registry once so the loop below
+    # can tell whether a given entry's family carries the
+    # 'plan-issue-write-back-preserve' PostStep -- see this file's top-of-
+    # file s6 addition note and script:Test-MarkerCandidatePreflight's own
+    # doc comment for the full rationale.
+    $burstPreflightRegistry = @(Get-MarkerFamilyRegistry)
     for ($i = 0; $i -lt $Entries.Count; $i++) {
         $entry = $Entries[$i]
         $refusal = $null
         try {
-            $refusal = script:Test-MarkerCandidatePreflight -Family $entry.Family -TargetSurface $entry.TargetSurface -Number $entry.Number -Marker $entry.Marker -Body $entry.Body
+            # M11 fix (issue #893 s11): for a plan-issue-family entry (unless
+            # -NoPreserve is set), run the SAME write-back-preserve merge
+            # Invoke-PersistMarkerWrite itself performs before its own
+            # preflight, and validate the PREVIEW-MERGED body -- a
+            # preserve-triggered size/hygiene violation now surfaces here,
+            # before any earlier burst entry has been allowed to land,
+            # instead of only at execution time. Read-only (GETs), never a
+            # write, so this stays consistent with "zero writes on any
+            # refusal". See this loop's own doc note above for the residual
+            # preview/execution-divergence risk this accepts.
+            $previewBody = $entry.Body
+            $entryFamilyRow = @($burstPreflightRegistry | Where-Object { $_.Family -eq $entry.Family })
+            $candidateSuppliedRefusal = $null
+            if ($entryFamilyRow.Count -gt 0 -and $entryFamilyRow[0].PostStep -eq 'plan-issue-write-back-preserve' -and -not [bool]$entry.NoPreserve) {
+                $preview = script:Invoke-PlanIssueWriteBackPreserve -Owner $Owner -Repo $Repo -Number $entry.Number -Marker $entry.Marker -Body $entry.Body
+                # M14 fix (issue #893 s11): a non-null Refusal means the
+                # entry's OWN candidate body carried a forged/stale
+                # phase-containment-ledger-ref pointer or slice_comment_id --
+                # surface that as a preflight refusal too, exactly mirroring
+                # Invoke-PersistMarkerWrite's own execution-time check.
+                if ($null -ne $preview.Refusal) {
+                    $candidateSuppliedRefusal = script:New-MarkerRefusal -Family $entry.Family -Target "$($entry.TargetSurface)/$($entry.Number)" -Detail $preview.Refusal
+                }
+                else {
+                    $previewBody = $preview.Body
+                }
+            }
+            $refusal = if ($null -ne $candidateSuppliedRefusal) { $candidateSuppliedRefusal } else { script:Test-MarkerCandidatePreflight -Family $entry.Family -TargetSurface $entry.TargetSurface -Number $entry.Number -Marker $entry.Marker -Body $previewBody }
         }
         catch {
             $refusal = script:New-MarkerRefusal -Family "$($entry.Family)" -Target "$($entry.TargetSurface)/$($entry.Number)" -Detail "entry could not be validated -- $($_.Exception.Message)"
@@ -1973,7 +2288,22 @@ function Invoke-PersistMarkerBurst {
             $artifacts["entry-$($i + 1)"] = 'landed'
         }
         else {
-            $artifacts["entry-$($i + 1)"] = 'failed'
+            # M18 fix (issue #893 s11): a PostStep failure (e.g.
+            # frame-slices-spine-splice) reports Success=$false but the
+            # underlying comment write itself DID land -- Invoke-PersistMarkerWrite
+            # signals this by populating a non-null Action alongside the
+            # failure (every OTHER failure path in this file -- refusals,
+            # read-back failures, PATCH/POST failures -- leaves Action=$null
+            # on Success=$false). Record the distinct
+            # 'landed-postfix-failed' status in that case so the operator
+            # can tell "nothing written" from "written but incomplete"
+            # without cross-referencing Results[].CommentId/Reason by hand.
+            if ($null -ne $writeResult.Action) {
+                $artifacts["entry-$($i + 1)"] = 'landed-postfix-failed'
+            }
+            else {
+                $artifacts["entry-$($i + 1)"] = 'failed'
+            }
             return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: burst halted at entry $($i + 1) of $($Entries.Count), family '$($entry.Family)': $($writeResult.Reason)"; Results = [object[]]$results.ToArray(); Artifacts = $artifacts }
         }
     }
@@ -2013,9 +2343,28 @@ function Invoke-PersistMarkerBurstFromManifest {
         [string]$ScratchRoot = (script:Get-MarkerScratchRoot)
     )
 
-    if (-not (Test-Path -LiteralPath $ManifestPath)) {
-        return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (burst manifest not found): $(script:ConvertTo-MarkerRefusalEcho -Value $ManifestPath)"; Results = [object[]]@(); Artifacts = [ordered]@{} }
+    # M13 fix (issue #893 s11): -BurstManifest/-ManifestPath itself was
+    # missing the same real path-containment bounding
+    # (Resolve-MarkerScratchBoundedPath) that Read-MarkerScratchBoundedBodyFile
+    # already applies to every -BodyFile / manifest bodyFile entry -- the
+    # manifest path argument was an existence-oracle plus an unbounded
+    # error-message path echo for any path on disk, arbitrary-file-outside-
+    # the-scratch-root included. Bound it here BEFORE Test-Path (a plain
+    # Test-Path on an unbounded path is itself part of the oracle this
+    # closes), mirroring the exact same helper and refusal shape every other
+    # scratch-bounded path in this file already uses.
+    $manifestBounded = Resolve-MarkerScratchBoundedPath -Path $ManifestPath -ScratchRoot $ScratchRoot
+    if (-not $manifestBounded.InBounds) {
+        return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (-BurstManifest out of bounds): $($manifestBounded.Reason)"; Results = [object[]]@(); Artifacts = [ordered]@{} }
     }
+    $ManifestPath = $manifestBounded.ResolvedPath
+    # M22 fix (issue #893 s11): every refusal message below that echoes
+    # $ManifestPath now routes through the same length-bounding helper
+    # (893-D6 invariant) every other echoed value in this file already uses
+    # -- $ManifestPath itself previously bypassed it, an inconsistency with
+    # no principled reason (a resolved scratch-bounded path is not exempt
+    # from the same "never dump an oversized field verbatim" contract).
+    $echoedManifestPath = script:ConvertTo-MarkerRefusalEcho -Value $ManifestPath
 
     $rawManifest = Get-Content -LiteralPath $ManifestPath -Raw
     try {
@@ -2023,12 +2372,12 @@ function Invoke-PersistMarkerBurstFromManifest {
     }
     catch {
         $echoed = script:ConvertTo-MarkerRefusalEcho -Value $_.Exception.Message
-        return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (malformed manifest '$ManifestPath'): not parseable JSON -- $echoed"; Results = [object[]]@(); Artifacts = [ordered]@{} }
+        return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (malformed manifest '$echoedManifestPath'): not parseable JSON -- $echoed"; Results = [object[]]@(); Artifacts = [ordered]@{} }
     }
 
     $rawEntries = @($parsed)
     if ($rawEntries.Count -eq 0) {
-        return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (malformed manifest '$ManifestPath'): manifest carries zero entries"; Results = [object[]]@(); Artifacts = [ordered]@{} }
+        return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (malformed manifest '$echoedManifestPath'): manifest carries zero entries"; Results = [object[]]@(); Artifacts = [ordered]@{} }
     }
 
     $requiredFields = @('family', 'number', 'targetSurface', 'marker', 'bodyFile')
@@ -2039,7 +2388,7 @@ function Invoke-PersistMarkerBurstFromManifest {
         foreach ($field in $requiredFields) {
             $value = $rawEntry.$field
             if ($null -eq $value -or ([string]$value).Trim().Length -eq 0) {
-                return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (malformed manifest '$ManifestPath', entry $entryIndex): missing required field '$field'"; Results = [object[]]@(); Artifacts = [ordered]@{} }
+                return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (malformed manifest '$echoedManifestPath', entry $entryIndex): missing required field '$field'"; Results = [object[]]@(); Artifacts = [ordered]@{} }
             }
         }
 
@@ -2052,19 +2401,46 @@ function Invoke-PersistMarkerBurstFromManifest {
         # deeper in the call chain.
         $targetSurfaceValue = [string]$rawEntry.targetSurface
         if ($targetSurfaceValue -notin @('issue', 'pull-request')) {
-            return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (malformed manifest '$ManifestPath', entry $entryIndex): field 'targetSurface' must be 'issue' or 'pull-request', got '$(script:ConvertTo-MarkerRefusalEcho -Value $targetSurfaceValue)'"; Results = [object[]]@(); Artifacts = [ordered]@{} }
+            return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (malformed manifest '$echoedManifestPath', entry $entryIndex): field 'targetSurface' must be 'issue' or 'pull-request', got '$(script:ConvertTo-MarkerRefusalEcho -Value $targetSurfaceValue)'"; Results = [object[]]@(); Artifacts = [ordered]@{} }
         }
 
         try {
             $number = [int]$rawEntry.number
         }
         catch {
-            return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (malformed manifest '$ManifestPath', entry $entryIndex): field 'number' is not a valid integer ($(script:ConvertTo-MarkerRefusalEcho -Value ([string]$rawEntry.number)))"; Results = [object[]]@(); Artifacts = [ordered]@{} }
+            return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (malformed manifest '$echoedManifestPath', entry $entryIndex): field 'number' is not a valid integer ($(script:ConvertTo-MarkerRefusalEcho -Value ([string]$rawEntry.number)))"; Results = [object[]]@(); Artifacts = [ordered]@{} }
         }
 
         $bodyFileResult = Read-MarkerScratchBoundedBodyFile -BodyFile ([string]$rawEntry.bodyFile) -ScratchRoot $ScratchRoot
         if (-not $bodyFileResult.Success) {
-            return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (manifest '$ManifestPath', entry $entryIndex, family '$($rawEntry.family)'): $($bodyFileResult.Reason)"; Results = [object[]]@(); Artifacts = [ordered]@{} }
+            return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (manifest '$echoedManifestPath', entry $entryIndex, family '$($rawEntry.family)'): $($bodyFileResult.Reason)"; Results = [object[]]@(); Artifacts = [ordered]@{} }
+        }
+
+        # M12 fix (issue #893 s11): noPreserve is optional (defaults $false
+        # when absent/$null), but when present it must be a REAL JSON
+        # boolean (ConvertFrom-Json already types `true`/`false` literals as
+        # [bool]) or an explicit case-insensitive 'true'/'false' STRING --
+        # never a bare `[bool]$value` cast on whatever JSON shape showed up.
+        # A bare cast silently coerces ANY non-empty string (including the
+        # realistic hand-authoring slip of JSON-quoting the boolean, e.g.
+        # "noPreserve": "false") to $true, silently disabling all
+        # write-back preservation with a Success=$true confirmation -- the
+        # exact AC5 data-loss path the preserve post-step exists to prevent.
+        # Refuse (naming the entry index and the offending value) on any
+        # other shape (number, array, object, or an unrecognized string)
+        # instead of guessing.
+        $noPreserveValue = $false
+        if ($null -ne $rawEntry.noPreserve) {
+            if ($rawEntry.noPreserve -is [bool]) {
+                $noPreserveValue = $rawEntry.noPreserve
+            }
+            elseif ($rawEntry.noPreserve -is [string] -and $rawEntry.noPreserve -match '(?i)^(true|false)$') {
+                $noPreserveValue = ($rawEntry.noPreserve.ToLowerInvariant() -eq 'true')
+            }
+            else {
+                $offendingType = if ($null -eq $rawEntry.noPreserve) { 'null' } else { $rawEntry.noPreserve.GetType().Name }
+                return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (malformed manifest '$echoedManifestPath', entry $entryIndex): field 'noPreserve' must be a JSON boolean (or the case-insensitive string 'true'/'false'), got '$(script:ConvertTo-MarkerRefusalEcho -Value ([string]$rawEntry.noPreserve))' (type $offendingType)"; Results = [object[]]@(); Artifacts = [ordered]@{} }
+            }
         }
 
         $resolvedEntries.Add([PSCustomObject]@{
@@ -2073,7 +2449,7 @@ function Invoke-PersistMarkerBurstFromManifest {
                 TargetSurface = [string]$rawEntry.targetSurface
                 Marker        = [string]$rawEntry.marker
                 Body          = $bodyFileResult.Body
-                NoPreserve    = [bool]$rawEntry.noPreserve
+                NoPreserve    = $noPreserveValue
             }) | Out-Null
     }
 
