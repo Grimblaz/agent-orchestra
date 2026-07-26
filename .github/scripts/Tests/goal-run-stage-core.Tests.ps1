@@ -70,15 +70,15 @@ Describe 'Resolve-GoalRunResumeStage' -Tag 'unit' {
         $result.ResumeStage | Should -Be 'loop-launched'
     }
 
-    It 'reports loop-released when the run log has a checkpoint but no explicit stage marker exists' {
+    It '#912 D1: reports loop-interrupted when the run log has a checkpoint but no explicit stage marker exists (resume re-derives progress from committed state, not the dead session)' {
         $result = Resolve-GoalRunResumeStage -ContractHashVerified $true -ActiveStatePresent $true -RunLogHasCheckpoint $true
-        $result.ResumeStage | Should -Be 'loop-released'
+        $result.ResumeStage | Should -Be 'loop-interrupted'
         $result.Reason | Should -Be 'run-log-implies-loop-launched-no-explicit-marker'
     }
 
-    It 'reports loop-released when the explicit stage marker says loop-launched' {
+    It '#912 D1: reports loop-interrupted when the explicit stage marker says loop-launched' {
         $result = Resolve-GoalRunResumeStage -ContractHashVerified $true -ExplicitStageMarker 'loop-launched'
-        $result.ResumeStage | Should -Be 'loop-released'
+        $result.ResumeStage | Should -Be 'loop-interrupted'
     }
 
     It 'reports chain-dispatched when the explicit stage marker says loop-released' {
@@ -390,15 +390,22 @@ Describe 'Test-GoalRunInflightAppearsDead (crash-atomicity)' -Tag 'unit' {
         $result.Reason | Should -Be 'marker-already-resolved'
     }
 
-    It 'is not dead when a halt report already exists, even if very stale' {
-        $result = Test-GoalRunInflightAppearsDead -MarkerStatus 'unresolved' -LaunchedAt (Get-Date).AddHours(-10) -HaltReportExists $true -PrExists $false -Now (Get-Date)
-        $result.AppearsDead | Should -Be $false
-        $result.Reason | Should -Be 'terminal-outcome-present'
+    It '#912 D3/D4: computes elapsed-based staleness even when a halt report exists, but additively flags TerminalOutcomePresent so the caller decides what stale-plus-terminal means' {
+        # Plan step 2 deletes the short-circuit-to-not-dead-on-terminal-outcome
+        # behavior; AppearsDead becomes purely time-computed and
+        # TerminalOutcomePresent becomes a separate additive output that
+        # Resolve-GoalRunInvocationAction's new precedence composes with.
+        $now = Get-Date
+        $result = Test-GoalRunInflightAppearsDead -MarkerStatus 'unresolved' -LaunchedAt $now.AddHours(-10) -HaltReportExists $true -PrExists $false -Now $now -StaleThresholdMinutes 60
+        $result.AppearsDead | Should -Be $true -Because 'the short-circuit to AppearsDead=$false on a terminal outcome is deleted by plan step 2'
+        $result.TerminalOutcomePresent | Should -Be $true
     }
 
-    It 'is not dead when a PR already exists, even if very stale' {
-        $result = Test-GoalRunInflightAppearsDead -MarkerStatus 'unresolved' -LaunchedAt (Get-Date).AddHours(-10) -HaltReportExists $false -PrExists $true -Now (Get-Date)
-        $result.AppearsDead | Should -Be $false
+    It '#912 D3/D4: computes elapsed-based staleness even when a PR already exists, but additively flags TerminalOutcomePresent' {
+        $now = Get-Date
+        $result = Test-GoalRunInflightAppearsDead -MarkerStatus 'unresolved' -LaunchedAt $now.AddHours(-10) -HaltReportExists $false -PrExists $true -Now $now -StaleThresholdMinutes 60
+        $result.AppearsDead | Should -Be $true
+        $result.TerminalOutcomePresent | Should -Be $true
     }
 
     It 'is not dead within the stale threshold using LaunchedAt when no heartbeat exists' {
@@ -458,10 +465,37 @@ Describe 'Resolve-GoalRunInvocationAction' -Tag 'unit' {
         $result.Action | Should -Be 'refuse-resume-existing'
     }
 
-    It 'offers triage when an unresolved marker exists and appears dead' {
+    It '#912 D2/D3: adopts and resumes when an unresolved marker exists, appears dead, and no terminal outcome is present (triage-dead-run retired)' {
         $marker = [pscustomobject]@{ CommentId = 100 }
         $result = Resolve-GoalRunInvocationAction -ExistingUnresolvedMarker $marker -AppearsDead $true
-        $result.Action | Should -Be 'triage-dead-run'
+        $result.Action | Should -Be 'adopt-and-resume'
+    }
+
+    It '#912 D3/D4: resolves and reports complete when the marker is stale and a terminal outcome (halt report or PR) is present' {
+        $marker = [pscustomobject]@{ CommentId = 100 }
+        $result = Resolve-GoalRunInvocationAction -ExistingUnresolvedMarker $marker -AppearsDead $true -TerminalOutcomePresent $true
+        $result.Action | Should -Be 'resolve-and-report-complete'
+    }
+
+    It '#912 D4: TerminalOutcomePresent is load-bearing -- flipping only that input changes the action from adopt-and-resume to resolve-and-report-complete' {
+        $marker = [pscustomobject]@{ CommentId = 100 }
+        $withoutTerminalOutcome = Resolve-GoalRunInvocationAction -ExistingUnresolvedMarker $marker -AppearsDead $true -TerminalOutcomePresent $false
+        $withTerminalOutcome = Resolve-GoalRunInvocationAction -ExistingUnresolvedMarker $marker -AppearsDead $true -TerminalOutcomePresent $true
+
+        $withoutTerminalOutcome.Action | Should -Be 'adopt-and-resume'
+        $withTerminalOutcome.Action | Should -Be 'resolve-and-report-complete'
+    }
+
+    It '#912 D3: refuses resume when the marker is fresh (not dead) even if a terminal outcome is present -- the live-run protection is never inferred from absent output' {
+        $marker = [pscustomobject]@{ CommentId = 100 }
+        $result = Resolve-GoalRunInvocationAction -ExistingUnresolvedMarker $marker -AppearsDead $false -TerminalOutcomePresent $true
+        $result.Action | Should -Be 'refuse-resume-existing'
+    }
+
+    It '#912 AC15: the force-adopt lever adopts and resumes even when the marker would otherwise be refused as live' {
+        $marker = [pscustomobject]@{ CommentId = 100 }
+        $result = Resolve-GoalRunInvocationAction -ExistingUnresolvedMarker $marker -AppearsDead $false -ForceAdopt $true
+        $result.Action | Should -Be 'adopt-and-resume'
     }
 }
 

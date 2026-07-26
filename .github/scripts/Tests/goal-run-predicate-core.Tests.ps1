@@ -142,7 +142,10 @@ Describe 'Invoke-GoalRunPredicateEvaluate' -Tag 'unit' {
             [pscustomobject]@{ Disposition = 'halt'; HaltReason = 'chain-stage-failure'; Reason = 'infra-error: worktree session threw'; ExitCode = 3; ValidatorRan = $true }
         }
         $script:haltReasonSeen = $null
-        $haltEmitter = { param($Report, $Issue, $RepoRoot, $Owner, $Repo) $script:haltReasonSeen = $Report.halt_reason }
+        # #912 s1: return a real emitter-shaped Success object (not nothing) so
+        # this assertion survives plan step 7's change to read .Success instead
+        # of unconditionally setting HaltEmitted = $true.
+        $haltEmitter = { param($Report, $Issue, $RepoRoot, $Owner, $Repo) $script:haltReasonSeen = $Report.halt_reason; [pscustomobject]@{ Success = $true; Url = 'https://example.invalid/comment/2' } }
 
         $result = Invoke-GoalRunPredicateEvaluate -Issue 874 -RepoRoot 'C:\gr-874-token' -ActiveStateReader $activeStateReader -PredicateResolver $resolver -HaltEmitter $haltEmitter
 
@@ -156,7 +159,10 @@ Describe 'Invoke-GoalRunPredicateEvaluate' -Tag 'unit' {
         $script:resolverCalledForMissingState = $false
         $resolver = { param($Issue, $RepoRoot, $LaunchPinnedHash, $Marker, $Repo, $GhCliPath, $GitCliPath, $PwshCliPath, $ValidatorScriptPath) $script:resolverCalledForMissingState = $true; [pscustomobject]@{ Disposition = 'satisfied'; HaltReason = $null; Reason = $null; ExitCode = 0; ValidatorRan = $true } }
         $script:haltEmittedForMissingState = $false
-        $haltEmitter = { param($Report, $Issue, $RepoRoot, $Owner, $Repo) $script:haltEmittedForMissingState = $true }
+        # #912 s1: return a real emitter-shaped Success object (not nothing) so
+        # this assertion survives plan step 7's change to read .Success instead
+        # of unconditionally setting HaltEmitted = $true.
+        $haltEmitter = { param($Report, $Issue, $RepoRoot, $Owner, $Repo) $script:haltEmittedForMissingState = $true; [pscustomobject]@{ Success = $true; Url = 'https://example.invalid/comment/3' } }
 
         $result = Invoke-GoalRunPredicateEvaluate -Issue 874 -RepoRoot 'C:\gr-874-token' -ActiveStateReader $activeStateReader -PredicateResolver $resolver -HaltEmitter $haltEmitter
 
@@ -166,5 +172,23 @@ Describe 'Invoke-GoalRunPredicateEvaluate' -Tag 'unit' {
         $result.HaltEmitted | Should -Be $true
         $script:resolverCalledForMissingState | Should -Be $false -Because 'the pin check has no hash to compare against without the active-state file'
         $script:haltEmittedForMissingState | Should -Be $true
+    }
+
+    It '#912 AC12: does not report HaltEmitted = $true when the halt emitter itself fails to post (the modal Find-OrUpsertComment gh-failure path)' {
+        $activeStateReader = script:New-StubActiveStateReader
+        $resolver = {
+            param($Issue, $RepoRoot, $LaunchPinnedHash, $Marker, $Repo, $GhCliPath, $GitCliPath, $PwshCliPath, $ValidatorScriptPath)
+            [pscustomobject]@{ Disposition = 'halt'; HaltReason = 'chain-stage-failure'; Reason = 'infra-error: worktree session threw'; ExitCode = 3; ValidatorRan = $true }
+        }
+        # Find-OrUpsertComment returns $null without throwing on every gh
+        # failure path (find-or-upsert-comment.ps1:152-153, 183-184, 208-209,
+        # 246-247) -- this is the modal failure a try/catch around the emit
+        # call never sees, so a real emitter surfaces it as Success = $false.
+        $haltEmitter = { param($Report, $Issue, $RepoRoot, $Owner, $Repo) [pscustomobject]@{ Success = $false; Url = $null } }
+
+        $result = Invoke-GoalRunPredicateEvaluate -Issue 874 -RepoRoot 'C:\gr-874-token' -ActiveStateReader $activeStateReader -PredicateResolver $resolver -HaltEmitter $haltEmitter
+
+        $result.ExitCode | Should -Be 2
+        $result.HaltEmitted | Should -Be $false -Because 'the emit itself failed, so reporting HaltEmitted = $true would be a false success claim'
     }
 }
