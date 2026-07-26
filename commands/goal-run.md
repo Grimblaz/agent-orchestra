@@ -13,7 +13,7 @@ Run the Goal-Run role inline in this conversation to launch or resume a single i
 
 `/goal-run {issue}` is BOTH launcher and resumer: it inspects only durable artifacts (never conversation memory) and enters at the first incomplete stage. This harness runs against exactly one issue's approved goal-contract, not a bundle — accept a single issue number only.
 
-`/goal-run {issue} adopt` and `/goal-run {issue} restart` are the two explicit operator levers (#912 D2/D6): `adopt` force-adopts past a fresh (not-yet-stale) heartbeat that would otherwise refuse a resume; `restart` clears a wedged run's durable markers so a fresh launch is possible again. Both are honored only when the operator typed the literal word — never inferred from any halt or harness state.
+`/goal-run {issue} adopt` and `/goal-run {issue} restart` are the two explicit operator levers (#912 D2/D6): `adopt` force-adopts past a fresh (not-yet-stale) heartbeat that would otherwise refuse a resume — and, honestly, past a completed run too: `adopt` outranks both the liveness check and the completion check in `Resolve-GoalRunInvocationAction`'s precedence, so invoking it on an issue that already shipped a PR (or already has a halt report) relaunches the chain rather than reporting completion. Check for an existing PR or halt report on the issue before using `adopt`. `restart` clears a wedged run's durable markers so a fresh launch is possible again. Both are honored only when the operator typed the literal word — never inferred from any halt or harness state.
 
 **Pre-flight**:
 
