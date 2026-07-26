@@ -525,6 +525,92 @@ Describe 'Test-GoalRunContractHashPinned' -Tag 'unit' {
             $result.Reason | Should -Be 'contract-comment-unresolvable'
         }
     }
+
+    Context 'M19: classifier regex-matches the CURRENT owning-file warning text (goal-contract-validate-core.ps1)' {
+        # M19: Resolve-GCPinnedCommentUnresolvableReason (goal-run-prompt-
+        # core.ps1, private) classifies pin-check failure causes by
+        # regex-matching Write-Warning text OWNED by a DIFFERENT file
+        # (goal-contract-validate-core.ps1, Get-GCPinnedCommentBody), which
+        # this test suite's own lib file may not modify (out of scope). The
+        # Context above hand-types a reproduction of that wording, which
+        # proves the classifier works against A string shaped like the real
+        # one -- but if the owning file's wording ever drifts, a hand-typed
+        # reproduction would keep passing while the live classifier silently
+        # misclassifies. These tests instead read the actual Write-Warning
+        # literal straight out of goal-contract-validate-core.ps1 at
+        # test-run time (never assumed or hand-copied) and drive that exact
+        # text through the real classification path
+        # (Test-GoalRunContractHashPinned), so a future wording change in
+        # the owning file's six cited lines (goal-contract-validate-
+        # core.ps1:528, :542, :546, :550, :557, :568, :572 -- see this
+        # classifier's own header comment in goal-run-prompt-core.ps1) fails
+        # this suite loudly instead of degrading silently.
+
+        BeforeAll {
+            $script:ValidateCoreLines = Get-Content -LiteralPath (Join-Path $script:RepoRoot '.github/scripts/lib/goal-contract-validate-core.ps1')
+
+            function script:Get-GCOwningFileWarningText {
+                param([Parameter(Mandatory)][string]$AnchorPattern)
+                $line = @($script:ValidateCoreLines | Where-Object { $_ -match 'Write-Warning' -and $_ -match $AnchorPattern }) | Select-Object -First 1
+                if (-not $line) {
+                    throw "M19 coupling check: no Write-Warning line matching anchor '$AnchorPattern' found in goal-contract-validate-core.ps1 -- Get-GCPinnedCommentBody's wording has moved or been removed; Resolve-GCPinnedCommentUnresolvableReason's regex-matching contract needs review."
+                }
+                if ($line -notmatch 'Write-Warning\s+([''"])(.*)\1\s*$') {
+                    throw "M19 coupling check: could not extract a quoted literal from the matched line: $line"
+                }
+                return $Matches[2]
+            }
+        }
+
+        It 'classifies the CURRENT repo/owner-unresolvable warning (line ~528) as repo-unresolvable' {
+            $text = Get-GCOwningFileWarningText -AnchorPattern 'could not resolve owner/repo'
+            $reader = { param($Issue, $Marker, $RepoRoot, $Repo, $GhCliPath, $GitCliPath) Write-Warning $text; return $null }.GetNewClosure()
+            $result = Test-GoalRunContractHashPinned -Issue 874 -LaunchPinnedHash $script:MatchingHash -CommentBodyReader $reader
+            $result.Reason | Should -Be 'contract-comment-unresolvable: repo-unresolvable'
+        }
+
+        It 'classifies the CURRENT gh-api-threw warning (line ~542) as gh-read-failed' {
+            $text = Get-GCOwningFileWarningText -AnchorPattern 'threw an exception'
+            $reader = { param($Issue, $Marker, $RepoRoot, $Repo, $GhCliPath, $GitCliPath) Write-Warning $text; return $null }.GetNewClosure()
+            $result = Test-GoalRunContractHashPinned -Issue 874 -LaunchPinnedHash $script:MatchingHash -CommentBodyReader $reader
+            $result.Reason | Should -Be 'contract-comment-unresolvable: gh-read-failed'
+        }
+
+        It 'classifies the CURRENT gh-api-nonzero-exit warning (line ~546) as gh-read-failed' {
+            $text = Get-GCOwningFileWarningText -AnchorPattern 'failed \(exit'
+            $reader = { param($Issue, $Marker, $RepoRoot, $Repo, $GhCliPath, $GitCliPath) Write-Warning $text; return $null }.GetNewClosure()
+            $result = Test-GoalRunContractHashPinned -Issue 874 -LaunchPinnedHash $script:MatchingHash -CommentBodyReader $reader
+            $result.Reason | Should -Be 'contract-comment-unresolvable: gh-read-failed'
+        }
+
+        It 'classifies the CURRENT gh-api-empty-response warning (line ~550) as gh-read-failed' {
+            $text = Get-GCOwningFileWarningText -AnchorPattern 'returned no comments'
+            $reader = { param($Issue, $Marker, $RepoRoot, $Repo, $GhCliPath, $GitCliPath) Write-Warning $text; return $null }.GetNewClosure()
+            $result = Test-GoalRunContractHashPinned -Issue 874 -LaunchPinnedHash $script:MatchingHash -CommentBodyReader $reader
+            $result.Reason | Should -Be 'contract-comment-unresolvable: gh-read-failed'
+        }
+
+        It 'classifies the CURRENT gh-api-unparseable-response warning (line ~557) as gh-read-failed' {
+            $text = Get-GCOwningFileWarningText -AnchorPattern 'failed to parse gh api response'
+            $reader = { param($Issue, $Marker, $RepoRoot, $Repo, $GhCliPath, $GitCliPath) Write-Warning $text; return $null }.GetNewClosure()
+            $result = Test-GoalRunContractHashPinned -Issue 874 -LaunchPinnedHash $script:MatchingHash -CommentBodyReader $reader
+            $result.Reason | Should -Be 'contract-comment-unresolvable: gh-read-failed'
+        }
+
+        It 'classifies the CURRENT no-comment-carries-marker warning (line ~568) as marker-not-found' {
+            $text = Get-GCOwningFileWarningText -AnchorPattern 'no comment on issue'
+            $reader = { param($Issue, $Marker, $RepoRoot, $Repo, $GhCliPath, $GitCliPath) Write-Warning $text; return $null }.GetNewClosure()
+            $result = Test-GoalRunContractHashPinned -Issue 874 -LaunchPinnedHash $script:MatchingHash -CommentBodyReader $reader
+            $result.Reason | Should -Be 'contract-comment-unresolvable: marker-not-found'
+        }
+
+        It 'classifies the CURRENT ambiguous-multi-marker warning (line ~572) as marker-ambiguous' {
+            $text = Get-GCOwningFileWarningText -AnchorPattern 'refusing to guess'
+            $reader = { param($Issue, $Marker, $RepoRoot, $Repo, $GhCliPath, $GitCliPath) Write-Warning $text; return $null }.GetNewClosure()
+            $result = Test-GoalRunContractHashPinned -Issue 874 -LaunchPinnedHash $script:MatchingHash -CommentBodyReader $reader
+            $result.Reason | Should -Be 'contract-comment-unresolvable: marker-ambiguous'
+        }
+    }
 }
 
 Describe 'Resolve-GoalRunLoopPredicate' -Tag 'unit' {
@@ -587,5 +673,30 @@ Describe 'Resolve-GoalRunLoopPredicate' -Tag 'unit' {
         $invoker = { param($Issue, $RepoRoot, $PwshCliPath, $ValidatorScriptPath) [pscustomobject]@{ ExitCode = 1; Reason = $null } }
         $result = Resolve-GoalRunLoopPredicate -Issue 874 -RepoRoot 'C:\gr-874-token' -LaunchPinnedHash $script:PinnedHash -PinCheck $pinCheck -ValidatorInvoker $invoker
         $result.Disposition | Should -Be 'not-satisfied'
+    }
+
+    # -----------------------------------------------------------------------
+    # M15 fix: Refusals threading -- mirrors Invoke-GoalRunChainRevalidate's
+    # own 912-s6 Refusals threading (goal-run-chain-core.ps1). Before this
+    # fix, Invoke-GoalRunValidatorProcess already returned Refusals on both
+    # paths, but only the chain re-validation path threaded it through --
+    # this in-loop predicate path silently dropped it.
+    # -----------------------------------------------------------------------
+
+    It 'M15: surfaces a tree-state refusal on the disposition''s own Refusals field when the validator invoker result carries one' {
+        $pinCheck = { param($Issue, $LaunchPinnedHash, $Marker, $RepoRoot, $Repo, $GhCliPath, $GitCliPath) [pscustomobject]@{ Pinned = $true; Reason = $null; LiveHash = $LaunchPinnedHash } }
+        $invoker = { param($Issue, $RepoRoot, $PwshCliPath, $ValidatorScriptPath) [pscustomobject]@{ ExitCode = 2; Reason = $null; Refusals = @('refused: uncommitted-changes') } }
+        $result = Resolve-GoalRunLoopPredicate -Issue 874 -RepoRoot 'C:\gr-874-token' -LaunchPinnedHash $script:PinnedHash -PinCheck $pinCheck -ValidatorInvoker $invoker
+        $result.Disposition | Should -Be 'halt'
+        $result.HaltReason | Should -Be 'chain-stage-failure'
+        $result.Refusals | Should -Not -BeNullOrEmpty
+        $result.Refusals[0] | Should -Be 'refused: uncommitted-changes'
+    }
+
+    It 'M15: reports an empty Refusals array (not a one-element array containing $null) when the validator invoker result carries none' {
+        $pinCheck = { param($Issue, $LaunchPinnedHash, $Marker, $RepoRoot, $Repo, $GhCliPath, $GitCliPath) [pscustomobject]@{ Pinned = $true; Reason = $null; LiveHash = $LaunchPinnedHash } }
+        $invoker = { param($Issue, $RepoRoot, $PwshCliPath, $ValidatorScriptPath) [pscustomobject]@{ ExitCode = 0; Reason = $null } }
+        $result = Resolve-GoalRunLoopPredicate -Issue 874 -RepoRoot 'C:\gr-874-token' -LaunchPinnedHash $script:PinnedHash -PinCheck $pinCheck -ValidatorInvoker $invoker
+        @($result.Refusals).Count | Should -Be 0
     }
 }

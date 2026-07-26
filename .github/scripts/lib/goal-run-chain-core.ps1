@@ -127,10 +127,24 @@ function Invoke-GoalRunChainRevalidate {
         Disposition 'halt' / HaltReason 'invariant-conflict' -- a distinct
         condition from a genuine re-validation failure, and the
         highest-precedence halt producer per Resolve-GoalRunHaltPrecedence.
+
+        M15 fix: the "EXACT SAME" claim above now also covers Refusals.
+        912-s6 added Refusals threading here but left
+        Resolve-GoalRunLoopPredicate (goal-run-prompt-core.ps1) still
+        dropping the field on an exit-2 refused verdict -- an asymmetry
+        this fix closes by threading Refusals through
+        Resolve-GoalRunLoopPredicate identically (same $null-guarded
+        @($result.Refusals) read, same pass-through to
+        Resolve-GoalRunValidatorExitDisposition, same Refusals field on the
+        returned object). Both functions now apply genuinely identical
+        exit-code/Reason/Refusals disposition logic, not just the same
+        exit-3/exit-2 bucketing.
     .OUTPUTS
-        [pscustomobject]@{ Disposition; HaltReason; Reason; ExitCode }
+        [pscustomobject]@{ Disposition; HaltReason; Reason; ExitCode; Refusals }
         Disposition is 'satisfied' | 'not-satisfied' | 'halt'. HaltReason is
-        $null unless Disposition is 'halt'.
+        $null unless Disposition is 'halt'. Refusals is an empty array
+        (never a one-element array containing $null) unless the validator
+        returned exit-2 refused literals.
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]

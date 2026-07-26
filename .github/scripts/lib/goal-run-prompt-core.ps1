@@ -151,10 +151,22 @@
         child-process invocation, injectable for tests) and apply
         Resolve-GoalRunValidatorExitDisposition to the result. Returns
         [pscustomobject]@{ Disposition; HaltReason; Reason; ExitCode;
-        ValidatorRan } -- Disposition is one of 'satisfied' |
+        ValidatorRan; Refusals } -- Disposition is one of 'satisfied' |
         'not-satisfied' | 'halt', directly consumable by the halt path of
         the stage machine (full wiring is a later step; this function
         only needs to return a shape that wiring can act on).
+
+        M15 fix: Refusals is now threaded through identically to
+        Invoke-GoalRunChainRevalidate (goal-run-chain-core.ps1, 912-s6) --
+        an exit-2 refused verdict's distinguishing literals (e.g. 'refused:
+        uncommitted-changes') are read from the validator-invoker result,
+        passed to Resolve-GoalRunValidatorExitDisposition, and surfaced on
+        this function's own Refusals field (an empty array, never a
+        one-element array containing $null, when none apply). Before this
+        fix only the chain re-validation path threaded Refusals; this
+        in-loop predicate path silently dropped it even though
+        Invoke-GoalRunValidatorProcess already returns the field on both
+        paths.
 #>
 
 . (Join-Path $PSScriptRoot 'goal-contract-validate-core.ps1')
@@ -377,6 +389,23 @@ function Resolve-GoalRunValidatorExitDisposition {
 # the original undifferentiated value when no warning was captured (a caller
 # or test double that returns $null with no Write-Warning), so pre-existing
 # behavior for callers that never emit a warning is unchanged.
+#
+# M19 (cross-file coupling, zero-tests-in-the-owning-suite gap): this
+# classifier regex-matches text owned by a DIFFERENT file
+# (goal-contract-validate-core.ps1), which this file may not modify. If a
+# future edit to that file's Get-GCPinnedCommentBody changes any of the six
+# lines cited above, none of THAT file's own tests would catch the drift --
+# the coupling is entirely one-directional and invisible from the owning
+# side. goal-run-prompt-core.Tests.ps1's own
+# 'M19: classifier regex-matches the CURRENT owning-file warning text'
+# Context guards against this from the consumer side instead: it reads the
+# actual Write-Warning literals out of goal-contract-validate-core.ps1 at
+# test-run time (not a hand-typed reproduction) and drives them through this
+# classifier via Test-GoalRunContractHashPinned, so a future edit to any of
+# the six cited lines that breaks one of the four `-match` patterns below
+# fails that suite loudly. A future editor of
+# goal-contract-validate-core.ps1's Get-GCPinnedCommentBody warnings should
+# run that suite before merging a wording change.
 function script:Resolve-GCPinnedCommentUnresolvableReason {
     param(
         [Parameter(Mandatory = $false)][AllowNull()][string[]]$Warnings = @()
@@ -592,12 +621,26 @@ function Resolve-GoalRunLoopPredicate {
     # (a default -ValidatorInvoker call, or a test double that opts in). A
     # test double result object with no ParseFailed property reads as $null
     # here, which [switch] coerces to $false -- unchanged pre-fix behavior.
-    $exitDisposition = Resolve-GoalRunValidatorExitDisposition -ExitCode $result.ExitCode -Reason $result.Reason -ParseFailed:([bool]$result.ParseFailed)
+    # M15 fix: thread Refusals through too, mirroring
+    # Invoke-GoalRunChainRevalidate's identical handling (goal-run-chain-
+    # core.ps1, 912-s6). Invoke-GoalRunValidatorProcess already returns a
+    # Refusals array on an exit-2 refused verdict, but this call site
+    # previously dropped it -- $null-guarded (rather than a bare
+    # @($result.Refusals)) because @() of a $null property yields a
+    # one-element array containing $null, not an empty array (the same
+    # gotcha this file's own Invoke-GoalRunValidatorProcess Refusals-reading
+    # code documents above).
+    $refusalsArg = @()
+    if ($null -ne $result.Refusals) { $refusalsArg = @($result.Refusals) }
+    $exitDisposition = Resolve-GoalRunValidatorExitDisposition -ExitCode $result.ExitCode -Reason $result.Reason -ParseFailed:([bool]$result.ParseFailed) -Refusals $refusalsArg
 
     $haltReason = $null
     if ($exitDisposition.Disposition -eq 'halt') {
         $haltReason = 'chain-stage-failure'
     }
+
+    $refusalsOut = @()
+    if ($null -ne $exitDisposition.Refusals) { $refusalsOut = @($exitDisposition.Refusals) }
 
     return [pscustomobject]@{
         Disposition  = $exitDisposition.Disposition
@@ -605,5 +648,6 @@ function Resolve-GoalRunLoopPredicate {
         Reason       = $exitDisposition.Reason
         ExitCode     = $result.ExitCode
         ValidatorRan = $true
+        Refusals     = $refusalsOut
     }
 }

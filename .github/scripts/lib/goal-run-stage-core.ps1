@@ -101,18 +101,37 @@ function Resolve-GoalRunResumeStage {
           1. -ContractHashVerified = $false -> 'blocked' (cannot run at all)
           2. -TerminalEmissionsVerified = $true -> 'complete'
           3. -ExplicitStageMarker (the goal-run-stage-{Issue} marker
-             latest recorded value) -- authoritative when present
+             latest recorded value) -- authoritative when present. The
+             three recorded marker values map to three DIFFERENT resume
+             stages, not straight through 1:1:
+               - 'chain-dispatched' -> 'chain-dispatched' (awaiting
+                 terminal emissions)
+               - 'loop-released' -> 'chain-dispatched' (the loop already
+                 finished; only the chain dispatch itself is outstanding)
+               - 'loop-launched' -> 'loop-interrupted' (the loop was
+                 launched but never recorded release -- the run must be
+                 resumed as an in-progress loop, not restarted as a fresh
+                 launch)
           4. -RunLogHasCheckpoint -- a checkpoint/deviation/experience-
              observation entry proves the loop ran even without an
              explicit stage marker (e.g. a crash between loop-launch and
-             the next marker write)
+             the next marker write) -> 'loop-interrupted', the same
+             resume stage the 'loop-launched' explicit marker above maps
+             to -- both mean "the loop is known to have started and has
+             no recorded release", just from different evidence.
           5. -ActiveStatePresent -- goal-run-active.json exists, so the
-             worktree was provisioned but the loop was never launched
+             worktree was provisioned but the loop was never launched ->
+             'loop-launched' (the resume stage that (re)launches the
+             loop -- distinct from the 'loop-interrupted' ResumeStage
+             above, which resumes an ALREADY-launched loop instead of
+             relaunching it)
           6. -InflightMarkerPresent -- a mutex marker was posted but
-             nothing was provisioned yet (crash mid pre-loop)
+             nothing was provisioned yet (crash mid pre-loop) -> 'pre-loop'
           7. Nothing present -> 'pre-loop' (fresh launch)
     .OUTPUTS
         [pscustomobject]@{ ResumeStage; Reason }
+        ResumeStage is one of: 'blocked' | 'complete' | 'chain-dispatched' |
+        'loop-interrupted' | 'loop-launched' | 'pre-loop'.
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
