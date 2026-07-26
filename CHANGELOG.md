@@ -2,6 +2,14 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.4.10] — 2026-07-25
+
+### Fixed
+
+- Added the missing `claude-opus-5` row to `cost-rate-table.json` (issue #905) — Claude Code sessions now default to Opus 5, and every orchestrated PR since its launch had been silently losing USD cost attribution for those events.
+- Fixed `cost-attribution.ps1`'s totals rollup: an event whose model has no rate-table row previously contributed nothing to `totals.cost_estimate_usd` with no signal that anything was wrong, so the reported PR cost silently understated real spend instead of going visibly unavailable. The total now one-way-latches to `null` on the first unresolvable model (never un-latches on a later priced event), while the pre-existing per-port `rate_unavailable` behavior for known-but-unpriced rows (e.g. Copilot, by design) is deliberately unchanged. Registered the cost test suites in CI (`pester.yml`) for the first time — no cost suite had ever run in any workflow, so this correction was previously unenforceable by any automated gate.
+- Refreshed the per-agent model + reasoning routing documentation (`Documents/Design/agent-body-architecture.md`) to reflect Opus 5's launch and correct a stale routing-table legend and citation drift in `cost-rate-table.md`.
+
 ## [3.4.9] — 2026-07-23
 
 ### Fixed

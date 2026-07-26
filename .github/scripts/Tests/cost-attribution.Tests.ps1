@@ -853,13 +853,15 @@ Describe 'Get-CostAttribution' {
     }
 
     Context 'issue #487 AC1: #813-shaped fixture' {
-        It 'produces null_cost_events == 0 across every bucket for a #813-shaped mix of the six new rate-table keys' {
+        It 'produces null_cost_events == 0 across every bucket for a #813-shaped mix of the seven new rate-table keys' {
             # Cache-read-heavy events attributed to orchestrator_overhead (no Agent dispatch —
             # mirrors #813's recorded mix, where ~97% of cache reads landed on orchestrator-overhead turns).
             $overheadEvents = @(
                 script:New-AssistantEvent -Model 'claude-fable-5' -InputTokens 200 -OutputTokens 20 -CacheCreation 500 -CacheRead 40000
                 script:New-AssistantEvent -Model 'claude-opus-4-8' -InputTokens 200 -OutputTokens 20 -CacheCreation 500 -CacheRead 35000
                 script:New-AssistantEvent -Model 'claude-sonnet-5' -InputTokens 200 -OutputTokens 20 -CacheCreation 500 -CacheRead 30000
+                # issue #905: claude-opus-5 is a new model key added to the rate table in this changeset.
+                script:New-AssistantEvent -Model 'claude-opus-5' -InputTokens 200 -OutputTokens 20 -CacheCreation 500 -CacheRead 32000
             )
 
             # Output-heavy events attributed to a review-style dispatch (agent-orchestra:Code-Critic maps to the 'review' port).
@@ -872,15 +874,90 @@ Describe 'Get-CostAttribution' {
             $events = @($overheadEvents) + @($reviewEvents)
             $result = Get-CostAttribution -Events $events -RateTablePath $script:RateTablePath -WarningVariable wv
 
-            $result.orchestrator_overhead.null_cost_events | Should -Be 0 -Because 'all three cache-read-heavy models (claude-fable-5, claude-opus-4-8, claude-sonnet-5) must resolve against the refreshed rate table'
+            $result.orchestrator_overhead.null_cost_events | Should -Be 0 -Because 'all four cache-read-heavy models (claude-fable-5, claude-opus-4-8, claude-sonnet-5, claude-opus-5) must resolve against the refreshed rate table'
             $result.ports.ContainsKey('review') | Should -BeTrue
             $result.ports['review'].null_cost_events | Should -Be 0 -Because 'all three output-heavy models (claude-sonnet-4-6, claude-haiku-4-5, claude-haiku-4-5-20251001) must resolve against the refreshed rate table'
 
             foreach ($portName in $result.ports.Keys) {
-                $result.ports[$portName].null_cost_events | Should -Be 0 -Because "port '$portName' should have zero null-cost events once all six new rate-table keys are present"
+                $result.ports[$portName].null_cost_events | Should -Be 0 -Because "port '$portName' should have zero null-cost events once all seven new rate-table keys are present"
             }
 
             $wv | Should -BeNullOrEmpty -Because 'no unknown-model or rate-unavailable warnings should fire once the rate table covers every model in the fixture'
+        }
+    }
+
+    Context 'issue #905: one-way cost latch on totals.cost_estimate_usd' {
+        It 'keeps totals.cost_estimate_usd null when an unpriced event precedes a priced claude-opus-5 event in the same run' {
+            # Ordering A: unknown-model event first, priced claude-opus-5 event second.
+            # 'totally-bogus-model' is deliberately distinct from claude-opus-5 so that adding
+            # the real claude-opus-5 rate-table row (a later plan step) cannot accidentally
+            # green this test on its own — the latch fix (a separate later plan step) is what
+            # this assertion is pinned to.
+            $unpricedEvent = script:New-AssistantEvent -Model 'totally-bogus-model' -InputTokens 111 -OutputTokens 22
+            $pricedEvent = script:New-AssistantEvent -Model 'claude-opus-5' -InputTokens 333 -OutputTokens 44
+
+            $result = Get-CostAttribution -Events @($unpricedEvent, $pricedEvent) -RateTablePath $script:RateTablePath -WarningVariable wv
+
+            $result.totals.cost_estimate_usd | Should -BeNullOrEmpty -Because 'an unpriced event anywhere in the run must make the run total unknown, not silently omit its own contribution while a later priced event fills the bucket'
+            $result.totals.tokens.input | Should -Be 444 -Because "the unpriced event's tokens must still accumulate into totals even though its cost is unknown"
+            $result.totals.tokens.output | Should -Be 66 -Because "the unpriced event's tokens must still accumulate into totals even though its cost is unknown"
+        }
+
+        It 'keeps totals.cost_estimate_usd null when a priced claude-opus-5 event precedes an unpriced event in the same run' {
+            # Ordering B: priced claude-opus-5 event first, unknown-model event second.
+            # A fixture using only ordering A would pass against an implementation with no
+            # latch at all (e.g. one that only checks the first event); both orderings are
+            # required to discriminate a true one-way latch from an order-sensitive patch.
+            $pricedEvent = script:New-AssistantEvent -Model 'claude-opus-5' -InputTokens 333 -OutputTokens 44
+            $unpricedEvent = script:New-AssistantEvent -Model 'totally-bogus-model' -InputTokens 111 -OutputTokens 22
+
+            $result = Get-CostAttribution -Events @($pricedEvent, $unpricedEvent) -RateTablePath $script:RateTablePath -WarningVariable wv
+
+            $result.totals.cost_estimate_usd | Should -BeNullOrEmpty -Because 'a later unpriced event must still null the run total even though an earlier priced event already gave cost_estimate_usd a nonzero value'
+            $result.totals.tokens.input | Should -Be 444 -Because "both events' tokens must still accumulate into totals even though the run total cost is unknown"
+            $result.totals.tokens.output | Should -Be 66 -Because "both events' tokens must still accumulate into totals even though the run total cost is unknown"
+        }
+
+        It 'leaves totals.cost_estimate_usd as the priced event''s real cost when a rate_unavailable event precedes a priced claude-opus-5 event' {
+            # Ordering A: rate_unavailable event first, priced claude-opus-5 event second.
+            # rate_unavailable (cost-attribution.ps1:1074-1076) is a model whose rate-table row
+            # EXISTS but whose rates resolve to null by design (e.g. every copilot-* row). Per the
+            # plan this branch is deliberately NOT latched: unlike an unknown-model event (which
+            # sets totals['_cost_latched_null']), a resolvable-but-null-rate event must not
+            # permanently null the run total. A mutation that latches this branch instead leaves
+            # the entire registered suite green, which is what this test discriminates against.
+            $rateUnavailableEvent = script:New-CopilotAssistantEvent
+            $pricedEvent = script:New-AssistantEvent -Model 'claude-opus-5' -InputTokens 333 -OutputTokens 44
+
+            $result = Get-CostAttribution -Events @($rateUnavailableEvent, $pricedEvent) -RateTablePath $script:RateTablePath -WarningVariable wv
+
+            $result.totals.cost_estimate_usd | Should -Be 0.002765 -Because 'rate_unavailable must not latch totals.cost_estimate_usd to null; the later priced claude-opus-5 event must still total its own real cost'
+        }
+
+        It 'leaves totals.cost_estimate_usd as the priced event''s real cost when a priced claude-opus-5 event precedes a rate_unavailable event' {
+            # Ordering B: priced claude-opus-5 event first, rate_unavailable event second.
+            # Both orderings are required to discriminate a true non-latch from an order-sensitive
+            # patch that merely happens to leave the first event's cost intact.
+            $pricedEvent = script:New-AssistantEvent -Model 'claude-opus-5' -InputTokens 333 -OutputTokens 44
+            $rateUnavailableEvent = script:New-CopilotAssistantEvent
+
+            $result = Get-CostAttribution -Events @($pricedEvent, $rateUnavailableEvent) -RateTablePath $script:RateTablePath -WarningVariable wv
+
+            $result.totals.cost_estimate_usd | Should -Be 0.002765 -Because 'a later rate_unavailable event must not retroactively null an already-priced totals.cost_estimate_usd; rate_unavailable is deliberately not a latching condition'
+        }
+
+        It 'totals a session containing only a zero-usage <synthetic> event as 0.00 on totals.cost_estimate_usd directly' {
+            # Distinguishes "no cost incurred" (a real 0.00) from "cost unavailable" (null).
+            # Asserts on totals.cost_estimate_usd directly rather than a per-port bucket value,
+            # because the bucket path already nulls out correctly for unpriced events and would
+            # mask a totals-level regression introduced by a future latch fix that over-nulls.
+            $dispatch = script:New-AgentDispatch -SubagentType 'code-smith'
+            $syntheticEvent = script:New-AssistantEvent -Content @($dispatch) -Model '<synthetic>' `
+                -InputTokens 0 -OutputTokens 0 -CacheCreation 0 -CacheRead 0
+
+            $result = Get-CostAttribution -Events @($syntheticEvent) -RateTablePath $script:RateTablePath -WarningVariable wv
+
+            $result.totals.cost_estimate_usd | Should -Be 0.0 -Because 'a session where no real cost was incurred must total exactly 0.00 on totals.cost_estimate_usd, not null'
         }
     }
 }
