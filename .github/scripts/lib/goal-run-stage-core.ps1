@@ -127,10 +127,10 @@ function Resolve-GoalRunResumeStage {
         return [pscustomobject]@{ ResumeStage = 'chain-dispatched'; Reason = 'loop-released-chain-not-dispatched' }
     }
     if ($ExplicitStageMarker -eq 'loop-launched') {
-        return [pscustomobject]@{ ResumeStage = 'loop-released'; Reason = 'loop-launched-awaiting-release' }
+        return [pscustomobject]@{ ResumeStage = 'loop-interrupted'; Reason = 'loop-launched-awaiting-release' }
     }
     if ($RunLogHasCheckpoint) {
-        return [pscustomobject]@{ ResumeStage = 'loop-released'; Reason = 'run-log-implies-loop-launched-no-explicit-marker' }
+        return [pscustomobject]@{ ResumeStage = 'loop-interrupted'; Reason = 'run-log-implies-loop-launched-no-explicit-marker' }
     }
     if ($ActiveStatePresent) {
         return [pscustomobject]@{ ResumeStage = 'loop-launched'; Reason = 'worktree-provisioned-loop-not-launched' }
@@ -710,8 +710,18 @@ function Test-GoalRunInflightAppearsDead {
         An inflight marker with no terminal outcome (no halt report, no PR)
         is a first-class detectable state. Pure given the already-fetched
         evidence the caller supplies -- no gh/git calls here.
+    .DESCRIPTION
+        #912 D3/D4: AppearsDead is purely elapsed-time-computed -- it is
+        NEVER short-circuited to $false just because a halt report or PR
+        (a terminal outcome) already exists. Whether a terminal outcome is
+        present is surfaced instead as the additive TerminalOutcomePresent
+        output, so Resolve-GoalRunInvocationAction's precedence can compose
+        "stale" with "terminal outcome present" as two independent signals
+        rather than the terminal-outcome check pre-empting staleness
+        detection entirely.
     .OUTPUTS
-        [pscustomobject]@{ AppearsDead; Reason; ElapsedMinutes; LastSeenAt }
+        [pscustomobject]@{ AppearsDead; Reason; ElapsedMinutes; LastSeenAt;
+        TerminalOutcomePresent }
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -725,11 +735,10 @@ function Test-GoalRunInflightAppearsDead {
         [int]$StaleThresholdMinutes = 60
     )
 
+    $terminalOutcomePresent = [bool]($HaltReportExists -or $PrExists)
+
     if ($MarkerStatus -ne 'unresolved') {
-        return [pscustomobject]@{ AppearsDead = $false; Reason = 'marker-already-resolved'; ElapsedMinutes = $null; LastSeenAt = $null }
-    }
-    if ($HaltReportExists -or $PrExists) {
-        return [pscustomobject]@{ AppearsDead = $false; Reason = 'terminal-outcome-present'; ElapsedMinutes = $null; LastSeenAt = $null }
+        return [pscustomobject]@{ AppearsDead = $false; Reason = 'marker-already-resolved'; ElapsedMinutes = $null; LastSeenAt = $null; TerminalOutcomePresent = $terminalOutcomePresent }
     }
 
     $lastSeen = if ($HeartbeatAt) { [datetime]$HeartbeatAt } else { $LaunchedAt }
@@ -751,10 +760,11 @@ function Test-GoalRunInflightAppearsDead {
     $appearsDead = $elapsed -ge $StaleThresholdMinutes
 
     return [pscustomobject]@{
-        AppearsDead    = $appearsDead
-        Reason         = if ($appearsDead) { 'stale-no-terminal-outcome' } else { 'within-stale-threshold' }
-        ElapsedMinutes = [math]::Round($elapsed, 1)
-        LastSeenAt     = $lastSeen
+        AppearsDead            = $appearsDead
+        Reason                 = if ($appearsDead) { 'stale-no-terminal-outcome' } else { 'within-stale-threshold' }
+        ElapsedMinutes         = [math]::Round($elapsed, 1)
+        LastSeenAt             = $lastSeen
+        TerminalOutcomePresent = $terminalOutcomePresent
     }
 }
 
@@ -765,25 +775,46 @@ function Resolve-GoalRunInvocationAction {
         current mutex state, per the requirement contract: a second
         invocation while an unresolved marker exists refuses to launch a
         new run and instead offers resume/triage.
+    .DESCRIPTION
+        #912 D2-D4/AC15: exhaustive precedence, highest wins --
+          (i)   -ExistingUnresolvedMarker is $null -> 'launch-new'.
+          (ii)  -ForceAdopt is set -> 'adopt-and-resume' (the explicit
+                override lever always wins once a marker exists, even over
+                a fresh/non-dead marker).
+          (iii) -AppearsDead is $false (heartbeat fresh) ->
+                'refuse-resume-existing' -- the live-run protection is
+                never inferred from an absent terminal outcome.
+          (iv)  -AppearsDead is $true AND -TerminalOutcomePresent is $true
+                -> 'resolve-and-report-complete'.
+          (v)   -AppearsDead is $true, no terminal outcome ->
+                'adopt-and-resume' (triage-dead-run retired).
     .OUTPUTS
         [pscustomobject]@{ Action; Reason }
         Action is one of: 'launch-new' | 'refuse-resume-existing' |
-        'triage-dead-run'.
+        'adopt-and-resume' | 'resolve-and-report-complete'.
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
     param(
         $ExistingUnresolvedMarker,
-        [Parameter(Mandatory)][bool]$AppearsDead
+        [Parameter(Mandatory)][bool]$AppearsDead,
+        [bool]$TerminalOutcomePresent = $false,
+        [bool]$ForceAdopt = $false
     )
 
     if ($null -eq $ExistingUnresolvedMarker) {
         return [pscustomobject]@{ Action = 'launch-new'; Reason = 'no-unresolved-marker' }
     }
-    if ($AppearsDead) {
-        return [pscustomobject]@{ Action = 'triage-dead-run'; Reason = 'inflight-marker-appears-dead' }
+    if ($ForceAdopt) {
+        return [pscustomobject]@{ Action = 'adopt-and-resume'; Reason = 'force-adopt-requested' }
     }
-    return [pscustomobject]@{ Action = 'refuse-resume-existing'; Reason = 'unresolved-marker-present' }
+    if (-not $AppearsDead) {
+        return [pscustomobject]@{ Action = 'refuse-resume-existing'; Reason = 'unresolved-marker-present' }
+    }
+    if ($TerminalOutcomePresent) {
+        return [pscustomobject]@{ Action = 'resolve-and-report-complete'; Reason = 'stale-marker-with-terminal-outcome' }
+    }
+    return [pscustomobject]@{ Action = 'adopt-and-resume'; Reason = 'inflight-marker-appears-dead' }
 }
 
 # ---------------------------------------------------------------------------
