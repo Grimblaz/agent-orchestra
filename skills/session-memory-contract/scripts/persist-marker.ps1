@@ -145,7 +145,22 @@ function script:Format-PersistMarkerArtifacts {
 }
 
 if ($PSCmdlet.ParameterSetName -eq 'Burst') {
-    $result = Invoke-PersistMarkerBurstFromManifest -Owner $Owner -Repo $Repo -ManifestPath $BurstManifest
+    # F4 fix (PR #917 review): wrap the burst dispatch call itself. This is
+    # belt-and-suspenders -- Invoke-PersistMarkerBurst already wraps its own
+    # inner Invoke-PersistMarkerWrite calls in try/catch (M4/N1 fix) so a
+    # Find-AllCommentsByExactMarker transport-failure throw is normally
+    # already converted to a Success=$false result before it ever reaches
+    # here -- but this wrapper is a documented-legal in-process `&` entry
+    # point in its own right, and every OTHER call site in this file is now
+    # symmetrically guarded, so this call site is not left as the one bare
+    # exception to that convention.
+    try {
+        $result = Invoke-PersistMarkerBurstFromManifest -Owner $Owner -Repo $Repo -ManifestPath $BurstManifest
+    }
+    catch {
+        [Console]::Error.WriteLine("persist-marker (burst): FAILED -- $($_.Exception.Message)")
+        exit 1
+    }
 
     if (-not $result.Success) {
         [Console]::Error.WriteLine("persist-marker (burst): FAILED -- $($result.Reason)")
@@ -166,8 +181,23 @@ if (-not $bodyFileResult.Success) {
     exit 1
 }
 
-$result = Invoke-PersistMarkerWrite -Family $Family -Owner $Owner -Repo $Repo -Number $Number `
-    -TargetSurface $TargetSurface -Marker $Marker -Body $bodyFileResult.Body -NoPreserve:$NoPreserve
+# F4 fix (PR #917 review): Invoke-PersistMarkerWrite's own dispatch to
+# Find-AllCommentsByExactMarker (via Invoke-MarkerPostNewWrite /
+# Invoke-MarkerUpsertWrite) has no try/catch of its own (see
+# persist-marker-core.ps1's own comment acknowledging this wrapper "has no
+# top-level try/catch of its own") -- Find-AllCommentsByExactMarker throws
+# BY DOCUMENTED DESIGN on a transport failure unrelated to gh-launch (404,
+# auth expiry, rate limit, 5xx; the F2 fix only covers launch failures).
+# Catch it here and convert to this wrapper's documented stderr contract
+# instead of an uncaught PowerShell stack trace.
+try {
+    $result = Invoke-PersistMarkerWrite -Family $Family -Owner $Owner -Repo $Repo -Number $Number `
+        -TargetSurface $TargetSurface -Marker $Marker -Body $bodyFileResult.Body -NoPreserve:$NoPreserve
+}
+catch {
+    [Console]::Error.WriteLine("persist-marker (family=$Family): FAILED -- $($_.Exception.Message)")
+    exit 1
+}
 
 if (-not $result.Success) {
     [Console]::Error.WriteLine("persist-marker (family=$Family): FAILED -- $($result.Reason)")

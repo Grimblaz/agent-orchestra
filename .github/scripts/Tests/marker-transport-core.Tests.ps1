@@ -230,6 +230,68 @@ Describe 'marker-transport-core' {
         }
     }
 
+    Context 'gh launch failure -- fail-open per each function''s own documented contract (F2, issue #893 PR #917 review)' {
+        <#
+        A real repro of the launch-failure class F2 fixes: `gh` absent from
+        PATH entirely (never a mocked non-zero $LASTEXITCODE) raises a
+        terminating CommandNotFoundException at the `& gh` call itself,
+        BEFORE $LASTEXITCODE is ever checked -- bypassing every function's
+        documented fail-open contract. The in-process `function global:gh`
+        mock used elsewhere in this file would swallow that class entirely
+        (a PowerShell function is always resolved before an external
+        command, so it can never reproduce a launch failure); each It below
+        removes that mock and points PATH at a directory with no `gh`
+        binary so `& gh` genuinely cannot resolve to anything.
+        #>
+        BeforeEach {
+            $script:GhLaunchFailureSavedPath = $env:PATH
+            Remove-Item Function:gh -ErrorAction SilentlyContinue
+            $script:NoGhDir = Join-Path $TestDrive "no-gh-here-$([guid]::NewGuid().ToString('N'))"
+            New-Item -ItemType Directory -Path $script:NoGhDir -Force | Out-Null
+            $env:PATH = $script:NoGhDir
+        }
+
+        AfterEach {
+            $env:PATH = $script:GhLaunchFailureSavedPath
+        }
+
+        It 'Get-CommentBodyById returns $null (its documented any-failure contract) rather than an uncaught exception' {
+            { $script:result = Get-CommentBodyById -Owner $script:Owner -Repo $script:Repo -CommentId 500 } | Should -Not -Throw
+            $script:result | Should -BeNullOrEmpty
+        }
+
+        It 'Get-CommentBodyByIdWithStatus returns Status=error (its documented failure shape) rather than an uncaught exception' {
+            { $script:result = Get-CommentBodyByIdWithStatus -Owner $script:Owner -Repo $script:Repo -CommentId 500 } | Should -Not -Throw
+            $script:result.Status | Should -Be 'error'
+            $script:result.Body | Should -BeNullOrEmpty
+            $script:result.ErrorMessage | Should -Not -BeNullOrEmpty
+        }
+
+        It 'Set-CommentBodyDirect returns Success=$false with a Reason (its documented failure shape) rather than an uncaught exception, for a launch failure on the PATCH call' {
+            { $script:result = Set-CommentBodyDirect -Owner $script:Owner -Repo $script:Repo -CommentId 500 -NewBody 'new body' } | Should -Not -Throw
+            $script:result.Success | Should -Be $false
+            $script:result.Reason | Should -Not -BeNullOrEmpty
+        }
+
+        It 'Find-CommentIdByExactMarker returns $null (its documented no-match/failure contract) rather than an uncaught exception' {
+            { $script:result = Find-CommentIdByExactMarker -Owner $script:Owner -Repo $script:Repo -IssueNumber $script:IssueNumber -Marker $script:Marker } | Should -Not -Throw
+            $script:result | Should -BeNullOrEmpty
+        }
+
+        It 'Find-AllCommentsByExactMarker throws a deterministic error naming the apiPath (its documented throw-on-failure contract), not an uncaught CommandNotFoundException' {
+            $thrown = $null
+            try {
+                Find-AllCommentsByExactMarker -Owner $script:Owner -Repo $script:Repo -IssueNumber $script:IssueNumber -Marker $script:Marker
+            }
+            catch {
+                $thrown = $_
+            }
+
+            $thrown | Should -Not -BeNullOrEmpty
+            $thrown.Exception.Message | Should -Match ([regex]::Escape("repos/$script:Owner/$script:Repo/issues/$script:IssueNumber/comments"))
+        }
+    }
+
     Context 'New-MarkerComment: large-body native invocation (M2, issue #893 s11)' {
         BeforeAll {
             $script:SavedPath = $env:PATH

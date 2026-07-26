@@ -1888,8 +1888,9 @@ function Resolve-MarkerScratchBoundedPath {
         segments; requires the target to exist -- every caller here needs to
         read the file's content anyway, so non-existence is itself a
         refusal), checks segment-boundary containment inside the
-        canonicalized -ScratchRoot, and then walks every path segment from
-        -ScratchRoot down to the leaf refusing on any symlink or junction
+        canonicalized -ScratchRoot, and then refuses on any symlink or
+        junction -- checking -ScratchRoot ITSELF first (F1 fix, PR #917
+        review), then walking every descendant path segment down to the leaf
         (893 s11 M1 fix -- see script:Test-MarkerPathSegmentIsReparsePoint).
     .DESCRIPTION
         Never a raw string-prefix test on the UNRESOLVED input -- that is
@@ -1903,12 +1904,15 @@ function Resolve-MarkerScratchBoundedPath {
         Resolve-Path alone is NOT symlink-aware: it canonicalizes the
         TRAVERSED path string (collapsing '.'/'..' segments) without ever
         dereferencing a reparse point, so a junction placed INSIDE the
-        scratch root whose target lives OUTSIDE it would still pass the
-        string-containment check above undetected. The per-segment walk
-        below is what actually closes that gap -- every directory component
-        between the scratch root and the leaf is checked via
-        script:Test-MarkerPathSegmentIsReparsePoint and refused if it is a
-        reparse point, regardless of where its target resolves.
+        scratch root (or the scratch root directory itself being a
+        junction/symlink) whose target lives OUTSIDE it would still pass the
+        string-containment check above undetected. What actually closes that
+        gap is script:Test-MarkerPathSegmentIsReparsePoint applied to BOTH
+        the scratch root itself (F1 fix, PR #917 review -- the root was
+        previously exempt, checked nowhere) AND every descendant directory
+        component between the scratch root and the leaf (893 s11 M1 fix),
+        refused if either is a reparse point, regardless of where its target
+        resolves.
 
         Known residual limitation (accepted, not solved here): a HARD LINK
         is not a reparse point (NTFS hard links are ordinary directory
@@ -1936,6 +1940,18 @@ function Resolve-MarkerScratchBoundedPath {
     $inBounds = $resolvedPath.Equals($resolvedScratchRoot, $comparison) -or $resolvedPath.StartsWith($rootWithSep, $comparison)
     if (-not $inBounds) {
         return [PSCustomObject]@{ InBounds = $false; ResolvedPath = $resolvedPath; Reason = "path resolves outside the scratch root '$resolvedScratchRoot': $(script:ConvertTo-MarkerRefusalEcho -Value $resolvedPath)" }
+    }
+
+    # F1 fix (PR #917 review): the ROOT ITSELF must also be tested -- if
+    # '.tmp' (or whatever -ScratchRoot resolves to) is itself a
+    # junction/symlink to an outside directory, the string-containment check
+    # above and the descendant-only walk below both pass unchanged (neither
+    # dereferences the root's own reparse point), and a leaf file under it
+    # is wrongly readable/publishable. This check runs BEFORE the
+    # descendant-segment loop so it always fires, including when -Path
+    # resolves to the root itself (Length equal, not greater).
+    if (script:Test-MarkerPathSegmentIsReparsePoint -Segment $resolvedScratchRoot) {
+        return [PSCustomObject]@{ InBounds = $false; ResolvedPath = $resolvedPath; Reason = "the scratch root itself is a symlink or junction at '$(script:ConvertTo-MarkerRefusalEcho -Value $resolvedScratchRoot)' -- reparse points are refused regardless of where their target resolves" }
     }
 
     # M1 (893 s11): walk every segment from the scratch root down to the
@@ -2505,7 +2521,25 @@ function Invoke-PersistMarkerBurstFromManifest {
     # from the same "never dump an oversized field verbatim" contract).
     $echoedManifestPath = script:ConvertTo-MarkerRefusalEcho -Value $ManifestPath
 
-    $rawManifest = Get-Content -LiteralPath $ManifestPath -Raw
+    # F3 fix (PR #917 review): Get-Content itself must be inside the
+    # try/catch, not just ConvertFrom-Json below. A directory path (or any
+    # other unreadable target) previously reached Get-Content OUTSIDE any
+    # try/catch: under the default $ErrorActionPreference=Continue it
+    # emitted a non-terminating error and left $rawManifest = $null,
+    # silently falling through to a misleading "manifest carries zero
+    # entries" refusal (wrong stated cause); under the documented-legal
+    # in-process `&` invocation mode (which callers may run with
+    # EAP=Stop), the same Get-Content call throws uncaught instead. The
+    # sibling Read-MarkerScratchBoundedBodyFile was already hardened for
+    # exactly this class ("Refuses (never throws)") -- this closes the
+    # same gap here.
+    try {
+        $rawManifest = Get-Content -LiteralPath $ManifestPath -Raw -ErrorAction Stop
+    }
+    catch {
+        $echoed = script:ConvertTo-MarkerRefusalEcho -Value $_.Exception.Message
+        return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (manifest '$echoedManifestPath' could not be read): $echoed"; Results = [object[]]@(); Artifacts = [ordered]@{} }
+    }
     try {
         $parsed = $rawManifest | ConvertFrom-Json -ErrorAction Stop
     }
@@ -2543,11 +2577,39 @@ function Invoke-PersistMarkerBurstFromManifest {
             return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (malformed manifest '$echoedManifestPath', entry $entryIndex): field 'targetSurface' must be 'issue' or 'pull-request', got '$(script:ConvertTo-MarkerRefusalEcho -Value $targetSurfaceValue)'"; Results = [object[]]@(); Artifacts = [ordered]@{} }
         }
 
-        try {
-            $number = [int]$rawEntry.number
+        # F5 fix (PR #917 review): a bare `[int]$rawEntry.number` cast
+        # silently COERCES any numeric-shaped JSON value instead of
+        # refusing it -- a JSON float like 123.5 rounds to 124 (writing to
+        # a DIFFERENT issue number), a JSON boolean `true`/`false` casts to
+        # 1/0, and non-positive integers were never rejected at all. The
+        # try/catch alone only ever caught non-numeric STRINGS (the only
+        # shape the cast actually throws on); it silently passed every one
+        # of these numeric-but-wrong-shape values through uncaught.
+        # Validate the raw JSON type/value BEFORE casting: refuse a
+        # boolean, refuse any value with a fractional part, and refuse
+        # non-positive results -- naming the entry index and the offending
+        # value (length-bounded via the existing echo-cap convention)
+        # rather than silently rounding/coercing.
+        $rawNumberValue = $rawEntry.number
+        if ($rawNumberValue -is [bool]) {
+            return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (malformed manifest '$echoedManifestPath', entry $entryIndex): field 'number' must be a whole number, got a JSON boolean ($(script:ConvertTo-MarkerRefusalEcho -Value ([string]$rawNumberValue)))"; Results = [object[]]@(); Artifacts = [ordered]@{} }
         }
-        catch {
-            return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (malformed manifest '$echoedManifestPath', entry $entryIndex): field 'number' is not a valid integer ($(script:ConvertTo-MarkerRefusalEcho -Value ([string]$rawEntry.number)))"; Results = [object[]]@(); Artifacts = [ordered]@{} }
+        elseif ($rawNumberValue -is [double] -or $rawNumberValue -is [single] -or $rawNumberValue -is [decimal]) {
+            if ($rawNumberValue -ne [Math]::Truncate($rawNumberValue)) {
+                return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (malformed manifest '$echoedManifestPath', entry $entryIndex): field 'number' must be a whole number, got a fractional value ($(script:ConvertTo-MarkerRefusalEcho -Value ([string]$rawNumberValue))) -- never silently rounded"; Results = [object[]]@(); Artifacts = [ordered]@{} }
+            }
+            $number = [int64]$rawNumberValue
+        }
+        else {
+            try {
+                $number = [int64]$rawNumberValue
+            }
+            catch {
+                return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (malformed manifest '$echoedManifestPath', entry $entryIndex): field 'number' is not a valid integer ($(script:ConvertTo-MarkerRefusalEcho -Value ([string]$rawEntry.number)))"; Results = [object[]]@(); Artifacts = [ordered]@{} }
+            }
+        }
+        if ($number -le 0) {
+            return [PSCustomObject]@{ Success = $false; Reason = "persist-marker: REFUSED (malformed manifest '$echoedManifestPath', entry $entryIndex): field 'number' must be a positive integer, got ($(script:ConvertTo-MarkerRefusalEcho -Value ([string]$rawNumberValue)))"; Results = [object[]]@(); Artifacts = [ordered]@{} }
         }
 
         $bodyFileResult = Read-MarkerScratchBoundedBodyFile -BodyFile ([string]$rawEntry.bodyFile) -ScratchRoot $ScratchRoot

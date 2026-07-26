@@ -293,6 +293,107 @@ exit 0
             (Get-Content -LiteralPath $callLogPath -Raw) | Should -Match 'issue comment 77002'
         }
     }
+
+    Context 'F4: a transport failure unrelated to gh-launch (Find-AllCommentsByExactMarker throwing by documented design) is caught at both wrapper call sites, not left to crash uncaught (issue #893 PR #917 review)' {
+        BeforeAll {
+            function script:New-GhMockDirPaginateFailure {
+                <#
+                .SYNOPSIS
+                    Real external `gh` seam whose paginated listing call
+                    (the one Find-AllCommentsByExactMarker issues) always
+                    fails non-zero with a non-404 message -- a transport
+                    failure unrelated to gh-launch (gh itself resolves and
+                    runs fine; the API call it makes fails), which
+                    Find-AllCommentsByExactMarker turns into a thrown
+                    exception BY DOCUMENTED DESIGN. Neither call site this
+                    context exercises (single-write, burst) had a top-level
+                    try/catch of its own before the F4 fix.
+                #>
+                param([Parameter(Mandatory)][string]$MockDir)
+                New-Item -ItemType Directory -Path $MockDir -Force | Out-Null
+                $ghMockContent = @'
+param()
+$a = $args
+if ($a.Count -ge 3 -and $a[0] -eq 'api' -and $a[1] -eq '--paginate' -and $a[2] -match '^repos/[^/]+/[^/]+/issues/\d+/comments$') {
+    [Console]::Error.WriteLine('gh: unexpected error connecting to api.github.com (HTTP 500)')
+    exit 1
+}
+exit 0
+'@
+                Set-Content -LiteralPath (Join-Path $MockDir 'gh.ps1') -Value $ghMockContent -Encoding UTF8
+            }
+        }
+
+        It 'single-write mode: surfaces the documented "persist-marker (family=...): FAILED -- ..." stderr contract + exit 1, not an uncaught PowerShell stack trace' {
+            $workDir = Join-Path $TestDrive 'f4-single-write'
+            $scratchRoot = Join-Path $workDir '.tmp'
+            New-Item -ItemType Directory -Path $scratchRoot -Force | Out-Null
+            $mockDir = Join-Path $workDir 'ghmock'
+            script:New-GhMockDirPaginateFailure -MockDir $mockDir
+
+            $marker = '<!-- experience-owner-complete-77003 -->'
+            $bodyPath = Join-Path $scratchRoot 'body.md'
+            [System.IO.File]::WriteAllText($bodyPath, "$marker`n`nSingle-write F4 transport-failure body.")
+
+            Push-Location -LiteralPath $workDir
+            try {
+                $env:PATH = "$mockDir$([System.IO.Path]::PathSeparator)$script:SavedPath"
+                $env:PATHEXT = ".PS1;$script:SavedPathExt"
+
+                $output = & pwsh -NoProfile -NonInteractive -File $script:WrapperPath `
+                    -Owner 'Grimblaz' -Repo 'agent-orchestra' -Family 'experience-owner-complete' `
+                    -Number 77003 -TargetSurface 'issue' -Marker $marker -BodyFile $bodyPath 2>&1
+                $exitCode = $LASTEXITCODE
+            }
+            finally {
+                $env:PATH = $script:SavedPath
+                $env:PATHEXT = $script:SavedPathExt
+                Pop-Location
+            }
+
+            $outputText = ($output | Out-String)
+            $exitCode | Should -Be 1 -Because $outputText
+            $outputText | Should -Match 'persist-marker \(family=experience-owner-complete\): FAILED' -Because $outputText
+            $outputText | Should -Not -Match 'FullyQualifiedErrorId|CategoryInfo' -Because "an uncaught PowerShell terminating error dumps these diagnostic headers; the documented contract is a single 'FAILED -- <reason>' line: $outputText"
+        }
+
+        It 'burst mode: surfaces a diagnosable burst-level FAILED report + exit 1, not an uncaught PowerShell stack trace' {
+            $workDir = Join-Path $TestDrive 'f4-burst'
+            $scratchRoot = Join-Path $workDir '.tmp'
+            New-Item -ItemType Directory -Path $scratchRoot -Force | Out-Null
+            $mockDir = Join-Path $workDir 'ghmock'
+            script:New-GhMockDirPaginateFailure -MockDir $mockDir
+
+            $marker = '<!-- experience-owner-complete-77004 -->'
+            $bodyPath = Join-Path $scratchRoot 'body.md'
+            [System.IO.File]::WriteAllText($bodyPath, "$marker`n`nBurst F4 transport-failure body.")
+            $manifestPath = Join-Path $scratchRoot 'burst.json'
+            $manifestEntries = @(
+                @{ family = 'experience-owner-complete'; number = 77004; targetSurface = 'issue'; marker = $marker; bodyFile = $bodyPath }
+            )
+            (ConvertTo-Json -InputObject $manifestEntries -Depth 10 -AsArray) | Set-Content -LiteralPath $manifestPath
+
+            Push-Location -LiteralPath $workDir
+            try {
+                $env:PATH = "$mockDir$([System.IO.Path]::PathSeparator)$script:SavedPath"
+                $env:PATHEXT = ".PS1;$script:SavedPathExt"
+
+                $output = & pwsh -NoProfile -NonInteractive -File $script:WrapperPath `
+                    -Owner 'Grimblaz' -Repo 'agent-orchestra' -BurstManifest $manifestPath 2>&1
+                $exitCode = $LASTEXITCODE
+            }
+            finally {
+                $env:PATH = $script:SavedPath
+                $env:PATHEXT = $script:SavedPathExt
+                Pop-Location
+            }
+
+            $outputText = ($output | Out-String)
+            $exitCode | Should -Be 1 -Because $outputText
+            $outputText | Should -Match 'persist-marker \(burst\): FAILED' -Because $outputText
+            $outputText | Should -Not -Match 'FullyQualifiedErrorId|CategoryInfo' -Because "an uncaught PowerShell terminating error dumps these diagnostic headers; the documented contract is a diagnosable burst-level FAILED report: $outputText"
+        }
+    }
 }
 
 Describe 'persist-marker-core: registry-parameterized refusal diagnostics + temp-file lifetime (s7)' {
@@ -477,7 +578,7 @@ evidence: "malformed-port-fixture"
     }
 
     Context 'Set-CommentBodyDirect: temp-file lifetime on an abnormal-exit PATCH' {
-        It 'removes its --input temp file even when the gh PATCH call itself throws mid-write' {
+        It 'removes its --input temp file even when the gh PATCH call itself throws mid-write, and F2 (PR #917 review) now converts that throw into a documented Success=$false result rather than letting it propagate' {
             # M9 (issue #893 s11): 'design-phase-complete' is now a post-new
             # family (matching the catalog's documented append-only
             # history), so it no longer exercises a PATCH at all -- this
@@ -486,16 +587,29 @@ evidence: "malformed-port-fixture"
             # is the vehicle now: its write-back-preserve pre-write post-step
             # is a genuine no-op here (a bare marker + prose body carries no
             # frame-spine block and no ledger pointer to preserve).
+            #
+            # F2 fix (PR #917 review) update: a terminating exception at the
+            # native `& gh` PATCH call site is EXACTLY the class F2 wraps --
+            # from Set-CommentBodyDirect's perspective, a mocked `gh`
+            # throwing mid-call is indistinguishable from a real
+            # native-process launch failure. The prior "must propagate as an
+            # uncaught throw" assertion here pinned the very defect F2
+            # fixes; Set-CommentBodyDirect now converts it into its own
+            # documented Success=$false/Reason shape instead. The
+            # temp-file-lifetime invariant this test exists to prove is
+            # unchanged and still asserted below.
             $designFamily = @(Get-MarkerFamilyRegistry | Where-Object { $_.Family -eq 'plan-issue' })[0]
             $marker = ($designFamily.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber")
             Add-MockComment -Id 92500 -Body "$marker`n`nOriginal body."
             $script:SimulatePatchThrowIds.Add(92500) | Out-Null
 
+            $script:result = $null
             {
-                Invoke-PersistMarkerWrite -Family $designFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber `
+                $script:result = Invoke-PersistMarkerWrite -Family $designFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber `
                     -TargetSurface $designFamily.TargetSurface -Marker $marker -Body "$marker`n`nChanged body, must trigger a PATCH."
-            } | Should -Throw -Because 'the simulated abnormal PATCH termination must propagate, not be silently swallowed'
+            } | Should -Not -Throw -Because 'F2 (PR #917 review) converts the native gh-call exception into a documented failure result rather than letting it propagate uncaught'
 
+            $script:result.Success | Should -Be $false -Because 'the simulated abnormal PATCH termination must surface as a diagnosable refusal, not a silent success'
             $script:CapturedPatchTempFile | Should -Not -BeNullOrEmpty -Because 'the PATCH call must actually have been reached for this test to be meaningful'
             (Test-Path -LiteralPath $script:CapturedPatchTempFile) | Should -Be $false -Because "Set-CommentBodyDirect's try/finally must remove its --input temp file even when the gh call itself throws mid-write -- an abnormal termination must never leak a scratch file"
         }
@@ -509,15 +623,18 @@ evidence: "malformed-port-fixture"
             # is the vehicle now: its write-back-preserve pre-write post-step
             # is a genuine no-op here (a bare marker + prose body carries no
             # frame-spine block and no ledger pointer to preserve).
+            #
+            # F2 fix (PR #917 review) update: see the sibling It above --
+            # the first attempt now returns Success=$false rather than
+            # throwing.
             $designFamily = @(Get-MarkerFamilyRegistry | Where-Object { $_.Family -eq 'plan-issue' })[0]
             $marker = ($designFamily.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber")
             Add-MockComment -Id 92600 -Body "$marker`n`nOriginal body."
             $script:SimulatePatchThrowIds.Add(92600) | Out-Null
 
-            {
-                Invoke-PersistMarkerWrite -Family $designFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber `
-                    -TargetSurface $designFamily.TargetSurface -Marker $marker -Body "$marker`n`nFirst attempt, aborts mid-write."
-            } | Should -Throw
+            $firstAttempt = Invoke-PersistMarkerWrite -Family $designFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber `
+                -TargetSurface $designFamily.TargetSurface -Marker $marker -Body "$marker`n`nFirst attempt, aborts mid-write."
+            $firstAttempt.Success | Should -Be $false -Because 'the simulated abnormal PATCH termination must surface as a diagnosable refusal on the first attempt'
 
             # Re-run WITHOUT the simulated throw: a clean retry after an
             # abnormal termination must succeed, proving the interrupted

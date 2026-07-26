@@ -152,7 +152,18 @@ function Get-CommentBodyById {
         [Parameter(Mandatory)][long]$CommentId
     )
     $getPath = "repos/$Owner/$Repo/issues/comments/$CommentId"
-    $getOutput = & gh api $getPath 2>$null
+    # F2 fix (PR #917 review): wrap the native invocation itself -- when
+    # `gh` is absent from PATH, `& gh` raises a terminating
+    # CommandNotFoundException BEFORE $LASTEXITCODE is ever checked,
+    # bypassing this function's documented "$null on any failure"
+    # fail-open contract.
+    try {
+        $getOutput = & gh api $getPath 2>$null
+    }
+    catch {
+        [Console]::Error.WriteLine("marker-transport-core: gh api GET $getPath threw a native-process launch failure: $($_.Exception.Message)")
+        return $null
+    }
     if ($LASTEXITCODE -ne 0) {
         [Console]::Error.WriteLine("marker-transport-core: gh api GET $getPath failed (exit $LASTEXITCODE)")
         return $null
@@ -199,7 +210,18 @@ function Get-CommentBodyByIdWithStatus {
     $getPath = "repos/$Owner/$Repo/issues/comments/$CommentId"
     $stderrFile = [System.IO.Path]::GetTempFileName()
     try {
-        $getOutput = & gh api $getPath 2>$stderrFile
+        # F2 fix (PR #917 review): a `gh` launch failure (e.g. absent from
+        # PATH) raises a terminating exception BEFORE $LASTEXITCODE is ever
+        # checked -- convert that into this function's own documented
+        # Status='error' failure shape rather than letting it escape
+        # uncaught.
+        try {
+            $getOutput = & gh api $getPath 2>$stderrFile
+        }
+        catch {
+            [Console]::Error.WriteLine("marker-transport-core: gh api GET $getPath threw a native-process launch failure: $($_.Exception.Message)")
+            return [PSCustomObject]@{ Status = 'error'; Body = $null; ErrorMessage = "gh api GET $getPath threw a native-process launch failure: $($_.Exception.Message)" }
+        }
         $exitCode = $LASTEXITCODE
         if ($exitCode -ne 0) {
             $stderrText = Get-Content -LiteralPath $stderrFile -Raw -ErrorAction SilentlyContinue
@@ -244,16 +266,31 @@ function Set-CommentBodyDirect {
     )
     $patchPath = "repos/$Owner/$Repo/issues/comments/$CommentId"
     $patchTempFile = $null
+    # F2 fix (PR #917 review): a `gh` launch failure raises a terminating
+    # exception BEFORE $LASTEXITCODE is ever checked -- capture that as a
+    # flag so it becomes this function's own documented Success=$false
+    # failure shape once the temp-file finally cleanup below has run,
+    # rather than escaping uncaught.
+    $patchLaunchException = $null
     try {
         $patchTempFile = [System.IO.Path]::GetTempFileName()
         $patchPayload = @{ body = $NewBody } | ConvertTo-Json -Depth 4 -Compress
         Set-Content -LiteralPath $patchTempFile -Value $patchPayload -Encoding UTF8 -NoNewline
-        $null = & gh api -X PATCH $patchPath --input $patchTempFile 2>$null
+        try {
+            $null = & gh api -X PATCH $patchPath --input $patchTempFile 2>$null
+        }
+        catch {
+            $patchLaunchException = $_
+        }
     }
     finally {
         if ($null -ne $patchTempFile -and (Test-Path -LiteralPath $patchTempFile)) {
             Remove-Item -LiteralPath $patchTempFile -Force -ErrorAction SilentlyContinue
         }
+    }
+    if ($null -ne $patchLaunchException) {
+        [Console]::Error.WriteLine("marker-transport-core: gh api PATCH $patchPath threw a native-process launch failure: $($patchLaunchException.Exception.Message)")
+        return [PSCustomObject]@{ Success = $false; Reason = "PATCH threw a native-process launch failure: $($patchLaunchException.Exception.Message)" }
     }
     if ($LASTEXITCODE -ne 0) {
         [Console]::Error.WriteLine("marker-transport-core: gh api PATCH $patchPath failed (exit $LASTEXITCODE)")
@@ -262,8 +299,14 @@ function Set-CommentBodyDirect {
 
     # Positive-proof verify: re-GET and confirm the write actually landed,
     # catching a PATCH that exit-0'd but silently truncated or corrupted the
-    # body.
-    $verifyOutput = & gh api $patchPath 2>$null
+    # body. Same F2 launch-failure wrap as the PATCH call above.
+    try {
+        $verifyOutput = & gh api $patchPath 2>$null
+    }
+    catch {
+        [Console]::Error.WriteLine("marker-transport-core: post-write verify GET $patchPath threw a native-process launch failure: $($_.Exception.Message)")
+        return [PSCustomObject]@{ Success = $false; Reason = "Post-write verify GET threw a native-process launch failure: $($_.Exception.Message)" }
+    }
     if ($LASTEXITCODE -ne 0) {
         [Console]::Error.WriteLine("marker-transport-core: post-write verify GET $patchPath failed (exit $LASTEXITCODE)")
         return [PSCustomObject]@{ Success = $false; Reason = "Post-write verify GET failed (exit $LASTEXITCODE)" }
@@ -320,7 +363,16 @@ function Find-CommentIdByExactMarker {
         [Parameter(Mandatory)][string]$Marker
     )
 
-    $listJson = & gh issue view $IssueNumber --json comments -R "$Owner/$Repo" 2>$null
+    # F2 fix (PR #917 review): a `gh` launch failure raises a terminating
+    # exception BEFORE $LASTEXITCODE is ever checked -- convert that into
+    # this function's own documented $null-on-failure contract.
+    try {
+        $listJson = & gh issue view $IssueNumber --json comments -R "$Owner/$Repo" 2>$null
+    }
+    catch {
+        [Console]::Error.WriteLine("marker-transport-core: gh issue view $IssueNumber threw a native-process launch failure: $($_.Exception.Message)")
+        return $null
+    }
     if ($LASTEXITCODE -ne 0) {
         [Console]::Error.WriteLine("marker-transport-core: gh issue view $IssueNumber failed (exit $LASTEXITCODE)")
         return $null
@@ -494,7 +546,19 @@ function Find-AllCommentsByExactMarker {
     )
 
     $apiPath = "repos/$Owner/$Repo/issues/$IssueNumber/comments"
-    $listOutput = & gh api --paginate $apiPath 2>$null
+    # F2 fix (PR #917 review): a `gh` launch failure raises a terminating
+    # CommandNotFoundException (or similar) BEFORE $LASTEXITCODE is ever
+    # checked. This function's contract is throw-on-failure regardless, but
+    # an uncaught native-launch exception is not the same DETERMINISTIC,
+    # diagnosable error this function otherwise promises (naming $apiPath
+    # and the underlying cause) -- catch it and re-throw in that same
+    # documented shape.
+    try {
+        $listOutput = & gh api --paginate $apiPath 2>$null
+    }
+    catch {
+        throw "marker-transport-core: gh api --paginate $apiPath threw a native-process launch failure: $($_.Exception.Message)"
+    }
     if ($LASTEXITCODE -ne 0) {
         throw "marker-transport-core: gh api --paginate $apiPath failed (exit $LASTEXITCODE)"
     }

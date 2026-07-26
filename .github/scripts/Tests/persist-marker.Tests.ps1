@@ -272,6 +272,32 @@ evidence: issue-893-plan-marker-posted
             $result.Reason | Should -Match '(?i)junction|symlink|reparse'
             $result.Body | Should -Be $null
         }
+
+        It 'F1: refuses a bodyFile read when the SCRATCH ROOT ITSELF is a junction/symlink, not only descendant segments (issue #893 PR #917 review)' {
+            # The prior per-segment walk seeded $walked = $resolvedScratchRoot
+            # and only tested segments joined AFTER the root -- the root
+            # itself was never passed to Test-MarkerPathSegmentIsReparsePoint.
+            # If '.tmp' itself is a junction/symlink to an outside directory,
+            # both the string-containment check and the descendant-only walk
+            # pass, and a leaf file under it is wrongly readable/publishable.
+            $secretDir = Join-Path $TestDrive 'outside-secret-root'
+            New-Item -ItemType Directory -Path $secretDir -Force | Out-Null
+            $secretFile = Join-Path $secretDir 'secret.md'
+            [System.IO.File]::WriteAllText($secretFile, 'top secret root-level contents')
+
+            # Replace the real scratch-root directory created in BeforeEach
+            # with a junction pointing at the outside secret directory --
+            # the root PATH itself is now the reparse point under test.
+            Remove-Item -LiteralPath $script:ScratchRoot -Force -Recurse
+            New-Item -ItemType Junction -Path $script:ScratchRoot -Target $secretDir | Out-Null
+            $viaRootJunction = Join-Path $script:ScratchRoot 'secret.md'
+
+            $result = Read-MarkerScratchBoundedBodyFile -BodyFile $viaRootJunction -ScratchRoot $script:ScratchRoot
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '(?i)junction|symlink|reparse'
+            $result.Body | Should -Be $null
+        }
     }
 
     Context 'Invoke-PersistMarkerWrite: size cap' {
@@ -747,6 +773,90 @@ evidence: issue-893-plan-marker-posted
             $result.Success | Should -Be $false
             $result.Reason | Should -Match '(?i)entry 1'
             $result.Reason | Should -Match '(?i)noPreserve'
+            $script:PostLog.Count | Should -Be 0
+        }
+
+        It 'F5: refuses a manifest entry whose number is a JSON float with a fractional part, never silently rounded to a DIFFERENT issue number (issue #893 PR #917 review)' {
+            $markerA = $script:GoodFamilyA.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+            $bodyPath = script:New-ScratchBodyFile -Name 'body-number-float.md' -Content "$markerA`n`nBody."
+            $entries = @(
+                @{ family = $script:GoodFamilyA.Family; number = 123.5; targetSurface = 'issue'; marker = $markerA; bodyFile = $bodyPath }
+            )
+            $manifestPath = script:New-ManifestFile -Entries $entries
+
+            $result = Invoke-PersistMarkerBurstFromManifest -Owner $script:Owner -Repo $script:Repo -ManifestPath $manifestPath -ScratchRoot $script:ScratchRoot
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '(?i)entry 1'
+            $result.Reason | Should -Match '(?i)number'
+            $result.Reason | Should -Not -Match '124'
+            $script:PostLog.Count | Should -Be 0
+        }
+
+        It 'F5: refuses a manifest entry whose number is a JSON boolean, never silently coerced to 1/0 (issue #893 PR #917 review)' {
+            $markerA = $script:GoodFamilyA.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+            $bodyPath = script:New-ScratchBodyFile -Name 'body-number-bool.md' -Content "$markerA`n`nBody."
+            $entries = @(
+                @{ family = $script:GoodFamilyA.Family; number = $true; targetSurface = 'issue'; marker = $markerA; bodyFile = $bodyPath }
+            )
+            $manifestPath = script:New-ManifestFile -Entries $entries
+
+            $result = Invoke-PersistMarkerBurstFromManifest -Owner $script:Owner -Repo $script:Repo -ManifestPath $manifestPath -ScratchRoot $script:ScratchRoot
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '(?i)entry 1'
+            $result.Reason | Should -Match '(?i)number'
+            $script:PostLog.Count | Should -Be 0
+        }
+
+        It 'F5: refuses a manifest entry whose number is negative, never silently written to an out-of-range issue number (issue #893 PR #917 review)' {
+            $markerA = $script:GoodFamilyA.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+            $bodyPath = script:New-ScratchBodyFile -Name 'body-number-negative.md' -Content "$markerA`n`nBody."
+            $entries = @(
+                @{ family = $script:GoodFamilyA.Family; number = -5; targetSurface = 'issue'; marker = $markerA; bodyFile = $bodyPath }
+            )
+            $manifestPath = script:New-ManifestFile -Entries $entries
+
+            $result = Invoke-PersistMarkerBurstFromManifest -Owner $script:Owner -Repo $script:Repo -ManifestPath $manifestPath -ScratchRoot $script:ScratchRoot
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '(?i)entry 1'
+            $result.Reason | Should -Match '(?i)number'
+            $script:PostLog.Count | Should -Be 0
+        }
+
+        It 'F5: refuses a manifest entry whose number is zero, never silently written to issue #0 (issue #893 PR #917 review)' {
+            $markerA = $script:GoodFamilyA.MarkerTemplate -replace '\{ID\}', "$script:IssueNumber"
+            $bodyPath = script:New-ScratchBodyFile -Name 'body-number-zero.md' -Content "$markerA`n`nBody."
+            $entries = @(
+                @{ family = $script:GoodFamilyA.Family; number = 0; targetSurface = 'issue'; marker = $markerA; bodyFile = $bodyPath }
+            )
+            $manifestPath = script:New-ManifestFile -Entries $entries
+
+            $result = Invoke-PersistMarkerBurstFromManifest -Owner $script:Owner -Repo $script:Repo -ManifestPath $manifestPath -ScratchRoot $script:ScratchRoot
+
+            $result.Success | Should -Be $false
+            $result.Reason | Should -Match '(?i)entry 1'
+            $result.Reason | Should -Match '(?i)number'
+            $script:PostLog.Count | Should -Be 0
+        }
+
+        It 'F3: refuses a manifest path that resolves to a DIRECTORY with a diagnosable message, not a misleading "zero entries" refusal or an uncaught throw (issue #893 PR #917 review)' {
+            # $rawManifest = Get-Content -LiteralPath $ManifestPath -Raw sat
+            # ABOVE the try{} that only covered ConvertFrom-Json -- a
+            # directory path previously produced a misleading "manifest
+            # carries zero entries" refusal (wrong stated cause) under
+            # default EAP=Continue, and would throw uncaught under the
+            # documented-legal in-process EAP=Stop invocation mode.
+            $manifestDir = Join-Path $script:ScratchRoot 'manifest-is-a-directory'
+            New-Item -ItemType Directory -Path $manifestDir -Force | Out-Null
+
+            $script:result = $null
+            { $script:result = Invoke-PersistMarkerBurstFromManifest -Owner $script:Owner -Repo $script:Repo -ManifestPath $manifestDir -ScratchRoot $script:ScratchRoot } | Should -Not -Throw
+
+            $script:result.Success | Should -Be $false
+            $script:result.Reason | Should -Match '(?i)manifest'
+            $script:result.Reason | Should -Not -Match '(?i)zero entries'
             $script:PostLog.Count | Should -Be 0
         }
 
