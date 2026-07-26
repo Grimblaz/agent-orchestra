@@ -84,7 +84,15 @@ flowchart LR
 
 ### The resume story
 
-Re-entering `/goal-run {issue}` on an in-flight run first checks for an unresolved `goal-run-inflight-{issue}` marker. If one exists and the heartbeat still looks fresh, the harness refuses to launch a duplicate (`refuse-resume-existing`) and reports what is already in flight. If the marker looks dead (no recent heartbeat) and a terminal outcome — a halt report or a PR — already exists, the run genuinely finished, so the harness resolves that marker and reports the outcome (`resolve-and-report-complete`) instead of launching anything. Otherwise — the marker looks dead with no terminal outcome yet, or the operator explicitly passed the `adopt` lever (`/goal-run {issue} adopt`) — the harness adopts the marker and resumes the run in place (`adopt-and-resume`) rather than leaving it stranded.
+Re-entering `/goal-run {issue}` first checks for a **live** `goal-run-inflight-{issue}` marker — live meaning the marker is either still `unresolved` or already `adopted` by some session, since an adopted marker is a run in progress under a new session rather than a finished one. Five outcomes are possible, in strict precedence:
+
+1. **No live marker at all** — nothing is in flight, so the harness launches a fresh run (`launch-new`).
+2. **The live marker was adopted by this very session** — the same session is continuing its own already-adopted run (say, it crashed before provisioning finished), so it resumes in place (`resume-own-adopted`) rather than re-adopting. Without this case the session would post a brand-new marker, then lose the tiebreak to its own earlier one, forever.
+3. **The operator explicitly passed the `adopt` lever** (`/goal-run {issue} adopt`) — the override wins over a fresh-looking marker, and the harness adopts and resumes (`adopt-and-resume`).
+4. **The heartbeat still looks fresh** — a real run is live, so the harness refuses to launch a duplicate (`refuse-resume-existing`) and reports what is already in flight.
+5. **The marker looks dead** (no recent heartbeat) — if a terminal outcome, a halt report or a pull request, already exists, the run genuinely finished, so the harness resolves that marker and reports the outcome (`resolve-and-report-complete`) instead of launching anything. With no terminal outcome, it adopts the marker and resumes the run in place (`adopt-and-resume`) rather than leaving it stranded.
+
+Deadness is judged on elapsed time since the last heartbeat alone. An existing halt report or pull request never makes a stale marker look alive — the two signals are weighed separately, at step 5.
 
 Once it is clear no run is already live, the harness resolves exactly where to resume by checking a fixed precedence of signals — highest-precedence check first:
 

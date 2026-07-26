@@ -425,7 +425,24 @@ function Get-GoalRunIssueComments {
         return @()
     }
 
-    $raw = & $GhCliPath api "repos/$ownerRepo/issues/$Issue/comments" --paginate --slurp 2>$null
+    # #912 external-review fix (G9): a missing or unresolvable -GhCliPath makes
+    # the `&` call operator throw a terminating CommandNotFoundException, which
+    # propagates straight past this function's documented never-throw contract
+    # (every other failure here returns an empty array). $LASTEXITCODE is never
+    # even reached on that path. Catch it and return the same typed empty-array
+    # failure the exit-code branch below already returns. Guarded with a plain
+    # try/catch rather than by importing Test-MarkerNativeLaunchFailure from
+    # marker-transport-core.ps1 -- that file mutates [Console]::OutputEncoding
+    # process-wide at dot-source time, the same reason
+    # Get-GRSMarkerWholeLinePattern re-implements its regex locally.
+    $raw = $null
+    try {
+        $raw = & $GhCliPath api "repos/$ownerRepo/issues/$Issue/comments" --paginate --slurp 2>$null
+    }
+    catch {
+        [Console]::Error.WriteLine("Get-GoalRunIssueComments: gh api invocation failed for repos/$ownerRepo/issues/$Issue/comments ($($_.Exception.Message))")
+        return @()
+    }
     if ($LASTEXITCODE -ne 0) {
         [Console]::Error.WriteLine("Get-GoalRunIssueComments: gh api repos/$ownerRepo/issues/$Issue/comments failed (exit $LASTEXITCODE)")
         return @()
@@ -622,7 +639,17 @@ function New-GoalRunIssueComment {
 
     $postArgs = @('issue', 'comment', $Issue, '--body', $Body)
     if ($Owner -and $Repo) { $postArgs += @('-R', "$Owner/$Repo") }
-    $output = & gh @postArgs 2>$null
+    # #912 external-review fix (G9, same family as the four `gh api` sites): a
+    # missing `gh` throws CommandNotFoundException past this function's typed
+    # Success = $false failure shape. Guarded to return that shape instead.
+    $output = $null
+    try {
+        $output = & gh @postArgs 2>$null
+    }
+    catch {
+        [Console]::Error.WriteLine("New-GoalRunIssueComment: gh issue comment invocation failed ($($_.Exception.Message))")
+        return [pscustomobject]@{ Success = $false; CommentId = $null; Url = $null }
+    }
     if ($LASTEXITCODE -ne 0) {
         [Console]::Error.WriteLine("New-GoalRunIssueComment: gh issue comment failed (exit $LASTEXITCODE)")
         return [pscustomobject]@{ Success = $false; CommentId = $null; Url = $null }
@@ -729,6 +756,20 @@ function Set-GoalRunInflightMarkerResolved {
         Set-Content -LiteralPath $tempFile -Value $payload -Encoding UTF8 -NoNewline
         & gh api -X PATCH $patchPath --input $tempFile 2>$null | Out-Null
     }
+    catch {
+        # #912 external-review fix (G9): this try had a finally but no catch, so
+        # a terminating error thrown inside it propagated straight past the
+        # documented [bool] contract. Two independent throwers live in here: a
+        # missing/unresolvable `gh` (CommandNotFoundException from the `&` call
+        # operator, before $LASTEXITCODE is ever set) and
+        # [System.IO.Path]::GetTempFileName() itself (IOException once the temp
+        # directory holds 65535 files, UnauthorizedAccessException when it is
+        # not writable). Both mean the PATCH did not land, which is exactly
+        # what $false already reports. The finally below still runs on this
+        # path, so the temp file is cleaned up either way.
+        [Console]::Error.WriteLine("Set-GoalRunInflightMarkerResolved: gh api PATCH $patchPath invocation failed ($($_.Exception.Message))")
+        return $false
+    }
     finally {
         if ($tempFile -and (Test-Path -LiteralPath $tempFile)) {
             Remove-Item -LiteralPath $tempFile -Force -ErrorAction SilentlyContinue
@@ -758,7 +799,17 @@ function script:Find-GRSInflightMarkerCommentById {
         [Parameter(Mandatory)][long]$TargetCommentId
     )
     return @($Comments) | Where-Object {
-        ($_.id -and ([long]$_.id -eq $TargetCommentId)) -or
+        # #912 external-review fix (G12): guard the [long] cast the same way
+        # its two siblings in this file already do (Get-GoalRunInflightMarkers
+        # and Clear-GoalRunStageMarker both use
+        # `try { [long]$c.id } catch { $null }`). Unguarded, a non-numeric
+        # `id` made the cast throw -- and because `-or` evaluates
+        # left-to-right, the throw happened BEFORE the `url` fallback on the
+        # right was ever evaluated. That made the fallback unreachable in
+        # exactly the case it exists to cover.
+        $numericId = $null
+        if ($_.id) { try { $numericId = [long]$_.id } catch { $numericId = $null } }
+        ($null -ne $numericId -and $numericId -eq $TargetCommentId) -or
         ($_.url -and ($_.url -match "#issuecomment-$TargetCommentId$"))
     } | Select-Object -First 1
 }
@@ -922,6 +973,17 @@ function Set-GoalRunInflightMarkerAdopted {
         $payload = @{ body = $adoptedBody } | ConvertTo-Json -Depth 4 -Compress
         Set-Content -LiteralPath $tempFile -Value $payload -Encoding UTF8 -NoNewline
         & gh api -X PATCH $patchPath --input $tempFile 2>$null | Out-Null
+    }
+    catch {
+        # #912 external-review fix (G9): same missing-catch defect as
+        # Set-GoalRunInflightMarkerResolved above, and the same two independent
+        # throwers (a missing `gh`, and GetTempFileName itself). Reuses the
+        # existing 'patch-failed' Reason rather than widening the documented
+        # enum -- a throw IS a PATCH failure, and the exception text goes to
+        # stderr where the diagnostic detail belongs. Verified stays $false
+        # because nothing was confirmed to land.
+        [Console]::Error.WriteLine("Set-GoalRunInflightMarkerAdopted: gh api PATCH $patchPath invocation failed ($($_.Exception.Message))")
+        return [pscustomobject]@{ Success = $false; Verified = $false; Reason = 'patch-failed'; AdoptedBySessionId = $SessionId }
     }
     finally {
         if ($tempFile -and (Test-Path -LiteralPath $tempFile)) {
@@ -1175,8 +1237,9 @@ function Invoke-GoalRunMutexLaunch {
            A post failure aborts the launch entirely -- New-GoalRunWorktree
            is never called on this path, so a running worktree with no
            mutex marker can never happen.
-        2. Re-fetches all live (unresolved) inflight markers and tiebreaks
-           via Resolve-GoalRunInflightMutexOutcome. The higher comment-id
+        2. Re-fetches all live (unresolved OR adopted -- see the M1 fix
+           comment on the live-set filter below) inflight markers and
+           tiebreaks via Resolve-GoalRunInflightMutexOutcome. The higher comment-id
            yields: it withdraws (marks resolved) its own marker and aborts
            without provisioning.
         3. M16 fix: a single reconcile read is vulnerable to GitHub
@@ -1640,7 +1703,16 @@ function Resolve-GoalRunControlReturn {
             # the target worktree (or a test fixture) instead of always the
             # process CWD.
             $existingComments = @(Get-GoalRunIssueComments -Issue $Issue -Owner $Owner -Repo $Repo -RepoRoot $RepoRoot -CommentsReader $CommentsReader)
-            $existingMatches = @($existingComments | Where-Object { $_.body -and ($_.body -like "*$haltMarker*") })
+            # #912 external-review follow-up (G7 sibling): this recency guard
+            # used the same raw `-like "*$marker*"` SUBSTRING match every other
+            # reader in this file was line-anchored away from. It is a
+            # read-only path -- the worst case is suppressing a genuine
+            # exhaustion halt because a comment merely MENTIONS the halt-report
+            # marker in prose -- but shipping two different marker-matching
+            # conventions in one file is how the next reader picks the wrong
+            # one. Reuse the shared helper. See Get-GRSMarkerWholeLinePattern.
+            $haltMarkerPattern = Get-GRSMarkerWholeLinePattern -Marker $haltMarker
+            $existingMatches = @($existingComments | Where-Object { $_.body -and ($_.body -match $haltMarkerPattern) })
 
             if ($existingMatches.Count -gt 0) {
                 $latestExistingTimestamp = $null
@@ -1912,9 +1984,26 @@ function Clear-GoalRunStageMarker {
         if (-not $commentId) { continue }
 
         $deletePath = "repos/$ownerSegment/$repoSegment/issues/comments/$commentId"
-        & gh api -X DELETE $deletePath 2>$null | Out-Null
-        if ($LASTEXITCODE -eq 0) {
+        # #912 external-review fix (G9): a missing `gh` threw
+        # CommandNotFoundException out of the whole loop, so the typed
+        # {Success; DeletedCommentIds; FailedCommentIds; Reason} result was
+        # never returned at all and any comment already deleted earlier in the
+        # loop went unreported. Catching per-iteration records the id as failed
+        # (which is truthful -- the DELETE did not land) and lets the remaining
+        # ids be attempted, so the returned ledger stays complete.
+        $deleteThrew = $false
+        try {
+            & gh api -X DELETE $deletePath 2>$null | Out-Null
+        }
+        catch {
+            [Console]::Error.WriteLine("Clear-GoalRunStageMarker: gh api DELETE $deletePath invocation failed ($($_.Exception.Message))")
+            $deleteThrew = $true
+        }
+        if (-not $deleteThrew -and $LASTEXITCODE -eq 0) {
             $deleted.Add($commentId)
+        }
+        elseif ($deleteThrew) {
+            $failed.Add($commentId)
         }
         else {
             [Console]::Error.WriteLine("Clear-GoalRunStageMarker: gh api DELETE $deletePath failed (exit $LASTEXITCODE)")

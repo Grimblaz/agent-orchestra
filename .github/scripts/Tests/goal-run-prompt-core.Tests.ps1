@@ -699,4 +699,29 @@ Describe 'Resolve-GoalRunLoopPredicate' -Tag 'unit' {
         $result = Resolve-GoalRunLoopPredicate -Issue 874 -RepoRoot 'C:\gr-874-token' -LaunchPinnedHash $script:PinnedHash -PinCheck $pinCheck -ValidatorInvoker $invoker
         @($result.Refusals).Count | Should -Be 0
     }
+
+    # -----------------------------------------------------------------------
+    # G10 (#912 external review): same defect as G17 on the chain-revalidate
+    # twin -- the pin-mismatch early return omitted Refusals entirely, so
+    # @($result.Refusals) on that path yielded the forbidden @($null). This
+    # file's header documents the function's return shape as carrying
+    # Refusals "an empty array, never a one-element array containing $null",
+    # so this IS a documented-contract violation, not just an asymmetry.
+    # -----------------------------------------------------------------------
+
+    It 'G10: reports an empty Refusals array (not a one-element array containing $null) on the pin-mismatch early return' {
+        $pinCheck = { param($Issue, $LaunchPinnedHash, $Marker, $RepoRoot, $Repo, $GhCliPath, $GitCliPath) [pscustomobject]@{ Pinned = $false; Reason = 'contract-hash-mismatch-since-launch'; LiveHash = 'deadbeef' } }
+        $invoker = { param($Issue, $RepoRoot, $PwshCliPath, $ValidatorScriptPath) [pscustomobject]@{ ExitCode = 0; Reason = $null } }
+
+        $result = Resolve-GoalRunLoopPredicate -Issue 874 -RepoRoot 'C:\gr-874-token' -LaunchPinnedHash $script:PinnedHash -PinCheck $pinCheck -ValidatorInvoker $invoker
+
+        $result.Disposition | Should -Be 'halt'
+        $result.ValidatorRan | Should -Be $false
+        $result.PSObject.Properties.Name | Should -Contain 'Refusals' -Because 'the documented return shape promises the property on every returned object, not only the post-validator ones'
+        # Count discriminates the two shapes: @($null).Count is 1, @().Count
+        # is 0. See the matching note on the G17 twin in
+        # goal-run-chain-core.Tests.ps1 for why a piped -Contain cannot be
+        # used against an empty array here.
+        @($result.Refusals).Count | Should -Be 0
+    }
 }

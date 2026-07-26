@@ -25,9 +25,9 @@ Complementary reading, each with a different job:
 
 `/goal-run {issue}` hands one GitHub issue — carrying an approved
 `goal-contract` plan variant (872-D2) — to the vendor's own `/goal` loop, and
-walks the result through re-validation, CE Gate, adversarial review, capped
-fix cycles, and PR creation, all without a live human answering questions
-mid-run. It is the second of two pipelines Agent Orchestra ships alongside
+walks the result through re-validation, CE Gate (Customer Experience Gate),
+adversarial review, capped fix cycles, and PR creation, all without a live
+human answering questions mid-run. It is the second of two pipelines Agent Orchestra ships alongside
 `/orchestrate` (see HOW-IT-WORKS.md's comparison table): where the conducted
 pipeline pauses at engagement gates and waits for an answer, goal-run has no
 mechanism to ask one, so every point that would otherwise raise

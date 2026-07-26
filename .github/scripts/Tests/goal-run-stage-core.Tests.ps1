@@ -1326,7 +1326,7 @@ Describe 'Resolve-GoalRunControlReturn (M13: control-return-then-read, distinct 
     It '#912 AC13: does NOT overwrite an existing goal-halt-report comment that postdates this run''s -LaunchedAt (a different, newer run''s report)' {
         Mock -CommandName Invoke-GoalRunHaltEmit -MockWith { throw 'Invoke-GoalRunHaltEmit must not be called when a newer report already exists' }
         Mock -CommandName Get-GoalRunIssueComments -MockWith {
-            @([pscustomobject]@{ id = 1; url = 'https://example/1'; body = '<!-- goal-halt-report-874 -->recent report'; updatedAt = '2026-07-26T12:00:00Z' })
+            @([pscustomobject]@{ id = 1; url = 'https://example/1'; body = (@('<!-- goal-halt-report-874 -->', '## Goal-run halt report', '', 'recent report') -join "`n"); updatedAt = '2026-07-26T12:00:00Z' })
         }
         $reader = { param($Path) [pscustomobject]@{ State = 'status-absent'; Event = $null } }
 
@@ -1344,7 +1344,7 @@ Describe 'Resolve-GoalRunControlReturn (M13: control-return-then-read, distinct 
             return [pscustomobject]@{ Success = $true; Url = 'https://example/halt'; Body = 'fake' }
         }
         Mock -CommandName Get-GoalRunIssueComments -MockWith {
-            @([pscustomobject]@{ id = 1; url = 'https://example/1'; body = '<!-- goal-halt-report-874 -->stale report'; updatedAt = '2026-07-26T08:00:00Z' })
+            @([pscustomobject]@{ id = 1; url = 'https://example/1'; body = (@('<!-- goal-halt-report-874 -->', '## Goal-run halt report', '', 'stale report') -join "`n"); updatedAt = '2026-07-26T08:00:00Z' })
         }
         $reader = { param($Path) [pscustomobject]@{ State = 'status-absent'; Event = $null } }
 
@@ -1387,7 +1387,7 @@ Describe 'Resolve-GoalRunControlReturn (M13: control-return-then-read, distinct 
         $existingReportUpdatedAtUtc = [datetime]::SpecifyKind([datetime]'2026-07-26T10:30:00', [System.DateTimeKind]::Utc)
 
         Mock -CommandName Get-GoalRunIssueComments -MockWith {
-            @([pscustomobject]@{ id = 1; url = 'https://example/1'; body = '<!-- goal-halt-report-874 -->newer report'; updatedAt = $existingReportUpdatedAtUtc })
+            @([pscustomobject]@{ id = 1; url = 'https://example/1'; body = (@('<!-- goal-halt-report-874 -->', '## Goal-run halt report', '', 'newer report') -join "`n"); updatedAt = $existingReportUpdatedAtUtc })
         }
         $reader = { param($Path) [pscustomobject]@{ State = 'status-absent'; Event = $null } }
 
@@ -1403,7 +1403,7 @@ Describe 'Resolve-GoalRunControlReturn (M13: control-return-then-read, distinct 
         $injectedReader = {
             param($Issue, $Owner, $Repo, $GhCliPath)
             $script:grcrReaderInvoked = $true
-            @([pscustomobject]@{ id = 1; url = 'https://example/1'; body = '<!-- goal-halt-report-874 -->newer report'; updatedAt = '2026-07-26T12:00:00Z' })
+            @([pscustomobject]@{ id = 1; url = 'https://example/1'; body = (@('<!-- goal-halt-report-874 -->', '## Goal-run halt report', '', 'newer report') -join "`n"); updatedAt = '2026-07-26T12:00:00Z' })
         }
         $reader = { param($Path) [pscustomobject]@{ State = 'status-absent'; Event = $null } }
 
@@ -1411,6 +1411,33 @@ Describe 'Resolve-GoalRunControlReturn (M13: control-return-then-read, distinct 
 
         $script:grcrReaderInvoked | Should -Be $true
         $result.HaltResult.Suppressed | Should -Be $true
+    }
+
+    # -----------------------------------------------------------------------
+    # G7 sibling (#912 external review): this recency guard used the same raw
+    # substring match the other three marker readers in the lib were
+    # line-anchored away from in the first external-review batch. A comment
+    # that merely MENTIONS the halt-report marker in prose must not count as
+    # an existing report, or a genuine exhaustion halt gets silently
+    # suppressed. Prose-mention fixture built by concatenation so this test
+    # file does not itself carry a live delimited marker literal.
+    # -----------------------------------------------------------------------
+
+    It 'G7 sibling: a prose comment merely MENTIONING the halt-report marker does not suppress the emit' {
+        Mock -CommandName Invoke-GoalRunHaltEmit -MockWith {
+            param($Report, $Issue, $RepoRoot, $Owner, $Repo)
+            return [pscustomobject]@{ Success = $true; Url = 'https://example/halt'; Body = 'fake' }
+        }
+        $proseMention = 'Heads up: the ' + '<!--' + ' goal-halt-report-874 ' + '-->' + ' comment from the earlier run was misleading, ignore it.'
+        Mock -CommandName Get-GoalRunIssueComments -MockWith {
+            @([pscustomobject]@{ id = 1; url = 'https://example/1'; body = $proseMention; updatedAt = '2026-07-26T12:00:00Z' })
+        }
+        $reader = { param($Path) [pscustomobject]@{ State = 'status-absent'; Event = $null } }
+
+        $result = Resolve-GoalRunControlReturn -TranscriptPath 'fake.jsonl' -Issue 874 -RepoRoot $script:RepoRoot -MaxRetries 1 -RetryDelayMs 1 -StatusReader $reader -LaunchedAt '2026-07-26T10:00:00Z'
+
+        $result.HaltResult.Suppressed | Should -Not -Be $true -Because 'a prose mention is not a real halt report, so it must not suppress a genuine exhaustion halt'
+        Should -Invoke -CommandName Invoke-GoalRunHaltEmit -Times 1
     }
 }
 

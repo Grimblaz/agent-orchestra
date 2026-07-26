@@ -157,6 +157,31 @@ Describe 'Invoke-GoalRunChainRevalidate: reuses the step 5 disposition function'
         $result = Invoke-GoalRunChainRevalidate -Issue 874 -RepoRoot 'C:\gr-874-token' -LaunchPinnedHash $script:PinnedHash -PinCheck $script:MatchingPinCheck -ValidatorInvoker $invoker
         @($result.Refusals).Count | Should -Be 0
     }
+
+    # -----------------------------------------------------------------------
+    # G17 (#912 external review): the .OUTPUTS contract promises Refusals on
+    # EVERY returned object as an empty array, "never a one-element array
+    # containing $null". The pin-mismatch early return omitted the property
+    # entirely, so @($result.Refusals) on that path yielded exactly @($null).
+    # Count is the assertion that discriminates: @($null).Count is 1, and a
+    # bare -BeNullOrEmpty passes on BOTH shapes, so it could not catch this.
+    # -----------------------------------------------------------------------
+
+    It 'G17: reports an empty Refusals array (not a one-element array containing $null) on the pin-mismatch early return' {
+        $mismatchPinCheck = { param($Issue, $LaunchPinnedHash, $Marker, $RepoRoot, $Repo, $GhCliPath, $GitCliPath) [pscustomobject]@{ Pinned = $false; Reason = 'contract-hash-mismatch-since-launch'; LiveHash = 'deadbeef' } }
+        $invoker = { param($Issue, $RepoRoot, $PwshCliPath, $ValidatorScriptPath) [pscustomobject]@{ ExitCode = 0; Reason = $null } }
+
+        $result = Invoke-GoalRunChainRevalidate -Issue 874 -RepoRoot 'C:\gr-874-token' -LaunchPinnedHash $script:PinnedHash -PinCheck $mismatchPinCheck -ValidatorInvoker $invoker
+
+        $result.Disposition | Should -Be 'halt'
+        $result.PSObject.Properties.Name | Should -Contain 'Refusals' -Because 'the .OUTPUTS contract promises the property on every returned object, not only the post-validator ones'
+        # Count is the discriminating assertion: the forbidden @($null) shape
+        # has Count 1, the contracted empty array has Count 0. (A piped
+        # `Should -Not -Contain $null` cannot be used here -- an empty array
+        # sends nothing down the pipeline, so Pester sees $null as the actual
+        # value and reports it as containing $null.)
+        @($result.Refusals).Count | Should -Be 0
+    }
 }
 
 # ---------------------------------------------------------------------------

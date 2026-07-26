@@ -149,11 +149,18 @@ function Invoke-GoalRunPredicateEvaluate {
         # emission and exit-code translation below rather than a separate,
         # hand-rolled early return -- the predicate command must never
         # exit silently on this branch either.
+        # Refusals is carried here for the same reason the shape is hand-rolled
+        # at all: this object stands in for what Resolve-GoalRunLoopPredicate
+        # itself would return, and that function's contract guarantees Refusals
+        # is an empty array (never a one-element array containing $null) on
+        # every returned object. Omitting it here would make this stand-in the
+        # one halt shape in the file that breaks the guarantee.
         $result = [pscustomobject]@{
             Disposition  = 'halt'
             HaltReason   = 'chain-stage-failure'
             Reason       = 'goal-run-active-state-unreadable'
             ValidatorRan = $false
+            Refusals     = @()
         }
     }
     else {

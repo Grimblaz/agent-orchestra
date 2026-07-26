@@ -607,12 +607,19 @@ function Resolve-GoalRunLoopPredicate {
     # validator -- the checks of the changed contract are never executed.
     $pin = & $PinCheck $Issue $LaunchPinnedHash $Marker $RepoRoot $Repo $GhCliPath $GitCliPath
     if (-not $pin.Pinned) {
+        # G10 fix: same defect Invoke-GoalRunChainRevalidate carried on its own
+        # pin-mismatch early return (G17). This file's header documents this
+        # function's return shape as including Refusals ("an empty array, never
+        # a one-element array containing $null, when none apply"), so omitting
+        # the property here made @($result.Refusals) yield the forbidden
+        # @($null) on the pin-mismatch path.
         return [pscustomobject]@{
             Disposition  = 'halt'
             HaltReason   = 'invariant-conflict'
             Reason       = $pin.Reason
             ExitCode     = $null
             ValidatorRan = $false
+            Refusals     = @()
         }
     }
 

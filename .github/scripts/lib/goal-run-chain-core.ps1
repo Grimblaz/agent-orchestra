@@ -175,11 +175,19 @@ function Invoke-GoalRunChainRevalidate {
     # a contract that changed after launch are never executed here either.
     $pin = & $PinCheck $Issue $LaunchPinnedHash $Marker $RepoRoot $Repo $GhCliPath $GitCliPath
     if (-not $pin.Pinned) {
+        # G17 fix: Refusals must be present on EVERY returned object, per this
+        # function's .OUTPUTS contract above ("an empty array (never a
+        # one-element array containing $null)"). This early return previously
+        # omitted the property entirely, so a caller doing @($result.Refusals)
+        # on the pin-mismatch path got exactly the forbidden @($null) -- a
+        # one-element array whose single element is $null, which reads as
+        # Count -eq 1 to any refusal-literal check.
         return [pscustomobject]@{
             Disposition = 'halt'
             HaltReason  = 'invariant-conflict'
             Reason      = $pin.Reason
             ExitCode    = $null
+            Refusals    = @()
         }
     }
 
