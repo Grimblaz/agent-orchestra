@@ -184,7 +184,28 @@ function Invoke-GoalRunChainRevalidate {
     # Resolve-GoalRunValidatorExitDisposition (goal-run-prompt-core.ps1) only.
     # M23 fix: pass through ParseFailed exactly as Resolve-GoalRunLoopPredicate
     # does, so a lost Reason on an exit-3 chain re-validation fails closed too.
-    $disposition = Resolve-GoalRunValidatorExitDisposition -ExitCode $result.ExitCode -Reason $result.Reason -ParseFailed:([bool]$result.ParseFailed)
+    # 912-s6 fix: thread Refusals through too. Invoke-GoalRunValidatorProcess
+    # (goal-run-prompt-core.ps1, 912-s3) already returns a Refusals array on
+    # an exit-2 refused verdict, but this call site previously dropped it --
+    # $null-guarded (rather than a bare @($result.Refusals)) because @() of a
+    # $null property yields a one-element array containing $null, not an
+    # empty array (same gotcha goal-run-prompt-core.ps1's own Refusals-reading
+    # code documents). Without this, the loop-interrupted resume stage
+    # (agents/Goal-Run.agent.md) has no way to distinguish a tree-state
+    # refusal (uncommitted-changes/no-run-diff, which should relaunch) from
+    # any other chain-stage-failure (which should halt).
+    #
+    # Array-identity note: `$x = if (...) { @(...) } else { @() }` silently
+    # collapses a one-element array to a plain scalar string -- PowerShell
+    # unrolls a script block's captured output the same way a function
+    # return value would, even for a bare variable assignment. Pre-assign
+    # the empty-array default, then conditionally overwrite it inside a
+    # plain (no-else) `if`, mirroring goal-run-prompt-core.ps1's own
+    # `$refusals = @(); if (...) { $refusals = @(...) }` shape for the
+    # exact same reason.
+    $refusalsArg = @()
+    if ($null -ne $result.Refusals) { $refusalsArg = @($result.Refusals) }
+    $disposition = Resolve-GoalRunValidatorExitDisposition -ExitCode $result.ExitCode -Reason $result.Reason -ParseFailed:([bool]$result.ParseFailed) -Refusals $refusalsArg
 
     $haltReason = $null
     if ($disposition.Disposition -eq 'halt') {
@@ -193,11 +214,15 @@ function Invoke-GoalRunChainRevalidate {
         $haltReason = 'chain-stage-failure'
     }
 
+    $refusalsOut = @()
+    if ($null -ne $disposition.Refusals) { $refusalsOut = @($disposition.Refusals) }
+
     return [pscustomobject]@{
         Disposition = $disposition.Disposition
         HaltReason  = $haltReason
         Reason      = $disposition.Reason
         ExitCode    = $result.ExitCode
+        Refusals    = $refusalsOut
     }
 }
 

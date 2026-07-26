@@ -136,6 +136,27 @@ Describe 'Invoke-GoalRunChainRevalidate: reuses the step 5 disposition function'
         $result = Invoke-GoalRunChainRevalidate -Issue 874 -RepoRoot 'C:\gr-874-token' -LaunchPinnedHash $script:PinnedHash -PinCheck $script:MatchingPinCheck -ValidatorInvoker $invoker
         $result.Disposition | Should -Be 'satisfied'
     }
+
+    # -----------------------------------------------------------------------
+    # 912-s6 fix: Refusals threading -- the loop-interrupted resume stage
+    # (agents/Goal-Run.agent.md) needs to distinguish a tree-state refusal
+    # (uncommitted-changes/no-run-diff) from any other chain-stage-failure.
+    # -----------------------------------------------------------------------
+
+    It '912-s6: surfaces a tree-state refusal on the disposition''s own Refusals field when the validator invoker result carries one' {
+        $invoker = { param($Issue, $RepoRoot, $PwshCliPath, $ValidatorScriptPath) [pscustomobject]@{ ExitCode = 2; Reason = $null; Refusals = @('refused: uncommitted-changes') } }
+        $result = Invoke-GoalRunChainRevalidate -Issue 874 -RepoRoot 'C:\gr-874-token' -LaunchPinnedHash $script:PinnedHash -PinCheck $script:MatchingPinCheck -ValidatorInvoker $invoker
+        $result.Disposition | Should -Be 'halt'
+        $result.HaltReason | Should -Be 'chain-stage-failure'
+        $result.Refusals | Should -Not -BeNullOrEmpty
+        $result.Refusals[0] | Should -Be 'refused: uncommitted-changes'
+    }
+
+    It '912-s6: reports an empty Refusals array (not a one-element array containing $null) when the validator invoker result carries none' {
+        $invoker = { param($Issue, $RepoRoot, $PwshCliPath, $ValidatorScriptPath) [pscustomobject]@{ ExitCode = 0; Reason = $null } }
+        $result = Invoke-GoalRunChainRevalidate -Issue 874 -RepoRoot 'C:\gr-874-token' -LaunchPinnedHash $script:PinnedHash -PinCheck $script:MatchingPinCheck -ValidatorInvoker $invoker
+        @($result.Refusals).Count | Should -Be 0
+    }
 }
 
 # ---------------------------------------------------------------------------
