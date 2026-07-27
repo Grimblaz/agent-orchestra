@@ -110,6 +110,67 @@ Describe 'Get-CostTranscriptSlug' {
             Get-CostTranscriptSlug -CwdPath '/home/runner/repo/.claude/worktrees/x-1' |
                 Should -BeExactly '-home-runner-repo--claude-worktrees-x-1'
         }
+        It 'does not treat a trailing backslash as a separator on a POSIX-shaped path' {
+            # PR #937 review: '\' is an ordinary filename character on POSIX,
+            # not a separator. A directory literally named with a trailing
+            # backslash is unusual but legal, and the vendor rule maps it to a
+            # trailing dash rather than dropping it. The discriminator that
+            # decides this is the path's own shape (no drive letter and not
+            # backslash-rooted), never $IsWindows -- this input has no drive
+            # letter and does not start with '\', regardless of which platform
+            # actually runs this test.
+            Get-CostTranscriptSlug -CwdPath '/tmp/repo\' | Should -BeExactly '-tmp-repo-'
+        }
+        It 'trims a genuine trailing slash regardless of host OS' {
+            # PR #937 post-fix review (M4): the POSIX branch of the trim had
+            # no coverage of its own trimming action -- deleting the whole
+            # branch left this suite green. Multiple trailing slashes collapse
+            # via the regex's '+' quantifier, same as the drive-letter branch.
+            Get-CostTranscriptSlug -CwdPath '/tmp/repo/' | Should -BeExactly '-tmp-repo'
+            Get-CostTranscriptSlug -CwdPath '/tmp/repo///' | Should -BeExactly '-tmp-repo'
+        }
+    }
+
+    Context 'separator-trim discriminator is path shape, not host OS or drive-letter alone (PR #937 review)' {
+        # M2: an earlier revision of this fix treated "no drive letter" as
+        # sufficient evidence of "POSIX-shaped" and stripped a legitimate
+        # trailing backslash from every Windows path that isn't
+        # drive-letter-absolute -- UNC, long-UNC, and drive-relative-rooted
+        # paths all regressed against HEAD. The fix restores HEAD parity for
+        # every one of those by also treating a leading '\' as Windows
+        # evidence, without reintroducing the $IsWindows gate that would
+        # regress the drive-letter case on the Linux CI runner (both classes
+        # below are host-OS-independent regardless of which platform runs
+        # this file).
+        It 'trims a UNC path''s trailing backslash (HEAD parity)' {
+            Get-CostTranscriptSlug -CwdPath '\\server\share\repo\' | Should -BeExactly '--server-share-repo'
+        }
+        It 'trims a long-UNC path''s trailing backslash (HEAD parity)' {
+            Get-CostTranscriptSlug -CwdPath '\\?\C:\repo\' | Should -BeExactly '----C--repo'
+        }
+        It 'trims a drive-relative rooted path''s trailing backslash (HEAD parity)' {
+            Get-CostTranscriptSlug -CwdPath '\dir\sub\' | Should -BeExactly '-dir-sub'
+        }
+        It 'still trims a drive-letter path''s trailing backslash regardless of host OS' {
+            Get-CostTranscriptSlug -CwdPath 'C:\Users\Micah\Code\Copilot-Orchestra\' |
+                Should -BeExactly 'C--Users-Micah-Code-Copilot-Orchestra'
+        }
+        It 'preserves a bare relative path''s trailing backslash as a documented residual' {
+            # A bare relative path (no drive letter, no leading separator)
+            # carries no evidence of which platform it belongs to, and no
+            # live caller supplies one as a cwd (git rev-parse
+            # --show-toplevel / Resolve-Path / Get-Location all return
+            # absolutes). Treating it as POSIX-shaped rather than guessing
+            # Windows is a deliberate, narrower-than-HEAD choice: the
+            # alternative (an unevidenced disjunct covering this class) was
+            # measured to restore this one unreachable class only by
+            # misclassifying a different reachable one (a POSIX relative name
+            # containing a backslash and no slash). This pin also kills a
+            # weakened '^[A-Za-z]:' -> '^[A-Za-z]' discriminator mutation:
+            # under that mutation this input's leading letter alone would
+            # route it to the drive branch and trim the backslash.
+            Get-CostTranscriptSlug -CwdPath 'dir\sub\' | Should -BeExactly 'dir-sub-'
+        }
     }
 
     Context 'punctuation classes (issue #908 evidence pass)' {

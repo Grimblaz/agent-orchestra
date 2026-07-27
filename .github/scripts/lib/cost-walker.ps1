@@ -317,7 +317,17 @@ function Get-CostTranscriptSlug {
              ('C:\') is left alone -- there the separator is part of the path.
              Trailing WHITESPACE is deliberately not stripped: it is not a
              separator, no real cwd carries one, and silently trimming it would
-             hide a malformed caller argument rather than surface it.
+             hide a malformed caller argument rather than surface it. Which
+             characters count as separators depends on the path's own shape,
+             not the host OS: a drive-letter path (already canonicalized to
+             backslash by normalization 2) treats both '\' and '/' as
+             separators; a path with no drive letter is POSIX-shaped and only
+             '/' is a separator there -- '\' is an ordinary filename
+             character, and trimming it would corrupt a real trailing-backslash
+             directory name (PR #937 review). Gating this on $IsWindows rather
+             than on drive-letter shape would have regressed the drive-letter
+             case whenever the function runs on a POSIX host, which is exactly
+             what the test suite's existing pins exercise on Linux CI.
 
         Residual known gap, deliberately not guessed at: an MSYS-form path
         longer than the cap derives its suffix from a lowercase drive
@@ -344,12 +354,28 @@ function Get-CostTranscriptSlug {
 
     $p = $CwdPath
 
-    # Input guard (not part of the vendor rule): a path with no alphanumeric
-    # character at all derives an all-dash slug that can never name a real
-    # directory, and every downstream caller guards on emptiness rather than
-    # validity -- so '-' would pass those guards and start a walk on garbage
-    # where the pre-#908 implementation degraded to ''. No valid cwd reaches
-    # this branch; it exists so a malformed one fails the same way it used to.
+    # Input guard (not part of the vendor rule, and a deliberate departure from
+    # it): a path with no ASCII alphanumeric character returns empty here even
+    # though the vendor rule would derive a non-empty all-dash slug for it (a
+    # Unicode-only POSIX path such as '/日本' is a valid, real cwd -- PR #937
+    # review). The real cost of that departure is NOT "narrower discovery" --
+    # measured across the actual call sites, it is call-site-dependent and
+    # sometimes total: the dominant path (frame-credit-ledger.ps1 ->
+    # cost-session-render.ps1) gates the ENTIRE walk, identity matching
+    # included, on a non-empty slug, so a Unicode-only cwd captures zero cost
+    # events and, on an orchestrated PR, a false "no-transcript-found"
+    # degraded comment gets posted for a walk that never ran -- the same
+    # misleading-diagnostic failure class issue #908 itself exists to close.
+    # Only one call site (Test-CostWalkerSessionTranscriptExists) actually
+    # falls back to identity matching the way an earlier revision of this
+    # comment claimed all of them do. Tracked as issue #938 rather than fixed
+    # here: the guard is not the only option between "ASCII-only" and "match
+    # the vendor rule exactly" (a Unicode-letter-aware guard would admit the
+    # broken class while still rejecting every separator-only input this
+    # guard was added to reject), and #938's first step is measuring whether
+    # a Unicode-only repo-root cwd is reachable in practice at all before
+    # choosing a shape -- the same evidence-first discipline this file's own
+    # derivation rule was built on.
     if ($p -notmatch '[a-zA-Z0-9]') {
         return ''
     }
@@ -362,12 +388,57 @@ function Get-CostTranscriptSlug {
 
     # Pre-normalization 2: canonicalize separators to the shape process.cwd()
     # reports for a drive-letter path, so the over-cap hash preimage matches.
-    if ($p -match '^[A-Za-z]:') {
+    #
+    # $isDriveLetterPath is computed once, here, and reused by normalization 3
+    # below (PR #937 post-fix review, M7): the two conditions used to be two
+    # separately-written copies of the same regex, and nothing enforced that
+    # they stayed in sync -- a mutation test proved a change to only the
+    # second copy produced zero test failures despite changing real behavior.
+    # Computed after normalization 1 (which can CREATE a drive letter from an
+    # MSYS path on Windows) and before the Replace call, so it reflects the
+    # path's drive-letter shape at the point normalization 2 acts on it, and
+    # stays valid afterward because Replace('/', '\') cannot alter the first
+    # two characters a drive-letter path is detected from.
+    $isDriveLetterPath = $p -match '^[A-Za-z]:'
+    if ($isDriveLetterPath) {
         $p = $p.Replace('/', '\')
     }
 
-    # Pre-normalization 3: drop trailing separators, except on a bare drive root.
-    if ($p -match '^(.*[^\\/])[\\/]+$' -and $Matches[1] -notmatch '^[A-Za-z]:$') {
+    # Pre-normalization 3: drop trailing separators, except on a bare drive
+    # root. Which characters count as a separator is decided by path SHAPE
+    # (drive-letter-absolute, or Windows-rooted with no drive letter), not by
+    # $IsWindows and not by "absence of a drive letter" alone (PR #937 review,
+    # M2/M7):
+    #   - A drive-letter path was already canonicalized to backslash above, so
+    #     both '\' and '/' are separators for it, regardless of host OS --
+    #     gating this on $IsWindows instead would silently stop trimming a
+    #     drive-letter path's trailing backslash whenever this runs on a
+    #     POSIX host, which is exactly the input shape the suite pins on the
+    #     Linux CI runner.
+    #   - A path rooted at a bare '\' (UNC '\\server\share\...', long-UNC
+    #     '\\?\C:\...', or drive-relative '\dir\...') is unambiguously
+    #     Windows-shaped even without a drive letter, and '\' is a separator
+    #     for it too -- an earlier revision of this fix treated "no drive
+    #     letter" as sufficient evidence of "POSIX-shaped" and stripped a
+    #     legitimate trailing backslash from every one of these forms.
+    #   - Anything else -- a genuine POSIX absolute path, or a bare relative
+    #     path with no leading separator at all -- has only '/' as a
+    #     separator; '\' is an ordinary filename character there. A bare
+    #     relative path carrying a literal trailing backslash (e.g.
+    #     'dir\sub\') is a deliberate, documented residual: its platform is
+    #     not determinable from the string alone, and no live caller supplies
+    #     a relative cwd, so this function treats it as POSIX-shaped rather
+    #     than guessing Windows -- narrower than HEAD's accidental trim of
+    #     this class, but the alternative (an unevidenced third disjunct
+    #     covering bare-relative-with-backslash) was measured to restore that
+    #     one unreachable class only by misclassifying a different reachable
+    #     one (a POSIX relative name containing a backslash and no slash).
+    if ($isDriveLetterPath -or $p.StartsWith('\')) {
+        if ($p -match '^(.*[^\\/])[\\/]+$' -and $Matches[1] -notmatch '^[A-Za-z]:$') {
+            $p = $Matches[1]
+        }
+    }
+    elseif ($p -match '^(.*[^/])/+$') {
         $p = $Matches[1]
     }
 
