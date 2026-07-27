@@ -158,6 +158,73 @@ Describe 'Resolve-GoalRunValidatorExitDisposition' -Tag 'unit' {
         $result.Disposition | Should -Be 'satisfied'
     }
 
+    Context '912-s3: exit-2 Refusals threading (AC7)' {
+        # goal-contract-validate-core.ps1's exit-2 refused verdict always
+        # sets Reason to $null -- the distinguishing literals live in the
+        # separate Refusals array instead (:594-601). Before this fix,
+        # Resolve-GoalRunValidatorExitDisposition never accepted Refusals at
+        # all, so every exit-2 refusal collapsed to the same generic
+        # fallback text regardless of cause. Each literal is also wrapped by
+        # Format-GCInertRender's fenced-code-block escaping, which these
+        # tests reproduce with the real helper so the fencing-strip path is
+        # exercised, not assumed.
+
+        # Format-GCInertRender is already in scope: goal-run-prompt-core.ps1
+        # dot-sources goal-contract-validate-core.ps1 at its own top, and
+        # this file's top-level BeforeAll dot-sources goal-run-prompt-core.ps1.
+
+        It 'distinguishes refused: uncommitted-changes from refused: no-run-diff at the disposition (the named AC7 example)' {
+            $fencedUncommitted = Format-GCInertRender -Content 'refused: uncommitted-changes'
+            $fencedNoRunDiff = Format-GCInertRender -Content 'refused: no-run-diff (merge-base(abc1234, def5678) equals the run sha def5678; observed condition only)'
+
+            $uncommitted = Resolve-GoalRunValidatorExitDisposition -ExitCode 2 -Reason $null -Refusals @($fencedUncommitted)
+            $noRunDiff = Resolve-GoalRunValidatorExitDisposition -ExitCode 2 -Reason $null -Refusals @($fencedNoRunDiff)
+
+            $uncommitted.Disposition | Should -Be 'halt'
+            $noRunDiff.Disposition | Should -Be 'halt'
+            $uncommitted.Reason | Should -Not -Be $noRunDiff.Reason
+            $uncommitted.Reason | Should -Match 'uncommitted-changes'
+            $noRunDiff.Reason | Should -Match 'no-run-diff'
+        }
+
+        It 'substring-matches the no-run-diff refusal rather than requiring exact equality, because the literal embeds commit shas that vary per run' {
+            $firstRun = Format-GCInertRender -Content 'refused: no-run-diff (merge-base(aaaaaaa, bbbbbbb) equals the run sha bbbbbbb; observed condition only)'
+            $secondRun = Format-GCInertRender -Content 'refused: no-run-diff (merge-base(ccccccc, ddddddd) equals the run sha ddddddd; observed condition only)'
+
+            $first = Resolve-GoalRunValidatorExitDisposition -ExitCode 2 -Reason $null -Refusals @($firstRun)
+            $second = Resolve-GoalRunValidatorExitDisposition -ExitCode 2 -Reason $null -Refusals @($secondRun)
+
+            # The two full Reason strings differ (different shas) but both
+            # substring-match the stable 'refused: no-run-diff' prefix.
+            $first.Reason | Should -Not -Be $second.Reason
+            $first.Reason | Should -Match 'refused: no-run-diff'
+            $second.Reason | Should -Match 'refused: no-run-diff'
+        }
+
+        It 'strips the Format-GCInertRender fenced-code-block wrap so the plain refusal literal is readable, not the raw fence' {
+            $fenced = Format-GCInertRender -Content 'refused: blank-check-floor'
+            $fenced | Should -Match '```'
+
+            $result = Resolve-GoalRunValidatorExitDisposition -ExitCode 2 -Reason $null -Refusals @($fenced)
+
+            $result.Reason | Should -Match 'refused: blank-check-floor'
+            $result.Reason | Should -Not -Match '```'
+        }
+
+        It 'surfaces the stripped literal on the disposition''s own Refusals field, not only folded into Reason text' {
+            $fenced = Format-GCInertRender -Content 'refused: uncommitted-changes'
+            $result = Resolve-GoalRunValidatorExitDisposition -ExitCode 2 -Reason $null -Refusals @($fenced)
+
+            $result.Refusals | Should -Not -BeNullOrEmpty
+            $result.Refusals[0] | Should -Be 'refused: uncommitted-changes'
+        }
+
+        It 'keeps the pre-fix generic exit-2 fallback text when -Refusals is omitted (existing call sites unaffected)' {
+            $result = Resolve-GoalRunValidatorExitDisposition -ExitCode 2 -Reason $null
+            $result.Reason | Should -Match 'validator did not attempt assessment'
+        }
+    }
+
     It 'maps an infra-error-prefixed exit 3 to halt -- the money test: confirms it resolves to neither satisfied nor not-satisfied' {
         $result = Resolve-GoalRunValidatorExitDisposition -ExitCode 3 -Reason 'infra-error: powershell-yaml module is required but could not be loaded'
         $result.Disposition | Should -Be 'halt'
@@ -261,6 +328,58 @@ exit 3
         $result.Reason | Should -Be 'review-required: mandatory-review flags present'
         $result.ParseFailed | Should -Be $false
     }
+
+    Context '912-s3: Refusals threading (AC7)' {
+        # Before this fix, this function read only $parsed.Reason and
+        # silently discarded $parsed.Refusals -- exercised here against the
+        # real subprocess-invocation path (a fixture "validator" script),
+        # not an injected fake result object, so the read is proven at the
+        # source.
+
+        It 'reads Refusals from a well-formed exit-2 refused verdict, preserving array identity for a single entry' {
+            $fakeValidator = Join-Path $TestDrive 'fake-validator-refused-single.ps1'
+            $fakeContent = @'
+Write-Output '{"Verdict":"refused","ExitCode":2,"Reason":null,"Refusals":["refused: uncommitted-changes"]}'
+exit 2
+'@
+            Set-Content -LiteralPath $fakeValidator -Value $fakeContent -Encoding utf8
+
+            $result = Invoke-GoalRunValidatorProcess -Issue 874 -RepoRoot $script:RepoRoot -PwshCliPath 'pwsh' -ValidatorScriptPath $fakeValidator
+
+            $result.ExitCode | Should -Be 2
+            $result.Reason | Should -BeNullOrEmpty
+            ($result.Refusals -is [array]) | Should -Be $true
+            $result.Refusals.Count | Should -Be 1
+            $result.Refusals[0] | Should -Be 'refused: uncommitted-changes'
+        }
+
+        It 'reads multiple Refusals entries when the verdict carries more than one' {
+            $fakeValidator = Join-Path $TestDrive 'fake-validator-refused-multi.ps1'
+            $fakeContent = @'
+Write-Output '{"Verdict":"refused","ExitCode":2,"Reason":null,"Refusals":["refused: uncommitted-changes","refused: no-run-diff (merge-base(aaa, bbb) equals the run sha bbb)"]}'
+exit 2
+'@
+            Set-Content -LiteralPath $fakeValidator -Value $fakeContent -Encoding utf8
+
+            $result = Invoke-GoalRunValidatorProcess -Issue 874 -RepoRoot $script:RepoRoot -PwshCliPath 'pwsh' -ValidatorScriptPath $fakeValidator
+
+            $result.Refusals.Count | Should -Be 2
+            $result.Refusals | Should -Contain 'refused: uncommitted-changes'
+        }
+
+        It 'reports an empty Refusals array (not a one-element array containing $null) for a non-refused verdict that omits the field' {
+            $fakeValidator = Join-Path $TestDrive 'fake-validator-pass.ps1'
+            $fakeContent = @'
+Write-Output '{"ExitCode":0,"Reason":null}'
+exit 0
+'@
+            Set-Content -LiteralPath $fakeValidator -Value $fakeContent -Encoding utf8
+
+            $result = Invoke-GoalRunValidatorProcess -Issue 874 -RepoRoot $script:RepoRoot -PwshCliPath 'pwsh' -ValidatorScriptPath $fakeValidator
+
+            @($result.Refusals).Count | Should -Be 0
+        }
+    }
 }
 
 Describe 'Resolve-GoalRunLoopPredicate: M23 ParseFailed pass-through' -Tag 'unit' {
@@ -329,6 +448,169 @@ Describe 'Test-GoalRunContractHashPinned' -Tag 'unit' {
         $result = Test-GoalRunContractHashPinned -Issue 874 -LaunchPinnedHash $script:MatchingHash -CommentBodyReader $reader
         $result.Pinned | Should -Be $false
     }
+
+    Context '912-s3: Get-GCPinnedCommentBody four null-causes are distinguishable (AC6)' {
+        # Get-GCPinnedCommentBody (goal-contract-validate-core.ps1) returns
+        # plain $null for four distinct causes and previously all four
+        # collapsed to the single generic 'contract-comment-unresolvable'
+        # Reason above. This function does not change
+        # Get-GCPinnedCommentBody's return contract; it recovers the cause
+        # from the real Write-Warning text the function already emits (each
+        # reader here reproduces that exact wording, and calls Write-Warning
+        # itself the same way the real function does, so the capture path is
+        # exercised against real text, not an assumed shape).
+
+        It 'distinguishes repo/owner-unresolvable from the generic fallback' {
+            $reader = {
+                param($Issue, $Marker, $RepoRoot, $Repo, $GhCliPath, $GitCliPath)
+                Write-Warning 'Get-GCPinnedCommentBody: could not resolve owner/repo from git remote; cannot read comments.'
+                return $null
+            }
+            $result = Test-GoalRunContractHashPinned -Issue 874 -LaunchPinnedHash $script:MatchingHash -CommentBodyReader $reader
+            $result.Pinned | Should -Be $false
+            $result.Reason | Should -Be 'contract-comment-unresolvable: repo-unresolvable'
+        }
+
+        It 'distinguishes a failed gh api read from the generic fallback' {
+            $reader = {
+                param($Issue, $Marker, $RepoRoot, $Repo, $GhCliPath, $GitCliPath)
+                Write-Warning 'Get-GCPinnedCommentBody: gh api repos/o/r/issues/874/comments --paginate failed (exit 1).'
+                return $null
+            }
+            $result = Test-GoalRunContractHashPinned -Issue 874 -LaunchPinnedHash $script:MatchingHash -CommentBodyReader $reader
+            $result.Pinned | Should -Be $false
+            $result.Reason | Should -Be 'contract-comment-unresolvable: gh-read-failed'
+        }
+
+        It 'distinguishes no comment carrying the marker from the generic fallback' {
+            $reader = {
+                param($Issue, $Marker, $RepoRoot, $Repo, $GhCliPath, $GitCliPath)
+                Write-Warning "Get-GCPinnedCommentBody: no comment on issue 874 carries marker '<!-- plan-issue-874 -->'."
+                return $null
+            }
+            $result = Test-GoalRunContractHashPinned -Issue 874 -LaunchPinnedHash $script:MatchingHash -CommentBodyReader $reader
+            $result.Pinned | Should -Be $false
+            $result.Reason | Should -Be 'contract-comment-unresolvable: marker-not-found'
+        }
+
+        It 'distinguishes an ambiguous multi-marker match (an integrity event, not infra) from the generic fallback' {
+            $reader = {
+                param($Issue, $Marker, $RepoRoot, $Repo, $GhCliPath, $GitCliPath)
+                Write-Warning "Get-GCPinnedCommentBody: 2 comments on issue 874 carry marker '<!-- plan-issue-874 -->'; refusing to guess (ambiguous)."
+                return $null
+            }
+            $result = Test-GoalRunContractHashPinned -Issue 874 -LaunchPinnedHash $script:MatchingHash -CommentBodyReader $reader
+            $result.Pinned | Should -Be $false
+            $result.Reason | Should -Be 'contract-comment-unresolvable: marker-ambiguous'
+        }
+
+        It 'produces four mutually-distinct Reason values across all four causes plus the no-warning fallback' {
+            $causes = @(
+                { Write-Warning 'Get-GCPinnedCommentBody: could not resolve owner/repo from git remote; cannot read comments.' },
+                { Write-Warning 'Get-GCPinnedCommentBody: gh api repos/o/r/issues/874/comments --paginate returned no comments.' },
+                { Write-Warning "Get-GCPinnedCommentBody: no comment on issue 874 carries marker '<!-- plan-issue-874 -->'." },
+                { Write-Warning "Get-GCPinnedCommentBody: 3 comments on issue 874 carry marker '<!-- plan-issue-874 -->'; refusing to guess (ambiguous)." }
+            )
+            $reasons = @($causes | ForEach-Object {
+                    $warnAction = $_
+                    $reader = { param($Issue, $Marker, $RepoRoot, $Repo, $GhCliPath, $GitCliPath) & $warnAction; return $null }.GetNewClosure()
+                    (Test-GoalRunContractHashPinned -Issue 874 -LaunchPinnedHash $script:MatchingHash -CommentBodyReader $reader).Reason
+                })
+            ($reasons | Select-Object -Unique).Count | Should -Be 4
+        }
+
+        It 'still resolves to the original generic value when the reader returns $null with no warning at all (pre-existing callers unaffected)' {
+            $reader = { param($Issue, $Marker, $RepoRoot, $Repo, $GhCliPath, $GitCliPath) $null }
+            $result = Test-GoalRunContractHashPinned -Issue 874 -LaunchPinnedHash $script:MatchingHash -CommentBodyReader $reader
+            $result.Reason | Should -Be 'contract-comment-unresolvable'
+        }
+    }
+
+    Context 'M19: classifier regex-matches the CURRENT owning-file warning text (goal-contract-validate-core.ps1)' {
+        # M19: Resolve-GCPinnedCommentUnresolvableReason (goal-run-prompt-
+        # core.ps1, private) classifies pin-check failure causes by
+        # regex-matching Write-Warning text OWNED by a DIFFERENT file
+        # (goal-contract-validate-core.ps1, Get-GCPinnedCommentBody), which
+        # this test suite's own lib file may not modify (out of scope). The
+        # Context above hand-types a reproduction of that wording, which
+        # proves the classifier works against A string shaped like the real
+        # one -- but if the owning file's wording ever drifts, a hand-typed
+        # reproduction would keep passing while the live classifier silently
+        # misclassifies. These tests instead read the actual Write-Warning
+        # literal straight out of goal-contract-validate-core.ps1 at
+        # test-run time (never assumed or hand-copied) and drive that exact
+        # text through the real classification path
+        # (Test-GoalRunContractHashPinned), so a future wording change in
+        # the owning file's six cited lines (goal-contract-validate-
+        # core.ps1:528, :542, :546, :550, :557, :568, :572 -- see this
+        # classifier's own header comment in goal-run-prompt-core.ps1) fails
+        # this suite loudly instead of degrading silently.
+
+        BeforeAll {
+            $script:ValidateCoreLines = Get-Content -LiteralPath (Join-Path $script:RepoRoot '.github/scripts/lib/goal-contract-validate-core.ps1')
+
+            function script:Get-GCOwningFileWarningText {
+                param([Parameter(Mandatory)][string]$AnchorPattern)
+                $line = @($script:ValidateCoreLines | Where-Object { $_ -match 'Write-Warning' -and $_ -match $AnchorPattern }) | Select-Object -First 1
+                if (-not $line) {
+                    throw "M19 coupling check: no Write-Warning line matching anchor '$AnchorPattern' found in goal-contract-validate-core.ps1 -- Get-GCPinnedCommentBody's wording has moved or been removed; Resolve-GCPinnedCommentUnresolvableReason's regex-matching contract needs review."
+                }
+                if ($line -notmatch 'Write-Warning\s+([''"])(.*)\1\s*$') {
+                    throw "M19 coupling check: could not extract a quoted literal from the matched line: $line"
+                }
+                return $Matches[2]
+            }
+        }
+
+        It 'classifies the CURRENT repo/owner-unresolvable warning (line ~528) as repo-unresolvable' {
+            $text = Get-GCOwningFileWarningText -AnchorPattern 'could not resolve owner/repo'
+            $reader = { param($Issue, $Marker, $RepoRoot, $Repo, $GhCliPath, $GitCliPath) Write-Warning $text; return $null }.GetNewClosure()
+            $result = Test-GoalRunContractHashPinned -Issue 874 -LaunchPinnedHash $script:MatchingHash -CommentBodyReader $reader
+            $result.Reason | Should -Be 'contract-comment-unresolvable: repo-unresolvable'
+        }
+
+        It 'classifies the CURRENT gh-api-threw warning (line ~542) as gh-read-failed' {
+            $text = Get-GCOwningFileWarningText -AnchorPattern 'threw an exception'
+            $reader = { param($Issue, $Marker, $RepoRoot, $Repo, $GhCliPath, $GitCliPath) Write-Warning $text; return $null }.GetNewClosure()
+            $result = Test-GoalRunContractHashPinned -Issue 874 -LaunchPinnedHash $script:MatchingHash -CommentBodyReader $reader
+            $result.Reason | Should -Be 'contract-comment-unresolvable: gh-read-failed'
+        }
+
+        It 'classifies the CURRENT gh-api-nonzero-exit warning (line ~546) as gh-read-failed' {
+            $text = Get-GCOwningFileWarningText -AnchorPattern 'failed \(exit'
+            $reader = { param($Issue, $Marker, $RepoRoot, $Repo, $GhCliPath, $GitCliPath) Write-Warning $text; return $null }.GetNewClosure()
+            $result = Test-GoalRunContractHashPinned -Issue 874 -LaunchPinnedHash $script:MatchingHash -CommentBodyReader $reader
+            $result.Reason | Should -Be 'contract-comment-unresolvable: gh-read-failed'
+        }
+
+        It 'classifies the CURRENT gh-api-empty-response warning (line ~550) as gh-read-failed' {
+            $text = Get-GCOwningFileWarningText -AnchorPattern 'returned no comments'
+            $reader = { param($Issue, $Marker, $RepoRoot, $Repo, $GhCliPath, $GitCliPath) Write-Warning $text; return $null }.GetNewClosure()
+            $result = Test-GoalRunContractHashPinned -Issue 874 -LaunchPinnedHash $script:MatchingHash -CommentBodyReader $reader
+            $result.Reason | Should -Be 'contract-comment-unresolvable: gh-read-failed'
+        }
+
+        It 'classifies the CURRENT gh-api-unparseable-response warning (line ~557) as gh-read-failed' {
+            $text = Get-GCOwningFileWarningText -AnchorPattern 'failed to parse gh api response'
+            $reader = { param($Issue, $Marker, $RepoRoot, $Repo, $GhCliPath, $GitCliPath) Write-Warning $text; return $null }.GetNewClosure()
+            $result = Test-GoalRunContractHashPinned -Issue 874 -LaunchPinnedHash $script:MatchingHash -CommentBodyReader $reader
+            $result.Reason | Should -Be 'contract-comment-unresolvable: gh-read-failed'
+        }
+
+        It 'classifies the CURRENT no-comment-carries-marker warning (line ~568) as marker-not-found' {
+            $text = Get-GCOwningFileWarningText -AnchorPattern 'no comment on issue'
+            $reader = { param($Issue, $Marker, $RepoRoot, $Repo, $GhCliPath, $GitCliPath) Write-Warning $text; return $null }.GetNewClosure()
+            $result = Test-GoalRunContractHashPinned -Issue 874 -LaunchPinnedHash $script:MatchingHash -CommentBodyReader $reader
+            $result.Reason | Should -Be 'contract-comment-unresolvable: marker-not-found'
+        }
+
+        It 'classifies the CURRENT ambiguous-multi-marker warning (line ~572) as marker-ambiguous' {
+            $text = Get-GCOwningFileWarningText -AnchorPattern 'refusing to guess'
+            $reader = { param($Issue, $Marker, $RepoRoot, $Repo, $GhCliPath, $GitCliPath) Write-Warning $text; return $null }.GetNewClosure()
+            $result = Test-GoalRunContractHashPinned -Issue 874 -LaunchPinnedHash $script:MatchingHash -CommentBodyReader $reader
+            $result.Reason | Should -Be 'contract-comment-unresolvable: marker-ambiguous'
+        }
+    }
 }
 
 Describe 'Resolve-GoalRunLoopPredicate' -Tag 'unit' {
@@ -391,5 +673,55 @@ Describe 'Resolve-GoalRunLoopPredicate' -Tag 'unit' {
         $invoker = { param($Issue, $RepoRoot, $PwshCliPath, $ValidatorScriptPath) [pscustomobject]@{ ExitCode = 1; Reason = $null } }
         $result = Resolve-GoalRunLoopPredicate -Issue 874 -RepoRoot 'C:\gr-874-token' -LaunchPinnedHash $script:PinnedHash -PinCheck $pinCheck -ValidatorInvoker $invoker
         $result.Disposition | Should -Be 'not-satisfied'
+    }
+
+    # -----------------------------------------------------------------------
+    # M15 fix: Refusals threading -- mirrors Invoke-GoalRunChainRevalidate's
+    # own 912-s6 Refusals threading (goal-run-chain-core.ps1). Before this
+    # fix, Invoke-GoalRunValidatorProcess already returned Refusals on both
+    # paths, but only the chain re-validation path threaded it through --
+    # this in-loop predicate path silently dropped it.
+    # -----------------------------------------------------------------------
+
+    It 'M15: surfaces a tree-state refusal on the disposition''s own Refusals field when the validator invoker result carries one' {
+        $pinCheck = { param($Issue, $LaunchPinnedHash, $Marker, $RepoRoot, $Repo, $GhCliPath, $GitCliPath) [pscustomobject]@{ Pinned = $true; Reason = $null; LiveHash = $LaunchPinnedHash } }
+        $invoker = { param($Issue, $RepoRoot, $PwshCliPath, $ValidatorScriptPath) [pscustomobject]@{ ExitCode = 2; Reason = $null; Refusals = @('refused: uncommitted-changes') } }
+        $result = Resolve-GoalRunLoopPredicate -Issue 874 -RepoRoot 'C:\gr-874-token' -LaunchPinnedHash $script:PinnedHash -PinCheck $pinCheck -ValidatorInvoker $invoker
+        $result.Disposition | Should -Be 'halt'
+        $result.HaltReason | Should -Be 'chain-stage-failure'
+        $result.Refusals | Should -Not -BeNullOrEmpty
+        $result.Refusals[0] | Should -Be 'refused: uncommitted-changes'
+    }
+
+    It 'M15: reports an empty Refusals array (not a one-element array containing $null) when the validator invoker result carries none' {
+        $pinCheck = { param($Issue, $LaunchPinnedHash, $Marker, $RepoRoot, $Repo, $GhCliPath, $GitCliPath) [pscustomobject]@{ Pinned = $true; Reason = $null; LiveHash = $LaunchPinnedHash } }
+        $invoker = { param($Issue, $RepoRoot, $PwshCliPath, $ValidatorScriptPath) [pscustomobject]@{ ExitCode = 0; Reason = $null } }
+        $result = Resolve-GoalRunLoopPredicate -Issue 874 -RepoRoot 'C:\gr-874-token' -LaunchPinnedHash $script:PinnedHash -PinCheck $pinCheck -ValidatorInvoker $invoker
+        @($result.Refusals).Count | Should -Be 0
+    }
+
+    # -----------------------------------------------------------------------
+    # G10 (#912 external review): same defect as G17 on the chain-revalidate
+    # twin -- the pin-mismatch early return omitted Refusals entirely, so
+    # @($result.Refusals) on that path yielded the forbidden @($null). This
+    # file's header documents the function's return shape as carrying
+    # Refusals "an empty array, never a one-element array containing $null",
+    # so this IS a documented-contract violation, not just an asymmetry.
+    # -----------------------------------------------------------------------
+
+    It 'G10: reports an empty Refusals array (not a one-element array containing $null) on the pin-mismatch early return' {
+        $pinCheck = { param($Issue, $LaunchPinnedHash, $Marker, $RepoRoot, $Repo, $GhCliPath, $GitCliPath) [pscustomobject]@{ Pinned = $false; Reason = 'contract-hash-mismatch-since-launch'; LiveHash = 'deadbeef' } }
+        $invoker = { param($Issue, $RepoRoot, $PwshCliPath, $ValidatorScriptPath) [pscustomobject]@{ ExitCode = 0; Reason = $null } }
+
+        $result = Resolve-GoalRunLoopPredicate -Issue 874 -RepoRoot 'C:\gr-874-token' -LaunchPinnedHash $script:PinnedHash -PinCheck $pinCheck -ValidatorInvoker $invoker
+
+        $result.Disposition | Should -Be 'halt'
+        $result.ValidatorRan | Should -Be $false
+        $result.PSObject.Properties.Name | Should -Contain 'Refusals' -Because 'the documented return shape promises the property on every returned object, not only the post-validator ones'
+        # Count discriminates the two shapes: @($null).Count is 1, @().Count
+        # is 0. See the matching note on the G17 twin in
+        # goal-run-chain-core.Tests.ps1 for why a piped -Contain cannot be
+        # used against an empty array here.
+        @($result.Refusals).Count | Should -Be 0
     }
 }

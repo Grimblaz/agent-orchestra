@@ -96,7 +96,26 @@ if (-not $isDotSourced) {
     if (-not [string]::IsNullOrWhiteSpace($PwshCliPath)) { $invokeArgs['PwshCliPath'] = $PwshCliPath }
     if (-not [string]::IsNullOrWhiteSpace($ValidatorScriptPath)) { $invokeArgs['ValidatorScriptPath'] = $ValidatorScriptPath }
 
-    $result = Invoke-GoalRunPredicateEvaluate @invokeArgs
+    # #912 AC13 fix: any exception escaping Invoke-GoalRunPredicateEvaluate
+    # (not just a $null/missing-ExitCode result, already guarded below) must
+    # still exit 2 rather than propagate as an unhandled exception. This does
+    # NOT stop the vendor loop -- every nonzero exit means keep-looping per
+    # the exit-code contract documented above -- it only ensures the process
+    # exits in the already-defined not-release-permitting direction instead
+    # of crashing.
+    try {
+        $result = Invoke-GoalRunPredicateEvaluate @invokeArgs
+    }
+    catch {
+        # #912 review fix (M18): a bare `exit 2` here discarded the
+        # exception with no diagnostic at all -- a human reading process
+        # logs after an unexpected halt had no way to tell WHY the
+        # predicate crashed. Writing the message to stderr before exiting
+        # does not change the exit-code contract (still exit 2, still
+        # release-permitting-never on this path).
+        [Console]::Error.WriteLine($_.Exception.Message)
+        exit 2
+    }
 
     # Defense-in-depth against a future refactor, mirroring the same guard
     # in goal-contract-validate.ps1: fail CLOSED (exit 2) rather than

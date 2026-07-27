@@ -2,6 +2,16 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.4.12] — 2026-07-26
+
+### Fixed
+
+- **`/goal-run` is resumable after an interruption (#912).** An interrupted run previously could not be resumed at all: the resume path needed the dead session's transcript, and the run-in-progress marker was never cleared on any ending, so the issue locked permanently after the first interruption — or after a successful completion. Resume now re-derives where a run actually got to from committed worktree state via re-validation, never a transcript.
+- **Marker adoption replaces resolve-and-proceed.** A resume adopts the run-in-progress marker rather than resolving it, so a still-live run keeps its mutex. Admission is session-identity-aware, so the owning session can safely re-enter its own adopted run.
+- **Two operator levers: `/goal-run {issue} adopt` and `/goal-run {issue} restart`.** `adopt` force-adopts past a fresh heartbeat; `restart` captures the worktree path and branch into a durable report before clearing anything, refuses outright against a live run, and clears both the stage marker and the active-state file.
+- **Tree-state validator refusals route to relaunch.** `refused: uncommitted-changes` and `refused: no-run-diff` — the modal states for an interrupted run — no longer collapse into a permanent halt loop.
+- **The loop predicate reports its halt truthfully**, including when the report itself cannot be filed. No in-predicate condition can stop the vendor loop; that gap is tracked separately in #927.
+
 ## [3.4.11] — 2026-07-26
 
 ### Added

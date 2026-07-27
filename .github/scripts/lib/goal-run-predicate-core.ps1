@@ -122,8 +122,9 @@ function Invoke-GoalRunPredicateEvaluate {
     # heartbeat refresh happened at post-loop chain-stage boundaries -- so a
     # genuinely live multi-hour in-loop run crossed the 60-minute stale
     # threshold and Test-GoalRunInflightAppearsDead misclassified it dead,
-    # letting triage-dead-run offer a resume that relaunched the still-running
-    # vendor loop. Refreshing heartbeat_at here keeps a live loop seen as live.
+    # letting adopt-and-resume offer a resume that relaunched the
+    # still-running vendor loop. Refreshing heartbeat_at here keeps a live
+    # loop seen as live.
     # Best-effort: a heartbeat-write failure (e.g. a not-yet-written state file
     # on the very first iteration) must NEVER change the predicate verdict, so
     # it is caught and recorded without affecting the disposition below.
@@ -148,11 +149,18 @@ function Invoke-GoalRunPredicateEvaluate {
         # emission and exit-code translation below rather than a separate,
         # hand-rolled early return -- the predicate command must never
         # exit silently on this branch either.
+        # Refusals is carried here for the same reason the shape is hand-rolled
+        # at all: this object stands in for what Resolve-GoalRunLoopPredicate
+        # itself would return, and that function's contract guarantees Refusals
+        # is an empty array (never a one-element array containing $null) on
+        # every returned object. Omitting it here would make this stand-in the
+        # one halt shape in the file that breaks the guarantee.
         $result = [pscustomobject]@{
             Disposition  = 'halt'
             HaltReason   = 'chain-stage-failure'
             Reason       = 'goal-run-active-state-unreadable'
             ValidatorRan = $false
+            Refusals     = @()
         }
     }
     else {
@@ -173,8 +181,24 @@ function Invoke-GoalRunPredicateEvaluate {
 
         $evidence = if ([string]::IsNullOrWhiteSpace([string]$result.Reason)) { @() } else { @([string]$result.Reason) }
         $report = New-GoalRunChainHaltReport -Issue $Issue -HaltReason $result.HaltReason -Stage 'loop' -PlanRemediation $remediation -Evidence $evidence
-        & $HaltEmitter $report $Issue $RepoRoot $Owner $Repo | Out-Null
-        $haltEmitted = $true
+        # #912 AC12/AC13 fix: the emitter can fail two distinct ways that must
+        # both resolve to HaltEmitted = $false rather than an unconditional
+        # $true. (1) Find-OrUpsertComment returns $null without throwing on
+        # every gh-failure path (find-or-upsert-comment.ps1:152-153, 183-184,
+        # 208-209, 246-247) -- Invoke-GoalRunHaltEmit surfaces that as
+        # Success = $false, so read .Success instead of assuming success.
+        # (2) A schema-invalid report makes Invoke-GoalRunHaltEmit THROW
+        # (goal-run-halt-core.ps1:218) -- catch it here so a bad report
+        # object cannot propagate out of this function; the halt disposition
+        # itself (HaltReason/Reason) is preserved either way since it was
+        # already computed above from $result, not from the emit outcome.
+        try {
+            $emitResult = & $HaltEmitter $report $Issue $RepoRoot $Owner $Repo
+            $haltEmitted = [bool]$emitResult.Success
+        }
+        catch {
+            $haltEmitted = $false
+        }
     }
 
     $exitCode = switch ($result.Disposition) {

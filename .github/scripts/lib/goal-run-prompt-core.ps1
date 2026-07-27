@@ -65,6 +65,22 @@
         tell the two halt causes apart even though they carry the same
         halt_reason.
 
+        912-s3 fix: exit 2's Reason is ALWAYS $null on the subprocess side
+        (the distinguishing literals live in the verdict's Refusals array
+        instead -- goal-contract-validate-core.ps1:594-601/:2500-2507), so
+        before this fix the generic exit-2 fallback text fired
+        unconditionally and every refusal cause (e.g. `refused:
+        uncommitted-changes` vs `refused: no-run-diff`) collapsed to the
+        same constant. This function now accepts an optional `-Refusals`
+        array; when supplied, each entry's Format-GCInertRender fencing is
+        stripped and the joined result becomes the halt detail (and is
+        also returned on the disposition's own `Refusals` field), so a
+        caller can distinguish specific refusal causes -- substring-match
+        rather than exact-equality, since `refused: no-run-diff` embeds
+        commit shas that vary per run. Omitting `-Refusals` keeps the
+        pre-fix generic fallback text, so existing call sites are
+        unaffected.
+
         M23 fix: an exit-3 subprocess result with `Reason: $null` is
         AMBIGUOUS between two genuinely different cases -- (a) the
         subprocess returned well-formed JSON that simply omits `Reason` (a
@@ -103,6 +119,18 @@
         is injectable (defaults to a thin Get-GCPinnedCommentBody wrapper)
         so callers/tests never need `gh` on PATH.
 
+        912-s3 fix: Get-GCPinnedCommentBody returns plain $null for four
+        distinct causes (repo/owner unresolvable, the gh api read failing,
+        no comment carrying the marker, or more than one comment carrying
+        it), which this function previously collapsed to a single
+        `contract-comment-unresolvable` Reason regardless of cause. Since
+        Get-GCPinnedCommentBody's return contract is out of this file's
+        scope to change, the distinguishing cause is instead recovered from
+        its Write-Warning text (captured via 3>&1 redirection) and mapped to
+        one of four `contract-comment-unresolvable: {cause}` Reason values;
+        a reader that emits no warning (a bare-$null test double) still
+        resolves to the original undifferentiated value.
+
       Resolve-GoalRunLoopPredicate -Issue <int> -RepoRoot <string>
                                     -LaunchPinnedHash <string>
                                     [-Marker <string>] [-Repo <string>]
@@ -123,10 +151,22 @@
         child-process invocation, injectable for tests) and apply
         Resolve-GoalRunValidatorExitDisposition to the result. Returns
         [pscustomobject]@{ Disposition; HaltReason; Reason; ExitCode;
-        ValidatorRan } -- Disposition is one of 'satisfied' |
+        ValidatorRan; Refusals } -- Disposition is one of 'satisfied' |
         'not-satisfied' | 'halt', directly consumable by the halt path of
         the stage machine (full wiring is a later step; this function
         only needs to return a shape that wiring can act on).
+
+        M15 fix: Refusals is now threaded through identically to
+        Invoke-GoalRunChainRevalidate (goal-run-chain-core.ps1, 912-s6) --
+        an exit-2 refused verdict's distinguishing literals (e.g. 'refused:
+        uncommitted-changes') are read from the validator-invoker result,
+        passed to Resolve-GoalRunValidatorExitDisposition, and surfaced on
+        this function's own Refusals field (an empty array, never a
+        one-element array containing $null, when none apply). Before this
+        fix only the chain re-validation path threaded Refusals; this
+        in-loop predicate path silently dropped it even though
+        Invoke-GoalRunValidatorProcess already returns the field on both
+        paths.
 #>
 
 . (Join-Path $PSScriptRoot 'goal-contract-validate-core.ps1')
@@ -209,6 +249,31 @@ function New-GoalRunPromptText {
 # 2. Predicate exit-code/Reason disambiguation (pure, M1)
 # ---------------------------------------------------------------------------
 
+# Private: reverses Format-GCInertRender's fixed-point fenced-code-block wrap
+# (goal-contract-validate-core.ps1:2221-2286) so a refusal literal can be
+# read back as plain text. The wrap shape is always exactly
+# "$fence`n$stripped`n$fence" (opening fence line, content, closing fence
+# line), so stripping the first and last line and rejoining the remainder
+# recovers $stripped even when it is itself multi-line. Content that was
+# never fenced (e.g. a bare string a test double supplies) is returned
+# unchanged -- this helper is defensive, not a parser that assumes its input
+# shape.
+function script:ConvertFrom-GCInertFencedText {
+    param(
+        [Parameter(Mandatory = $false)][AllowNull()][AllowEmptyString()][string]$Content
+    )
+
+    if ([string]::IsNullOrEmpty($Content)) {
+        return $Content
+    }
+
+    $lines = $Content -split "`n"
+    if ($lines.Count -ge 3 -and $lines[0] -match '^`{3,}\s*$' -and $lines[-1] -match '^`{3,}\s*$') {
+        return ($lines[1..($lines.Count - 2)] -join "`n")
+    }
+    return $Content
+}
+
 function Resolve-GoalRunValidatorExitDisposition {
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -220,7 +285,14 @@ function Resolve-GoalRunValidatorExitDisposition {
         # JSON-parse failure (case b, must fail closed). Defaults to $false
         # so every existing call site that does not yet pass it keeps its
         # current behavior.
-        [switch]$ParseFailed
+        [switch]$ParseFailed,
+        # 912-s3: the exit-2 refused verdict's distinguishing literals
+        # (e.g. 'refused: uncommitted-changes', 'refused: no-run-diff').
+        # Each entry may still carry Format-GCInertRender's fenced-code-block
+        # wrap; this function strips that fencing before use. Optional and
+        # defaults to empty so every existing call site that does not yet
+        # pass it keeps its current (generic exit-2 message) behavior.
+        [Parameter(Mandatory = $false)][AllowNull()][string[]]$Refusals = @()
     )
 
     if ($ExitCode -eq 0) {
@@ -243,8 +315,31 @@ function Resolve-GoalRunValidatorExitDisposition {
         # is prefixed with the exit code so it stays distinguishable from
         # the exit-3 infra-error halt text below even though both share
         # the chain-stage-failure halt_reason one level up.
-        $haltDetail = if ($Reason) { "refused (exit 2): $Reason" } else { 'refused (exit 2): validator did not attempt assessment (pre-run precondition failure)' }
-        return [pscustomobject]@{ Disposition = 'halt'; Reason = $haltDetail }
+        #
+        # 912-s3: Reason is ALWAYS $null on a refused verdict (the
+        # distinguishing literals live in Refusals instead --
+        # goal-contract-validate-core.ps1:594-601), so before this fix the
+        # generic fallback below fired unconditionally and every refusal
+        # cause (uncommitted-changes, no-run-diff, and so on) collapsed to
+        # the same constant. When Refusals is supplied, strip each
+        # literal's inert-render fencing and use it as the halt detail so
+        # a caller can substring-match a specific refusal cause -- a
+        # no-run-diff refusal embeds commit shas, so callers must
+        # substring-match rather than compare for exact equality.
+        $strippedRefusals = @(
+            @($Refusals) | Where-Object { -not [string]::IsNullOrEmpty($_) } |
+            ForEach-Object { script:ConvertFrom-GCInertFencedText -Content ([string]$_) }
+        )
+        if ($strippedRefusals.Count -gt 0) {
+            $haltDetail = 'refused (exit 2): ' + ($strippedRefusals -join '; ')
+        }
+        elseif ($Reason) {
+            $haltDetail = "refused (exit 2): $Reason"
+        }
+        else {
+            $haltDetail = 'refused (exit 2): validator did not attempt assessment (pre-run precondition failure)'
+        }
+        return [pscustomobject]@{ Disposition = 'halt'; Reason = $haltDetail; Refusals = $strippedRefusals }
     }
     if ($ExitCode -eq 3) {
         if ($Reason -and ($Reason -match '^infra-error:')) {
@@ -282,6 +377,58 @@ function Resolve-GoalRunValidatorExitDisposition {
 # 3. Launch-pinned contract-hash check (M4, security-critical)
 # ---------------------------------------------------------------------------
 
+# Private: classifies which of Get-GCPinnedCommentBody's four null-return
+# causes fired, using the captured Write-Warning text as the only available
+# signal (its return contract itself is out of this step's scope -- see
+# Test-GoalRunContractHashPinned's call site). Matches the literal wording at
+# goal-contract-validate-core.ps1:528 (repo/owner unresolvable), :542/:546/
+# :550/:557 (four sibling wordings for a failed or unparseable gh api read,
+# all bucketed as one 'gh-read-failed' infra cause per the frame-slice
+# contract), :568 (no comment carries the marker), and :572 (more than one
+# comment carries the marker -- an integrity event, not infra). Falls back to
+# the original undifferentiated value when no warning was captured (a caller
+# or test double that returns $null with no Write-Warning), so pre-existing
+# behavior for callers that never emit a warning is unchanged.
+#
+# M19 (cross-file coupling, zero-tests-in-the-owning-suite gap): this
+# classifier regex-matches text owned by a DIFFERENT file
+# (goal-contract-validate-core.ps1), which this file may not modify. If a
+# future edit to that file's Get-GCPinnedCommentBody changes any of the six
+# lines cited above, none of THAT file's own tests would catch the drift --
+# the coupling is entirely one-directional and invisible from the owning
+# side. goal-run-prompt-core.Tests.ps1's own
+# 'M19: classifier regex-matches the CURRENT owning-file warning text'
+# Context guards against this from the consumer side instead: it reads the
+# actual Write-Warning literals out of goal-contract-validate-core.ps1 at
+# test-run time (not a hand-typed reproduction) and drives them through this
+# classifier via Test-GoalRunContractHashPinned, so a future edit to any of
+# the six cited lines that breaks one of the four `-match` patterns below
+# fails that suite loudly. A future editor of
+# goal-contract-validate-core.ps1's Get-GCPinnedCommentBody warnings should
+# run that suite before merging a wording change.
+function script:Resolve-GCPinnedCommentUnresolvableReason {
+    param(
+        [Parameter(Mandatory = $false)][AllowNull()][string[]]$Warnings = @()
+    )
+
+    foreach ($w in @($Warnings)) {
+        if ([string]::IsNullOrEmpty($w)) { continue }
+        if ($w -match 'could not resolve owner/repo') {
+            return 'contract-comment-unresolvable: repo-unresolvable'
+        }
+        if ($w -match 'refusing to guess \(ambiguous\)') {
+            return 'contract-comment-unresolvable: marker-ambiguous'
+        }
+        if ($w -match 'no comment on issue .* carries marker') {
+            return 'contract-comment-unresolvable: marker-not-found'
+        }
+        if ($w -match 'gh api') {
+            return 'contract-comment-unresolvable: gh-read-failed'
+        }
+    }
+    return 'contract-comment-unresolvable'
+}
+
 function Test-GoalRunContractHashPinned {
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -306,9 +453,40 @@ function Test-GoalRunContractHashPinned {
         }
     }
 
-    $body = & $CommentBodyReader $Issue $Marker $RepoRoot $Repo $GhCliPath $GitCliPath
+    # 912-s3: Get-GCPinnedCommentBody (goal-contract-validate-core.ps1)
+    # returns plain $null for FOUR distinct causes -- repo/owner
+    # unresolvable (:527-530), the gh api read itself failing in any of
+    # several ways (:541-559: threw, non-zero exit, empty response, or
+    # unparseable JSON), no comment carrying the marker (:567-570), and
+    # more than one comment carrying the marker (:571-574, an integrity
+    # event reachable by pasting a live marker literal into any comment,
+    # not an infra condition). Without this fix all four collapsed to the
+    # same 'contract-comment-unresolvable' Reason below, because $null
+    # carries no cause information on its own. This file does not touch
+    # Get-GCPinnedCommentBody's return contract (out of this step's scope
+    # -- see the frame-slice contract); instead the distinguishing
+    # information already present in its Write-Warning text is captured
+    # via the warning stream (redirected with 3>&1, forced to emit via a
+    # function-local $WarningPreference override that cannot leak to the
+    # caller) and pattern-matched below. A reader that emits no warning at
+    # all (e.g. a test double that just returns $null) still resolves to
+    # the original generic 'contract-comment-unresolvable' value, so
+    # pre-existing callers are unaffected.
+    $WarningPreference = 'Continue'
+    $bodyWarnings = [System.Collections.Generic.List[string]]::new()
+    $body = & $CommentBodyReader $Issue $Marker $RepoRoot $Repo $GhCliPath $GitCliPath 3>&1 |
+        ForEach-Object {
+            if ($_ -is [System.Management.Automation.WarningRecord]) {
+                $bodyWarnings.Add($_.Message)
+                $null
+            }
+            else {
+                $_
+            }
+        } | Where-Object { $null -ne $_ } | Select-Object -Last 1
+
     if ($null -eq $body) {
-        return [pscustomobject]@{ Pinned = $false; Reason = 'contract-comment-unresolvable'; LiveHash = $null }
+        return [pscustomobject]@{ Pinned = $false; Reason = (script:Resolve-GCPinnedCommentUnresolvableReason -Warnings $bodyWarnings); LiveHash = $null }
     }
 
     $payload = Get-GCContractBlock -CommentBody $body
@@ -363,10 +541,21 @@ function script:Invoke-GoalRunValidatorProcess {
     # ambiguity this fix closes.
     $reason = $null
     $parseFailed = $false
+    # 912-s3: the exit-2 refused verdict carries its distinguishing literals
+    # in Refusals, not Reason (Reason is $null on every refusal --
+    # goal-contract-validate-core.ps1:594-601/:2500-2507). Previously only
+    # Reason was read here, so Refusals was silently discarded and every
+    # refusal collapsed to one constant downstream. $null-guarded (rather
+    # than a bare @($parsed.Refusals)) because @() of a $null property
+    # yields a one-element array containing $null, not an empty array.
+    $refusals = @()
     if ($raw) {
         try {
             $parsed = ($raw | Out-String) | ConvertFrom-Json -ErrorAction Stop
             $reason = $parsed.Reason
+            if ($null -ne $parsed.Refusals) {
+                $refusals = @($parsed.Refusals)
+            }
         }
         catch {
             $reason = $null
@@ -380,7 +569,7 @@ function script:Invoke-GoalRunValidatorProcess {
         $parseFailed = $true
     }
 
-    return [pscustomobject]@{ ExitCode = $exitCode; Reason = $reason; ParseFailed = $parseFailed }
+    return [pscustomobject]@{ ExitCode = $exitCode; Reason = $reason; ParseFailed = $parseFailed; Refusals = $refusals }
 }
 
 function Resolve-GoalRunLoopPredicate {
@@ -418,12 +607,19 @@ function Resolve-GoalRunLoopPredicate {
     # validator -- the checks of the changed contract are never executed.
     $pin = & $PinCheck $Issue $LaunchPinnedHash $Marker $RepoRoot $Repo $GhCliPath $GitCliPath
     if (-not $pin.Pinned) {
+        # G10 fix: same defect Invoke-GoalRunChainRevalidate carried on its own
+        # pin-mismatch early return (G17). This file's header documents this
+        # function's return shape as including Refusals ("an empty array, never
+        # a one-element array containing $null, when none apply"), so omitting
+        # the property here made @($result.Refusals) yield the forbidden
+        # @($null) on the pin-mismatch path.
         return [pscustomobject]@{
             Disposition  = 'halt'
             HaltReason   = 'invariant-conflict'
             Reason       = $pin.Reason
             ExitCode     = $null
             ValidatorRan = $false
+            Refusals     = @()
         }
     }
 
@@ -432,12 +628,26 @@ function Resolve-GoalRunLoopPredicate {
     # (a default -ValidatorInvoker call, or a test double that opts in). A
     # test double result object with no ParseFailed property reads as $null
     # here, which [switch] coerces to $false -- unchanged pre-fix behavior.
-    $exitDisposition = Resolve-GoalRunValidatorExitDisposition -ExitCode $result.ExitCode -Reason $result.Reason -ParseFailed:([bool]$result.ParseFailed)
+    # M15 fix: thread Refusals through too, mirroring
+    # Invoke-GoalRunChainRevalidate's identical handling (goal-run-chain-
+    # core.ps1, 912-s6). Invoke-GoalRunValidatorProcess already returns a
+    # Refusals array on an exit-2 refused verdict, but this call site
+    # previously dropped it -- $null-guarded (rather than a bare
+    # @($result.Refusals)) because @() of a $null property yields a
+    # one-element array containing $null, not an empty array (the same
+    # gotcha this file's own Invoke-GoalRunValidatorProcess Refusals-reading
+    # code documents above).
+    $refusalsArg = @()
+    if ($null -ne $result.Refusals) { $refusalsArg = @($result.Refusals) }
+    $exitDisposition = Resolve-GoalRunValidatorExitDisposition -ExitCode $result.ExitCode -Reason $result.Reason -ParseFailed:([bool]$result.ParseFailed) -Refusals $refusalsArg
 
     $haltReason = $null
     if ($exitDisposition.Disposition -eq 'halt') {
         $haltReason = 'chain-stage-failure'
     }
+
+    $refusalsOut = @()
+    if ($null -ne $exitDisposition.Refusals) { $refusalsOut = @($exitDisposition.Refusals) }
 
     return [pscustomobject]@{
         Disposition  = $exitDisposition.Disposition
@@ -445,5 +655,6 @@ function Resolve-GoalRunLoopPredicate {
         Reason       = $exitDisposition.Reason
         ExitCode     = $result.ExitCode
         ValidatorRan = $true
+        Refusals     = $refusalsOut
     }
 }

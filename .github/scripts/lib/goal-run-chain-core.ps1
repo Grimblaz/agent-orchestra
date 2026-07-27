@@ -127,10 +127,24 @@ function Invoke-GoalRunChainRevalidate {
         Disposition 'halt' / HaltReason 'invariant-conflict' -- a distinct
         condition from a genuine re-validation failure, and the
         highest-precedence halt producer per Resolve-GoalRunHaltPrecedence.
+
+        M15 fix: the "EXACT SAME" claim above now also covers Refusals.
+        912-s6 added Refusals threading here but left
+        Resolve-GoalRunLoopPredicate (goal-run-prompt-core.ps1) still
+        dropping the field on an exit-2 refused verdict -- an asymmetry
+        this fix closes by threading Refusals through
+        Resolve-GoalRunLoopPredicate identically (same $null-guarded
+        @($result.Refusals) read, same pass-through to
+        Resolve-GoalRunValidatorExitDisposition, same Refusals field on the
+        returned object). Both functions now apply genuinely identical
+        exit-code/Reason/Refusals disposition logic, not just the same
+        exit-3/exit-2 bucketing.
     .OUTPUTS
-        [pscustomobject]@{ Disposition; HaltReason; Reason; ExitCode }
+        [pscustomobject]@{ Disposition; HaltReason; Reason; ExitCode; Refusals }
         Disposition is 'satisfied' | 'not-satisfied' | 'halt'. HaltReason is
-        $null unless Disposition is 'halt'.
+        $null unless Disposition is 'halt'. Refusals is an empty array
+        (never a one-element array containing $null) unless the validator
+        returned exit-2 refused literals.
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -161,11 +175,19 @@ function Invoke-GoalRunChainRevalidate {
     # a contract that changed after launch are never executed here either.
     $pin = & $PinCheck $Issue $LaunchPinnedHash $Marker $RepoRoot $Repo $GhCliPath $GitCliPath
     if (-not $pin.Pinned) {
+        # G17 fix: Refusals must be present on EVERY returned object, per this
+        # function's .OUTPUTS contract above ("an empty array (never a
+        # one-element array containing $null)"). This early return previously
+        # omitted the property entirely, so a caller doing @($result.Refusals)
+        # on the pin-mismatch path got exactly the forbidden @($null) -- a
+        # one-element array whose single element is $null, which reads as
+        # Count -eq 1 to any refusal-literal check.
         return [pscustomobject]@{
             Disposition = 'halt'
             HaltReason  = 'invariant-conflict'
             Reason      = $pin.Reason
             ExitCode    = $null
+            Refusals    = @()
         }
     }
 
@@ -184,7 +206,28 @@ function Invoke-GoalRunChainRevalidate {
     # Resolve-GoalRunValidatorExitDisposition (goal-run-prompt-core.ps1) only.
     # M23 fix: pass through ParseFailed exactly as Resolve-GoalRunLoopPredicate
     # does, so a lost Reason on an exit-3 chain re-validation fails closed too.
-    $disposition = Resolve-GoalRunValidatorExitDisposition -ExitCode $result.ExitCode -Reason $result.Reason -ParseFailed:([bool]$result.ParseFailed)
+    # 912-s6 fix: thread Refusals through too. Invoke-GoalRunValidatorProcess
+    # (goal-run-prompt-core.ps1, 912-s3) already returns a Refusals array on
+    # an exit-2 refused verdict, but this call site previously dropped it --
+    # $null-guarded (rather than a bare @($result.Refusals)) because @() of a
+    # $null property yields a one-element array containing $null, not an
+    # empty array (same gotcha goal-run-prompt-core.ps1's own Refusals-reading
+    # code documents). Without this, the loop-interrupted resume stage
+    # (agents/Goal-Run.agent.md) has no way to distinguish a tree-state
+    # refusal (uncommitted-changes/no-run-diff, which should relaunch) from
+    # any other chain-stage-failure (which should halt).
+    #
+    # Array-identity note: `$x = if (...) { @(...) } else { @() }` silently
+    # collapses a one-element array to a plain scalar string -- PowerShell
+    # unrolls a script block's captured output the same way a function
+    # return value would, even for a bare variable assignment. Pre-assign
+    # the empty-array default, then conditionally overwrite it inside a
+    # plain (no-else) `if`, mirroring goal-run-prompt-core.ps1's own
+    # `$refusals = @(); if (...) { $refusals = @(...) }` shape for the
+    # exact same reason.
+    $refusalsArg = @()
+    if ($null -ne $result.Refusals) { $refusalsArg = @($result.Refusals) }
+    $disposition = Resolve-GoalRunValidatorExitDisposition -ExitCode $result.ExitCode -Reason $result.Reason -ParseFailed:([bool]$result.ParseFailed) -Refusals $refusalsArg
 
     $haltReason = $null
     if ($disposition.Disposition -eq 'halt') {
@@ -193,11 +236,15 @@ function Invoke-GoalRunChainRevalidate {
         $haltReason = 'chain-stage-failure'
     }
 
+    $refusalsOut = @()
+    if ($null -ne $disposition.Refusals) { $refusalsOut = @($disposition.Refusals) }
+
     return [pscustomobject]@{
         Disposition = $disposition.Disposition
         HaltReason  = $haltReason
         Reason      = $disposition.Reason
         ExitCode    = $result.ExitCode
+        Refusals    = $refusalsOut
     }
 }
 
