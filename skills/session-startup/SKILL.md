@@ -43,7 +43,12 @@ Follow these steps exactly.
 
 For automatic startup runs, first use any hook-injected `additionalContext` if it is already present in the agent's first turn. Resolve the detector script path relative to this skill file for manual fallback: the wrapper at `scripts/session-cleanup-detector.ps1` (in this skill's directory) self-resolves its repo root via `$PSScriptRoot`, so no environment variables are required. If `pwsh` is unavailable or the script is missing, skip the entire check silently and continue with the user's request.
 
-**Scratch-containment net (AC5)**: As part of the SessionStart hook invocation, `session-cleanup-detector.ps1` calls `scripts/Ensure-ScratchGitignore.ps1` (fail-open) before running the cleanup detector. That script idempotently appends `.tmp/` and the mangle-literal gitignore patterns from `skills/terminal-hygiene/SKILL.md ## Scratch & Temp-File Hygiene` to the consumer repo's `.gitignore` when any are absent. Running it twice produces no duplicate lines. Failures in this step are swallowed — they never crash the hook or affect the cleanup-detector output.
+**Scratch-containment net (AC5)**: As part of the SessionStart hook invocation, `session-cleanup-detector.ps1` calls `scripts/Ensure-ScratchGitignore.ps1` (fail-open) before running the cleanup detector. That script idempotently writes to **two distinct destinations**, and both are intentional:
+
+1. It appends `.tmp/` and the mangle-literal gitignore patterns from `skills/terminal-hygiene/SKILL.md ## Scratch & Temp-File Hygiene` to the consumer repo's tracked `.gitignore` when any are absent.
+2. It writes the goal-run harness runtime-state patterns (root-anchored entries for `goal-run-active.json` and `goal-run-log.jsonl`, each written with a leading slash so it matches only at the worktree root; sourced from `skills/goal-run/`, **not** from terminal-hygiene) to `.git/info/exclude` — the per-clone, untracked exclude file. That destination is load-bearing: appending these to the tracked `.gitignore` would leave the launch repo dirty, and the goal-contract validator refuses a dirty `-RepoRoot`, which is the exact `refused: uncommitted-changes` halt this ignoring exists to prevent (#929). A maintainer auditing the script against this doc should not treat the goal-run handling as spurious.
+
+Running it twice produces no duplicate lines in either destination. Failures in this step are swallowed — they never crash the hook or affect the cleanup-detector output.
 
 ### Step 2 — Check the automatic run-once guard
 

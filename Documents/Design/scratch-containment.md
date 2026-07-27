@@ -16,7 +16,14 @@ Three-layer defense in depth:
 
 **Post-merge disk clearing** — `Remove-IssueTmpScratch` in `post-merge-cleanup.ps1`: deletes an issue's `.tmp/{N}-*` and `.tmp/issue-{N}*` files at merge time, ordered after orphan-branch cleanup by convention (log-readability, not a data dependency — the auto-resolve predicate reads git history only).
 
-**Consumer zero-config** — `Ensure-ScratchGitignore.ps1` called from `session-cleanup-detector.ps1` at SessionStart: idempotently appends `.tmp/` and the mangle-literal net to the consumer repo's `.gitignore` if absent. Fail-open (always exits 0).
+**Consumer zero-config** — `Ensure-ScratchGitignore.ps1` called from `session-cleanup-detector.ps1` at SessionStart. It writes to **two distinct destinations**, and both are intentional:
+
+1. *Scratch containment (this design)* — idempotently appends `.tmp/` and the mangle-literal net to the consumer repo's tracked `.gitignore` if absent.
+2. *goal-run runtime state (#929, outside this design)* — writes root-anchored patterns for `goal-run-active.json` and `goal-run-log.jsonl` (each anchored with a leading slash so it matches only at the worktree root) to `.git/info/exclude`, **not** to `.gitignore`. That destination is load-bearing: the exclude file is per-clone and untracked, so it cannot itself dirty a tracked file, whereas a tracked-`.gitignore` append would leave the launch repo modified and re-trigger the exact `refused: uncommitted-changes` halt the ignoring exists to prevent.
+
+A maintainer auditing the script against this doc should not treat the goal-run handling as spurious. Canonical description: [session-startup SKILL.md](../../skills/session-startup/SKILL.md) § Scratch-containment net (AC5).
+
+Both steps fail open independently (the script always exits 0).
 
 ## Key decisions (from #643)
 
@@ -39,7 +46,7 @@ The gitignore net catches most shapes but is acknowledged best-effort. Documente
 - `skills/safe-operations/SKILL.md`, `skills/browser-canvas-testing/SKILL.md`, `skills/ui-iteration/SKILL.md` — cross-references
 - `.gitignore` — containment net
 - `skills/session-startup/scripts/post-merge-cleanup.ps1` — `Remove-IssueTmpScratch`
-- `skills/session-startup/scripts/Ensure-ScratchGitignore.ps1` — consumer zero-config hook
+- `skills/session-startup/scripts/Ensure-ScratchGitignore.ps1` — consumer zero-config hook; two destinations (scratch net to `.gitignore`, goal-run runtime state to `.git/info/exclude`)
 - `.github/scripts/Tests/post-merge-cleanup.Tests.ps1` — TDD coverage
 - `.github/scripts/Tests/script-safety-contract.Tests.ps1` — grep guard
 - `.github/scripts/Tests/Ensure-ScratchGitignore.Tests.ps1` — hook tests
