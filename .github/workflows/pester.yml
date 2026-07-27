@@ -131,6 +131,14 @@ jobs:
             # Tracked in issue #909 — re-add this file to the allowlist once that
             # issue makes the suite Linux-clean. The five suites below run and
             # pass on Linux.
+            # NOTE: cost-walker.Tests.ps1 is likewise deliberately NOT listed.
+            # Several of its blocks pass hard-coded 'C:\fake\path' literals into
+            # path-composition and filesystem code — the same shape as the #909
+            # failures above. Issue #908 split the pure-string
+            # Get-CostTranscriptSlug coverage into the suite below so the slug
+            # regression is CI-gated without importing that risk; the split file
+            # touches no filesystem, git, or PSDrive.
+            '.github/scripts/Tests/cost-walker-slug.Tests.ps1',
             '.github/scripts/Tests/cost-attribution.Tests.ps1',
             '.github/scripts/Tests/cost-rate-table.Tests.ps1',
             '.github/scripts/Tests/cost-pattern-renderer.Tests.ps1',

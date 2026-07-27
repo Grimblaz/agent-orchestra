@@ -200,55 +200,129 @@ function script:Add-CostWalkerAssistantEventAndSubagents {
     }
 }
 
+function script:Get-CostWalkerSlugHashSuffix {
+    <#
+    .SYNOPSIS
+        Reproduces Claude Code's disambiguating hash suffix for over-long slugs.
+    .DESCRIPTION
+        Vendor rule (issue #908 evidence pass), expressed in its original form:
+            hash(s):  t = 0; for each char c: t = (t << 5) - t + c.charCodeAt() | 0
+            suffix:   Math.abs(hash(s)).toString(36)
+        That is the classic 31-multiplier string hash, wrapped to a signed 32-bit
+        integer after every character, rendered in lowercase base-36.
+
+        `(t << 5) - t` is exactly `t * 31` modulo 2^32, so wrapping once per
+        character after `t * 31 + c` reproduces the vendor's shift-then-subtract
+        order without needing to model the intermediate shift.
+    .OUTPUTS
+        [string] lowercase base-36 magnitude, '0' when the hash is zero.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Value
+    )
+
+    $hash = 0L
+    foreach ($ch in $Value.ToCharArray()) {
+        $hash = ($hash * 31L + [long][int]$ch) -band 0xFFFFFFFFL
+        if ($hash -ge 2147483648L) { $hash -= 4294967296L }
+    }
+
+    # JavaScript numbers are doubles, so Math.abs(-2^31) is 2^31 rather than an
+    # overflow. Widen to [long] before taking the magnitude -- [Math]::Abs on
+    # [int]::MinValue throws in .NET.
+    $magnitude = [Math]::Abs($hash)
+    if ($magnitude -eq 0L) {
+        return '0'
+    }
+
+    $digits = '0123456789abcdefghijklmnopqrstuvwxyz'
+    $encoded = [System.Text.StringBuilder]::new()
+    while ($magnitude -gt 0L) {
+        $remainder = $magnitude % 36L
+        [void]$encoded.Insert(0, $digits[[int]$remainder])
+        $magnitude = [long](($magnitude - $remainder) / 36L)
+    }
+
+    return $encoded.ToString()
+}
+
 function Get-CostTranscriptSlug {
     <#
     .SYNOPSIS
-        Derives the Claude projects slug from a CWD path string.
+        Derives the Claude Code projects-directory slug from a CWD path string.
     .DESCRIPTION
-        Slug derivation rule (issue #467 D1):
-          Split path into segments, replace spaces within segments with '-',
-          join as: {drive}--{seg1}-{seg2}-...
-          Drive letter is lowercased; all other segment case is preserved.
+        Mirrors Claude Code's own slug builder, which is the sole authority for
+        these directory names. Issue #908 replaced the segment-join approximation
+        introduced by issue #467 D1 after an evidence pass over the real
+        ~/.claude/projects/* names; the vendor rule is a single character-class
+        substitution over the whole path, not a per-segment join:
+
+            slug = cwd.replace(/[^a-zA-Z0-9]/g, '-')
+            if (slug.length > 200) {
+                slug = slug.slice(0, 200) + '-' + base36(abs(hash(cwd)))
+            }
+
+        Three consequences the segment-join rule got wrong:
+          * EVERY non-alphanumeric character maps to '-' -- dots, underscores and
+            the drive colon included, not just spaces and separators.
+          * Runs are NOT collapsed. A dotted segment contributes its own leading
+            '-' on top of the separator's, which is exactly what produces the
+            '--claude-worktrees-' form Claude Code writes for '.claude/worktrees'.
+            The old rule emitted '-.claude-worktrees-', which matched nothing and
+            left the primary-slug lookup permanently dead for worktree checkouts.
+          * Case is preserved everywhere, drive letter included: 'C:\...' derives
+            'C--...', not 'c--...'.
+
         Examples:
-          C:\Users\Micah\Code 2\copilot-orchestra  -> c--Users-Micah-Code-2-copilot-orchestra
-          /c/Users/Micah/Code 2/copilot-orchestra  -> c--Users-Micah-Code-2-copilot-orchestra
+          C:\Users\Micah\Code 2\copilot-orchestra
+            -> C--Users-Micah-Code-2-copilot-orchestra
+          C:\Users\Micah\Code\Copilot-Orchestra\.claude\worktrees\issue-908-99513b
+            -> C--Users-Micah-Code-Copilot-Orchestra--claude-worktrees-issue-908-99513b
+          C:\repo\src\my.app_v2
+            -> C--repo-src-my-app-v2
+          /c/Users/Micah/Code 2/copilot-orchestra
+            -> c--Users-Micah-Code-2-copilot-orchestra
+
+        Two pre-normalizations run before the vendor rule, because callers can
+        hold a path in a shape Claude Code itself never sees:
+          1. A git-bash MSYS drive path ('/c/repo') is rewritten to its Windows
+             form ('c:/repo') so it derives the slug of the session that actually
+             ran there. Feeding the raw MSYS form to the vendor rule would yield
+             a leading '-' and a single-dash drive ('-c-repo'), matching nothing.
+          2. Trailing separators are dropped, since process.cwd() never reports
+             one and 'C:\repo\' must not derive a trailing '-'. A bare drive root
+             ('C:\') is left alone -- there the separator is part of the path.
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$CwdPath
     )
 
-    # Step 1: Normalize to forward slashes
-    $p = $CwdPath.Replace('\', '/')
+    $p = $CwdPath
 
-    # Step 2: Strip leading slash (git-bash /c/... or UNC-style leading slashes)
-    $p = $p.TrimStart('/')
-
-    # Step 3: Strip drive-letter colon and lowercase drive (e.g. "C:/..." -> "c/...")
-    if ($p -match '^([A-Za-z]):(.*)$') {
-        $driveLetter = $Matches[1].ToLowerInvariant()
-        $afterColon = $Matches[2].TrimStart('/')
-        $p = if ($afterColon) { "$driveLetter/$afterColon" } else { $driveLetter }
+    # Pre-normalization 1: git-bash MSYS drive form -> Windows drive form.
+    if ($p -match '^/([A-Za-z])/(.*)$') {
+        $p = "$($Matches[1]):/$($Matches[2])"
     }
 
-    # Step 4: Split into non-empty path segments
-    $segments = @($p.Split('/') | Where-Object { $_ -ne '' })
-
-    if ($segments.Count -eq 0) {
-        return ''
+    # Pre-normalization 2: drop trailing separators, except on a bare drive root.
+    if ($p -match '^(.*[^\\/])[\\/]+$' -and $Matches[1] -notmatch '^[A-Za-z]:$') {
+        $p = $Matches[1]
     }
 
-    # Step 5: Replace spaces with '-' within each segment
-    $processedSegments = @($segments | ForEach-Object { $_.Replace(' ', '-') })
+    # Vendor rule: every non-alphanumeric character becomes '-'; nothing is
+    # collapsed, trimmed, or case-folded.
+    $slug = [regex]::Replace($p, '[^a-zA-Z0-9]', '-')
 
-    # Step 6: Join: drive segment + '--' + remaining segments joined by '-'
-    if ($processedSegments.Count -eq 1) {
-        return $processedSegments[0]
+    # Vendor overflow rule. The 200 is inlined rather than held in a $script:
+    # constant on purpose: $script: values do not survive a cloned worker
+    # runspace, and this library is dot-sourced into one by frame-credit-ledger.
+    $maxSlugLength = 200
+    if ($slug.Length -le $maxSlugLength) {
+        return $slug
     }
 
-    $driveSegment = $processedSegments[0]
-    $remainingJoined = $processedSegments[1..($processedSegments.Count - 1)] -join '-'
-    return "$driveSegment--$remainingJoined"
+    return $slug.Substring(0, $maxSlugLength) + '-' + (script:Get-CostWalkerSlugHashSuffix -Value $p)
 }
 
 function script:Resolve-CostWalkerPrimarySlugDir {

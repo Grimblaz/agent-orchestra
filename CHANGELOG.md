@@ -2,6 +2,13 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.4.14] — 2026-07-27
+
+### Fixed
+
+- `Get-CostTranscriptSlug` now mirrors Claude Code's actual projects-directory naming rule — every non-alphanumeric character maps to `-`, nothing is collapsed or case-folded, and slugs over 200 characters are truncated with a base-36 hash suffix. The previous per-segment join lowercased the drive and only substituted spaces, so it derived a directory that never existed for any `.claude/worktrees/*` checkout, leaving the primary-slug lookup permanently dead and emitting a misleading `slug directory not found` warning on every cost walk from a worktree (#908).
+- Registered `cost-walker-slug.Tests.ps1` as a CI gate. The slug coverage was split out of `cost-walker.Tests.ps1`, which stays unregistered because other blocks in it pass Windows path literals into filesystem code and are not Linux-clean (#908).
+
 ## [3.4.13] — 2026-07-26
 
 ### Fixed

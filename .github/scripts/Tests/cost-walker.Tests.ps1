@@ -1,38 +1,10 @@
 #Requires -Version 7.0
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 
-Describe 'Get-CostTranscriptSlug' {
-    BeforeAll {
-        $script:LibPath = Join-Path $PSScriptRoot '../lib/cost-walker.ps1'
-        if (Test-Path $script:LibPath) {
-            . $script:LibPath
-            . (Join-Path $PSScriptRoot '../lib/path-normalize.ps1')
-        }
-    }
 
-    Context 'slug derivation' {
-        It 'derives slug from Windows backslash path' {
-            Get-CostTranscriptSlug -CwdPath 'C:\Users\Micah\Code 2\copilot-orchestra' |
-                Should -Be 'c--Users-Micah-Code-2-copilot-orchestra'
-        }
-        It 'derives slug from git-bash /c/ path' {
-            Get-CostTranscriptSlug -CwdPath '/c/Users/Micah/Code 2/copilot-orchestra' |
-                Should -Be 'c--Users-Micah-Code-2-copilot-orchestra'
-        }
-        It 'replaces spaces with dashes' {
-            Get-CostTranscriptSlug -CwdPath '/c/Users/Micah/My Project' |
-                Should -Be 'c--Users-Micah-My-Project'
-        }
-        It 'preserves case in path segments' {
-            Get-CostTranscriptSlug -CwdPath '/c/Users/Micah/MyRepo' |
-                Should -Be 'c--Users-Micah-MyRepo'
-        }
-        It 'drops leading drive-letter colon' {
-            Get-CostTranscriptSlug -CwdPath 'D:\repos\project' |
-                Should -Be 'd--repos-project'
-        }
-    }
-}
+# Get-CostTranscriptSlug coverage lives in cost-walker-slug.Tests.ps1, which is
+# registered in .github/workflows/pester.yml. It was split out by issue #908 so
+# the slug regression runs in CI without importing this suite's Linux-red blocks.
 
 Describe 'Invoke-CostTranscriptWalk' {
     BeforeAll {
