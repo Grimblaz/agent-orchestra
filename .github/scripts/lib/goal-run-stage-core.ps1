@@ -1705,12 +1705,28 @@ function Resolve-GoalRunControlReturn {
             $existingComments = @(Get-GoalRunIssueComments -Issue $Issue -Owner $Owner -Repo $Repo -RepoRoot $RepoRoot -CommentsReader $CommentsReader)
             # #912 external-review follow-up (G7 sibling): this recency guard
             # used the same raw `-like "*$marker*"` SUBSTRING match every other
-            # reader in this file was line-anchored away from. It is a
-            # read-only path -- the worst case is suppressing a genuine
-            # exhaustion halt because a comment merely MENTIONS the halt-report
-            # marker in prose -- but shipping two different marker-matching
-            # conventions in one file is how the next reader picks the wrong
-            # one. Reuse the shared helper. See Get-GRSMarkerWholeLinePattern.
+            # reader in this file was line-anchored away from. Shipping two
+            # different marker-matching conventions in one file is how the next
+            # reader picks the wrong one. Reuse the shared helper. See
+            # Get-GRSMarkerWholeLinePattern.
+            #
+            # #912 post-fix defense (F1) -- do NOT read this guard as read-only.
+            # An earlier revision of this comment claimed "the worst case is
+            # suppressing a genuine exhaustion halt". That is wrong: failing to
+            # suppress routes control into Invoke-GoalRunHaltEmit ->
+            # Find-OrUpsertComment, whose target selection is still an
+            # unanchored `-like "*$Marker*"` over whole comment bodies, with an
+            # earliest-REST-id tie-break that actively prefers the wrong comment.
+            # So a prose comment that merely MENTIONS the halt-report marker is
+            # no longer suppressed here, and can be selected and PATCHed away
+            # there. Anchoring this reader is still correct -- the suppression it
+            # removed was itself a false-negative on halt reporting, and the
+            # same clobber is already reachable unguarded from the
+            # per-iteration halt emit in goal-run-predicate-core.ps1 -- but the
+            # writer-side selector is the real fix and is out of scope here.
+            # See Documents/Design/marker-reader-inventory.md
+            # "## Comment-selector class (Find-OrUpsertComment and the `-like`
+            # cluster)", which scopes that replacement to the s5 slice of #885.
             $haltMarkerPattern = Get-GRSMarkerWholeLinePattern -Marker $haltMarker
             $existingMatches = @($existingComments | Where-Object { $_.body -and ($_.body -match $haltMarkerPattern) })
 
@@ -2066,8 +2082,8 @@ function Invoke-GoalRunRestart {
         restart` lever. Refuses while the run appears live (fresh
         heartbeat); otherwise captures the worktree path and branch into a
         durable report comment BEFORE clearing anything, then clears BOTH
-        the stage marker comment and the worktree's goal-run-active.json
-        file.
+        the stage marker comment and the goal-run-active.json file inside
+        that worktree.
     .DESCRIPTION
         Capture-then-clear is the single most load-bearing ordering this
         function exists to guarantee (see the requirement contract): the
@@ -2076,8 +2092,9 @@ function Invoke-GoalRunRestart {
         clearing the marker before recording the branch would orphan every
         commit the interrupted loop made with no way to find it again.
         This function only ever runs from the explicit operator `restart`
-        argument text (see agents/Goal-Run.agent.md's Operator Restart
-        section) -- never inferred from any halt or harness state.
+        argument text (see the Operator Restart section in
+        agents/Goal-Run.agent.md) -- never inferred from any halt or
+        harness state.
 
         Liveness reuses Test-GoalRunInflightAppearsDead's elapsed-time math
         (Delegation Instead Of Duplication -- see implementation-discipline
