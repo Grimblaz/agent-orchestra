@@ -21,12 +21,17 @@ Describe 'Ensure-ScratchGitignore.ps1' {
         # Canonical patterns expected to be present after the script runs.
         # /*[Tt]emp* intentionally absent (RF4): over-matched template.md/attempt.js;
         # primary mangle shapes covered by /[A-Za-z]:* and /[A-Za-z][A-Za-z]sers*.
+        # goal-run-active.json / goal-run-log.jsonl (#929): the harness writes both
+        # at the execution worktree root, and the contract validator refuses a dirty
+        # -RepoRoot, so an unignored pair halts every run's first predicate call.
         $script:RequiredPatterns = @(
             '.tmp/',
             '/[A-Za-z][A-Za-z]sers*',
             '/[A-Za-z]:*',
             '/var*folders*',
-            '/[Rr][Uu][Nn][Nn][Ee][Rr]*[Tt][Ee][Mm][Pp]*'
+            '/[Rr][Uu][Nn][Nn][Ee][Rr]*[Tt][Ee][Mm][Pp]*',
+            'goal-run-active.json',
+            'goal-run-log.jsonl'
         )
     }
 

@@ -288,11 +288,12 @@
         fail-closed shape (`ExitCode=1, TotalFailed=0, TimedOut` as
         applicable) -- Test-GCSuiteGatePass rejects this on ExitCode even
         though TotalFailed reads 0, closing the exact false-GREEN gap this
-        slice exists to fix. Standalone at s4, like s3: not yet threaded
-        into the `-SuitePhase` seam on Invoke-GCWorktreeSession or the
-        control flow inside Invoke-GoalContractValidate; a later slice
-        wires it in and folds the verdict from Test-GCSuiteGatePass into
-        Resolve-GCVerdictDisposition alongside the s1/s3/s5 signals. NO
+        slice exists to fix. WIRED as of s6 (#929 AC4 doc correction --
+        this block previously still said "not yet threaded", which is how a
+        reader concluded the green floor was inert): Invoke-GoalContractValidate
+        passes `-SuitePhase` to Invoke-GCWorktreeSession at :840, calls
+        Test-GCSuiteGatePass at :876, and folds the result into the fail
+        disposition at :878. The gate is live, not standalone. NO
         FLAKE-QUENCH (U5, judge-sustained HIGH, dropped from the plan
         entirely): this function contains no retry-the-suite-on-failure
         logic of any kind -- any failure, flaky or not, is `fail`.
@@ -422,11 +423,10 @@
         Invoke-GCSuitePhase). A `Resolve-GCDiffBase` refusal short-circuits
         before any detector runs. Every detector result is a FLAG, never a
         block -- this function has no fail/pass verdict of its own.
-        Standalone at s5, like s3/s4: not yet threaded into
-        Invoke-GCWorktreeSession's seams or Invoke-GoalContractValidate's
-        control flow; s6 wires it in and folds `Flags` into
-        Resolve-GCVerdictDisposition's `-HasReviewRequired` signal
-        alongside the s1/s3/s4 signals.
+        WIRED as of s6 (#929 AC4 doc correction): Invoke-GoalContractValidate
+        passes `-DiffIntegrityPhase` to Invoke-GCWorktreeSession at :840, and
+        `Flags` reaches Resolve-GCVerdictDisposition's `-HasReviewRequired`
+        signal at :890 alongside the s1/s3/s4 signals.
 #>
 
 # Sibling-lib dot-source, mirroring the repo convention (e.g.
@@ -903,11 +903,13 @@ function Invoke-GoalContractValidate {
 # -----------------------------------------------------------------------------
 # s2: detached disposable-worktree execution environment (frame-slice s2,
 # AC1/AC2). These functions are net-new (no production `git worktree add`
-# precedent) and are not yet threaded into Invoke-GoalContractValidate's
-# control flow above -- that function still implements only the s1
-# contract-intake gates. s3 (target-check execution) and s4 (suite green
+# precedent). WIRED as of s6 (#929 AC4 doc correction -- this block previously
+# said Invoke-GoalContractValidate "still implements only the s1 contract-intake
+# gates", which is no longer true): that function now calls
+# Invoke-GCWorktreeSession at :840 with all three phase seams populated. s3
+# (target-check execution) and s4 (suite green
 # floor) plug their bodies into Invoke-GCWorktreeSession's -ChecksPhase and
-# -SuitePhase seams; a later slice folds the resulting session object into
+# -SuitePhase seams; s6 folds the resulting session object into
 # Resolve-GCVerdictDisposition alongside the intake gates.
 # -----------------------------------------------------------------------------
 
@@ -1168,11 +1170,10 @@ function Invoke-GCWorktreeSession {
 # executes it as a shell command via pwsh without attempting to sanitize or
 # interpret its content beyond that. These functions are net-new (no
 # production Process.Kill($true)-timeout precedent existed before this
-# slice) and are standalone at s3: not yet threaded into
-# Invoke-GCWorktreeSession's -ChecksPhase seam or Invoke-GoalContractValidate's
-# control flow. s6 wires Invoke-GCTargetChecks into -ChecksPhase and folds
-# its result into Resolve-GCVerdictDisposition alongside the s1/s4/s5
-# signals.
+# slice). WIRED as of s6 (#929 AC4 doc correction): Invoke-GCTargetChecks runs
+# in Invoke-GCWorktreeSession's -ChecksPhase seam (passed at :840) and its
+# result folds into Resolve-GCVerdictDisposition at :877-878 alongside the
+# s1/s4/s5 signals.
 # -----------------------------------------------------------------------------
 
 function ConvertTo-GCWallClockSeconds {
@@ -1698,9 +1699,9 @@ try {
 # -HasReviewRequired path alongside the s1/s3/s4 signals. Net-new: no
 # production `git merge-base` explicit-SHA precedent, AST `Should`-count
 # precedent, or `--diff-filter=DR --no-renames` test-deletion precedent
-# existed before this slice. These functions are standalone at s5, like s3/s4:
-# not yet threaded into Invoke-GCWorktreeSession's seams or
-# Invoke-GoalContractValidate's control flow.
+# existed before this slice. WIRED as of s6 (#929 AC4 doc correction): reached
+# through Invoke-GCWorktreeSession's -DiffIntegrityPhase seam, passed by
+# Invoke-GoalContractValidate at :840.
 # -----------------------------------------------------------------------------
 
 # The only two invariants[] literals this validator interprets (872's schema

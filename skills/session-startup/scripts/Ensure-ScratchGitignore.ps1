@@ -1,8 +1,10 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-    Idempotently appends .tmp/ and mangle-literal patterns to the repo .gitignore.
-    Called once per session by the SessionStart hook.
+    Idempotently appends .tmp/, mangle-literal, and goal-run runtime-state
+    patterns to the repo .gitignore. Called once per session by the SessionStart
+    hook, which is what gives consumer repositories the same protection the hub
+    repo gets from its own committed .gitignore.
 
     Requires PowerShell 7+ (uses the ?? null-coalescing operator); the SessionStart
     hook invokes it under pwsh, matching this contract.
@@ -28,7 +30,17 @@ $requiredLines = @(
     '/[A-Za-z][A-Za-z]sers*',
     '/[A-Za-z]:*',
     '/var*folders*',
-    '/[Rr][Uu][Nn][Nn][Ee][Rr]*[Tt][Ee][Mm][Pp]*'
+    '/[Rr][Uu][Nn][Nn][Ee][Rr]*[Tt][Ee][Mm][Pp]*',
+    # goal-run harness runtime state (#929). The harness writes both files at the
+    # execution worktree root by design (874-D6), and the contract validator
+    # refuses a dirty -RepoRoot before doing anything else, so leaving them
+    # untracked makes every run's first predicate call halt with
+    # 'refused: uncommitted-changes'. Ignoring rather than committing is
+    # deliberate: a run log can carry transcript event content and absolute
+    # session paths, so committing it would be a disclosure path into the PR.
+    '# goal-run harness runtime state - keep out of git status',
+    'goal-run-active.json',
+    'goal-run-log.jsonl'
 )
 
 try {

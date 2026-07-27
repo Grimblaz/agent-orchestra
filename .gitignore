@@ -30,6 +30,16 @@ memories/
 # but this is defense-in-depth in case a capture lands somewhere tracked.
 leg-*.jsonl
 leg-*.stderr.log
+
+# goal-run harness runtime state (#929) — the harness writes both files at the
+# execution worktree root by design (874-D6), and the contract validator refuses
+# a dirty -RepoRoot before it does anything else, so leaving them untracked made
+# every run's first predicate call halt with 'refused: uncommitted-changes'.
+# Ignoring rather than committing is deliberate: a run log can carry transcript
+# event content and absolute session paths, so committing it would be a
+# disclosure path into the PR.
+goal-run-active.json
+goal-run-log.jsonl
 leg-*.log
 
 # Agent scratch — keep out of git status

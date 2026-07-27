@@ -2,6 +2,14 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.4.13] — 2026-07-26
+
+### Fixed
+
+- goal-run: ignore `goal-run-active.json` and `goal-run-log.jsonl` so a freshly provisioned goal-run worktree reports a clean tree. The harness writes both at the worktree root by design (874-D6) and the contract validator refuses a dirty `-RepoRoot` before anything else, so every run's first predicate call previously halted with `refused: uncommitted-changes` (#929).
+- `Ensure-ScratchGitignore.ps1` appends the same two patterns, giving consumer repositories the protection the hub repo gets from its own committed `.gitignore` (#929).
+- Correct five stale "not yet threaded" claims in `goal-contract-validate-core.ps1`'s own doc comments: the suite green floor, target checks, and diff-integrity phases have all been wired since s6. The stale text caused a plan to describe the absolute zero-failure suite gate as baseline-relative (#929).
+
 ## [3.4.12] — 2026-07-26
 
 ### Fixed
