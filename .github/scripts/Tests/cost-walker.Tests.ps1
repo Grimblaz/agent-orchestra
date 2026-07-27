@@ -90,8 +90,12 @@ Describe 'Invoke-CostTranscriptWalk' {
 
             # Default gh-cmdlet call-through: this It creates a REAL uppercase-named directory
             # on disk and asserts the code discovers it via real filesystem fallback
-            # (Resolve-CostWalkerPrimarySlugDir's case-insensitive Get-ChildItem match at
-            # cost-walker.ps1:214-216). Only the exact lowercase path this It is simulating as
+            # (the case-insensitive Get-ChildItem match inside
+            # Resolve-CostWalkerPrimarySlugDir in cost-walker.ps1 -- referenced by function
+            # name rather than line number, which the #908 rewrite invalidated once already).
+            # That fallback is load-bearing, not vestigial: a real lowercase-drive slug
+            # directory exists on disk alongside its uppercase sibling. Only the exact
+            # lowercase path this It is simulating as
             # absent should be intercepted; every other Test-Path call (directory-discovery,
             # subagent-file probes, etc.) must hit the real filesystem so that fallback works.
             # A captured CommandInfo reference is required to call through without recursing

@@ -262,6 +262,16 @@ function Get-CostTranscriptSlug {
                 slug = slug.slice(0, 200) + '-' + base36(abs(hash(cwd)))
             }
 
+        Provenance: extracted from the installed Claude Code CLI binary and
+        confirmed independently against versions 2.1.216 and 2.1.219 (issue #908,
+        cross-checked in issue #932). The binary carries a second, similarly
+        shaped builder that DOES lowercase -- it resolves *team* directories, not
+        projects, so anyone re-deriving this rule by grepping for the regex alone
+        must confirm they matched the projects-dir resolver. This is a
+        reverse-engineered vendor rule with no version guard: if derived slugs
+        stop matching real directories after a CLI upgrade, re-extract before
+        assuming a defect here.
+
         Three consequences the segment-join rule got wrong:
           * EVERY non-alphanumeric character maps to '-' -- dots, underscores and
             the drive colon included, not just spaces and separators.
@@ -280,18 +290,52 @@ function Get-CostTranscriptSlug {
             -> C--Users-Micah-Code-Copilot-Orchestra--claude-worktrees-issue-908-99513b
           C:\repo\src\my.app_v2
             -> C--repo-src-my-app-v2
-          /c/Users/Micah/Code 2/copilot-orchestra
+          /c/Users/Micah/Code 2/copilot-orchestra   (on Windows)
             -> c--Users-Micah-Code-2-copilot-orchestra
+          /home/runner/work/repo                    (on Linux)
+            -> -home-runner-work-repo
 
-        Two pre-normalizations run before the vendor rule, because callers can
-        hold a path in a shape Claude Code itself never sees:
-          1. A git-bash MSYS drive path ('/c/repo') is rewritten to its Windows
-             form ('c:/repo') so it derives the slug of the session that actually
-             ran there. Feeding the raw MSYS form to the vendor rule would yield
-             a leading '-' and a single-dash drive ('-c-repo'), matching nothing.
-          2. Trailing separators are dropped, since process.cwd() never reports
+        Three pre-normalizations run before the vendor rule, because callers can
+        hold a path in a shape Claude Code itself never sees. All three exist to
+        reconstruct the exact string the vendor's own process.cwd() reported --
+        which matters twice over, because above the 200-char cap that string is
+        also the hash preimage, and a preimage difference is unrecoverable by any
+        case-insensitive lookup (issue #932, M1/M3):
+          1. Windows only: a git-bash MSYS drive path ('/c/repo') is rewritten to
+             its Windows form ('c:/repo'). Feeding the raw MSYS form to the vendor
+             rule would yield a leading '-' and a single-dash drive ('-c-repo'),
+             matching nothing. Gated on $IsWindows because on a POSIX host
+             '/c/repo' is a genuine directory whose vendor slug IS '-c-repo';
+             rewriting it there would corrupt a correct derivation.
+          2. Separators are canonicalized to backslash whenever a drive letter is
+             present, because that is the shape process.cwd() reports on Windows.
+             Without this, the same physical path spelled 'C:/...' (as
+             `git rev-parse --show-toplevel` emits) derives a different over-cap
+             hash suffix than 'C:\...'.
+          3. Trailing separators are dropped, since process.cwd() never reports
              one and 'C:\repo\' must not derive a trailing '-'. A bare drive root
              ('C:\') is left alone -- there the separator is part of the path.
+             Trailing WHITESPACE is deliberately not stripped: it is not a
+             separator, no real cwd carries one, and silently trimming it would
+             hide a malformed caller argument rather than surface it.
+
+        Residual known gap, deliberately not guessed at: an MSYS-form path
+        longer than the cap derives its suffix from a lowercase drive
+        ('c:\...'). Node preserves whatever drive case it is handed -- measured,
+        process.chdir('c:\') leaves process.cwd() reporting 'c:\' -- so drive
+        case is genuinely derivable from any path that carries one, which is why
+        this function preserves it rather than folding it. An MSYS path is the
+        one input shape that carries none: '/c/...' spells the drive lowercase
+        by convention whatever Windows reported. Below the cap the
+        case-insensitive lookup absorbs the difference; above it the drive
+        character is part of the hash preimage and the suffix diverges. No live
+        caller supplies an MSYS path -- every one passes a repo root from git
+        plus Resolve-Path -- so the gap is pinned by test rather than papered
+        over with an unevidenced uppercase guess.
+
+        (This is the narrow residue of plan amendment A1, which claimed drive
+        case is not derivable at all. Measured against the vendor, that is false
+        in general and true only for MSYS input.)
     #>
     [CmdletBinding()]
     param(
@@ -300,12 +344,29 @@ function Get-CostTranscriptSlug {
 
     $p = $CwdPath
 
+    # Input guard (not part of the vendor rule): a path with no alphanumeric
+    # character at all derives an all-dash slug that can never name a real
+    # directory, and every downstream caller guards on emptiness rather than
+    # validity -- so '-' would pass those guards and start a walk on garbage
+    # where the pre-#908 implementation degraded to ''. No valid cwd reaches
+    # this branch; it exists so a malformed one fails the same way it used to.
+    if ($p -notmatch '[a-zA-Z0-9]') {
+        return ''
+    }
+
     # Pre-normalization 1: git-bash MSYS drive form -> Windows drive form.
-    if ($p -match '^/([A-Za-z])/(.*)$') {
+    # Windows only -- on POSIX, '/c/repo' is a real directory, not a drive.
+    if ($IsWindows -and $p -match '^/([A-Za-z])/(.*)$') {
         $p = "$($Matches[1]):/$($Matches[2])"
     }
 
-    # Pre-normalization 2: drop trailing separators, except on a bare drive root.
+    # Pre-normalization 2: canonicalize separators to the shape process.cwd()
+    # reports for a drive-letter path, so the over-cap hash preimage matches.
+    if ($p -match '^[A-Za-z]:') {
+        $p = $p.Replace('/', '\')
+    }
+
+    # Pre-normalization 3: drop trailing separators, except on a bare drive root.
     if ($p -match '^(.*[^\\/])[\\/]+$' -and $Matches[1] -notmatch '^[A-Za-z]:$') {
         $p = $Matches[1]
     }
@@ -314,9 +375,12 @@ function Get-CostTranscriptSlug {
     # collapsed, trimmed, or case-folded.
     $slug = [regex]::Replace($p, '[^a-zA-Z0-9]', '-')
 
-    # Vendor overflow rule. The 200 is inlined rather than held in a $script:
-    # constant on purpose: $script: values do not survive a cloned worker
-    # runspace, and this library is dot-sourced into one by frame-credit-ledger.
+    # Vendor overflow rule. $maxSlugLength is a single-use function-local by
+    # design: promoting it to a $script: constant would enlist it in the
+    # worker-runspace marshal registry (Get-FCLCostScriptState in
+    # cost-fcl-helpers.ps1, which already carries this file's two genuine
+    # $script: constants) for no benefit, and that registry is the contract a
+    # future maintainer should extend -- not route around.
     $maxSlugLength = 200
     if ($slug.Length -le $maxSlugLength) {
         return $slug
