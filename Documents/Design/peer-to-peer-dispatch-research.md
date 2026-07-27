@@ -321,7 +321,7 @@ Issue #539 completed the Agent Teams cost measurement and returned a No-Go verdi
         -ParentCwd '<absolute-path-to-repo-root>' `
         -IssueNumber 535
     ```
-    Where `<transcript-slug>` is the slug derived from your repo path (e.g., `c--Users-YourName-Code-copilot-orchestra`; drive letter is lowercased) and `<absolute-path-to-repo-root>` is the absolute path to your local clone (e.g., `C:\Users\YourName\Code\copilot-orchestra`). Valid parameters: `-Slug`, `-Branch`, `-ParentCwd`, `-IssueNumber`, `-ProjectsRoot`. `-Repo` is not a valid parameter name.
+    Where `<transcript-slug>` is the slug derived from your repo path (e.g., `C--Users-YourName-Code-copilot-orchestra`; every non-alphanumeric character becomes a dash and case is preserved — see `Get-CostTranscriptSlug`) and `<absolute-path-to-repo-root>` is the absolute path to your local clone (e.g., `C:\Users\YourName\Code\copilot-orchestra`). Valid parameters: `-Slug`, `-Branch`, `-ParentCwd`, `-IssueNumber`, `-ProjectsRoot`. `-Repo` is not a valid parameter name.
 
 ### Copilot Chat — methodology
 

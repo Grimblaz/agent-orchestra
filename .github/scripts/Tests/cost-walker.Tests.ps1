@@ -1,38 +1,10 @@
 #Requires -Version 7.0
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 
-Describe 'Get-CostTranscriptSlug' {
-    BeforeAll {
-        $script:LibPath = Join-Path $PSScriptRoot '../lib/cost-walker.ps1'
-        if (Test-Path $script:LibPath) {
-            . $script:LibPath
-            . (Join-Path $PSScriptRoot '../lib/path-normalize.ps1')
-        }
-    }
 
-    Context 'slug derivation' {
-        It 'derives slug from Windows backslash path' {
-            Get-CostTranscriptSlug -CwdPath 'C:\Users\Micah\Code 2\copilot-orchestra' |
-                Should -Be 'c--Users-Micah-Code-2-copilot-orchestra'
-        }
-        It 'derives slug from git-bash /c/ path' {
-            Get-CostTranscriptSlug -CwdPath '/c/Users/Micah/Code 2/copilot-orchestra' |
-                Should -Be 'c--Users-Micah-Code-2-copilot-orchestra'
-        }
-        It 'replaces spaces with dashes' {
-            Get-CostTranscriptSlug -CwdPath '/c/Users/Micah/My Project' |
-                Should -Be 'c--Users-Micah-My-Project'
-        }
-        It 'preserves case in path segments' {
-            Get-CostTranscriptSlug -CwdPath '/c/Users/Micah/MyRepo' |
-                Should -Be 'c--Users-Micah-MyRepo'
-        }
-        It 'drops leading drive-letter colon' {
-            Get-CostTranscriptSlug -CwdPath 'D:\repos\project' |
-                Should -Be 'd--repos-project'
-        }
-    }
-}
+# Get-CostTranscriptSlug coverage lives in cost-walker-slug.Tests.ps1, which is
+# registered in .github/workflows/pester.yml. It was split out by issue #908 so
+# the slug regression runs in CI without importing this suite's Linux-red blocks.
 
 Describe 'Invoke-CostTranscriptWalk' {
     BeforeAll {
@@ -118,8 +90,12 @@ Describe 'Invoke-CostTranscriptWalk' {
 
             # Default gh-cmdlet call-through: this It creates a REAL uppercase-named directory
             # on disk and asserts the code discovers it via real filesystem fallback
-            # (Resolve-CostWalkerPrimarySlugDir's case-insensitive Get-ChildItem match at
-            # cost-walker.ps1:214-216). Only the exact lowercase path this It is simulating as
+            # (the case-insensitive Get-ChildItem match inside
+            # Resolve-CostWalkerPrimarySlugDir in cost-walker.ps1 -- referenced by function
+            # name rather than line number, which the #908 rewrite invalidated once already).
+            # That fallback is load-bearing, not vestigial: a real lowercase-drive slug
+            # directory exists on disk alongside its uppercase sibling. Only the exact
+            # lowercase path this It is simulating as
             # absent should be intercepted; every other Test-Path call (directory-discovery,
             # subagent-file probes, etc.) must hit the real filesystem so that fallback works.
             # A captured CommandInfo reference is required to call through without recursing

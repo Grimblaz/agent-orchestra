@@ -131,6 +131,22 @@ jobs:
             # Tracked in issue #909 — re-add this file to the allowlist once that
             # issue makes the suite Linux-clean. The five suites below run and
             # pass on Linux.
+            # NOTE: cost-walker.Tests.ps1 is likewise deliberately NOT listed —
+            # but for a weaker reason than the #909 entry above, and the
+            # difference matters. That suite has never been registered and this
+            # repo has no way to measure whether it is Linux-clean (no Linux
+            # runner available; its 13 conditional skips gate on git-remote
+            # availability, not platform, so a local run cannot stand in for
+            # one). Registering it would be an unmeasured bet, so issue #908
+            # split the pure-string Get-CostTranscriptSlug coverage into the
+            # suite below, which is Linux-clean by construction: a pure string
+            # function, string/integer assertions only, and Windows-shaped paths
+            # that are never anything but function arguments.
+            # An earlier revision of this note claimed the parent suite was
+            # Linux-RED on #909's 'C:\fake\path' shape. Review measured that as
+            # unsubstantiated (4 such literals, none reaching path composition,
+            # vs 61 in the #909 comparator) and it is withdrawn — see #932.
+            '.github/scripts/Tests/cost-walker-slug.Tests.ps1',
             '.github/scripts/Tests/cost-attribution.Tests.ps1',
             '.github/scripts/Tests/cost-rate-table.Tests.ps1',
             '.github/scripts/Tests/cost-pattern-renderer.Tests.ps1',

@@ -200,55 +200,264 @@ function script:Add-CostWalkerAssistantEventAndSubagents {
     }
 }
 
+function script:Get-CostWalkerSlugHashSuffix {
+    <#
+    .SYNOPSIS
+        Reproduces Claude Code's disambiguating hash suffix for over-long slugs.
+    .DESCRIPTION
+        Vendor rule (issue #908 evidence pass), expressed in its original form:
+            hash(s):  t = 0; for each char c: t = (t << 5) - t + c.charCodeAt() | 0
+            suffix:   Math.abs(hash(s)).toString(36)
+        That is the classic 31-multiplier string hash, wrapped to a signed 32-bit
+        integer after every character, rendered in lowercase base-36.
+
+        `(t << 5) - t` is exactly `t * 31` modulo 2^32, so wrapping once per
+        character after `t * 31 + c` reproduces the vendor's shift-then-subtract
+        order without needing to model the intermediate shift.
+    .OUTPUTS
+        [string] lowercase base-36 magnitude, '0' when the hash is zero.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Value
+    )
+
+    $hash = 0L
+    foreach ($ch in $Value.ToCharArray()) {
+        $hash = ($hash * 31L + [long][int]$ch) -band 0xFFFFFFFFL
+        if ($hash -ge 2147483648L) { $hash -= 4294967296L }
+    }
+
+    # JavaScript numbers are doubles, so Math.abs(-2^31) is 2^31 rather than an
+    # overflow. Widen to [long] before taking the magnitude -- [Math]::Abs on
+    # [int]::MinValue throws in .NET.
+    $magnitude = [Math]::Abs($hash)
+    if ($magnitude -eq 0L) {
+        return '0'
+    }
+
+    $digits = '0123456789abcdefghijklmnopqrstuvwxyz'
+    $encoded = [System.Text.StringBuilder]::new()
+    while ($magnitude -gt 0L) {
+        $remainder = $magnitude % 36L
+        [void]$encoded.Insert(0, $digits[[int]$remainder])
+        $magnitude = [long](($magnitude - $remainder) / 36L)
+    }
+
+    return $encoded.ToString()
+}
+
 function Get-CostTranscriptSlug {
     <#
     .SYNOPSIS
-        Derives the Claude projects slug from a CWD path string.
+        Derives the Claude Code projects-directory slug from a CWD path string.
     .DESCRIPTION
-        Slug derivation rule (issue #467 D1):
-          Split path into segments, replace spaces within segments with '-',
-          join as: {drive}--{seg1}-{seg2}-...
-          Drive letter is lowercased; all other segment case is preserved.
+        Mirrors Claude Code's own slug builder, which is the sole authority for
+        these directory names. Issue #908 replaced the segment-join approximation
+        introduced by issue #467 D1 after an evidence pass over the real
+        ~/.claude/projects/* names; the vendor rule is a single character-class
+        substitution over the whole path, not a per-segment join:
+
+            slug = cwd.replace(/[^a-zA-Z0-9]/g, '-')
+            if (slug.length > 200) {
+                slug = slug.slice(0, 200) + '-' + base36(abs(hash(cwd)))
+            }
+
+        Provenance: extracted from the installed Claude Code CLI binary and
+        confirmed independently against versions 2.1.216 and 2.1.219 (issue #908,
+        cross-checked in issue #932). The binary carries a second, similarly
+        shaped builder that DOES lowercase -- it resolves *team* directories, not
+        projects, so anyone re-deriving this rule by grepping for the regex alone
+        must confirm they matched the projects-dir resolver. This is a
+        reverse-engineered vendor rule with no version guard: if derived slugs
+        stop matching real directories after a CLI upgrade, re-extract before
+        assuming a defect here.
+
+        Three consequences the segment-join rule got wrong:
+          * EVERY non-alphanumeric character maps to '-' -- dots, underscores and
+            the drive colon included, not just spaces and separators.
+          * Runs are NOT collapsed. A dotted segment contributes its own leading
+            '-' on top of the separator's, which is exactly what produces the
+            '--claude-worktrees-' form Claude Code writes for '.claude/worktrees'.
+            The old rule emitted '-.claude-worktrees-', which matched nothing and
+            left the primary-slug lookup permanently dead for worktree checkouts.
+          * Case is preserved everywhere, drive letter included: 'C:\...' derives
+            'C--...', not 'c--...'.
+
         Examples:
-          C:\Users\Micah\Code 2\copilot-orchestra  -> c--Users-Micah-Code-2-copilot-orchestra
-          /c/Users/Micah/Code 2/copilot-orchestra  -> c--Users-Micah-Code-2-copilot-orchestra
+          C:\Users\Micah\Code 2\copilot-orchestra
+            -> C--Users-Micah-Code-2-copilot-orchestra
+          C:\Users\Micah\Code\Copilot-Orchestra\.claude\worktrees\issue-908-99513b
+            -> C--Users-Micah-Code-Copilot-Orchestra--claude-worktrees-issue-908-99513b
+          C:\repo\src\my.app_v2
+            -> C--repo-src-my-app-v2
+          /c/Users/Micah/Code 2/copilot-orchestra   (on Windows)
+            -> c--Users-Micah-Code-2-copilot-orchestra
+          /home/runner/work/repo                    (on Linux)
+            -> -home-runner-work-repo
+
+        Three pre-normalizations run before the vendor rule, because callers can
+        hold a path in a shape Claude Code itself never sees. All three exist to
+        reconstruct the exact string the vendor's own process.cwd() reported --
+        which matters twice over, because above the 200-char cap that string is
+        also the hash preimage, and a preimage difference is unrecoverable by any
+        case-insensitive lookup (issue #932, M1/M3):
+          1. Windows only: a git-bash MSYS drive path ('/c/repo') is rewritten to
+             its Windows form ('c:/repo'). Feeding the raw MSYS form to the vendor
+             rule would yield a leading '-' and a single-dash drive ('-c-repo'),
+             matching nothing. Gated on $IsWindows because on a POSIX host
+             '/c/repo' is a genuine directory whose vendor slug IS '-c-repo';
+             rewriting it there would corrupt a correct derivation.
+          2. Separators are canonicalized to backslash whenever a drive letter is
+             present, because that is the shape process.cwd() reports on Windows.
+             Without this, the same physical path spelled 'C:/...' (as
+             `git rev-parse --show-toplevel` emits) derives a different over-cap
+             hash suffix than 'C:\...'.
+          3. Trailing separators are dropped, since process.cwd() never reports
+             one and 'C:\repo\' must not derive a trailing '-'. A bare drive root
+             ('C:\') is left alone -- there the separator is part of the path.
+             Trailing WHITESPACE is deliberately not stripped: it is not a
+             separator, no real cwd carries one, and silently trimming it would
+             hide a malformed caller argument rather than surface it. Which
+             characters count as separators depends on the path's own shape,
+             not the host OS: a drive-letter path (already canonicalized to
+             backslash by normalization 2) treats both '\' and '/' as
+             separators; a path with no drive letter is POSIX-shaped and only
+             '/' is a separator there -- '\' is an ordinary filename
+             character, and trimming it would corrupt a real trailing-backslash
+             directory name (PR #937 review). Gating this on $IsWindows rather
+             than on drive-letter shape would have regressed the drive-letter
+             case whenever the function runs on a POSIX host, which is exactly
+             what the test suite's existing pins exercise on Linux CI.
+
+        Residual known gap, deliberately not guessed at: an MSYS-form path
+        longer than the cap derives its suffix from a lowercase drive
+        ('c:\...'). Node preserves whatever drive case it is handed -- measured,
+        process.chdir('c:\') leaves process.cwd() reporting 'c:\' -- so drive
+        case is genuinely derivable from any path that carries one, which is why
+        this function preserves it rather than folding it. An MSYS path is the
+        one input shape that carries none: '/c/...' spells the drive lowercase
+        by convention whatever Windows reported. Below the cap the
+        case-insensitive lookup absorbs the difference; above it the drive
+        character is part of the hash preimage and the suffix diverges. No live
+        caller supplies an MSYS path -- every one passes a repo root from git
+        plus Resolve-Path -- so the gap is pinned by test rather than papered
+        over with an unevidenced uppercase guess.
+
+        (This is the narrow residue of plan amendment A1, which claimed drive
+        case is not derivable at all. Measured against the vendor, that is false
+        in general and true only for MSYS input.)
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$CwdPath
     )
 
-    # Step 1: Normalize to forward slashes
-    $p = $CwdPath.Replace('\', '/')
+    $p = $CwdPath
 
-    # Step 2: Strip leading slash (git-bash /c/... or UNC-style leading slashes)
-    $p = $p.TrimStart('/')
-
-    # Step 3: Strip drive-letter colon and lowercase drive (e.g. "C:/..." -> "c/...")
-    if ($p -match '^([A-Za-z]):(.*)$') {
-        $driveLetter = $Matches[1].ToLowerInvariant()
-        $afterColon = $Matches[2].TrimStart('/')
-        $p = if ($afterColon) { "$driveLetter/$afterColon" } else { $driveLetter }
-    }
-
-    # Step 4: Split into non-empty path segments
-    $segments = @($p.Split('/') | Where-Object { $_ -ne '' })
-
-    if ($segments.Count -eq 0) {
+    # Input guard (not part of the vendor rule, and a deliberate departure from
+    # it): a path with no ASCII alphanumeric character returns empty here even
+    # though the vendor rule would derive a non-empty all-dash slug for it (a
+    # Unicode-only POSIX path such as '/日本' is a valid, real cwd -- PR #937
+    # review). The real cost of that departure is NOT "narrower discovery" --
+    # measured across the actual call sites, it is call-site-dependent and
+    # sometimes total: the dominant path (frame-credit-ledger.ps1 ->
+    # cost-session-render.ps1) gates the ENTIRE walk, identity matching
+    # included, on a non-empty slug, so a Unicode-only cwd captures zero cost
+    # events and, on an orchestrated PR, a false "no-transcript-found"
+    # degraded comment gets posted for a walk that never ran -- the same
+    # misleading-diagnostic failure class issue #908 itself exists to close.
+    # Only one call site (Test-CostWalkerSessionTranscriptExists) actually
+    # falls back to identity matching the way an earlier revision of this
+    # comment claimed all of them do. Tracked as issue #938 rather than fixed
+    # here: the guard is not the only option between "ASCII-only" and "match
+    # the vendor rule exactly" (a Unicode-letter-aware guard would admit the
+    # broken class while still rejecting every separator-only input this
+    # guard was added to reject), and #938's first step is measuring whether
+    # a Unicode-only repo-root cwd is reachable in practice at all before
+    # choosing a shape -- the same evidence-first discipline this file's own
+    # derivation rule was built on.
+    if ($p -notmatch '[a-zA-Z0-9]') {
         return ''
     }
 
-    # Step 5: Replace spaces with '-' within each segment
-    $processedSegments = @($segments | ForEach-Object { $_.Replace(' ', '-') })
-
-    # Step 6: Join: drive segment + '--' + remaining segments joined by '-'
-    if ($processedSegments.Count -eq 1) {
-        return $processedSegments[0]
+    # Pre-normalization 1: git-bash MSYS drive form -> Windows drive form.
+    # Windows only -- on POSIX, '/c/repo' is a real directory, not a drive.
+    if ($IsWindows -and $p -match '^/([A-Za-z])/(.*)$') {
+        $p = "$($Matches[1]):/$($Matches[2])"
     }
 
-    $driveSegment = $processedSegments[0]
-    $remainingJoined = $processedSegments[1..($processedSegments.Count - 1)] -join '-'
-    return "$driveSegment--$remainingJoined"
+    # Pre-normalization 2: canonicalize separators to the shape process.cwd()
+    # reports for a drive-letter path, so the over-cap hash preimage matches.
+    #
+    # $isDriveLetterPath is computed once, here, and reused by normalization 3
+    # below (PR #937 post-fix review, M7): the two conditions used to be two
+    # separately-written copies of the same regex, and nothing enforced that
+    # they stayed in sync -- a mutation test proved a change to only the
+    # second copy produced zero test failures despite changing real behavior.
+    # Computed after normalization 1 (which can CREATE a drive letter from an
+    # MSYS path on Windows) and before the Replace call, so it reflects the
+    # path's drive-letter shape at the point normalization 2 acts on it, and
+    # stays valid afterward because Replace('/', '\') cannot alter the first
+    # two characters a drive-letter path is detected from.
+    $isDriveLetterPath = $p -match '^[A-Za-z]:'
+    if ($isDriveLetterPath) {
+        $p = $p.Replace('/', '\')
+    }
+
+    # Pre-normalization 3: drop trailing separators, except on a bare drive
+    # root. Which characters count as a separator is decided by path SHAPE
+    # (drive-letter-absolute, or Windows-rooted with no drive letter), not by
+    # $IsWindows and not by "absence of a drive letter" alone (PR #937 review,
+    # M2/M7):
+    #   - A drive-letter path was already canonicalized to backslash above, so
+    #     both '\' and '/' are separators for it, regardless of host OS --
+    #     gating this on $IsWindows instead would silently stop trimming a
+    #     drive-letter path's trailing backslash whenever this runs on a
+    #     POSIX host, which is exactly the input shape the suite pins on the
+    #     Linux CI runner.
+    #   - A path rooted at a bare '\' (UNC '\\server\share\...', long-UNC
+    #     '\\?\C:\...', or drive-relative '\dir\...') is unambiguously
+    #     Windows-shaped even without a drive letter, and '\' is a separator
+    #     for it too -- an earlier revision of this fix treated "no drive
+    #     letter" as sufficient evidence of "POSIX-shaped" and stripped a
+    #     legitimate trailing backslash from every one of these forms.
+    #   - Anything else -- a genuine POSIX absolute path, or a bare relative
+    #     path with no leading separator at all -- has only '/' as a
+    #     separator; '\' is an ordinary filename character there. A bare
+    #     relative path carrying a literal trailing backslash (e.g.
+    #     'dir\sub\') is a deliberate, documented residual: its platform is
+    #     not determinable from the string alone, and no live caller supplies
+    #     a relative cwd, so this function treats it as POSIX-shaped rather
+    #     than guessing Windows -- narrower than HEAD's accidental trim of
+    #     this class, but the alternative (an unevidenced third disjunct
+    #     covering bare-relative-with-backslash) was measured to restore that
+    #     one unreachable class only by misclassifying a different reachable
+    #     one (a POSIX relative name containing a backslash and no slash).
+    if ($isDriveLetterPath -or $p.StartsWith('\')) {
+        if ($p -match '^(.*[^\\/])[\\/]+$' -and $Matches[1] -notmatch '^[A-Za-z]:$') {
+            $p = $Matches[1]
+        }
+    }
+    elseif ($p -match '^(.*[^/])/+$') {
+        $p = $Matches[1]
+    }
+
+    # Vendor rule: every non-alphanumeric character becomes '-'; nothing is
+    # collapsed, trimmed, or case-folded.
+    $slug = [regex]::Replace($p, '[^a-zA-Z0-9]', '-')
+
+    # Vendor overflow rule. $maxSlugLength is a single-use function-local by
+    # design: promoting it to a $script: constant would enlist it in the
+    # worker-runspace marshal registry (Get-FCLCostScriptState in
+    # cost-fcl-helpers.ps1, which already carries this file's two genuine
+    # $script: constants) for no benefit, and that registry is the contract a
+    # future maintainer should extend -- not route around.
+    $maxSlugLength = 200
+    if ($slug.Length -le $maxSlugLength) {
+        return $slug
+    }
+
+    return $slug.Substring(0, $maxSlugLength) + '-' + (script:Get-CostWalkerSlugHashSuffix -Value $p)
 }
 
 function script:Resolve-CostWalkerPrimarySlugDir {
