@@ -128,7 +128,9 @@ Don't just check boxes—collect evidence:
 
 Three properties, fixed. The **format is yours to choose** — offer whatever best demonstrates the criterion — but whatever you choose must carry all three:
 
-- **Discriminating** — it could have come out negative. There is a state of the world, reachable by this codebase, in which this evidence would have shown failure. The sharpest form is a pairing: the same check red before the change and green after. Evidence that would read identically against the pre-change tree is not discriminating, no matter how detailed.
+- **Discriminating** — it could have come out negative. There is a state of the world, reachable by this codebase, in which this evidence would have shown failure. Note what this does *not* say: it is about whether the check could have failed, not about whether its result changed.
+  - For a **change criterion** — the work makes something new true — the sharpest form is a pairing: the same check red before and green after. Here a result identical to the pre-change tree is not discriminating, no matter how detailed.
+  - For a **preservation criterion** — the work must leave something true: a refactor, a backward-compatibility guarantee, "no breaking changes to dependents" — invariance *is* the result you want, and the check is discriminating as long as it would have caught the breakage. Say what it would have caught, or show it going red once against a deliberately broken version. A parity run is real evidence; a parity run nobody has ever seen fail is not.
 - **Attributed** — it says where it came from. What ran, against what, how many, at which commit. "28 of 30 enumerable project directories" and "3,792 randomized paths compared against a reference implementation" are attributed; "the tests pass" and "verified locally" are not.
 - **Per-criterion** — it maps to one acceptance criterion. A single suite-wide green offered against every criterion at once tells you the suite is green, and nothing about which criteria are met.
 
@@ -155,7 +157,7 @@ The first four object to vagueness, staleness, and unverified assumption. Of the
 - ❌ "It worked yesterday" (not now)
 - ❌ "The tests pass" (which tests?)
 - ❌ "I didn't change that" (verify anyway)
-- ❌ A green suite that was equally green before the change (nothing here could have failed)
+- ❌ A green suite that was equally green before the change, offered for a criterion claiming something *new* is true (nothing there could have failed). Not this: the same run offered for a **preservation** criterion, where invariance is the point — that is acceptable once you say what the check would have caught
 - ❌ A new test that passes against the pre-change code (it proves the code loads, not that the change did anything)
 - ❌ A test whose expected value is computed by the function under test (it agrees with itself under every implementation)
 - ❌ One aggregate green offered against several acceptance criteria at once (not per-criterion)
