@@ -606,6 +606,29 @@ exit 1
             $shimPath  = & $script:NewPassingGhShim -ParentPath $repoPath -State 'CLOSED' -HeadRefOid $branchTip
 
             $result = & $script:InvokeCleanupWithGh -RepoPath $repoPath -BranchName $branch -GhShimPath $shimPath
+
+            # TEMPORARY (issue #922): S3 fails on the Linux runner and passes on
+            # Windows, and two narrower diagnostics both came back clean. Dump the
+            # executor's own decision plus every input it read, in one shot, so the
+            # cause localises without another round-trip. Remove once resolved.
+            & git -C $repoPath diff --quiet --ignore-cr-at-eol 'origin/main' $branch 2>$null
+            $dxTolerant = $LASTEXITCODE
+            & git -C $repoPath diff --quiet 'origin/main' $branch 2>$null
+            $dxStrict = $LASTEXITCODE
+            $mtOut = @(& git -C $repoPath merge-tree --write-tree 'origin/main' $branch 2>$null)
+            $mtExit = $LASTEXITCODE
+            Write-Host "S3-DIAG git=$((& git --version) -join '')"
+            Write-Host "S3-DIAG autocrlf=$(& git -C $repoPath config --get core.autocrlf) filemode=$(& git -C $repoPath config --get core.filemode)"
+            Write-Host "S3-DIAG revlist-count=$((& git -C $repoPath rev-list 'origin/main..' + $branch --count 2>$null) -join '')"
+            Write-Host "S3-DIAG diff-tolerant-exit=$dxTolerant diff-strict-exit=$dxStrict merge-tree-exit=$mtExit merge-tree-out0=$($mtOut | Select-Object -First 1)"
+            Write-Host "S3-DIAG branchTip=$(& git -C $repoPath rev-parse $branch) mainTip=$(& git -C $repoPath rev-parse main) originMain=$(& git -C $repoPath rev-parse origin/main)"
+            Write-Host "S3-DIAG branches-after=$((& git -C $repoPath branch --list) -join ' | ')"
+            Write-Host "S3-DIAG exitcode=$($result.ExitCode)"
+            Write-Host "S3-DIAG ghcalls=$(($result.GhCalls) -join ' ;; ')"
+            Write-Host "S3-DIAG ---- executor output ----"
+            foreach ($line in @($result.Output -split "`r?`n")) { Write-Host "S3-DIAG | $line" }
+            Write-Host "S3-DIAG ---- end ----"
+
             $result.ExitCode | Should -Be 0
             (& $script:TestLocalBranchExists -RepoPath $repoPath -BranchName $branch) | Should -BeFalse -Because 'patch-equivalent stray commit should be absorbed'
         }
