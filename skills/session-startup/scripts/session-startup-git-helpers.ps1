@@ -225,7 +225,20 @@ function Get-SCDBranchMergeVerdict {
     }
     finally { $ErrorActionPreference = $savedEap }
 
+    $mergedTree = @($mergeTreeOutput | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1)
+
     if ($mergeTreeExit -eq 1) {
+        # Exit 1 covers BOTH a genuine conflict and an invocation failure — a
+        # bad ref exits 1 too, measured, not assumed. They are told apart by
+        # stdout: a conflicting merge still writes the merged tree's OID on the
+        # first line, while a failed invocation writes nothing to stdout at all.
+        #
+        # AC6 requires each undetermined cause to be the one that actually
+        # applied. Reporting a gathering failure as "merge-tree conflicted" would
+        # be Defect C's mis-attribution reproduced inside the verdict.
+        if ($mergedTree.Count -eq 0) {
+            return (& $undetermined $script:BranchMergeUndeterminedCauses.GitSignalFailed)
+        }
         # Conflicting merge-tree: no conclusive content evidence in either
         # direction. This is the steady state for any worktree older than one
         # merge (the version-bump file set is touched by essentially every
@@ -237,7 +250,6 @@ function Get-SCDBranchMergeVerdict {
         return (& $undetermined $script:BranchMergeUndeterminedCauses.GitSignalFailed)
     }
 
-    $mergedTree = @($mergeTreeOutput | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1)
     if ($mergedTree.Count -eq 0) {
         return (& $undetermined $script:BranchMergeUndeterminedCauses.GitSignalFailed)
     }

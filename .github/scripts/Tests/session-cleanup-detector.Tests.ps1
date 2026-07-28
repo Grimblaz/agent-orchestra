@@ -1089,7 +1089,10 @@ exit $LASTEXITCODE
                 'show-ref-refs/remotes/origin/main' = 0
                 'fetch-exit'                        = 0
                 "diff-quiet-exit-$branch"           = 1
+                # Real git writes the merged tree OID even on a conflict; exit 1 with
+                # no stdout is an invocation failure, which #922 reports differently.
                 "merge-tree-exit-$branch"           = 1
+                "merge-tree-output-$branch"         = 'tree-conflicted-oid'
                 'path-configs'                      = @{
                     "$siblingPath" = @{
                         'branch--show-current' = $branch

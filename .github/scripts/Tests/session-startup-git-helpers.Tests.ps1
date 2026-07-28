@@ -368,7 +368,11 @@ exit $LASTEXITCODE
             & $script:WithMockedGit -GitConfig ($script:DefaultGitConfig + @{
                 "rev-list-count-origin/main..$branch" = 2
                 "diff-quiet-exit-$branch"              = 1
+                # Real git writes the merged tree OID even when the merge conflicts;
+                # exit 1 with NO stdout is an invocation failure, not a conflict, and
+                # issue #922 tells those two apart (AC6).
                 "merge-tree-exit-$branch"              = 1
+                "merge-tree-output-$branch"            = 'tree-conflicted-oid'
                 "cherry-$branch"                       = '+ deadbee Unmerged tip commit'
                 "rev-parse-$branch"                    = 'currenttipsha'
             }) -GhConfig @{
@@ -392,7 +396,11 @@ exit $LASTEXITCODE
             & $script:WithMockedGit -GitConfig ($script:DefaultGitConfig + @{
                 "rev-list-count-origin/main..$branch" = 1
                 "diff-quiet-exit-$branch"              = 1
+                # Real git writes the merged tree OID even when the merge conflicts;
+                # exit 1 with NO stdout is an invocation failure, not a conflict, and
+                # issue #922 tells those two apart (AC6).
                 "merge-tree-exit-$branch"              = 1
+                "merge-tree-output-$branch"            = 'tree-conflicted-oid'
                 # Patch history says "unmerged". Under Amendment A1.1 that no longer
                 # establishes the conclusive negative, so the reason must not claim it.
                 "cherry-$branch"                       = '+ deadbee Unmerged tip commit'
