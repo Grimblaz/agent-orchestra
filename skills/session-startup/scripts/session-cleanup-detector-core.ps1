@@ -1973,6 +1973,18 @@ function Invoke-SessionCleanupDetector {
     $eligibleVisibleOrphanBranchCleanups = @($visibleOrphanBranchCleanups | Where-Object { $_.Eligible })
     $manualReviewVisibleOrphanBranchCleanups = @($visibleOrphanBranchCleanups | Where-Object { -not $_.Eligible })
 
+    # Issue #922 (Amendment A2.3 / AC15): the render cap of ten applies to REPORTED
+    # LINES only. The composite command's arguments derive from the FULL eligible
+    # set, because an eligible candidate costs one argument, not one line of screen.
+    #
+    # Deriving them from the truncated set — as the pre-#922 form did — means this
+    # change makes more candidates eligible and then silently drops the ones past
+    # position ten from the command that is supposed to clean them, introducing a
+    # new instance of the very defect this issue exists to fix. Measured on this
+    # repository: 16 live claude/* branches against a cap of 10.
+    $eligibleSiblingWorktreeCleanups = @($siblingWorktreeCleanups | Where-Object { $_.Eligible })
+    $eligibleOrphanBranchCleanups = @($orphanBranchCleanups | Where-Object { $_.Eligible })
+
     if ($siblingWorktreeCleanups.Count -gt 0 -or $orphanBranchCleanups.Count -gt 0) {
         $signalNames = @()
         if ($null -ne $staleBranch) { $signalNames += 'stale branch' }
@@ -2008,16 +2020,27 @@ function Invoke-SessionCleanupDetector {
             $lines += (Get-SCDManualReviewLines -Label 'Orphan branch' -Items $manualReviewVisibleOrphanBranchCleanups)
         }
         if ($hiddenClaudeCleanupCount -gt 0) {
-            $lines += "- +$hiddenClaudeCleanupCount more — run ``git for-each-ref --format='%(refname:short)' refs/heads/claude/`` to see the full list."
+            # Issue #922 (A2.3): this cap hides LINES, not candidates. Any eligible
+            # candidate counted here is still present in the offered command below.
+            $lines += "- +$hiddenClaudeCleanupCount more not listed here — any that are ready are still included in the command below; run ``git for-each-ref --format='%(refname:short)' refs/heads/claude/`` to see the full list."
         }
         if ($isDegradedCwd) {
             $lines += ''
             $lines += '_Note: the current location did not match a registered worktree, so sibling and orphan branch findings above are report-only — re-run from a registered worktree to enable one-click cleanup._'
         }
-        $lines += ''
-        $lines += 'To clean up, run:'
-        $lines += '```powershell'
-        $lines += '# Run in a PowerShell (pwsh) terminal:'
+        # Issue #922 (Defect B / AC9): the prescription's header, opening fence and
+        # closing fence used to be emitted unconditionally, with only the composite
+        # command line inside guarded on having arguments. Observed live: eight
+        # findings, every one correctly held for review, and a cleanup block
+        # containing nothing but a comment — "To clean up, run:" followed by
+        # nothing to run.
+        #
+        # Both emitters now write into $commandLines FIRST, and the block is opened
+        # only if something ended up in it. There are genuinely two emitters: the
+        # per-issue tracking invocations below, and the composite invocation.
+        # Guarding the block on $compositeArgs alone would suppress a block that
+        # legitimately contains per-issue tracking commands.
+        $commandLines = @()
 
         # Build composite invocation
         $compositeArgs = @()
@@ -2036,14 +2059,15 @@ function Invoke-SessionCleanupDetector {
         if ($null -ne $staleBranch -and -not $staleBranch.IssueId) {
             $compositeArgs += "-FeatureBranch '$escaped'"
         }
-        if ($eligibleVisibleSiblingWorktreeCleanups.Count -gt 0) {
-            $siblingPaths = $eligibleVisibleSiblingWorktreeCleanups | ForEach-Object {
+        # Issue #922 (A2.3): the FULL eligible sets, not the render-capped ones.
+        if ($eligibleSiblingWorktreeCleanups.Count -gt 0) {
+            $siblingPaths = $eligibleSiblingWorktreeCleanups | ForEach-Object {
                 "'" + (ConvertTo-SCDPowerShellSingleQuoteEscapedText -Value $_.WorktreePath) + "'"
             }
             $compositeArgs += "-SiblingWorktrees @($($siblingPaths -join ','))"
         }
-        if ($eligibleVisibleOrphanBranchCleanups.Count -gt 0) {
-            $orphanNames = $eligibleVisibleOrphanBranchCleanups | ForEach-Object {
+        if ($eligibleOrphanBranchCleanups.Count -gt 0) {
+            $orphanNames = $eligibleOrphanBranchCleanups | ForEach-Object {
                 "'" + (ConvertTo-SCDPowerShellSingleQuoteEscapedText -Value $_.BranchName) + "'"
             }
             $compositeArgs += "-OrphanBranches @($($orphanNames -join ','))"
@@ -2066,16 +2090,31 @@ function Invoke-SessionCleanupDetector {
             foreach ($item in $otherIssueCleanup) {
                 $safeB = ConvertTo-SCDPowerShellSingleQuoteEscapedText -Value ($item.BranchName ?? '')
                 if ($item.BranchName) {
-                    $lines += "pwsh '$safeRoot/skills/session-startup/scripts/post-merge-cleanup.ps1' -IssueNumber $($item.IssueId) -FeatureBranch '$safeB'"
+                    $commandLines += "pwsh '$safeRoot/skills/session-startup/scripts/post-merge-cleanup.ps1' -IssueNumber $($item.IssueId) -FeatureBranch '$safeB'"
                 } else {
-                    $lines += "pwsh '$safeRoot/skills/session-startup/scripts/post-merge-cleanup.ps1' -IssueNumber $($item.IssueId) -SkipRemoteDelete -SkipLocalDelete"
+                    $commandLines += "pwsh '$safeRoot/skills/session-startup/scripts/post-merge-cleanup.ps1' -IssueNumber $($item.IssueId) -SkipRemoteDelete -SkipLocalDelete"
                 }
             }
         }
         if ($compositeArgs.Count -gt 0) {
-            $lines += "pwsh '$safeRoot/skills/session-startup/scripts/post-merge-cleanup.ps1' $($compositeArgs -join ' ')"
+            $commandLines += "pwsh '$safeRoot/skills/session-startup/scripts/post-merge-cleanup.ps1' $($compositeArgs -join ' ')"
         }
-        $lines += '```'
+
+        $lines += ''
+        if ($commandLines.Count -gt 0) {
+            $lines += 'To clean up, run:'
+            $lines += '```powershell'
+            $lines += '# Run in a PowerShell (pwsh) terminal:'
+            $lines += $commandLines
+            $lines += '```'
+        }
+        else {
+            # Issue #922 (AC9): say there is nothing to run, and say WHY, so a
+            # reader can tell this apart from a session in which candidates were
+            # dropped unexamined — which is what the pre-#922 empty block looked
+            # exactly like.
+            $lines += 'Nothing to run automatically: every finding above was evaluated, and none is currently ready for cleanup. Each line states what is still missing.'
+        }
         $lines += ''
     }
     elseif ($null -ne $currentNoUpstreamWorktree -and $null -eq $staleBranch -and $cleanupNeeded.Count -eq 0) {

@@ -1538,7 +1538,7 @@ exit $LASTEXITCODE
             $insideFence | Should -Not -Match 'git branch -D ' -Because 'raw git branch -D must not appear in fenced block for orphan category'
         }
 
-        It 'T12 D9 caps claude orphan output at 10 cleanup bullets and commands with a deterministic overflow hint' {
+        It 'T12 D9/#922-A2.3 caps claude orphan output at 10 cleanup BULLETS with a deterministic overflow hint, while the offered command keeps every eligible candidate' {
             $workDir = Join-Path $TestDrive 'orphan-claude-bounded'
             New-Item -ItemType Directory -Path $workDir -Force | Out-Null
             $branches = 1..12 | ForEach-Object { 'claude/reclaimable-{0:d2}-abcde' -f $_ }
@@ -1565,13 +1565,24 @@ exit $LASTEXITCODE
 
             $result.ExitCode | Should -Be 0
             $concreteBulletCount | Should -Be 10
-            $concreteOrphanEntryCount | Should -Be 10 -Because 'exactly 10 orphan branch entries must appear in the -OrphanBranches array'
+            # Issue #922 Amendment A2.3: this assertion previously required exactly
+            # 10 entries in -OrphanBranches — the render cap truncating the offered
+            # COMMAND. That is the defect this issue exists to fix, one level down:
+            # decision D1 makes more candidates eligible and the cap then silently
+            # drops the ones past position ten from the command meant to clean them.
+            # An eligible candidate costs one argument, not one line of screen.
+            $concreteOrphanEntryCount | Should -Be 12 -Because 'the render cap governs reported lines only; every eligible candidate stays in the offered command (A2.3 / AC15)'
             $insideFence | Should -Match 'post-merge-cleanup\.ps1' -Because 'composite invocation must reference the cleanup script'
             $insideFence | Should -Match '-OrphanBranches' -Because '-OrphanBranches parameter must appear in composite invocation'
             $context | Should -Match "\+2 more.*$overflowCommandPattern"
-            $context | Should -Not -Match ([regex]::Escape($branches[10]))
-            $context | Should -Not -Match ([regex]::Escape($branches[11]))
-            $insideFence | Should -Not -Match ([regex]::Escape("git branch -D '$($branches[10])'"))
+            # The two capped candidates are absent from the reported LINES...
+            $outsideFenceOnly = & $script:RemoveFencedPowerShellBlocks -Context $context
+            $outsideFenceOnly | Should -Not -Match ([regex]::Escape($branches[10]))
+            $outsideFenceOnly | Should -Not -Match ([regex]::Escape($branches[11]))
+            # ...and present in the offered command.
+            $insideFence | Should -Match ([regex]::Escape($branches[10])) -Because 'an eligible candidate past the render cap must still be cleanable'
+            $insideFence | Should -Match ([regex]::Escape($branches[11]))
+            $insideFence | Should -Not -Match ([regex]::Escape("git branch -D '$($branches[10])'")) -Because 'raw git branch -D must never appear for the orphan category'
             $insideFence | Should -Not -Match ([regex]::Escape("git branch -D '$($branches[11])'"))
         }
 
@@ -1618,9 +1629,13 @@ exit $LASTEXITCODE
             $insideFence | Should -Match '-OrphanBranches' -Because '-OrphanBranches parameter must appear in composite invocation'
             $concreteClaudeBulletCount | Should -Be 10
             $visibleOrphanBulletCount | Should -Be 9
-            $visibleOrphanEntryCount | Should -Be 9 -Because 'exactly 9 orphan entries must appear in the -OrphanBranches array'
+            # Issue #922 Amendment A2.3: the current worktree still consumes a
+            # reported-LINE slot (it is a line of screen), so only 9 orphan bullets
+            # render — but all 10 eligible orphans remain in the offered command.
+            $visibleOrphanEntryCount | Should -Be 10 -Because 'the render cap governs reported lines only; the capped orphan must still be cleanable (A2.3 / AC15)'
             $context | Should -Match "\+1 more.*$overflowCommandPattern"
-            $context | Should -Not -Match ([regex]::Escape($orphanBranches[9]))
+            $outsideFence | Should -Not -Match ([regex]::Escape($orphanBranches[9])) -Because 'the capped candidate is absent from the reported lines'
+            $insideFence | Should -Match ([regex]::Escape($orphanBranches[9])) -Because 'the capped candidate is present in the offered command'
             $insideFence | Should -Not -Match ([regex]::Escape("git branch -D '$($orphanBranches[9])'"))
         }
 
