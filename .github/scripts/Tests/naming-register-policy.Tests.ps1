@@ -115,14 +115,14 @@ Describe "Register: bidirectional binding to vocab-seed" {
         }
     }
 
-    It "vocab-seed contains exactly 55 data rows" {
-        $extractedTerms.Count | Should -Be 55
+    It "vocab-seed contains exactly 56 data rows" {
+        $extractedTerms.Count | Should -Be 56
     }
 
     It "every vocab-seed term has a register entry" {
         $registerTerms = @($register | Select-Object -ExpandProperty term)
         $missing = $extractedTerms | Where-Object { $registerTerms -notcontains $_ }
-        $missing | Should -BeNullOrEmpty -Because "all 55 vocab-seed terms must have register entries; missing: $($missing -join ', ')"
+        $missing | Should -BeNullOrEmpty -Because "all 56 vocab-seed terms must have register entries; missing: $($missing -join ', ')"
     }
 
     It "register has no terms absent from vocab-seed (no orphan entries)" {
@@ -130,8 +130,8 @@ Describe "Register: bidirectional binding to vocab-seed" {
         $missing | Should -BeNullOrEmpty -Because "register must not contain terms absent from vocab-seed; orphans: $($missing -join ', ')"
     }
 
-    It "register entry count matches vocab-seed term count (55)" {
-        $register | Should -HaveCount 55
+    It "register entry count matches vocab-seed term count (56)" {
+        $register | Should -HaveCount 56
     }
 }
 

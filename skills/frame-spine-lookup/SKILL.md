@@ -197,6 +197,19 @@ Do not edit specialist shells for this contract unless a future test proves the 
   path, because a goal-contract plan is meant to be executed by the future
   goal-run harness (#874), not walked by Spine-Runner or looked up
   mid-turn by a specialist.
+- **The credit-ledger degradation note below covers the brief too.**
+  `Get-FCLLatestParsedFrameSpine` returning `$null` for a brief is the same
+  expected behavior it is for a goal-contract plan, and for the same reason:
+  no spine exists to parse, so zero spine-sourced credit rows is the correct
+  answer rather than a defect. Recorded here because #942 deletes the only
+  shape that note currently names.
+- **Brief plans (issue #941) are out of scope for the same reason.** A
+  `plan-variant: brief` plan (see `skills/plan-authoring/SKILL.md § Brief plan
+  variant`) carries no `<!-- frame-spine ... -->` block and no
+  `<!-- frame-slices-{ID} -->` sibling, because it has no numbered
+  implementation steps to route. `missing-spine` is the intended fail-loud
+  backstop here too; a brief is read whole by its executor rather than
+  slice-dispatched.
 - **Spine-reader enumeration (872-D7 / AC2).** The production readers of the
   frame-spine mechanism, in full, are: `frame-validate-core.ps1` (the
   structural-coverage validator, `.github/scripts/lib/frame-validate-core.ps1`),

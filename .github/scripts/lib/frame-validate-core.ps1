@@ -376,6 +376,150 @@ function Test-FVPlanSpineOmittedPlanTooSmall {
     return ($normalized -match '(?m)^\s*spine-omitted\s*:\s*plan-too-small\s*$')
 }
 
+# The sections a brief-shaped chunk plan must carry (issue #941). Read from the
+# two briefs already in production (#939's and #941's own plan comments), not
+# inferred from one sample. Section 4 is load-bearing beyond this list: the
+# chunked-delivery doctrine's A3 names "the brief's fourth section" as the
+# container falsifiers reach the executor in, so renumbering these breaks a
+# doctrine sentence, not just a heading.
+$script:FVBriefRequiredSections = @(
+    [pscustomobject]@{ Number = 1; Name = 'Problem and observed evidence' }
+    [pscustomobject]@{ Number = 2; Name = 'Epistemic map' }
+    [pscustomobject]@{ Number = 3; Name = 'Acceptance criteria' }
+    [pscustomobject]@{ Number = 4; Name = 'Falsifiers' }
+    [pscustomobject]@{ Number = 5; Name = 'Context inventory' }
+    [pscustomobject]@{ Number = 6; Name = 'Evidence obligations' }
+)
+
+function Remove-FVFencedRegion {
+    <#
+    .SYNOPSIS
+        Blanks every line inside a fenced code block, preserving line count.
+
+    .DESCRIPTION
+        The plan-comment readers in this file are otherwise markdown-blind --
+        the accepted-carve-out note further down documents what that costs for
+        Get-GCContractBlock. For any check whose WRONG answer is a silent PASS
+        (rather than Get-GCContractBlock's loud fail), markdown-blindness is not
+        an acceptable carve-out: a document that merely QUOTES a shape would
+        satisfy a check for HAVING that shape. Both ``` and ~~~ fences are
+        recognised, with an optional info string; the opening fence's character
+        and length must be matched or exceeded to close, per CommonMark.
+
+        Lines are blanked rather than removed so the caller's `(?m)^` anchors
+        and any line arithmetic still see the original layout.
+    #>
+    [CmdletBinding()]
+    param([AllowNull()][AllowEmptyString()][string]$Text)
+
+    if ([string]::IsNullOrEmpty($Text)) { return $Text }
+
+    $lines = (ConvertTo-FVNormalizedText -Text $Text) -split "`n"
+    $fenceChar = $null
+    $fenceLength = 0
+
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $trimmed = $lines[$i].TrimStart()
+
+        if ($null -eq $fenceChar) {
+            if ($trimmed -match '^(?<fence>`{3,}|~{3,})') {
+                $fenceChar = $Matches['fence'][0]
+                $fenceLength = $Matches['fence'].Length
+                $lines[$i] = ''
+            }
+            continue
+        }
+
+        # Inside a fence: everything is blanked, including the closing line.
+        $isClose = ($trimmed -match '^(?<fence>`{3,}|~{3,})\s*$') -and
+                   ($Matches['fence'][0] -eq $fenceChar) -and
+                   ($Matches['fence'].Length -ge $fenceLength)
+        $lines[$i] = ''
+        if ($isClose) { $fenceChar = $null; $fenceLength = 0 }
+    }
+
+    return ($lines -join "`n")
+}
+
+function Remove-FVHtmlComment {
+    <#
+    .SYNOPSIS
+        Blanks HTML-comment spans, preserving line count.
+
+    .DESCRIPTION
+        Companion to Remove-FVFencedRegion for the same reason: a required
+        heading commented out is not a heading the document carries. An
+        unterminated `<!--` blanks to end-of-text, which is the conservative
+        direction -- the reader treats commented-out content as absent.
+    #>
+    [CmdletBinding()]
+    param([AllowNull()][AllowEmptyString()][string]$Text)
+
+    if ([string]::IsNullOrEmpty($Text)) { return $Text }
+
+    $normalized = ConvertTo-FVNormalizedText -Text $Text
+
+    return [regex]::Replace($normalized, '(?s)<!--.*?(?:-->|\z)', {
+            param($match)
+            # Keep the newlines so line positions do not shift.
+            return ($match.Value -replace '[^\n]', '')
+        })
+}
+
+function Invoke-FVBriefPlanValidate {
+    <#
+    .SYNOPSIS
+        Validates a plan comment that declares `plan-variant: brief`.
+
+    .DESCRIPTION
+        Deliberately minimal (#936 D2): it checks the shape the doctrine
+        requires, not the quality of what is written in it. Recognising the
+        token is not validating the shape, so a document declaring itself a
+        brief while carrying none of the required sections fails here -- and
+        one that merely QUOTES the six headings inside a fenced example or an
+        HTML comment carries none of them either, which is why the body is
+        stripped of both before the scan (#947 review, M1). The judgment half
+        -- artifact-pinned criteria, unmarked provenance, missing proof
+        standards -- is the Brief conformance check in
+        skills/plan-authoring/SKILL.md, which a reviewer runs; it is not
+        mechanically decidable from the text and is deliberately not attempted
+        here.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$CommentBody
+    )
+
+    $structuralViolations = [System.Collections.Generic.List[string]]::new()
+
+    # Normalize first: every sibling reader in this file does, and .NET's
+    # `(?m)^` anchors only after `\n`, so a CR-only body would otherwise report
+    # every section missing (#947 review, M15).
+    $prose = Remove-FVHtmlComment -Text (Remove-FVFencedRegion -Text $CommentBody)
+
+    foreach ($section in $script:FVBriefRequiredSections) {
+        # `[ \t]+`, never `\s+`: `\s` matches `\n`, so `\s+` lets a bare `##`
+        # line pair with an unrelated following line to satisfy a heading that
+        # does not exist. Same rule as frame-spine-core.ps1's block reader
+        # (#878 s6; re-broken and re-fixed here per #947 review, M2).
+        $pattern = '(?im)^##[ \t]+' + [regex]::Escape("$($section.Number).") + '[ \t]+' + [regex]::Escape($section.Name) + '\b'
+        $matchCount = @([regex]::Matches($prose, $pattern)).Count
+
+        if ($matchCount -eq 0) {
+            $structuralViolations.Add("brief is missing its required section $($section.Number) '$($section.Name)'.") | Out-Null
+        }
+        elseif ($matchCount -gt 1) {
+            # Arity, for the same reason Get-GCContractBlock fails on 2+ blocks:
+            # A3 pins falsifiers to the brief's FOURTH section by number, so a
+            # duplicated section leaves "which one the executor reads"
+            # undefined (#947 review, M18).
+            $structuralViolations.Add("brief carries section $($section.Number) '$($section.Name)' $matchCount times; each required section must appear exactly once.") | Out-Null
+        }
+    }
+
+    return (New-FVStructuralCoverageResult -StructuralViolations $structuralViolations.ToArray() -CoverageGaps @())
+}
+
 function Get-FVPlanAcceptanceCriterionId {
     param([AllowNull()][string]$CommentBody)
 
@@ -539,6 +683,70 @@ function Invoke-FVPlanValidate {
     $isGoalContractVariant = Test-GCVariantFrontmatter -CommentBody $commentBody
     $spineBlock = Get-FSCSpineBlock -CommentBody $commentBody
     $contractPayload = Get-GCContractBlock -CommentBody $commentBody
+
+    # Arity BEFORE precedence (#947 review, M3). Get-FSCPlanVariant returns the
+    # first declaration and Test-GCVariantFrontmatter returns true on any, so a
+    # frontmatter declaring two variants would otherwise be classified by line
+    # order -- `brief` then `goal-contract` validating as a brief while the
+    # reverse order rejects, for a semantically identical body. Rejecting the
+    # arity is the only answer that does not depend on which reader ran first,
+    # and this repo is mid-migration from one variant literal to the other,
+    # which is exactly when a half-edited frontmatter carries both.
+    $declaredVariants = @(Get-FSCPlanVariantDeclaration -CommentBody $commentBody)
+    if ($declaredVariants.Count -gt 1) {
+        return (New-FVAggregateResult -Results @((New-FVCheckResult -Name 'PlanStructuralCoverage' -Passed $false -Detail "Ambiguous plan: frontmatter declares plan-variant $($declaredVariants.Count) times ($(($declaredVariants | ForEach-Object { "'$_'" }) -join ', ')); a plan must declare exactly one shape.")))
+    }
+
+    $planVariant = if ($declaredVariants.Count -eq 1) { [string]$declaredVariants[0] } else { $null }
+    $isBriefVariant = ($planVariant -eq 'brief')
+
+    # An unrecognized declaration is named rather than left to fall through to
+    # `Missing frame-spine block.`, which sends the author down the add-a-spine
+    # repair path for a plan that is one letter from a valid shape. The reader
+    # already holds the value; using it costs one comparison (#947 review, M17).
+    if ($planVariant -and $planVariant -notin @('brief', 'goal-contract')) {
+        return (New-FVAggregateResult -Results @((New-FVCheckResult -Name 'PlanStructuralCoverage' -Passed $false -Detail "Plan declares an unrecognized plan-variant '$planVariant'; the supported shapes are 'brief' and 'goal-contract'.")))
+    }
+
+    # #941: the brief is a lawful plan shape in its own right, hoisted above the
+    # frame-spine null-check for the same reason the goal-contract branch is --
+    # otherwise a brief falls through to `Missing frame-spine block.` and the
+    # shape the doctrine ratifies is rejected in practice. A brief needs no
+    # `spine-omitted: plan-too-small` token: that carve-out licenses omission
+    # below three implementation steps, which is a statement about size, and a
+    # brief has no numbered steps by construction. Briefs persisted before this
+    # branch existed still carry the token; it is simply not read here.
+    if ($isBriefVariant) {
+        if ($null -ne $spineBlock) {
+            return (New-FVAggregateResult -Results @((New-FVCheckResult -Name 'PlanStructuralCoverage' -Passed $false -Detail 'Ambiguous plan: declares plan-variant: brief frontmatter and also carries a frame-spine block; a plan must use exactly one mechanism.')))
+        }
+
+        # Count REAL contract-block heads rather than reading Get-GCContractBlock's
+        # $null, which conflates "no block" with "two or more" (goal-contract-core.ps1's
+        # documented deferred gap). Reading that $null as absence fails OPEN on the
+        # ambiguous case (#947 review, M5); reading a fence-blind presence check
+        # fails CLOSED on a brief that merely quotes a contract block in an example
+        # (#947 review, M6) -- which #942, the chunk that retires the harness, is
+        # near-certain to do. Counting outside fenced regions answers both.
+        $contractHeadCount = @([regex]::Matches(
+                (Remove-FVFencedRegion -Text $commentBody),
+                [regex]::Escape('<!-- goal-contract') + '[ \t]*\n')).Count
+        if ($contractHeadCount -gt 0) {
+            return (New-FVAggregateResult -Results @((New-FVCheckResult -Name 'PlanStructuralCoverage' -Passed $false -Detail "Ambiguous plan: declares plan-variant: brief frontmatter and also carries $contractHeadCount <!-- goal-contract --> block(s); a plan must use exactly one mechanism.")))
+        }
+
+        # The skill forbids four artifacts, not two: no frame-spine block, no
+        # frame-slice blocks, no frame-slices sibling, no slice_comment_id. A
+        # brief carrying slices validated clean and the slices were then
+        # orphaned, since a brief is outside Spine-Runner's dispatch surface by
+        # the same change that admits it (#947 review, M19).
+        $sliceBlockCount = @(Get-FVPlanSliceBlock -CommentBody $commentBody).Count
+        if ($sliceBlockCount -gt 0) {
+            return (New-FVAggregateResult -Results @((New-FVCheckResult -Name 'PlanStructuralCoverage' -Passed $false -Detail "Ambiguous plan: declares plan-variant: brief frontmatter and also carries $sliceBlockCount frame-slice block(s); a brief has no implementation steps to route, and nothing would ever walk them.")))
+        }
+
+        return (Invoke-FVBriefPlanValidate -CommentBody $commentBody)
+    }
 
     if ($isGoalContractVariant) {
         if ($null -ne $spineBlock) {

@@ -348,6 +348,120 @@ function script:ConvertFrom-FSCSpineYamlInternal {
     }
 }
 
+function Get-FSCPlanVariantDeclaration {
+    <#
+    .SYNOPSIS
+        Returns EVERY `plan-variant:` value declared in the plan comment's
+        frontmatter, in document order. Empty array when none is declared.
+
+    .DESCRIPTION
+        Frontmatter-anchored, never a body-wide line match: a plan whose prose
+        quotes the literal `plan-variant: brief` -- documentation, a migration
+        table, a design record -- must not be misclassified as one. Lives here
+        rather than in either caller because both plan-comment readers need it
+        (frame-validate-core.ps1's structural branch and orchestra-spine.ps1's
+        no-spine message), and a second hand-rolled copy is how the two drift.
+
+        Returning the full list rather than the first value is deliberate
+        (#947 review, M3): a first-wins reader classifies a frontmatter that
+        declares two variants by line order, so the same body validates one way
+        and rejects the other way round. Arity is the caller's to reject, and it
+        can only do that if it can see the arity.
+
+        On not folding this into goal-contract-core.ps1's
+        Test-GCVariantFrontmatter, which encodes the same rule for one literal:
+        the reverse consolidation -- reducing that function to a call on this
+        one -- is genuinely available (both live callers dot-source this file
+        first, and goal-contract-validate-core.ps1 never calls it), so the
+        rejection is NOT "it cannot be done." It is that goal-contract-core.ps1
+        currently dot-sources nothing, #942 deletes the file outright, and the
+        consolidation would add a cross-library dependency plus re-point the
+        unit tests pinned to that function -- all to share ~25 lines that are
+        scheduled for deletion. Revisit if #942 slips.
+    #>
+    [CmdletBinding()]
+    param([AllowNull()][AllowEmptyString()][string]$CommentBody)
+
+    $declarations = [System.Collections.Generic.List[string]]::new()
+    if ([string]::IsNullOrWhiteSpace($CommentBody)) { return $declarations.ToArray() }
+
+    $lines = (script:ConvertTo-FSCNormalizedText -Text $CommentBody) -split "`n"
+
+    # Skip leading HTML-comment marker lines and blank lines -- a persisted plan
+    # comment carries `<!-- plan-issue-{ID} -->` and often a
+    # `<!-- phase-containment-ledger-ref: ... -->` pointer above the frontmatter.
+    # Comment CLOSURE is tracked, not just the opening delimiter: a skip loop
+    # keyed on `StartsWith('<!--')` alone walks straight through a commented-out
+    # frontmatter block and reads it as live (#947 review, M16).
+    $index = 0
+    $inComment = $false
+    while ($index -lt $lines.Count) {
+        $trimmed = $lines[$index].Trim()
+
+        if ($inComment) {
+            if ($trimmed.EndsWith('-->')) { $inComment = $false }
+            $index++
+            continue
+        }
+
+        if ($trimmed -eq '') { $index++; continue }
+
+        if ($trimmed.StartsWith('<!--')) {
+            # A single-line `<!-- ... -->` marker closes on its own line; an
+            # unclosed opener puts us inside a comment span.
+            if (-not $trimmed.EndsWith('-->') -or $trimmed -eq '<!--') { $inComment = $true }
+            $index++
+            continue
+        }
+
+        break
+    }
+
+    # An unterminated comment span swallows the rest of the body, so there is no
+    # frontmatter to read -- the conservative answer, and the one that keeps a
+    # commented-out declaration inert.
+    if ($inComment) { return $declarations.ToArray() }
+
+    if ($index -ge $lines.Count -or $lines[$index].Trim() -ne '---') { return $declarations.ToArray() }
+
+    # Collect the frontmatter region first and require a closing fence before
+    # reading anything out of it. Scanning line-by-line without that check
+    # would run past an unterminated region into the plan body, where a prose
+    # line beginning `plan-variant:` at column 0 reads as a declaration -- the
+    # same false-positive class the frontmatter anchoring exists to prevent.
+    $frontmatterLines = [System.Collections.Generic.List[string]]::new()
+    $closed = $false
+    for ($i = $index + 1; $i -lt $lines.Count; $i++) {
+        if ($lines[$i].Trim() -eq '---') { $closed = $true; break }
+        $frontmatterLines.Add($lines[$i]) | Out-Null
+    }
+
+    if (-not $closed) { return $declarations.ToArray() }
+
+    foreach ($line in $frontmatterLines) {
+        if ($line -match '^plan-variant:\s*(?:"(?<value>[^"]+)"|''(?<value>[^'']+)''|(?<value>\S+))\s*$') {
+            $declarations.Add(([string]$Matches['value']).Trim()) | Out-Null
+        }
+    }
+
+    return $declarations.ToArray()
+}
+
+function Get-FSCPlanVariant {
+    <#
+    .SYNOPSIS
+        Returns the plan comment's first declared `plan-variant:` value, or
+        $null. Callers that must reject an ambiguous multi-declaration
+        frontmatter should use Get-FSCPlanVariantDeclaration instead.
+    #>
+    [CmdletBinding()]
+    param([AllowNull()][AllowEmptyString()][string]$CommentBody)
+
+    $declarations = @(Get-FSCPlanVariantDeclaration -CommentBody $CommentBody)
+    if ($declarations.Count -eq 0) { return $null }
+    return [string]$declarations[0]
+}
+
 function Get-FSCSpineBlock {
     param([AllowNull()][string]$CommentBody)
 

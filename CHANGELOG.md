@@ -2,6 +2,24 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.5.0] — 2026-07-28
+
+### Added
+
+- **Brief is a first-class plan shape (#941, chunk 3 of #936).** `plan-variant: brief` joins spine-bearing and goal-contract as a lawful plan shape. `skills/plan-authoring/SKILL.md` gains the authoring contract (frontmatter key, six required sections, and the `#### Brief conformance check` over the four mechanical properties #936 D5 named); `Invoke-FVPlanValidate` accepts a conforming brief, rejects a document declaring itself a brief while carrying none of the required sections, and rejects a brief carrying a frame-spine or goal-contract block as ambiguous. Two briefs had already shipped by riding the `spine-omitted: plan-too-small` size carve-out, which was never a statement about shape.
+- **Chunk-plan review charter re-aimed by adapter selection (#941, #936 D5 as corrected by DA4).** A brief-shaped chunk plan is dispatched to the prosecution-only `design-challenge` adapter at every point that actually selects one (`commands/plan.md`, `skills/plan-authoring/SKILL.md`'s stress-test step, and the `agents/Issue-Planner.agent.md` charter). `skills/adversarial-review/adapters/standard.md` is untouched: it is the code-review adapter, so a pass-count edit there would have relaxed every code review over its size threshold.
+- **Consuming surfaces taught the brief (#941).** The planner's spine-append escape, Spine-Runner's no-spine message, `orchestra-spine.ps1`'s render precedence, `frame-spine-lookup`'s scope note, and Code-Conductor's dispatch fall-through each handle a brief explicitly; Code-Conductor's goal-contract halt is preserved. New shared reader `Get-FSCPlanVariant` (`frame-spine-core.ps1`) so the validator and the spine renderer read the declaration one way.
+- **Doctrine migrated (#941).** `CLAUDE.md` and `Documents/Design/chunked-delivery.md` now name the brief in Bound 2, the operating rules, and the panel-depth clause; A3 names the brief's fourth section as the container for falsifiers. Per #936 DA5 the interim operating-rule wording names no command — `/goal-run` halts on any plan lacking a goal-contract block, so it cannot run a brief — and the `## Deferred follow-up` row is routed to #924 rather than guessed.
+
+### Fixed
+
+- **Brief validation hardened by the #947 adversarial review** (25 of 31 merged findings sustained). The section-presence check now strips fenced regions and HTML comments before scanning — a document quoting the six headings in a fenced example previously validated clean, which made the "recognising the token is not validating the shape" claim false. `\s+` became `[ \t]+` (`\s` crosses newlines, so a bare `##` line paired with an unrelated next line satisfied a heading that did not exist). A frontmatter declaring `plan-variant` twice is now rejected on arity rather than classified by line order. Real `<!-- goal-contract -->` heads are counted outside fenced regions instead of reading `Get-GCContractBlock`'s zero-or-more-than-one conflated `$null`, which failed open on two real blocks and closed on a brief quoting one. Also: line-ending normalization, comment-closure tracking in the frontmatter skip loop, a named error for an unrecognized variant, per-section arity, and rejection of orphaned frame-slice blocks.
+- **The `design-challenge` shape now carries its convergence filter at every brief dispatch site.** #936 D5 specified it and the first implementation omitted it, leaving `solution-authoring`'s non-overridable classification gate with no defined input for a brief. `skills/adversarial-review/adapters/design-challenge.md` and the platform adapter table now declare both consumers instead of asserting Solution-Designer exclusivity.
+
+### Known gap
+
+- **A brief's plan review has no phase-containment ledger emission path** (#936 DA6). The ledger's plan-surface writer is judge-gated end to end, and the re-aimed charter removes the judge stage, so a brief renders `plan-stress-test: COULD NOT VERIFY` until #936 defines the brief's emission surface. Stated in `skills/plan-authoring/SKILL.md § Brief plan variant` and in the doctrine's panel-depth bullet rather than worked around — suppressing the fallback's trigger literal would produce the silent zero that fallback exists to prevent.
+
 ## [3.4.15] — 2026-07-28
 
 ### Changed

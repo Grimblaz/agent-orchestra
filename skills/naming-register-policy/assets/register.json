@@ -319,6 +319,12 @@
     "decode": "Bound 1 = the parent design stops at the seams; Bound 2 = the chunk plan is a contract, not a recipe. See Documents/Design/chunked-delivery.md."
   },
   {
+    "term": "brief (chunk plan)",
+    "register": "stable-code",
+    "kind": "atomic",
+    "expansion": "brief (the chunk-plan shape declared by `plan-variant: brief` — six numbered sections stating the contract, with no implementation steps; not the same thing as the context brief upstream-onboarding renders)"
+  },
+  {
     "term": "A1–A5 (doctrine amendments)",
     "register": "stable-code",
     "kind": "family",

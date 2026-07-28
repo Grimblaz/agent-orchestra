@@ -32,6 +32,11 @@ Use the resolved `agents/Issue-Planner.agent.md` shared body and adopt that role
 
 ## Inline adversarial-pipeline dispatch
 
-Read `skills/adversarial-review/platforms/claude.md` and follow its parent-side dispatcher checklist as a thin caller with adapter `standard`. Pass the resolved issue number, issue body, Experience-Owner framing, Solution-Designer output, current draft plan, project guidance, and any prior plan-review context as the pre-dispatch context. The shared checklist owns handshake construction, prosecution, merge, defense, judge, partial-pass recovery, atomic marker emission, and review-state persistence.
+Select the adapter from the draft plan's shape (#936 D5, landing sites per #936 DA4):
+
+- A plan whose frontmatter declares `plan-variant: brief` — the chunk-plan shape — uses adapter `design-challenge`: three prosecution-only lenses, no defense, no judge, and the **convergence filter** (`skills/design-exploration/SKILL.md § Convergence Filter`, #785) applied to the merged three-lens ledger. The filter is part of the shape #936 D5 selected, not an optional extra: `skills/solution-authoring/SKILL.md` keys the classification gate's firing input on convergence-sustained findings, so omitting it leaves a non-overridable gate with no defined input. Run the `#### Brief conformance check` from `skills/plan-authoring/SKILL.md` › `### Brief plan variant` before dispatching, and require the reviewer to run it as the first act of the review. Do not edit `skills/adversarial-review/adapters/standard.md` to achieve this — that is the code-review adapter, and re-aiming plan review by changing its pass count would relax every code review over its size threshold.
+- Every other plan shape uses adapter `standard`.
+
+Read `skills/adversarial-review/platforms/claude.md` and follow its parent-side dispatcher checklist as a thin caller with the selected adapter. Pass the resolved issue number, issue body, Experience-Owner framing, Solution-Designer output, current draft plan, project guidance, and any prior plan-review context as the pre-dispatch context. The shared checklist owns handshake construction, prosecution, merge, defense, judge, partial-pass recovery, atomic marker emission, and review-state persistence.
 
 ARGUMENTS: $ARGUMENTS

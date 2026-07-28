@@ -332,10 +332,35 @@ function Invoke-OrchestraSpineRender {
     # 872-D5/872-D7: goal-contract variant detection is hoisted above both
     # the plan-too-small escape and the legacy-plan-shape fall-through, so a
     # variant-declared plan always renders the variant-aware message instead
-    # of either misleading no-spine message (identical precedence to
-    # Invoke-FVPlanValidate in frame-validate-core.ps1).
+    # of either misleading no-spine message.
+    #
+    # Precedence note (#947 review, M4): this renderer checks goal-contract
+    # first and brief second; Invoke-FVPlanValidate checks brief first. The
+    # orders used to be identical and this comment used to say so. They can
+    # differ now only for a frontmatter declaring BOTH variants, which
+    # Invoke-FVPlanValidate rejects outright as ambiguous arity, so no body
+    # reaching a successful validation is classified differently by the two.
+    # Renderer output is advisory prose, not a gate; do not read the ordering
+    # difference as a second classification rule.
     if (Test-GCVariantFrontmatter -CommentBody $planComment.Body) {
         return 'plan uses the goal-contract variant — no spine; see the plan comment for the contract'
+    }
+
+    # #941: same precedence for the brief variant, and hoisted above the
+    # plan-too-small escape for the same reason — a brief never emits a spine
+    # by design, so both the plan-too-small message ("too small") and the
+    # legacy fall-through would describe it wrongly.
+    if ((Get-FSCPlanVariant -CommentBody $planComment.Body) -eq 'brief') {
+        # Report the ambiguity rather than hiding it. Invoke-FVPlanValidate fails
+        # a brief carrying a frame-spine block as ambiguous; returning the
+        # ordinary no-spine message here would render an invalid plan as a
+        # normal one and silently drop the spine it does carry (#947 external
+        # review, qodo finding 2).
+        if ($null -ne (Get-FSCSpineBlock -CommentBody $planComment.Body)) {
+            return 'plan is ambiguous: declares plan-variant: brief and also carries a frame-spine block — a plan must use exactly one mechanism; run frame-validate -Mode plan for the structural failure'
+        }
+
+        return 'plan uses the brief variant — no spine by design; the brief itself is the contract, see the plan comment'
     }
 
     if ($planComment.Body -match '(?m)^\s*spine-omitted\s*:\s*plan-too-small\s*$') {
