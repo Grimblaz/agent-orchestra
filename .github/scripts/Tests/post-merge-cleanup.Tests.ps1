@@ -653,12 +653,15 @@ exit $LASTEXITCODE
             New-Item -ItemType Directory -Path $workDir -Force | Out-Null
             $branch = 'pester-temp/issue-500-orphan-merged'
 
-            # git cherry returns empty stdout = merged
+            # Issue #922 (A1.1): merged-ness is expressed by CONTENT evidence — the
+            # branch tip's tree already equals the remote default's. This fixture
+            # previously said "merged" with `cherry-$branch = ''` (patch history),
+            # which no longer establishes the verdict in either direction.
             $result = & $script:InvokeScript -WorkDir $workDir -GitConfig @{
                 'symbolic-ref-origin-HEAD'     = 'refs/remotes/origin/main'
                 'show-ref-refs/remotes/origin/main' = 0
                 'fetch-exit'                   = 0
-                "cherry-$branch"               = ''
+                "diff-quiet-exit-$branch"      = 0
                 'branch-d-exit'                = 0
             } -ScriptParams @{
                 OrphanBranches = [string[]]@($branch)
@@ -736,7 +739,8 @@ exit $LASTEXITCODE
                 'fetch-exit'               = 0
                 'worktree-list-porcelain'  = (& $script:NewPrimaryPorcelain -WorkDir $workDir)
                 "rev-list-count-$branch"   = '2'
-                "cherry-$branch"           = ''
+                # Issue #922 (A1.1): content evidence, not patch history.
+                "diff-quiet-exit-$branch"  = 0
                 'worktree-remove-exit'     = 0
                 'branch-d-exit'            = 0
                 'path-configs'             = @{
@@ -776,7 +780,8 @@ exit $LASTEXITCODE
                 'fetch-exit'                                            = 0
                 'worktree-list-porcelain'                               = (& $script:NewPrimaryPorcelain -WorkDir $workDir)
                 "rev-list-count-$branch"                                = '2'
-                "cherry-$branch"                                        = ''
+                # Issue #922 (A1.1): content evidence, not patch history.
+                "diff-quiet-exit-$branch"                               = 0
                 'worktree-remove-exit'                                  = 0
                 "worktree-remove-leave-residue-$siblingFwdPath"         = $true
                 'branch-d-exit'                                         = 0
@@ -1004,7 +1009,8 @@ exit $LASTEXITCODE
                 'symbolic-ref-origin-HEAD' = 'refs/remotes/origin/main'
                 'show-ref-refs/remotes/origin/main' = 0
                 'fetch-exit'               = 128   # fetch FAILS
-                "cherry-$branch"           = ''    # branch is merged
+                # Issue #922 (A1.1): branch is merged by content evidence.
+                "diff-quiet-exit-$branch"  = 0
                 'branch-d-exit'            = 0
             } -ScriptParams @{
                 OrphanBranches = [string[]]@($branch)
@@ -1018,20 +1024,23 @@ exit $LASTEXITCODE
     }
 
     # =========================================================================
-    # Squash-aware oracle (git cherry)
+    # Squash-aware oracle (content evidence; patch history demoted per #922 A1.1)
     # =========================================================================
-    Context 'git cherry squash-aware oracle' {
+    Context 'squash-aware merged oracle' {
 
-        It 'TC-Cherry-1: empty stdout from git cherry means merged (uses -d not -D)' {
-            $workDir = Join-Path $TestDrive 'cherry-merged'
+        It 'TC-Content-1: strict tree-equivalence means merged (uses -d not -D)' {
+            $workDir = Join-Path $TestDrive 'content-merged'
             New-Item -ItemType Directory -Path $workDir -Force | Out-Null
-            $branch = 'pester-temp/issue-500-cherry-merged'
+            $branch = 'pester-temp/issue-500-content-merged'
 
             $result = & $script:InvokeScript -WorkDir $workDir -GitConfig @{
                 'symbolic-ref-origin-HEAD' = 'refs/remotes/origin/main'
                 'show-ref-refs/remotes/origin/main' = 0
                 'fetch-exit'               = 0
-                "cherry-$branch"           = ''   # empty = merged
+                # Issue #922 (A1.1): this assertion's subject is the -d-not-D
+                # preference and the absence of --is-ancestor; only the way the
+                # fixture expresses merged-ness moved, from patch history to content.
+                "diff-quiet-exit-$branch"  = 0
                 'branch-d-exit'            = 0
             } -ScriptParams @{
                 OrphanBranches = [string[]]@($branch)
@@ -1042,7 +1051,7 @@ exit $LASTEXITCODE
             $branchDeleteCalls = @($result.GitCalls | Where-Object { $_ -match "^branch-deleted\t" })
             $branchDeleteCalls.Count | Should -BeGreaterThan 0 -Because 'merged branch must be deleted'
             $ancestorCalls = @($result.GitCalls | Where-Object { $_ -match 'is-ancestor' })
-            $ancestorCalls.Count | Should -Be 0 -Because 'must NEVER use --is-ancestor; use git cherry instead'
+            $ancestorCalls.Count | Should -Be 0 -Because 'must NEVER use --is-ancestor; use content evidence instead'
         }
 
         It 'TC-Cherry-2: when git cherry exits non-zero, falls back to an OID-checked gh pr lookup — a name-only match with a mismatched headRefOid must NOT be treated as evidence of merge (finding A, M4-class false positive)' {
@@ -1130,47 +1139,59 @@ exit $LASTEXITCODE
                 'show-ref-refs/remotes/origin/main' = 0
                 'fetch-exit'             = 0
                 "rev-list-count-$branch" = 'garbage'
-                "cherry-$branch"         = '+ deadbee an unmerged commit'
             } -ScriptParams @{
                 OrphanBranches = [string[]]@($branch)
             }
 
             $result.ExitCode | Should -Be 0
-            $cherryCalls = @($result.GitCalls | Where-Object { $_ -match "^cherry-called\t.*$([regex]::Escape($branch))" })
-            $cherryCalls.Count | Should -BeGreaterThan 0 -Because 'a rev-list --count parse failure must fall through to the legacy git-cherry chain, never be silently treated as a verified zero-commit branch'
+            # Issue #922 (A1.1): the fall-through target is the content-evidence
+            # merged chain, not the demoted patch-history probe. The observation
+            # this assertion carries — that an unparseable count does NOT take the
+            # verified-zero-commit shortcut — is unchanged; only the observable
+            # naming that chain moved from `cherry-called` to `diff-quiet-called`.
+            $mergedCheckCalls = @($result.GitCalls | Where-Object { $_ -match "^diff-quiet-called\t.*$([regex]::Escape($branch))\t" })
+            $mergedCheckCalls.Count | Should -BeGreaterThan 0 -Because 'a rev-list --count parse failure must fall through to the merged-check chain, never be silently treated as a verified zero-commit branch'
             $deleteCalls = @($result.GitCalls | Where-Object { $_ -match "^branch-deleted\t.*$([regex]::Escape($branch))" })
             $deleteCalls.Count | Should -Be 0 -Because 'an unparseable git signal must never authorize deletion'
         }
 
-        It 'TC-Cherry-OrgRef: git cherry is called with the origin/ prefixed default-branch ref as the base ref (not the bare default-branch name)' {
+        It 'TC-Content-OrgRef: the merged check compares against the origin/ prefixed default-branch ref, never the bare default-branch name' {
             # Regression test for M1: Test-BranchMergedIntoDefault must use origin/$DefaultBranch
             # so it compares against the fetched remote tip, not a potentially stale local ref.
-            $workDir = Join-Path $TestDrive 'cherry-org-ref'
+            # Issue #922 (A1.1): the base ref now reaches the content signals rather
+            # than `git cherry`, so the property is asserted on those calls. Stated as
+            # a universal over every merged-check call — a bare-`main` base ref on ANY
+            # of them fails — rather than as the existence of one origin/-prefixed call.
+            $workDir = Join-Path $TestDrive 'content-org-ref'
             New-Item -ItemType Directory -Path $workDir -Force | Out-Null
-            $branch = 'pester-temp/issue-500-cherry-org-ref'
+            $branch = 'pester-temp/issue-500-content-org-ref'
+            $mergedTreeOid = 'tree-org-ref-oid'
 
             $result = & $script:InvokeScript -WorkDir $workDir -GitConfig @{
                 'symbolic-ref-origin-HEAD'     = 'refs/remotes/origin/main'
                 'show-ref-refs/remotes/origin/main' = 0
                 'fetch-exit'                   = 0
-                "cherry-$branch"               = ''   # empty = merged
+                # Force BOTH content signals to run: strict diff says "differs", then
+                # merge-tree resolves it, so the base ref is observed on each.
+                "diff-quiet-exit-$branch"      = 1
+                "merge-tree-output-$branch"    = $mergedTreeOid
+                "merge-tree-exit-$branch"      = 0
+                "diff-quiet-exit-$mergedTreeOid" = 0
                 'branch-d-exit'                = 0
-                'cherry-require-origin-prefix' = $true   # mock enforces origin/ prefix
             } -ScriptParams @{
                 OrphanBranches = [string[]]@($branch)
             }
 
-            $result.ExitCode | Should -Be 0 -Because 'script must succeed when git cherry is called with origin/<defaultBranch>'
+            $result.ExitCode | Should -Be 0
 
-            # Verify the logged cherry-called line uses origin/main as the base ref
-            $cherryCalls = @($result.GitCalls | Where-Object { $_ -match "^cherry-called\t" })
-            $cherryCalls.Count | Should -BeGreaterThan 0 -Because 'git cherry must have been called'
-            $baseRefCall = $cherryCalls | Where-Object { $_ -match "^cherry-called\torigin/" } | Select-Object -First 1
-            $baseRefCall | Should -Not -BeNullOrEmpty -Because "git cherry base ref must use origin/ prefix (M1 fix: compare against fetched remote tip, not stale local ref)"
+            $branchDiffCalls = @($result.GitCalls | Where-Object { $_ -match "^diff-quiet-called\t.+\t$([regex]::Escape($branch))\t" })
+            $branchDiffCalls.Count | Should -BeGreaterThan 0 -Because 'the strict tree-equivalence signal must have run'
+            $mergeTreeCalls = @($result.GitCalls | Where-Object { $_ -match "^merge-tree-called\t.+\t$([regex]::Escape($branch))$" })
+            $mergeTreeCalls.Count | Should -BeGreaterThan 0 -Because 'the merge-tree signal must have run'
 
-            # Also confirm no error log entries (which the mock writes when origin/ prefix is missing)
-            $errorCalls = @($result.GitCalls | Where-Object { $_ -match 'cherry-base-ref-error' })
-            $errorCalls.Count | Should -Be 0 -Because 'mock must not have detected a missing origin/ prefix'
+            $mergedCheckCalls = @($branchDiffCalls) + @($mergeTreeCalls)
+            $bareRefCalls = @($mergedCheckCalls | Where-Object { $_ -split "`t" | Select-Object -Index 1 | Where-Object { -not $_.StartsWith('origin/') } })
+            $bareRefCalls.Count | Should -Be 0 -Because "every merged-check base ref must use the origin/ prefix (M1 fix: compare against the fetched remote tip, not a stale local ref); saw: $($bareRefCalls -join '; ')"
         }
 
         It 'TC-SquashOffline-S5: deletes a tree-equivalent squash-style orphan without gh on PATH' {
@@ -1238,7 +1259,8 @@ exit $LASTEXITCODE
                 'show-ref-refs/remotes/origin/main' = 0
                 'upstream-ref-main'                 = 'upstream/main'
                 'fetch-exit'                        = 0
-                "cherry-$branch"                   = ''
+                # Issue #922 (A1.1): merged by content evidence, not patch history.
+                "diff-quiet-exit-$branch"           = 0
                 'branch-d-exit'                     = 0
             } -ScriptParams @{
                 OrphanBranches = [string[]]@($branch)
@@ -1248,7 +1270,23 @@ exit $LASTEXITCODE
             $result.GitCalls | Should -Contain "fetch-called`torigin" -Because 'cleanup should keep the existing origin fetch'
             $result.GitCalls | Should -Contain "fetch-called`tupstream" -Because 'cleanup should refresh a non-origin configured upstream remote'
             $result.GitCalls | Should -Contain "diff-quiet-called`tupstream/main`t$branch`tignore-cr-at-eol=True" -Because 'direct diff should use the configured upstream ref'
-            $result.GitCalls | Should -Contain "cherry-called`tupstream/main`t$branch" -Because 'cherry fallback should use the configured upstream ref'
+            # Issue #922 (A1.1): the cherry-fallback leg of this assertion is gone —
+            # patch history is no longer consulted at all. The property it carried
+            # (every merged-check signal resolves the configured non-origin upstream
+            # rather than defaulting to origin/) is re-expressed against merge-tree,
+            # which is the signal that now follows the direct diff.
+            $branch2 = 'pester-temp/issue-513-non-origin-upstream-mergetree'
+            $result2 = & $script:InvokeScript -WorkDir $workDir -GitConfig @{
+                'symbolic-ref-origin-HEAD'          = 'refs/remotes/origin/main'
+                'show-ref-refs/remotes/origin/main' = 0
+                'upstream-ref-main'                 = 'upstream/main'
+                'fetch-exit'                        = 0
+                "diff-quiet-exit-$branch2"          = 1
+                "merge-tree-exit-$branch2"          = 1
+            } -ScriptParams @{
+                OrphanBranches = [string[]]@($branch2)
+            }
+            $result2.GitCalls | Should -Contain "merge-tree-called`tupstream/main`t$branch2" -Because 'the merge-tree signal should use the configured upstream ref'
         }
     }
 
@@ -1281,6 +1319,11 @@ title: "Issue 42 back-compat test"
                 'pull-exit'                          = 0
                 'fetch-exit'                         = 0
                 "ls-remote-$featureBranch"           = ''   # remote gone
+                # Issue #922 (A1.1): this fixture previously leaned on the shim's
+                # DEFAULT cherry behaviour (exit 0, no output = merged) to reach the
+                # delete. Patch history no longer establishes merged, so the
+                # merged-ness is now stated explicitly as content evidence.
+                "diff-quiet-exit-$featureBranch"     = 0
                 "branch-list-$featureBranch"         = "  $featureBranch"
                 'branch--show-current'               = 'main'
                 'branch-D-exit'                      = 0
@@ -1329,8 +1372,9 @@ title: "Issue 42 back-compat test"
                 'worktree-list-porcelain'           = (& $script:NewPrimaryPorcelain -WorkDir $script:CombinedWorkDir)
                 "rev-list-count-$orphanBranch"      = '2'
                 "rev-list-count-$siblingBranch"     = '2'
-                "cherry-$orphanBranch"              = ''   # merged
-                "cherry-$siblingBranch"             = ''   # merged
+                # Issue #922 (A1.1): merged by content evidence, not patch history.
+                "diff-quiet-exit-$orphanBranch"     = 0
+                "diff-quiet-exit-$siblingBranch"    = 0
                 'branch-d-exit'                     = 0
                 'worktree-remove-exit'              = 0
                 'path-configs'                      = @{
@@ -1390,24 +1434,38 @@ title: "Issue 42 back-compat test"
             $result.Output | Should -Not -Match 'Must specify -IssueNumber' -Because 'guard must accept -FeatureBranch alone'
         }
 
-        It 'TC-Cherry-DashLines: cherry output with only "-" lines is treated as merged (C4)' {
-            # Per Copilot reviewer: git cherry prefixes with '+' (not in upstream)
-            # or '-' (patch-equivalent). A branch with only '-' lines is merged.
+        It 'TC-PatchHistoryDemoted: cherry patch-equivalence alone no longer authorizes deletion (#922 A1.1 / I-6)' {
+            # This test previously asserted the OPPOSITE — that cherry output with
+            # only '-' lines (patch-equivalent) meant merged, and the branch was
+            # deleted on that evidence alone. Issue #922 Amendment A1.1 removes patch
+            # history as a conclusive signal in both directions: `git cherry` answers
+            # "were these patches ever applied upstream", not "is this content present
+            # upstream now", and a revert breaks patch equivalence while leaving cherry
+            # still saying merged. The deletion path escalates -d to -D with the
+            # worktree already removed, so a false merged verdict there is unrecoverable.
+            #
+            # The fixture is unchanged; only the expected outcome is inverted. It is
+            # therefore discriminating in both directions: it fails against the
+            # pre-#922 tree (which deletes) and against any regression that
+            # reinstates cherry.
             $workDir = Join-Path $TestDrive 'cherry-dash'
             New-Item -ItemType Directory -Path $workDir -Force | Out-Null
             $branch = 'pester-temp/issue-500-cherry-dash'
             $result = & $script:InvokeScript -WorkDir $workDir -GitConfig @{
                 'symbolic-ref-origin-HEAD' = 'refs/remotes/origin/main'
                 'fetch-exit'               = 0
-                # cherry returns "- abc1234 patch-equivalent" — should be treated as merged
+                # Content signals are inconclusive: the tip differs and merge-tree
+                # conflicts. Only patch history says "merged" — which must not be enough.
+                "diff-quiet-exit-$branch"  = 1
+                "merge-tree-exit-$branch"  = 1
                 "cherry-$branch"           = "- abc1234 Patch-equivalent commit already in upstream"
                 'branch-d-exit'            = 0
             } -ScriptParams @{
                 OrphanBranches = [string[]]@($branch)
             }
             $result.ExitCode | Should -Be 0
-            $result.Output | Should -Match 'Deleted 1 orphan branch' -Because 'branch with only "-" lines is merged (patch-equivalent) and must be deleted'
-            $result.Output | Should -Not -Match 'Skipped' -Because 'branch should not be skipped — "-" lines indicate it IS merged'
+            $result.Output | Should -Not -Match 'Deleted 1 orphan branch' -Because 'patch-history equivalence is not content evidence and must not authorize deletion'
+            $result.Output | Should -Match 'Skipped' -Because 'with both content signals inconclusive and no matching merged PR, the branch is retained for review'
         }
 
         It 'TC-Cherry-PlusLines: cherry output with "+" lines correctly treated as unmerged (C4 sanity check)' {
@@ -1577,7 +1635,8 @@ title: "Issue 42 back-compat test"
                 'symbolic-ref-origin-HEAD'         = 'refs/remotes/origin/main'
                 'show-ref-refs/remotes/origin/main' = 0
                 'fetch-exit'                        = 0
-                "cherry-$orphanBranch"              = ''   # merged
+                # Issue #922 (A1.1): merged by content evidence, not patch history.
+                "diff-quiet-exit-$orphanBranch"     = 0
                 'branch-d-exit'                     = 0
             } -ScriptParams @{
                 IssueNumber    = 643

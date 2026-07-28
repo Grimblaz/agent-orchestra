@@ -113,26 +113,58 @@ function Get-RemoteDefaultRef {
     return "origin/$DefaultBranch"
 }
 
-function Test-BranchTreeEquivalentToDefault {
+# Issue #922 (Amendment A2.4): the signal literals a merged verdict may name, and
+# the causes an undetermined verdict may name. Single authoritative source —
+# Get-SCDBranchMergeVerdict is the only producer, and the evidence string the
+# eligibility gate records must name the signal that actually fired rather than
+# the unconditional "tree-equivalent" the pre-#922 gate recorded for every shape.
+$script:BranchMergeSignals = @{
+    TreeEquivalent  = 'tree-equivalent'
+    MergeTreeNoOp   = 'merge-tree no-op'
+    MergeTreeDiffers = 'merge-tree clean and divergent'
+}
+
+$script:BranchMergeUndeterminedCauses = @{
+    MergeTreeConflicted = 'merge-tree conflicted'
+    GitSignalFailed     = 'git signal failed'
+}
+
+function Get-SCDBranchMergeVerdict {
     <#
     .SYNOPSIS
-        Git-only merged-detection (Issue #889 M4): tree-equivalence, accumulated-squash
-        merge-tree no-op, and git-cherry patch-equivalence — with NO gh fallback.
-        Extracted from Test-BranchMergedIntoDefault so the eligibility primitive
-        (Test-WorktreeBranchRemovalEligible) can call a purely git-only merged
-        check that never risks the name-only gh pr list fallback's false
-        "tree-equivalent" evidence for a branch that only shares a name with an
-        unrelated merged PR.
+        Issue #922 (invariant I-6, Amendments A1.1/A2.1/A2.4): the sole producer of
+        a git-only merge verdict about $BranchName against the remote default.
+        Content evidence only — no gh, no patch history.
+    .DESCRIPTION
+        Two content signals establish `merged`:
+          * strict tree-equivalence — the branch tip's tree already equals the
+            remote default's;
+          * merge-tree no-op — merging the branch into the remote default would
+            produce the remote default's own tree (the squash-then-advance shape).
+
+        One content signal establishes `definitively-unmerged` (A2.1): merge-tree
+        merges CLEANLY and the resulting tree still differs from the remote
+        default. That is positive evidence that the branch carries content the
+        default does not have. Where merge-tree conflicts, no conclusive verdict
+        is available at all and the answer is `undetermined`.
+
+        `git cherry` is deliberately absent (A1.1). It compares patch identities —
+        "were these patches ever applied upstream", not "is this content present
+        upstream now" — and was wrong in both directions: a revert breaks patch
+        equivalence while leaving cherry saying merged, and a squash rewrites
+        patch-ids so cherry says unmerged for fully-shipped branches. Patch
+        history yields neither conclusive value.
+
+        Line-ending tolerance (--ignore-cr-at-eol) is retained deliberately per
+        A1.4; issue #513 asserts that behaviour directly.
     .OUTPUTS
-        Tri-state [bool]/$null, matching this file's existing tri-state
-        convention (e.g. Test-OrphanBranchGitHubSignalsShipped): $true when
-        git-only signals show the branch is merged/absorbed; $false when git
-        cherry ran successfully and shows the branch is definitively NOT
-        merged (a conclusive git-only answer — callers must not fall back to
-        a name-only gh lookup in this case, since it would be redundant with
-        a definitive git-only "no"); $null when every git-only signal was
-        inconclusive (git cherry itself failed) and the caller should attempt
-        an independent fallback (gh pr list, or an OID-checked PR match).
+        Hashtable: @{
+            Verdict = 'merged' | 'definitively-unmerged' | 'undetermined'
+            Signal  = <one of $script:BranchMergeSignals> | $null
+            Cause   = <one of $script:BranchMergeUndeterminedCauses> | $null
+        }
+        Every failure to gather evidence resolves to 'undetermined' (I-5); no
+        failure path produces either conclusive value.
     #>
     [CmdletBinding()]
     param(
@@ -145,8 +177,17 @@ function Test-BranchTreeEquivalentToDefault {
 
     $remoteDefault = Get-RemoteDefaultRef -DefaultBranch $DefaultBranch
 
-    # Primary: tree-equivalence check (AC1/AC6) — catches squash-merged branches
-    # whose tip content is identical to the remote default even when commit history differs.
+    $merged = {
+        param([string]$Signal)
+        @{ Verdict = 'merged'; Signal = $Signal; Cause = $null }
+    }
+    $undetermined = {
+        param([string]$Cause)
+        @{ Verdict = 'undetermined'; Signal = $null; Cause = $Cause }
+    }
+
+    # Signal 1: strict tree-equivalence — catches squash-merged branches whose tip
+    # content is identical to the remote default even when commit history differs.
     $savedEap = $ErrorActionPreference
     $ErrorActionPreference = 'SilentlyContinue'
     try {
@@ -154,10 +195,11 @@ function Test-BranchTreeEquivalentToDefault {
         $diffExit = $LASTEXITCODE
     }
     finally { $ErrorActionPreference = $savedEap }
-    if ($diffExit -eq 0) { return $true }
+    if ($diffExit -eq 0) { return (& $merged $script:BranchMergeSignals.TreeEquivalent) }
 
-    # Accumulated squash branch: if merging the branch into the current default
-    # would produce the same tree, cleanup is still safe after default advances.
+    # Signals 2 and 3 both come out of one merge-tree run. `git merge-tree
+    # --write-tree` exits 0 on a clean merge, 1 on conflicts, and otherwise on
+    # error; only the clean case carries content evidence in either direction.
     $savedEap = $ErrorActionPreference
     $ErrorActionPreference = 'SilentlyContinue'
     try {
@@ -165,42 +207,89 @@ function Test-BranchTreeEquivalentToDefault {
         $mergeTreeExit = $LASTEXITCODE
     }
     finally { $ErrorActionPreference = $savedEap }
-    if ($mergeTreeExit -eq 0) {
-        $mergedTree = @($mergeTreeOutput | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1)
-        if ($mergedTree.Count -gt 0) {
-            $mergedTreeOid = $mergedTree[0].Trim()
-            $savedEap = $ErrorActionPreference
-            $ErrorActionPreference = 'SilentlyContinue'
-            try {
-                Invoke-SCDNativeCommand { git diff --quiet --ignore-cr-at-eol $remoteDefault $mergedTreeOid 2>$null }
-                $mergedTreeDiffExit = $LASTEXITCODE
-            }
-            finally { $ErrorActionPreference = $savedEap }
-            if ($mergedTreeDiffExit -eq 0) { return $true }
-        }
+
+    if ($mergeTreeExit -eq 1) {
+        # Conflicting merge-tree: no conclusive content evidence in either
+        # direction. This is the steady state for any worktree older than one
+        # merge (the version-bump file set is touched by essentially every
+        # commit), and Amendment A2.2 requires it to stay reachable at the
+        # merged-pull-request rung rather than resolving here.
+        return (& $undetermined $script:BranchMergeUndeterminedCauses.MergeTreeConflicted)
+    }
+    if ($mergeTreeExit -ne 0) {
+        return (& $undetermined $script:BranchMergeUndeterminedCauses.GitSignalFailed)
     }
 
-    # Secondary: git cherry against the resolved remote default ref (G1)
+    $mergedTree = @($mergeTreeOutput | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1)
+    if ($mergedTree.Count -eq 0) {
+        return (& $undetermined $script:BranchMergeUndeterminedCauses.GitSignalFailed)
+    }
+
+    $mergedTreeOid = $mergedTree[0].Trim()
     $savedEap = $ErrorActionPreference
     $ErrorActionPreference = 'SilentlyContinue'
     try {
-        $cherryOutput = Invoke-SCDNativeCommand { git cherry $remoteDefault $BranchName 2>$null }
-        $cherryExit = $LASTEXITCODE
+        Invoke-SCDNativeCommand { git diff --quiet --ignore-cr-at-eol $remoteDefault $mergedTreeOid 2>$null }
+        $mergedTreeDiffExit = $LASTEXITCODE
     }
     finally { $ErrorActionPreference = $savedEap }
-    if ($cherryExit -eq 0) {
-        # C4: cherry prefixes lines with '+' (not in upstream) or '-' (patch-equivalent
-        # already in upstream). Branch is merged when there are NO '+' lines.
-        # (Empty stdout is the trivial subset of "no '+' lines".)
-        $unmergedLines = @($cherryOutput | Where-Object { $_ -match '^\+\s' })
-        return ($unmergedLines.Count -eq 0)
+
+    if ($mergedTreeDiffExit -eq 0) {
+        return (& $merged $script:BranchMergeSignals.MergeTreeNoOp)
+    }
+    if ($mergedTreeDiffExit -eq 1) {
+        # Amendment A2.1: the merge succeeded cleanly and still changed the
+        # default's tree, so the branch demonstrably carries content the default
+        # does not have. This is the ONLY producer of the negative verdict — before
+        # A2.1, A1.1's demotion of cherry left D4's silence category with no
+        # constructible input at all.
+        return @{
+            Verdict = 'definitively-unmerged'
+            Signal  = $script:BranchMergeSignals.MergeTreeDiffers
+            Cause   = $null
+        }
     }
 
-    # git cherry itself failed: every git-only signal was inconclusive. Return
-    # $null (not $false) so the caller can distinguish "definitively unmerged"
-    # from "no git-only answer" and decide whether an independent fallback
-    # (gh pr list, or an OID-checked PR match) is warranted.
-    return $null
+    # The comparison itself failed (exit > 1): no verdict, per I-5.
+    return (& $undetermined $script:BranchMergeUndeterminedCauses.GitSignalFailed)
+}
+
+function Test-BranchTreeEquivalentToDefault {
+    <#
+    .SYNOPSIS
+        Tri-state adapter over Get-SCDBranchMergeVerdict, preserving the
+        bool/$null contract Test-BranchMergedIntoDefault and the cleanup executor
+        consume. Issue #889 M4 established that this check must stay purely
+        git-only (no name-only `gh pr list` fallback, which would fabricate
+        "tree-equivalent" evidence for a branch that merely shares a name with an
+        unrelated merged PR); issue #922 moved the verdict itself into
+        Get-SCDBranchMergeVerdict so the establishing signal can be named.
+    .OUTPUTS
+        Tri-state [bool]/$null: $true when content evidence shows the branch is
+        merged; $false when content evidence conclusively shows it is not
+        (Amendment A2.1's clean-merge-tree-that-differs); $null when no
+        conclusive content evidence was obtained and the caller should attempt an
+        independent fallback (an OID-checked merged-PR match).
+
+        Issue #922 Amendment A1.1: `git cherry` no longer contributes, so the
+        merge-tree-conflicting case now returns $null where it previously
+        returned a conclusive (and frequently wrong) answer from patch history.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$BranchName,
+
+        [Parameter(Mandatory)]
+        [string]$DefaultBranch
+    )
+
+    $verdict = Get-SCDBranchMergeVerdict -BranchName $BranchName -DefaultBranch $DefaultBranch
+    switch ($verdict.Verdict) {
+        'merged' { return $true }
+        'definitively-unmerged' { return $false }
+        default { return $null }
+    }
 }
 
 function Test-BranchMergedIntoDefault {
@@ -888,7 +977,8 @@ function Test-WorktreeBranchRemovalEligible {
         # negative. $evidenceGatheringFailed carries that distinction to the
         # no-match exit below.
         $evidenceGatheringFailed = $false
-        if (Test-BranchTreeEquivalentToDefault -BranchName $BranchName -DefaultBranch $DefaultBranch) {
+        $mergeVerdict = Get-SCDBranchMergeVerdict -BranchName $BranchName -DefaultBranch $DefaultBranch
+        if ($mergeVerdict.Verdict -eq 'merged') {
             # Finding C (#889 fix cycle): a branch whose unique commits are
             # exclusively --allow-empty no-ops is trivially tree-equivalent by
             # definition (no commit changed any file) — do not accept that as
@@ -903,9 +993,26 @@ function Test-WorktreeBranchRemovalEligible {
             }
             elseif (-not $allUniqueCommitsEmpty) {
                 $result.Eligible = $true
-                $result.Evidence = "merged into $remoteDefault (tree-equivalent)"
+                # Issue #922 Amendment A2.4: name the signal that actually fired.
+                # The pre-#922 form was one unconditional assignment saying
+                # "tree-equivalent" whichever signal established the verdict, so
+                # the merge-tree-no-op shape — one of the two shapes AC1 mandates —
+                # was reportable only by mislabelling its own evidence.
+                $result.Evidence = "merged into $remoteDefault ($($mergeVerdict.Signal))"
                 return $result
             }
+        }
+        elseif ($mergeVerdict.Verdict -eq 'definitively-unmerged') {
+            # Issue #922 Amendment A2.1: conclusive content evidence that the branch
+            # carries changes absent from the remote default. Decision D4 renders
+            # this outcome silently, so it must not fall through to the paid
+            # merged-PR rung — that rung exists for candidates whose content
+            # evidence was inconclusive, not for ones it settled.
+            $result.ManualReviewReason = $script:WorktreeEligibilityReasons.UnmergedCommits
+            return $result
+        }
+        elseif ($mergeVerdict.Cause -eq $script:BranchMergeUndeterminedCauses.GitSignalFailed) {
+            $evidenceGatheringFailed = $true
         }
 
         $pr = Get-SCDMergedPrByHeadOid -Branch $BranchName -DefaultBranch $DefaultBranch
