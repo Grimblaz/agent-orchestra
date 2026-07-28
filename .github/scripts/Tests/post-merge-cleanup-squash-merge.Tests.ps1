@@ -577,6 +577,17 @@ exit 1
             & $script:InvokeGit -RepoPath $repoPath -Arguments @('cherry-pick', $strayCommit) | Out-Null
             & $script:PushMain -RepoPath $repoPath
 
+            # Issue #922: this fixture asserted its OUTCOME without ever checking
+            # its own PRECONDITION. `cherry-pick`'s output is swallowed, so if it
+            # fails — as it evidently does on the Linux runner, where this test is
+            # the single failure in an otherwise green suite — main never receives
+            # the content, and the test reports "the branch was not absorbed" while
+            # the real cause is that the fixture was never built. Assert the
+            # precondition so the failure names itself.
+            $mainHasStray = @(& git -C $repoPath ls-tree -r --name-only main 2>$null)
+            $mainHasStray | Should -Contain 'stray.txt' `
+                -Because 'the fixture requires the stray commit to have been cherry-picked onto main; if this fails, the cherry-pick did, and the outcome assertion below is meaningless'
+
             # git cherry should show '-' for the feature commit (patch-equivalent)
             $branchTip = (& git -C $repoPath rev-parse $branch 2>$null).Trim()
             $shimPath  = & $script:NewPassingGhShim -ParentPath $repoPath -State 'CLOSED' -HeadRefOid $branchTip

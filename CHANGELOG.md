@@ -12,6 +12,7 @@ All notable changes to agent-orchestra will be documented in this file.
 - Manual-review reasons name the cause that actually applied: running out of time is reported differently from having too many candidates, and "could not verify" is no longer reported as "unmerged commits".
 - The cleanup command block is printed only when there is a command in it; otherwise the check says there is nothing to run and why.
 - An eligible worktree past the ten-line display cap still appears in the offered cleanup command.
+- **Deliberate silence, new in this release:** a worktree or branch the check concludes is carrying live, unmerged work — content evidence says so, and no merged pull request matches its current tip — is now reported not at all, rather than as a manual-review line. This is the one thing the check deliberately stays quiet about; it exists so an in-flight worktree does not produce a line at every session start. Everything else it declines to offer is still reported with the reason.
 
 ## [3.5.0] — 2026-07-28
 

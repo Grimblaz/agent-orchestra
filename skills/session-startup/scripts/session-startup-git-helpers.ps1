@@ -137,6 +137,15 @@ function Get-RemoteDefaultRef {
 # the unconditional "tree-equivalent" the pre-#922 gate recorded for every shape.
 $script:BranchMergeSignals = @{
     TreeEquivalent  = 'tree-equivalent'
+    # Issue #922 Amendment A3 (review of PR #950, finding M5): the content probes
+    # pass --ignore-cr-at-eol, so "tree-equivalent" can mean "identical except for
+    # line endings". Issue #513 asserts that tolerance directly and Amendment A1.4
+    # retained it deliberately, so the BEHAVIOUR stands — but decision D1 made this
+    # signal a live deletion authority on the worktree paths for the first time,
+    # and #513's asserted fixture only ever covered the detached-orphan executor
+    # path. Invariant I-1 says no output asserts more than its evidence supports:
+    # when the equivalence rests on the tolerance, the offered command says so.
+    TreeEquivalentCrOnly = 'tree-equivalent apart from line endings'
     MergeTreeNoOp   = 'merge-tree no-op'
     MergeTreeDiffers = 'merge-tree clean and divergent'
 }
@@ -212,7 +221,25 @@ function Get-SCDBranchMergeVerdict {
         $diffExit = $LASTEXITCODE
     }
     finally { $ErrorActionPreference = $savedEap }
-    if ($diffExit -eq 0) { return (& $merged $script:BranchMergeSignals.TreeEquivalent) }
+    if ($diffExit -eq 0) {
+        # Amendment A3 (finding M5): distinguish a genuine tree-identity from one
+        # that holds only because CR-at-EOL differences were ignored. One extra
+        # local git call, on the merged path only, so the evidence names what it
+        # actually established. The verdict is unchanged either way — this is a
+        # disclosure fix, not a narrowing of #513's deliberate tolerance.
+        $savedEap = $ErrorActionPreference
+        $ErrorActionPreference = 'SilentlyContinue'
+        try {
+            Invoke-SCDNativeCommand { git diff --quiet $remoteDefault $BranchName 2>$null }
+            $strictDiffExit = $LASTEXITCODE
+        }
+        finally { $ErrorActionPreference = $savedEap }
+
+        if ($strictDiffExit -eq 1) {
+            return (& $merged $script:BranchMergeSignals.TreeEquivalentCrOnly)
+        }
+        return (& $merged $script:BranchMergeSignals.TreeEquivalent)
+    }
 
     # Signals 2 and 3 both come out of one merge-tree run. `git merge-tree
     # --write-tree` exits 0 on a clean merge, 1 on conflicts, and otherwise on
@@ -1089,12 +1116,29 @@ function Get-SCDFreeEligibilityEvidence {
         }
         elseif ($mergeVerdict.Verdict -eq 'definitively-unmerged') {
             # Issue #922 Amendment A2.1: conclusive content evidence that the branch
-            # carries changes absent from the remote default. Decision D4 renders
-            # this outcome silently, so it must not fall through to the paid
-            # merged-PR rung — that rung exists for candidates whose content
-            # evidence was inconclusive, not for ones it settled.
-            $result.ManualReviewReason = $script:WorktreeEligibilityReasons.UnmergedCommits
-            $result.Outcome = $script:WorktreeEligibilityOutcomes.DefinitivelyUnmerged
+            # carries changes absent from the remote default.
+            #
+            # Amendment A3 (review of PR #950, findings M4/M6): this arm used to
+            # settle here and skip the merged-pull-request rung, on the reasoning
+            # that the rung is for candidates whose content evidence was
+            # inconclusive. That was wrong, and it reproduced this issue's own
+            # headline defect. merge-tree is merge-base-relative, so a branch that
+            # SHIPPED and whose files main later deleted or renamed merges cleanly
+            # and re-adds them — reading as definitively-unmerged. Decision D4 then
+            # rendered it silently: a shipped worktree, dropped without a word,
+            # which is Defect A with a new cause.
+            #
+            # The rescue costs D4's noise rationale nothing, because
+            # Get-SCDMergedPrByHeadOid requires the merged PR's headRefOid to equal
+            # the branch's CURRENT tip. A shipped branch whose tip has not moved
+            # matches and is surfaced; an in-flight worktree has commits after its
+            # PR (or no merged PR at all), gets no-match, and keeps the silent
+            # outcome below. Amendment A1.3's "silence keys on the FINAL outcome,
+            # never the intermediate verdict" is thereby honoured for this arm too
+            # — it was the one arm still keying on the intermediate verdict.
+            $free.Resolved = $false
+            $free.PaidRung = 'rung2-negative'
+            $free.PendingReason = $script:WorktreeEligibilityReasons.UnmergedCommits
             return $free
         }
         elseif ($mergeVerdict.Cause -eq $script:BranchMergeUndeterminedCauses.GitSignalFailed) {
@@ -1165,6 +1209,25 @@ function Resolve-SCDPaidEligibility {
         $result.Evidence = "PR #$($pr.Number) merged"
         return $result
     }
+
+    if ($FreeEvidence.PaidRung -eq 'rung2-negative') {
+        # Issue #922 Amendment A3: for a conclusively-negative candidate the
+        # merged-pull-request lookup is a BEST-EFFORT rescue. Only a positive match
+        # (handled above) can overturn the content evidence; every other status —
+        # no-match, unavailable, timeout — leaves that evidence standing, and the
+        # outcome silent per decision D4.
+        #
+        # This must be tested BEFORE the timeout and unavailable arms. Letting an
+        # unreachable gh convert this candidate into a rendered
+        # "couldn't verify: gh unavailable" line would put a manual-review line
+        # against every in-flight worktree on any offline session — precisely the
+        # permanent-noise condition D4 rejects by name, reintroduced through the
+        # rescue meant to be free of it.
+        $result.ManualReviewReason = $FreeEvidence.PendingReason
+        $result.Outcome = $script:WorktreeEligibilityOutcomes.DefinitivelyUnmerged
+        return $result
+    }
+
     if ($pr.Status -eq 'timeout') {
         $result.ManualReviewReason = $script:WorktreeEligibilityReasons.GhTimeout
         return $result
@@ -1178,6 +1241,15 @@ function Resolve-SCDPaidEligibility {
         # 'no-match' — a same-name PR may exist but its headRefOid does not match
         # the current branch tip (M4's OID-mismatch guard), or no PR exists at all.
         $result.ManualReviewReason = $FreeEvidence.PendingReason
+        return $result
+    }
+
+    if ($FreeEvidence.PaidRung -eq 'rung2-negative') {
+        # Issue #922 Amendment A3: content evidence conclusively said "not merged"
+        # and no merged pull request contradicted it at the branch's current tip.
+        # NOW the outcome is final, and decision D4 renders it silently.
+        $result.ManualReviewReason = $FreeEvidence.PendingReason
+        $result.Outcome = $script:WorktreeEligibilityOutcomes.DefinitivelyUnmerged
         return $result
     }
 

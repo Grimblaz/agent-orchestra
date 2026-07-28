@@ -890,8 +890,23 @@ exit $LASTEXITCODE
             }
 
             $result.ExitCode | Should -Be 0
-            $branchSkipPattern = [regex]::Escape("Removed worktree '$siblingFwdPath', but skipped branch '$branch'") + ' (?:—|-) ' + [regex]::Escape('unmerged commits') + ' (?:—|-) ' + [regex]::Escape('review before deleting')
+            # Issue #922 Amendment A3 (review finding M11): the skip reason used to
+            # be the unconditional literal 'unmerged commits' for five different
+            # causes — a conclusive negative, an inconclusive merge check, a git
+            # failure, gh unavailable, and gh timeout. It is now cause-specific, so
+            # this assertion pins the line's SHAPE and requires the reason to come
+            # from the enumerated set, rather than pinning one literal that was
+            # true only by coincidence. The test's own subject — that a removed
+            # worktree is still counted when the branch deletion is skipped — is
+            # unchanged and is carried by the assertions below.
+            $branchSkipPattern = [regex]::Escape("Removed worktree '$siblingFwdPath', but skipped branch '$branch'") + ' (?:—|-) ' + '(.+?)' + ' (?:—|-) ' + [regex]::Escape('review before deleting')
             $result.Output | Should -Match $branchSkipPattern
+            $skipReason = ([regex]::Match($result.Output, $branchSkipPattern)).Groups[1].Value
+            $skipReason | Should -BeIn @(
+                'unmerged commits'
+                "couldn't verify: no conclusive merge evidence"
+                "couldn't verify: no matching merged pull request"
+            ) -Because 'the skip reason must name a cause from the enumerated set, not a literal standing in for all of them'
             $result.Output | Should -Match ([regex]::Escape("Deleted 1 sibling worktree(s): $siblingFwdPath")) -Because 'the summary must include a worktree that was already successfully removed'
             $worktreeRemovals = @($result.GitCalls | Where-Object { $_ -eq "worktree-removed`t$siblingFwdPath" })
             $worktreeRemovals.Count | Should -Be 1 -Because 'the worktree removal itself must have succeeded before the branch skip'

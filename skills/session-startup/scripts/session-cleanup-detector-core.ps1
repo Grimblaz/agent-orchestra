@@ -452,6 +452,21 @@ function Get-SCDGatedEligibility {
 
     $budgetReason = Get-SCDCollectionGhBudgetOutcome -Budget $Budget -Category $Category
     if ($budgetReason) {
+        if ($FreeEvidence.PaidRung -eq 'rung2-negative') {
+            # Issue #922 Amendment A3: the merged-pull-request lookup for a
+            # conclusively-negative candidate is a BEST-EFFORT rescue, not the
+            # thing that establishes the outcome. When the budget cannot fund it,
+            # fall back to the content evidence already gathered rather than
+            # rendering a budget line for a branch we have good reason to believe
+            # is live work — that would be the permanent-noise condition D4
+            # rejects, reintroduced through the rescue.
+            return @{
+                Eligible           = $false
+                Evidence           = $null
+                ManualReviewReason = $FreeEvidence.PendingReason
+                Outcome            = $script:WorktreeEligibilityOutcomes.DefinitivelyUnmerged
+            }
+        }
         return @{
             Eligible           = $false
             Evidence           = $null
@@ -509,6 +524,21 @@ function Resolve-SCDCandidateEligibility {
 
     $pending = @($Candidates | Where-Object { $_.NeedsEligibility })
 
+    # Amendment A3 (review of PR #950, findings M1/M2): both budgets are handed in
+    # already constructed, and their stopwatches started when the caller built
+    # them — before discovery, which includes a `git fetch` and one `git ls-remote`
+    # per upstream-bearing candidate, each with its own 5 s timeout. Measured on
+    # this repository: 2.5 s of a 5 s free budget was already spent before the free
+    # pass evaluated its first candidate, and one timed-out fetch consumed all of
+    # it, so every candidate reported "local evidence pass ran out of time" — a
+    # cause that had not applied, which is the very defect class this issue fixes.
+    #
+    # Each stopwatch is restarted here so it meters the phase it is named for.
+    # The free budget's 5 s was sized against a measurement of the free pass ALONE
+    # (2271 ms over 20 candidates), so this is the window it was always meant to
+    # bound.
+    $FreeBudget.Stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+
     # ---- Pass 1: free evidence for EVERY candidate, before any paid work ----
     foreach ($candidate in $pending) {
         if ($IsDegradedCwd) { continue }
@@ -519,6 +549,16 @@ function Resolve-SCDCandidateEligibility {
         }
         $candidate.FreeEvidence = Get-SCDFreeEligibilityEvidence -BranchName $candidate.BranchName -DefaultBranch $DefaultBranch
     }
+
+    # The gh budget's elapsed cap meters the PAID phase, so it starts here — after
+    # the free pass, and after discovery. Before Amendment A3 both stopwatches
+    # started together at detector entry, which made the two windows overlap: the
+    # comment claiming "worst case 5 s free + the 10 s gh cap" described 15 s of
+    # serial budget where the true bound was max(5, 10), and the paid phase opened
+    # with a clock already showing discovery and free-pass time. That directly
+    # weakened Amendment A2.2's requirement that the pull-request rung stay
+    # reachable for the steady-state squash case.
+    $GhBudget.Stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 
     # ---- Pass 2: paid evidence, only for what the free pass left open ----
     #
@@ -539,8 +579,14 @@ function Resolve-SCDCandidateEligibility {
     # This orders the paid phase; it does not raise any ceiling. The design
     # rejected raising the budget ceiling because that moves the cliff without
     # correcting the inversion.
-    $paidOrder = @($pending | Where-Object { $_.FreeEvidence -and $_.FreeEvidence.PaidRung -eq 'rung2' }) +
-                 @($pending | Where-Object { -not ($_.FreeEvidence -and $_.FreeEvidence.PaidRung -eq 'rung2') })
+    # Amendment A3 adds a third group, ordered LAST: the conclusively-negative
+    # candidates whose merged-pull-request rescue is best-effort. They must not
+    # displace a candidate whose outcome the paid rung actually decides.
+    $isRung2 = { param($c) $c.FreeEvidence -and $c.FreeEvidence.PaidRung -eq 'rung2' }
+    $isRung2Negative = { param($c) $c.FreeEvidence -and $c.FreeEvidence.PaidRung -eq 'rung2-negative' }
+    $paidOrder = @($pending | Where-Object { & $isRung2 $_ }) +
+                 @($pending | Where-Object { -not (& $isRung2 $_) -and -not (& $isRung2Negative $_) }) +
+                 @($pending | Where-Object { & $isRung2Negative $_ })
 
     foreach ($candidate in $paidOrder) {
         if ($candidate.FreePhaseBoundExceeded) {

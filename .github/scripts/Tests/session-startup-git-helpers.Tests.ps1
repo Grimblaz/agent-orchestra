@@ -437,8 +437,17 @@ exit $LASTEXITCODE
                 $result.Eligible | Should -Be $false
                 $result.ManualReviewReason | Should -BeExactly 'unmerged commits'
                 $result.Outcome | Should -BeExactly 'definitively-unmerged'
+                # Issue #922 Amendment A3 (review finding M4): this assertion was
+                # the inverse — "conclusive content evidence must not fall through
+                # to the paid merged-PR rung". That was wrong. merge-tree is
+                # merge-base-relative, so a SHIPPED branch whose files main later
+                # deleted or renamed merges cleanly and re-adds them, reading as
+                # definitively-unmerged; skipping the rung meant decision D4 then
+                # dropped it silently — this issue's own headline defect, restaged.
+                # The rung now runs as a best-effort rescue, and only a positive
+                # OID-matched merged PR can overturn the content evidence.
                 $ghCallLog = Join-Path $MockDir 'gh-mock-calls.log'
-                (Test-Path $ghCallLog) | Should -Be $false -Because 'conclusive content evidence must not fall through to the paid merged-PR rung'
+                (Test-Path $ghCallLog) | Should -Be $true -Because 'the merged-PR rescue must be attempted before a conclusive negative is rendered silently'
             }
         }
 
