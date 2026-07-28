@@ -165,10 +165,17 @@ issue: 941
         $structural.Detail.Contains('Ambiguous plan') | Should -BeTrue
     }
 
-    It 'does not classify a spine-bearing plan whose prose merely quotes the brief token' {
-        # A frame-spine plan that mentions `plan-variant: brief` in prose (not in
-        # frontmatter) must stay a spine plan — the same false-positive class
-        # 872-D5 guarded for the goal-contract token.
+    It 'does not classify a plan whose prose merely quotes the brief token' {
+        # A plan that mentions `plan-variant: brief` in prose (not in
+        # frontmatter) must not be routed to the brief branch — the same
+        # false-positive class 872-D5 guarded for the goal-contract token.
+        #
+        # The fixture is a plan that VALIDATES CLEAN and the assertion is on
+        # ExitCode, not on the absence of a substring. The original form used a
+        # spine with no matching slice anchors, so it failed with 'Invalid
+        # canonical frame-spine block' and passed only because that string
+        # happens not to contain the substring — it never reached the
+        # discrimination it claims to guard (#947 review, M14).
         $plan = @'
 <!-- plan-issue-998 -->
 
@@ -178,23 +185,201 @@ priority: p2
 issue_id: 998
 created: 2026-07-28
 ce_gate: true
+spine-omitted: plan-too-small
 ---
 
-## Plan: A spine plan documenting the brief
+## Plan: A small plan documenting the brief
 
 A chunk plan declares `plan-variant: brief` in its frontmatter.
-
-<!-- frame-spine
-spine_schema_version: 2
-generated_at: "2026-07-28T00:00:00Z"
-coverage:
-  implement-code: [s1]
--->
 '@
         $result = Invoke-FVPlanValidate -CommentText $plan
 
         $structural = & $script:GetCheck $result 'PlanStructuralCoverage'
+        $structural.Passed | Should -BeTrue -Because "a quoted token must leave an otherwise-valid plan valid: $($structural.Detail)"
+        $result.ExitCode | Should -Be 0
         $structural.Detail | Should -Not -BeLike '*declares plan-variant: brief*'
+        (Get-FSCPlanVariant -CommentBody $plan) | Should -BeNullOrEmpty
+    }
+
+    It 'rejects a document whose six headings appear only inside a fenced example' {
+        # The wrong answer here is a silent PASS, so markdown-blindness is not an
+        # acceptable carve-out the way it is for Get-GCContractBlock's loud fail.
+        $fenced = @(
+            '```markdown',
+            '## 1. Problem and observed evidence',
+            '## 2. Epistemic map',
+            '## 3. Acceptance criteria',
+            '## 4. Falsifiers',
+            '## 5. Context inventory',
+            '## 6. Evidence obligations',
+            '```',
+            '',
+            'That is all. This plan says nothing.'
+        ) -join "`n"
+
+        $result = Invoke-FVPlanValidate -CommentText (& $script:NewBriefPlan -OmitSections @('1', '2', '3', '4', '5', '6') -ExtraBody $fenced)
+
+        $structural = & $script:GetCheck $result 'PlanStructuralCoverage'
+        $structural.Passed | Should -BeFalse -Because 'quoting the shape is not carrying the shape'
+        $structural.Detail.Contains('Problem and observed evidence') | Should -BeTrue
+    }
+
+    It 'rejects a document whose six headings appear only inside an HTML comment' {
+        $commented = @(
+            '<!--',
+            '## 1. Problem and observed evidence',
+            '## 2. Epistemic map',
+            '## 3. Acceptance criteria',
+            '## 4. Falsifiers',
+            '## 5. Context inventory',
+            '## 6. Evidence obligations',
+            '-->'
+        ) -join "`n"
+
+        $result = Invoke-FVPlanValidate -CommentText (& $script:NewBriefPlan -OmitSections @('1', '2', '3', '4', '5', '6') -ExtraBody $commented)
+
+        $structural = & $script:GetCheck $result 'PlanStructuralCoverage'
+        $structural.Passed | Should -BeFalse -Because 'a commented-out heading is not a heading the document carries'
+    }
+
+    It 'does not let a bare ## line pair with a following line to satisfy a section' {
+        # `\s` matches `\n`; `[ \t]` does not. Same rule as frame-spine-core's
+        # block reader (#878 s6).
+        $bare = @(
+            '##',
+            '1. Problem and observed evidence',
+            '##',
+            '2. Epistemic map'
+        ) -join "`n"
+
+        $result = Invoke-FVPlanValidate -CommentText (& $script:NewBriefPlan -OmitSections @('1', '2') -ExtraBody $bare)
+
+        $structural = & $script:GetCheck $result 'PlanStructuralCoverage'
+        $structural.Passed | Should -BeFalse
+        $structural.Detail.Contains('Problem and observed evidence') | Should -BeTrue -Because 'a bare ## and an unrelated next line is not a heading'
+    }
+
+    It 'accepts a legitimate brief that also quotes the six-section template' {
+        # The complement of the fenced-only case: stripping fences must not cost
+        # a real brief its own sections.
+        $quoted = @(
+            'For reference, the required shape is:',
+            '',
+            '```markdown',
+            '## 1. Problem and observed evidence',
+            '## 4. Falsifiers',
+            '```'
+        ) -join "`n"
+
+        $result = Invoke-FVPlanValidate -CommentText (& $script:NewBriefPlan -ExtraBody $quoted)
+
+        $structural = & $script:GetCheck $result 'PlanStructuralCoverage'
+        $structural.Passed | Should -BeTrue -Because "the real headings are still present: $($structural.Detail)"
+    }
+
+    It 'rejects a brief carrying a required section more than once' {
+        $result = Invoke-FVPlanValidate -CommentText (& $script:NewBriefPlan -ExtraBody '## 4. Falsifiers — a second, conflicting copy')
+
+        $structural = & $script:GetCheck $result 'PlanStructuralCoverage'
+        $structural.Passed | Should -BeFalse -Because 'A3 pins falsifiers to the fourth section by number; two of them leaves the container undefined'
+        $structural.Detail.Contains('2 times') | Should -BeTrue
+    }
+
+    It 'rejects a frontmatter declaring plan-variant twice, in either order' {
+        foreach ($pair in @(@('brief', 'goal-contract'), @('goal-contract', 'brief'))) {
+            $fm = "status: pending`nissue_id: 941`nplan-variant: $($pair[0])`nplan-variant: $($pair[1])"
+            $result = Invoke-FVPlanValidate -CommentText (& $script:NewBriefPlan -Frontmatter $fm)
+
+            $structural = & $script:GetCheck $result 'PlanStructuralCoverage'
+            $structural.Passed | Should -BeFalse -Because "declaring both must not be classified by line order ($($pair -join ' then '))"
+            $structural.Detail.Contains('declares plan-variant 2 times') | Should -BeTrue
+        }
+    }
+
+    It 'rejects a brief carrying two real goal-contract blocks rather than reading the ambiguity as absence' {
+        # Get-GCContractBlock returns $null for both "none" and "2+", so a
+        # presence check on its result fails OPEN on the ambiguous case.
+        $twoBlocks = @(
+            '<!-- goal-contract',
+            'schema_version: 1',
+            'issue: 941',
+            '-->',
+            '',
+            '<!-- goal-contract',
+            'schema_version: 1',
+            'issue: 941',
+            '-->'
+        ) -join "`n"
+
+        $result = Invoke-FVPlanValidate -CommentText (& $script:NewBriefPlan -ExtraBody $twoBlocks)
+
+        $structural = & $script:GetCheck $result 'PlanStructuralCoverage'
+        $structural.Passed | Should -BeFalse
+        $structural.Detail.Contains('2 <!-- goal-contract --> block(s)') | Should -BeTrue
+    }
+
+    It 'accepts a brief that quotes a goal-contract block inside a fenced example' {
+        # #942 retires the goal-contract harness, so its own brief is near-certain
+        # to quote one as evidence. A fence-blind presence check rejects it.
+        $fencedContract = @(
+            'The block this chunk retires looks like:',
+            '',
+            '```text',
+            '<!-- goal-contract',
+            'schema_version: 1',
+            'issue: 942',
+            '-->',
+            '```'
+        ) -join "`n"
+
+        $result = Invoke-FVPlanValidate -CommentText (& $script:NewBriefPlan -ExtraBody $fencedContract)
+
+        $structural = & $script:GetCheck $result 'PlanStructuralCoverage'
+        $structural.Passed | Should -BeTrue -Because "a fenced documentation example is not a real contract block: $($structural.Detail)"
+    }
+
+    It 'rejects a brief carrying frame-slice blocks that nothing would ever walk' {
+        $slice = @(
+            '<!-- frame-slice',
+            'step_id: s1',
+            'provides: [implement-code]',
+            'adapter: skills/implementation-discipline/adapters/implement-code-adapter.md',
+            'ac-refs: [AC1]',
+            '-->'
+        ) -join "`n"
+
+        $result = Invoke-FVPlanValidate -CommentText (& $script:NewBriefPlan -ExtraBody $slice)
+
+        $structural = & $script:GetCheck $result 'PlanStructuralCoverage'
+        $structural.Passed | Should -BeFalse -Because 'a brief is outside Spine-Runner dispatch, so accepted slices are orphaned'
+        $structural.Detail.Contains('frame-slice block(s)') | Should -BeTrue
+    }
+
+    It 'names an unrecognized variant instead of reporting a missing frame-spine block' {
+        $result = Invoke-FVPlanValidate -CommentText (& $script:NewBriefPlan -Frontmatter "status: pending`nplan-variant: breif")
+
+        $structural = & $script:GetCheck $result 'PlanStructuralCoverage'
+        $structural.Passed | Should -BeFalse
+        $structural.Detail.Contains("unrecognized plan-variant 'breif'") | Should -BeTrue -Because 'a one-letter typo must not send the author down the add-a-spine repair path'
+        $structural.Detail.Contains('Missing frame-spine block.') | Should -BeFalse
+    }
+
+    It 'validates a brief whose line endings are CR-only' {
+        $plan = (& $script:NewBriefPlan) -replace "`n", "`r"
+
+        $result = Invoke-FVPlanValidate -CommentText $plan
+
+        $structural = & $script:GetCheck $result 'PlanStructuralCoverage'
+        $structural.Passed | Should -BeTrue -Because "the variant reader normalizes, so the section reader must too: $($structural.Detail)"
+    }
+
+    It 'validates a brief whose line endings are CRLF' {
+        $plan = (& $script:NewBriefPlan) -replace "`n", "`r`n"
+
+        $result = Invoke-FVPlanValidate -CommentText $plan
+
+        $structural = & $script:GetCheck $result 'PlanStructuralCoverage'
+        $structural.Passed | Should -BeTrue -Because "CRLF is the common GitHub body shape: $($structural.Detail)"
     }
 
     It 'leaves the goal-contract variant rejection path unchanged' {
@@ -254,6 +439,43 @@ A chunk plan declares plan-variant: brief in its frontmatter.
     It 'reports no declaration for an empty or absent body' {
         (Get-FSCPlanVariant -CommentBody '') | Should -BeNullOrEmpty
         (Get-FSCPlanVariant -CommentBody $null) | Should -BeNullOrEmpty
+    }
+
+    It 'does not read a commented-out frontmatter block as a live declaration' {
+        # The skip loop must track comment CLOSURE, not just the opening
+        # delimiter, or it walks through a commented-out block into the real
+        # frontmatter having already read the dead one.
+        $plan = @'
+<!-- plan-issue-994 -->
+<!--
+---
+plan-variant: brief
+---
+-->
+
+---
+status: pending
+issue_id: 994
+spine-omitted: plan-too-small
+---
+
+## Plan: An ordinary small plan
+'@
+        (Get-FSCPlanVariant -CommentBody $plan) | Should -BeNullOrEmpty -Because 'a commented-out declaration is inert'
+
+        # And the plan it belongs to still validates as what it actually is.
+        $result = Invoke-FVPlanValidate -CommentText $plan
+        $structural = & $script:GetCheck $result 'PlanStructuralCoverage'
+        $structural.Passed | Should -BeTrue -Because "a lawful spine-omitted plan must not be hard-rejected with fabricated brief violations: $($structural.Detail)"
+    }
+
+    It 'returns every declaration so a caller can reject the arity' {
+        $fm = "status: pending`nplan-variant: brief`nplan-variant: goal-contract"
+        $declarations = @(Get-FSCPlanVariantDeclaration -CommentBody (& $script:NewBriefPlan -Frontmatter $fm))
+
+        $declarations.Count | Should -Be 2
+        $declarations[0] | Should -BeExactly 'brief'
+        $declarations[1] | Should -BeExactly 'goal-contract'
     }
 }
 
@@ -358,17 +580,34 @@ Describe 'Brief plan variant — conformance check' -Tag 'unit' {
 Describe 'Brief plan variant — review charter' -Tag 'unit' {
 
     It 'every adapter-selecting dispatch point routes a brief to design-challenge' {
-        foreach ($path in @('commands/plan.md', 'skills/plan-authoring/SKILL.md')) {
+        # Asserts the SELECTION SENTENCES, not word proximity. The original
+        # bounded-distance regex stayed true after both selection steps were
+        # deleted — two unrelated occurrences satisfied it (#947 review, M13).
+        $expected = @{
+            'commands/plan.md'                = 'declares `plan-variant: brief` — the chunk-plan shape — uses adapter `design-challenge`'
+            'skills/plan-authoring/SKILL.md'  = 'declares `plan-variant: brief` selects `skills/adversarial-review/adapters/design-challenge.md`'
+        }
+
+        foreach ($path in $expected.Keys) {
             $content = & $script:ReadRepoFile $path
-            $content | Should -Match '(?s)brief.{0,400}`design-challenge`|`design-challenge`.{0,400}brief' `
-                -Because "$path selects the review adapter for /plan and must send a brief to the prosecution-only shape"
+            $content.Contains($expected[$path]) | Should -BeTrue `
+                -Because "$path is where the review adapter is actually selected for /plan; deleting the selection rule must turn this red"
         }
     }
 
     It 'keeps the standard adapter selected for every non-brief plan' {
-        foreach ($path in @('commands/plan.md', 'skills/plan-authoring/SKILL.md')) {
+        # `Contains('standard')` was vacuous: it is satisfied by "standards
+        # check", "proof standard", "standard frame-spine plan" — all present on
+        # origin/main (#947 review, M13).
+        $expected = @{
+            'commands/plan.md'               = 'Every other plan shape uses adapter `standard`.'
+            'skills/plan-authoring/SKILL.md' = 'Every other plan shape selects `standard` as before.'
+        }
+
+        foreach ($path in $expected.Keys) {
             $content = & $script:ReadRepoFile $path
-            $content.Contains('standard') | Should -BeTrue -Because "$path must still select `standard` for spine-bearing plans"
+            $content.Contains($expected[$path]) | Should -BeTrue `
+                -Because "$path must keep an explicit fall-through to ``standard`` for spine-bearing plans"
         }
     }
 
@@ -382,11 +621,16 @@ Describe 'Brief plan variant — review charter' -Tag 'unit' {
     }
 
     It 'the planner charter no longer prescribes the five-pass panel for a brief' {
+        # `Contains('brief')` is TRUE on origin/main ("standard brief", "context
+        # brief"), so it never guarded anything (#947 review, M13).
         $content = & $script:ReadRepoFile 'agents/Issue-Planner.agent.md'
 
-        $content.Contains('brief') | Should -BeTrue -Because 'the planner charter must name the brief shape'
-        $content | Should -Match '(?s)brief.{0,400}design-challenge|design-challenge.{0,400}brief' `
+        $content.Contains('Chunk sub-issues of a designed parent are authored as a brief instead') | Should -BeTrue `
+            -Because 'the planner charter must name the brief shape as the chunk-plan artifact'
+        $content.Contains('the prosecution-only `design-challenge` adapter') | Should -BeTrue `
             -Because 'the planner charter must route a brief to the design-challenge shape'
+        $content.Contains('not the five-pass panel') | Should -BeTrue `
+            -Because 'the charter must say what stops applying, not only what starts'
     }
 }
 
@@ -441,10 +685,17 @@ Describe 'Brief plan variant — doctrine migration' -Tag 'unit' {
     }
 
     It 'chunked-delivery no longer claims nothing enforces A1-A5 at authoring time' {
+        # Rationale corrected (#947 review, M23): the VALIDATOR half does not
+        # falsify that sentence — a brief with all six sections and an
+        # artifact-pinned, unchecked-floor criterion still validates. What
+        # falsifies it is that some enforcement now exists at authoring time at
+        # all, and the replacing prose is careful to say what it does not reach.
         $content = & $script:ReadRepoFile 'Documents/Design/chunked-delivery.md'
         $body = & $script:StripInterimNote $content
         $body.Contains('a plan can violate any of A1–A5 and still validate') | Should -BeFalse `
-            -Because 'the conformance check and the brief validator branch falsify that sentence'
+            -Because 'the sentence claims nothing enforces A1-A5 at authoring time, which the conformance check falsifies'
+        $body.Contains('Neither reaches A1 or A3') | Should -BeTrue `
+            -Because 'the replacement must state what the new enforcement does NOT reach, or it overclaims in the other direction'
     }
 
     It 'the migration table no longer schedules rows this chunk has discharged' {

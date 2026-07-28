@@ -332,8 +332,16 @@ function Invoke-OrchestraSpineRender {
     # 872-D5/872-D7: goal-contract variant detection is hoisted above both
     # the plan-too-small escape and the legacy-plan-shape fall-through, so a
     # variant-declared plan always renders the variant-aware message instead
-    # of either misleading no-spine message (identical precedence to
-    # Invoke-FVPlanValidate in frame-validate-core.ps1).
+    # of either misleading no-spine message.
+    #
+    # Precedence note (#947 review, M4): this renderer checks goal-contract
+    # first and brief second; Invoke-FVPlanValidate checks brief first. The
+    # orders used to be identical and this comment used to say so. They can
+    # differ now only for a frontmatter declaring BOTH variants, which
+    # Invoke-FVPlanValidate rejects outright as ambiguous arity, so no body
+    # reaching a successful validation is classified differently by the two.
+    # Renderer output is advisory prose, not a gate; do not read the ordering
+    # difference as a second classification rule.
     if (Test-GCVariantFrontmatter -CommentBody $planComment.Body) {
         return 'plan uses the goal-contract variant — no spine; see the plan comment for the contract'
     }
