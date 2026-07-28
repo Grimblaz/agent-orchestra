@@ -2,6 +2,18 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.6.0] — 2026-07-28
+
+### Fixed
+
+- Squash-merged Claude Code worktrees are now surfaced by the session-startup cleanup check. The candidate gate no longer renders a merged verdict of its own — a squash merge writes a new commit, so the ancestry test it used discarded the ordinary case before any evidence was gathered. The eligibility gate is now the sole authority, on all three candidate paths.
+- The merged verdict rests on content evidence. Patch-history equivalence (`git cherry`) establishes neither a merged nor an unmerged verdict; a clean merge-tree whose result still differs from the remote default establishes the negative. Merged evidence names the signal that established it.
+- Local evidence is gathered for every candidate before any candidate spends the GitHub API budget, so a worktree that needs no network call is never refused because other candidates used the budget up. The local pass carries its own time bound.
+- Manual-review reasons name the cause that actually applied: running out of time is reported differently from having too many candidates, and "could not verify" is no longer reported as "unmerged commits".
+- The cleanup command block is printed only when there is a command in it; otherwise the check says there is nothing to run and why.
+- An eligible worktree past the ten-line display cap still appears in the offered cleanup command.
+- **Deliberate silence, new in this release:** a worktree or branch the check concludes is carrying live, unmerged work — content evidence says so, and no merged pull request matches its current tip — is now reported not at all, rather than as a manual-review line. This is the one thing the check deliberately stays quiet about; it exists so an in-flight worktree does not produce a line at every session start. Everything else it declines to offer is still reported with the reason.
+
 ## [3.5.0] — 2026-07-28
 
 ### Added

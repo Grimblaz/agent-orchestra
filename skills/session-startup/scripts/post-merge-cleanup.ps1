@@ -491,7 +491,31 @@ function Remove-SiblingWorktree {
             }
         }
         else {
-            Write-Output "Removed worktree '$WorktreePath', but skipped branch '$worktreeBranch' — unmerged commits — review before deleting"
+            # Issue #922 Amendment A3 (review of PR #950, finding M11): this used to
+            # say "unmerged commits" unconditionally. Test-BranchMergedIntoDefault
+            # returns $false for five different reasons — a conclusive negative, a
+            # merge-tree conflict with no matching PR, a git failure, gh
+            # unavailable, and gh timeout — so the message asserted a verdict the
+            # tool had not established, on a branch whose worktree is already gone.
+            # That is exactly the conflation AC6 removes on the detector side, and
+            # Amendment A1.1 widened it by making the inconclusive case common.
+            # AC6's split now reaches the executor too.
+            # One call, not two: this probe runs real git, and calling it twice
+            # would both double the cost and desynchronise any caller observing the
+            # command sequence.
+            $branchContentVerdict = Test-BranchTreeEquivalentToDefault -BranchName $worktreeBranch -DefaultBranch $DefaultBranch
+            $branchSkipReason = if ($null -eq $branchContentVerdict) {
+                "couldn't verify: no conclusive merge evidence"
+            }
+            elseif ($branchContentVerdict) {
+                # Content says merged but the merged check still declined, so the
+                # decline came from the empty-commit guard or the PR lookup.
+                "couldn't verify: no matching merged pull request"
+            }
+            else {
+                'unmerged commits'
+            }
+            Write-Output "Removed worktree '$WorktreePath', but skipped branch '$worktreeBranch' — $branchSkipReason — review before deleting"
         }
     }
 }

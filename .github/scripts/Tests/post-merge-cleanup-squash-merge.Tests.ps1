@@ -139,6 +139,29 @@ Describe 'post-merge-cleanup.ps1 - squash-merge orphan cleanup (Issue #513)' {
             & $script:InvokeGit -RepoPath $RepoPath -Arguments @('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main') | Out-Null
         }
 
+        # Issue #922: the gh shims below were Windows-only — a `gh.ps1` plus a
+        # `gh.cmd` batch wrapper. On Linux neither is resolvable by the bare name
+        # `gh`, so `Get-Command gh` failed, the eligibility primitive reported
+        # "gh unavailable", and any fixture depending on gh evidence silently took
+        # the retain path. That is why S3 failed on the runner and passed on
+        # Windows: on Linux its cherry-pick reproduced the original commit's exact
+        # SHA (identical tree, parent, message and committer second), leaving zero
+        # unique commits, which routes to the gh-dependent zero-commit rung — the
+        # one rung the shim could not serve there.
+        #
+        # This writes an extensionless POSIX wrapper alongside, with the execute
+        # bit set, so the same fixture means the same thing on both platforms.
+        $script:AddPosixGhShim = {
+            param([Parameter(Mandatory)][string]$ShimPath)
+
+            if ($IsWindows) { return }
+
+            $posixWrapper = "#!/bin/sh`nexec pwsh -NoProfile -NonInteractive -File `"`$(dirname `"`$0`")/gh.ps1`" `"`$@`"`n"
+            $target = Join-Path $ShimPath 'gh'
+            [System.IO.File]::WriteAllText($target, $posixWrapper, [System.Text.UTF8Encoding]::new($false))
+            & chmod +x $target 2>&1 | Out-Null
+        }
+
         $script:NewFailingGhShim = {
             param(
                 [Parameter(Mandatory)]
@@ -159,6 +182,7 @@ exit 64
 
             $cmdContent = "@echo off`r`npwsh -NoProfile -NonInteractive -File `"%~dp0gh.ps1`" %*`r`nexit %ERRORLEVEL%"
             Set-Content -Path (Join-Path $shimPath 'gh.cmd') -Value $cmdContent -Encoding ascii
+            & $script:AddPosixGhShim -ShimPath $shimPath
 
             return $shimPath
         }
@@ -207,6 +231,7 @@ exit 1
             Set-Content -Path (Join-Path $shimPath 'gh.ps1') -Value $ghMock -Encoding utf8NoBOM
             $cmdContent = "@echo off`r`npwsh -NoProfile -NonInteractive -File `"%~dp0gh.ps1`" %*`r`nexit %ERRORLEVEL%"
             Set-Content -Path (Join-Path $shimPath 'gh.cmd') -Value $cmdContent -Encoding ascii
+            & $script:AddPosixGhShim -ShimPath $shimPath
             return $shimPath
         }
 
@@ -571,18 +596,68 @@ exit 1
             & $script:SetRepoFile -RepoPath $repoPath -RelativePath 'stray.txt' -Content "stray`n"
             & $script:CommitAll -RepoPath $repoPath -Message 'stray commit'
 
-            # Cherry-pick stray onto main (same content, same patch)
+            # Cherry-pick stray onto main (same content, same patch).
+            #
+            # Issue #922: committed with a DIFFERENT message on purpose. A plain
+            # `cherry-pick` preserves the original message, so when the replay lands
+            # in the same committer second it reproduces the source commit's exact
+            # SHA — main and the branch then point at one commit, the branch has
+            # ZERO unique commits, and the test silently exercises the zero-commit
+            # rung instead of the absorption chain it is named for. That is a race,
+            # not a platform difference; it merely surfaced on the Linux runner
+            # first. Patch-id is content-derived, so a different message keeps the
+            # commit patch-equivalent while guaranteeing a distinct SHA.
             $strayCommit = (& git -C $repoPath rev-parse $branch 2>$null).Trim()
             & $script:InvokeGit -RepoPath $repoPath -Arguments @('checkout', 'main') | Out-Null
-            & $script:InvokeGit -RepoPath $repoPath -Arguments @('cherry-pick', $strayCommit) | Out-Null
+            & $script:InvokeGit -RepoPath $repoPath -Arguments @('cherry-pick', '--no-commit', $strayCommit) | Out-Null
+            & $script:CommitAll -RepoPath $repoPath -Message 'stray commit (replayed onto main)'
             & $script:PushMain -RepoPath $repoPath
+
+            # Issue #922: this fixture asserted its OUTCOME without ever checking
+            # its own PRECONDITION. `cherry-pick`'s output is swallowed, so if it
+            # fails — as it evidently does on the Linux runner, where this test is
+            # the single failure in an otherwise green suite — main never receives
+            # the content, and the test reports "the branch was not absorbed" while
+            # the real cause is that the fixture was never built. Assert the
+            # precondition so the failure names itself.
+            $mainHasStray = @(& git -C $repoPath ls-tree -r --name-only main 2>$null)
+            $mainHasStray | Should -Contain 'stray.txt' `
+                -Because 'the fixture requires the stray commit to have been cherry-picked onto main; if this fails, the cherry-pick did, and the outcome assertion below is meaningless'
+
+            # The cherry-pick landing is necessary but not sufficient: this test's
+            # premise is that the branch is TREE-IDENTICAL to the remote default, so
+            # the merged check clears it on content evidence with no gh call. Pin
+            # that directly, and report the actual signal state on failure, so a
+            # platform difference localises itself instead of surfacing as the
+            # downstream "branch was not absorbed".
+            $branchTree = (& git -C $repoPath rev-parse "${branch}^{tree}" 2>$null)
+            $remoteTree = (& git -C $repoPath rev-parse 'origin/main^{tree}' 2>$null)
+            & git -C $repoPath diff --quiet --ignore-cr-at-eol 'origin/main' $branch 2>$null
+            $tolerantDiffExit = $LASTEXITCODE
+            "$branchTree" | Should -BeExactly "$remoteTree" `
+                -Because "the branch must be tree-identical to origin/main for this fixture to mean what it claims (tolerant diff exit was $tolerantDiffExit)"
+
+            # Pin the shape this test is named for: the branch must still carry its
+            # own commit, or it is exercising the zero-commit rung instead of the
+            # patch-equivalence absorption chain.
+            $uniqueCount = (& git -C $repoPath rev-list "origin/main..$branch" --count 2>$null)
+            "$uniqueCount".Trim() | Should -BeExactly '1' `
+                -Because 'S3 is the stray-but-reachable ANCESTOR sub-case; a branch with zero unique commits takes a different path entirely'
 
             # git cherry should show '-' for the feature commit (patch-equivalent)
             $branchTip = (& git -C $repoPath rev-parse $branch 2>$null).Trim()
             $shimPath  = & $script:NewPassingGhShim -ParentPath $repoPath -State 'CLOSED' -HeadRefOid $branchTip
 
             $result = & $script:InvokeCleanupWithGh -RepoPath $repoPath -BranchName $branch -GhShimPath $shimPath
+
             $result.ExitCode | Should -Be 0
+            # With the fixture pinned to one unique commit and a tree identical to
+            # origin/main, this resolves on content evidence alone. Asserting the
+            # absence of gh traffic keeps that true: if a future change routes this
+            # shape through a network rung, it will be visible here rather than
+            # showing up as a platform-dependent flake.
+            @($result.GhCalls).Count | Should -Be 0 `
+                -Because 'a tree-identical branch is merged on local evidence; no gh call is needed on either platform'
             (& $script:TestLocalBranchExists -RepoPath $repoPath -BranchName $branch) | Should -BeFalse -Because 'patch-equivalent stray commit should be absorbed'
         }
 
