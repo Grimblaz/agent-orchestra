@@ -759,12 +759,19 @@ function Test-SCDUniqueCommitsAllEmpty {
         real work. Mirrors the legacy Test-OrphanBranchCommitsAbsorbed's
         "if ($paths.Count -eq 0) { return $false }" empty-path rejection pattern.
     .OUTPUTS
-        [bool] $true only on a confirmed all-empty unique-commit set. Any git
-        failure, or any commit with at least one touched path, returns $false —
-        the caller uses $false to mean "do not withhold the evidence", so failing
-        toward $false here costs nothing (the caller still proceeds to its next
-        rung on any doubt) while never silently withholding legitimate evidence
-        because of an unrelated git-invocation error.
+        Tri-state [bool]/$null. $true on a confirmed all-empty unique-commit
+        set; $false when at least one unique commit touched at least one path;
+        $null when the determination could not be made at all (the `git log`
+        invocation failed).
+
+        Issue #922 (invariant I-5, decision D3): $null replaces the previous
+        $false-on-failure return. The caller reads $false as "do not withhold
+        the evidence" and immediately grants eligibility on it, so returning
+        $false for a git failure fabricated tree-equivalence evidence out of an
+        unrelated git error — the one path that violated this file's stated
+        fail-direction intent ("any git or gh failure resolves toward NOT
+        eligible (retain) — never eligible"). Callers must test for $null
+        BEFORE testing `-not`, since `-not $null` is $true.
     #>
     [CmdletBinding()]
     param(
@@ -783,7 +790,7 @@ function Test-SCDUniqueCommitsAllEmpty {
     }
     finally { $ErrorActionPreference = $savedEap }
 
-    if ($logExit -ne 0) { return $false }
+    if ($logExit -ne 0) { return $null }
 
     foreach ($line in @($logOutput)) {
         if (-not [string]::IsNullOrWhiteSpace($line)) { return $false }
@@ -875,12 +882,26 @@ function Test-WorktreeBranchRemovalEligible {
     if ($uniqueCount -ge 1) {
         # Rung 2: git-only tree-equivalence first (never the name-only gh fallback — M4),
         # then the primitive's own OID-checked merged-PR-by-head rung.
+        #
+        # Issue #922 (I-5): a failure to gather evidence inside this rung must never
+        # reach the rung's own 'unmerged commits' exit, which asserts a conclusive
+        # negative. $evidenceGatheringFailed carries that distinction to the
+        # no-match exit below.
+        $evidenceGatheringFailed = $false
         if (Test-BranchTreeEquivalentToDefault -BranchName $BranchName -DefaultBranch $DefaultBranch) {
             # Finding C (#889 fix cycle): a branch whose unique commits are
             # exclusively --allow-empty no-ops is trivially tree-equivalent by
             # definition (no commit changed any file) — do not accept that as
             # merge evidence; fall through to the OID-checked PR rung instead.
-            if (-not (Test-SCDUniqueCommitsAllEmpty -BranchName $BranchName -RemoteDefaultRef $remoteDefault)) {
+            $allUniqueCommitsEmpty = Test-SCDUniqueCommitsAllEmpty -BranchName $BranchName -RemoteDefaultRef $remoteDefault
+            if ($null -eq $allUniqueCommitsEmpty) {
+                # Issue #922 (I-5/AC7): the determination itself failed. Withhold the
+                # tree-equivalence evidence rather than granting eligibility on it —
+                # `-not $null` is $true, which is precisely how the pre-#922 form
+                # fabricated "merged (tree-equivalent)" out of a `git log` error.
+                $evidenceGatheringFailed = $true
+            }
+            elseif (-not $allUniqueCommitsEmpty) {
                 $result.Eligible = $true
                 $result.Evidence = "merged into $remoteDefault (tree-equivalent)"
                 return $result
@@ -903,6 +924,12 @@ function Test-WorktreeBranchRemovalEligible {
         }
         # 'no-match' — a same-name PR may exist but its headRefOid does not match
         # the current branch tip (M4's OID-mismatch guard), or no PR exists at all.
+        if ($evidenceGatheringFailed) {
+            # Issue #922 (I-5): report the gathering failure, not a conclusive
+            # negative we never established.
+            $result.ManualReviewReason = $script:WorktreeEligibilityReasons.GitSignalFailed
+            return $result
+        }
         $result.ManualReviewReason = $script:WorktreeEligibilityReasons.UnmergedCommits
         return $result
     }
