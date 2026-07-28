@@ -59,8 +59,8 @@ An optional, skippable worth-it check that runs **once per issue after the issue
 - [references/defect-response.md](references/defect-response.md): Two-track remediation, graceful degradation, and CE or proxy prosecution re-activation.
 - [references/value-reflex.md](references/value-reflex.md): Value Reflex advisory-outcome meanings and the `Park`/`Decline` recording contract.
 - [references/hub-consumer-classification.md](references/hub-consumer-classification.md): Hub/Consumer Classification Gate rule, consumer-artifact routing targets, and override path.
-- [platforms/copilot.md](platforms/copilot.md): Copilot structured-question invocation.
-- [platforms/claude.md](platforms/claude.md): Claude Code structured-question invocation.
+- [references/goal-run-surface-classes.md](references/goal-run-surface-classes.md): Goal-run harness surface classification — which surfaces a CE Gate exerciser re-runs live versus code-audits.
+- Structured-question invocation per platform: [platforms/copilot.md](platforms/copilot.md) (Copilot) and [platforms/claude.md](platforms/claude.md) (Claude Code).
 
 ## Related Guidance
 

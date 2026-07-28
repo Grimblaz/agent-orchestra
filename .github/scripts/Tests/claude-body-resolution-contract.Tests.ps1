@@ -26,6 +26,7 @@ Describe 'Claude shell body-resolution contract' {
             [pscustomobject]@{ ShellName = 'code-smith'; BodyFile = 'Code-Smith.agent.md' }
             [pscustomobject]@{ ShellName = 'doc-keeper'; BodyFile = 'Doc-Keeper.agent.md' }
             [pscustomobject]@{ ShellName = 'experience-owner'; BodyFile = 'Experience-Owner.agent.md' }
+            [pscustomobject]@{ ShellName = 'goal-run'; BodyFile = 'Goal-Run.agent.md' }
             [pscustomobject]@{ ShellName = 'issue-planner'; BodyFile = 'Issue-Planner.agent.md' }
             [pscustomobject]@{ ShellName = 'process-review'; BodyFile = 'Process-Review.agent.md' }
             [pscustomobject]@{ ShellName = 'refactor-specialist'; BodyFile = 'Refactor-Specialist.agent.md' }
@@ -101,7 +102,7 @@ Describe 'Claude shell body-resolution contract' {
         $script:GeneralizedCanonicalParagraph = $script:CanonicalBodyLoadParagraph.Replace($script:CanonicalBodyFile, '{Name}.agent.md')
     }
 
-    It 'discovers exactly the 16 Claude shells covered by the body-resolution contract' {
+    It 'discovers exactly the Claude shells covered by the body-resolution contract' {
         $expectedShellNames = @($script:ExpectedShells.ShellName | Sort-Object)
         $actualShellNames = @(
             Get-ChildItem -Path $script:AgentsDirectory -Filter '*.md' -File |
@@ -110,7 +111,10 @@ Describe 'Claude shell body-resolution contract' {
                 Sort-Object
         )
 
-        $actualShellNames.Count | Should -Be 16 -Because 'the D1 contract must cover all 16 Claude shell wrappers'
+        # The expected roster is the enumerated table above, not a literal count: adding or
+        # removing a shell without registering it here still fails, and the failure names
+        # which shell rather than only that a number moved.
+        $actualShellNames.Count | Should -Be $script:ExpectedShells.Count -Because 'the D1 contract must cover every Claude shell wrapper in agents/'
         $actualShellNames | Should -Be $expectedShellNames
     }
 

@@ -2,6 +2,18 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.6.1] — 2026-07-28
+
+### Fixed
+
+- **Full local test suite restored to green (#948)**: seven contract assertions across six files were failing on `main`, so a suite run could not tell a maintainer whether their own change broke anything. Five of the seven trace to one event — PR #903 added the goal-run agent (manifest entry, shell, shared body, extracted reference) and tripped four separate contract tests that CI's allowlist never runs.
+- `agents/goal-run.md` now enumerates all eight `Goal-Run.agent.md` sections; the shell had been under-enumerating two, silently dropping them from the methodology the agent is told to follow.
+- `agents/goal-run.md` is now registered in the Claude body-resolution contract, bringing it under the D1 byte-alignment assertions it had been escaping.
+- `skills/customer-experience/SKILL.md` indexes its `goal-run-surface-classes.md` reference; `CLAUDE.md` again names the eight supported plugin CLI commands.
+- The agent-count assertions derive their expected value from the plugin manifest instead of a hard-coded literal, which also detects a declared agent that fails to resolve — a case the literal form passed wrongly.
+- The Copilot-sunset `-Skip` guard no longer flags platform-conditional skips as de-obligations, and `phase-containment-report.Tests.ps1` no longer races sibling workers over the shared temp directory.
+- New: `Documents/Design/test-suite-baseline-948.md` records the launch baseline, the runner's counting and false-green traps, and the disposition of every test that was red.
+
 ## [3.6.0] — 2026-07-28
 
 ### Fixed

@@ -268,11 +268,46 @@ Describe 'Invoke-PhaseContainmentReportCli' {
             # default/-NoCache run. Snapshot the temp directory's matching
             # files before and after a default (bypass-cache) invocation and
             # assert no new one was left behind.
-            $before = @(Get-ChildItem -Path $env:TEMP -Filter 'tmp*.tmp' -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name)
-            Invoke-PhaseContainmentReportCli -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 90 -Token '' | Out-Null
-            $after = @(Get-ChildItem -Path $env:TEMP -Filter 'tmp*.tmp' -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name)
-            $newFiles = @($after | Where-Object { $before -notcontains $_ })
-            $newFiles | Should -BeNullOrEmpty -Because "a default (bypass-cache) run must not orphan a real temp file; new tmp*.tmp file(s) found: $($newFiles -join ', ')"
+            # Watch a PRIVATE temp directory, not the shared one.
+            #
+            # Two reasons. First, the shared directory is shared: the full-suite runner
+            # executes eight test files concurrently, so another worker's temp file lands
+            # inside this snapshot window and fails this test for something it did not do.
+            # That race is intermittent -- it passed twice and failed once across three
+            # measured full-suite runs at the same commit.
+            #
+            # Second, the code under test resolves its temp path through
+            # [System.IO.Path]::GetTempPath(), NOT through $env:TEMP (see the comment at
+            # phase-containment-report.ps1's bypass CachePath construction). Snapshotting
+            # $env:TEMP while the product writes to GetTempPath() means that if the two ever
+            # diverge this test watches the wrong directory and cannot see the orphan at all.
+            #
+            # Redirecting TMP/TEMP/TMPDIR moves GetTempPath() itself, so a real orphan from
+            # the product still lands where this test is looking. Detection is preserved --
+            # strengthened, in the divergence case -- and only cross-worker noise is removed.
+            $savedTmp = $env:TMP
+            $savedTemp = $env:TEMP
+            $savedTmpDir = $env:TMPDIR
+            $privateTemp = Join-Path ([System.IO.Path]::GetTempPath()) "pcr-orphan-probe-$([guid]::NewGuid().ToString('N'))"
+            New-Item -ItemType Directory -Path $privateTemp -Force | Out-Null
+            try {
+                $env:TMP = $privateTemp
+                $env:TEMP = $privateTemp
+                $env:TMPDIR = $privateTemp
+
+                $probeRoot = [System.IO.Path]::GetTempPath()
+                $before = @(Get-ChildItem -Path $probeRoot -Filter 'tmp*.tmp' -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name)
+                Invoke-PhaseContainmentReportCli -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 90 -Token '' | Out-Null
+                $after = @(Get-ChildItem -Path $probeRoot -Filter 'tmp*.tmp' -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name)
+                $newFiles = @($after | Where-Object { $before -notcontains $_ })
+                $newFiles | Should -BeNullOrEmpty -Because "a default (bypass-cache) run must not orphan a real temp file; new tmp*.tmp file(s) found: $($newFiles -join ', ')"
+            }
+            finally {
+                $env:TMP = $savedTmp
+                $env:TEMP = $savedTemp
+                $env:TMPDIR = $savedTmpDir
+                Remove-Item -LiteralPath $privateTemp -Recurse -Force -ErrorAction SilentlyContinue
+            }
         }
     }
 

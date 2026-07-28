@@ -105,7 +105,7 @@ The `session-startup` skill also owns a Claude-only active-assist drift check. W
 
 ### For maintainers
 
-The supported Claude plugin CLI surface (list/install/uninstall/update plus the marketplace subcommands) is cataloged in [README.md § For maintainers](README.md#for-maintainers) and [skills/plugin-release-hygiene/SKILL.md](skills/plugin-release-hygiene/SKILL.md).
+The supported Claude plugin CLI surface is `claude plugin list`, `claude plugin install <plugin@marketplace>`, `claude plugin uninstall <plugin@marketplace>`, `claude plugin update <plugin@marketplace>`, `claude plugin marketplace list`, `claude plugin marketplace add <source>`, `claude plugin marketplace remove <name>`, and `claude plugin marketplace update` — cataloged with usage notes in [README.md § For maintainers](README.md#for-maintainers) and [skills/plugin-release-hygiene/SKILL.md](skills/plugin-release-hygiene/SKILL.md).
 
 ## Quality-first, shift-left
 
