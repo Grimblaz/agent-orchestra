@@ -247,6 +247,51 @@ $script:SCDCollectionTimeCapManualReviewReason = "could not verify: ran out of e
 # the local pass never reached — never silence, and never a conclusive negative.
 $script:SCDFreePhaseBoundManualReviewReason = "could not verify: local evidence pass ran out of time"
 
+# Issue #922 (decision D5 / AC5): the free-evidence phase's own wall-clock bound,
+# separate from the network-cost budget above.
+#
+# Why a separate bound at all: invariant I-2 requires that no gh budget check
+# fires during the free pass, which would otherwise leave that pass
+# uninterruptible while a single candidate's local git chain is unbounded. Binding
+# the existing elapsed cap to the free phase instead was rejected — it makes I-2's
+# "for every candidate" unsatisfiable whenever the cap trips mid-pass.
+#
+# Why 5 seconds. Measured against this repository on 2026-07-28 at commit 2c22178,
+# over its 20 live candidate-shaped branches: 2271 ms total, mean 114 ms per
+# candidate, max 210 ms. Five seconds is ~2.2x the whole measured pass — roughly
+# 44 candidates at the measured mean — so it does not fire in ordinary operation
+# while still capping a pathological tree. It must also stay generous enough that
+# Amendment A2.2's steady-state case (a squash whose merge-tree conflicts) reaches
+# the paid merged-pull-request rung rather than being cut off before it: in the
+# same measurement only 3 of 20 candidates needed that rung at all, and all three
+# were reached inside 500 ms of cumulative free-phase time.
+#
+# Worst case is 5 s free + the 10 s gh cap, comparable to the 15.3 s measured on
+# the pre-#922 tree — but with free evidence never deniable by the paid budget.
+$script:SCDFreeEvidencePhaseSeconds = 5
+
+function New-SCDFreeEvidenceBudget {
+    [CmdletBinding()]
+    param(
+        [int]$Seconds = $script:SCDFreeEvidencePhaseSeconds
+    )
+
+    return @{
+        Seconds   = $Seconds
+        Stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    }
+}
+
+function Test-SCDFreeEvidenceBudgetExceeded {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [hashtable]$Budget
+    )
+
+    return ($Budget.Stopwatch.Elapsed.TotalSeconds -ge $Budget.Seconds)
+}
+
 function Test-SCDCurrentLocationMatchesWorktreeRecord {
     <#
     .SYNOPSIS
@@ -375,7 +420,14 @@ function Get-SCDGatedEligibility {
         [Parameter(Mandatory)]
         [string]$DefaultBranch,
 
-        [bool]$IsDegradedCwd = $false
+        [bool]$IsDegradedCwd = $false,
+
+        # Issue #922 (I-2): the free (git-only) evidence for this candidate, when
+        # the caller has already gathered it in a prior pass. When omitted, this
+        # function gathers it inline — preserving the original single-candidate
+        # contract for callers that evaluate one branch in isolation.
+        [AllowNull()]
+        [hashtable]$FreeEvidence = $null
     )
 
     if ($IsDegradedCwd) {
@@ -386,6 +438,17 @@ function Get-SCDGatedEligibility {
             Outcome            = $script:WorktreeEligibilityOutcomes.NotEligible
         }
     }
+
+    if ($null -eq $FreeEvidence) {
+        $FreeEvidence = Get-SCDFreeEligibilityEvidence -BranchName $BranchName -DefaultBranch $DefaultBranch
+    }
+
+    # Issue #922 (invariant I-2 / AC4): a candidate the free phase already settled
+    # spends NO budget. The pre-#922 form charged a unit before delegating, and it
+    # was the only call site of the budget predicate — so a merged candidate
+    # enumerated behind enough network-costly ones was refused its own free
+    # evidence and reported as un-evaluable. That is the cost inversion this fixes.
+    if ($FreeEvidence.Resolved) { return $FreeEvidence.Result }
 
     $budgetReason = Get-SCDCollectionGhBudgetOutcome -Budget $Budget -Category $Category
     if ($budgetReason) {
@@ -399,7 +462,114 @@ function Get-SCDGatedEligibility {
         }
     }
 
-    return Test-WorktreeBranchRemovalEligible -BranchName $BranchName -DefaultBranch $DefaultBranch
+    return Resolve-SCDPaidEligibility -FreeEvidence $FreeEvidence -BranchName $BranchName -DefaultBranch $DefaultBranch
+}
+
+function Resolve-SCDCandidateEligibility {
+    <#
+    .SYNOPSIS
+        Issue #922 (invariant I-2, decision D5): resolves eligibility for the whole
+        candidate set in TWO passes — free (local git) for every candidate first,
+        then paid (gh) for whatever the free pass could not settle.
+    .DESCRIPTION
+        The pre-#922 detector interleaved discovery and evaluation: each collection
+        function evaluated candidates as it found them, and the current-branch
+        candidate was evaluated before either collection ran. Under that shape a
+        candidate's free evidence could be denied because earlier candidates had
+        already exhausted a budget it never needed to touch.
+
+        Pass 1 runs the network-free evidence for every candidate, bounded by its
+        own wall-clock budget (D5). Candidates the bound cuts off carry the
+        free-phase reason and are still reported — never silence, and never a
+        conclusive negative (AC5).
+
+        Pass 2 runs the gh rungs, in candidate order, sharing one collection
+        budget across all categories.
+
+        Candidates are hashtables and are mutated in place.
+    #>
+    [CmdletBinding()]
+    param(
+        [AllowNull()]
+        [array]$Candidates,
+
+        [Parameter(Mandatory)]
+        [string]$DefaultBranch,
+
+        [Parameter(Mandatory)]
+        [hashtable]$GhBudget,
+
+        [Parameter(Mandatory)]
+        [hashtable]$FreeBudget,
+
+        [bool]$IsDegradedCwd = $false
+    )
+
+    if ($null -eq $Candidates -or $Candidates.Count -eq 0) { return }
+
+    $pending = @($Candidates | Where-Object { $_.NeedsEligibility })
+
+    # ---- Pass 1: free evidence for EVERY candidate, before any paid work ----
+    foreach ($candidate in $pending) {
+        if ($IsDegradedCwd) { continue }
+        if (Test-SCDFreeEvidenceBudgetExceeded -Budget $FreeBudget) {
+            $candidate.FreeEvidence = $null
+            $candidate.FreePhaseBoundExceeded = $true
+            continue
+        }
+        $candidate.FreeEvidence = Get-SCDFreeEligibilityEvidence -BranchName $candidate.BranchName -DefaultBranch $DefaultBranch
+    }
+
+    # ---- Pass 2: paid evidence, only for what the free pass left open ----
+    #
+    # Issue #922 (Amendment A2.2 / AC14): within the paid phase, candidates whose
+    # CONTENT evidence was inconclusive go first. That is the steady-state squash
+    # case — a worktree older than one merge, whose merge-tree conflicts on the
+    # version-bump file set — and A2.2 requires the merged-pull-request rung to be
+    # actually reachable for it, not merely correct in principle.
+    #
+    # The other paid class is the zero-unique-commit branch, which needs gh only to
+    # tell a shipped bookkeeping branch from one freshly cut and not yet worked on.
+    # Measured on this repository at commit 2c22178: 16 of 20 candidates were in
+    # that class, and evaluating them first exhausted the 10 s elapsed cap before
+    # `feature/issue-905-opus-5-adoption` — the canonical A2.2 case, shipped as
+    # PR #907 — was reached at all. It was reported as un-evaluable rather than
+    # offered, which is criterion 2's failure mode exactly.
+    #
+    # This orders the paid phase; it does not raise any ceiling. The design
+    # rejected raising the budget ceiling because that moves the cliff without
+    # correcting the inversion.
+    $paidOrder = @($pending | Where-Object { $_.FreeEvidence -and $_.FreeEvidence.PaidRung -eq 'rung2' }) +
+                 @($pending | Where-Object { -not ($_.FreeEvidence -and $_.FreeEvidence.PaidRung -eq 'rung2') })
+
+    foreach ($candidate in $paidOrder) {
+        if ($candidate.FreePhaseBoundExceeded) {
+            $eligibility = @{
+                Eligible           = $false
+                Evidence           = $null
+                ManualReviewReason = $script:SCDFreePhaseBoundManualReviewReason
+                Outcome            = $script:WorktreeEligibilityOutcomes.NotEligible
+            }
+        }
+        else {
+            $eligibility = Get-SCDGatedEligibility `
+                -Budget $GhBudget `
+                -Category $candidate.Category `
+                -BranchName $candidate.BranchName `
+                -DefaultBranch $DefaultBranch `
+                -IsDegradedCwd $IsDegradedCwd `
+                -FreeEvidence $candidate.FreeEvidence
+        }
+
+        $candidate.Eligible = $eligibility.Eligible
+        $candidate.ManualReviewReason = $eligibility.ManualReviewReason
+        $candidate.Outcome = $eligibility.Outcome
+        # The sibling/orphan renderers read Reason; the current-branch renderer
+        # reads Evidence. Both are set so one resolver serves every path.
+        $candidate.Reason = $eligibility.Evidence
+        $candidate.Evidence = $eligibility.Evidence
+        $candidate.NeedsEligibility = $false
+    }
 }
 
 function Get-SCDManualReviewLines {
@@ -811,11 +981,11 @@ function Get-SCDSiblingWorktreeCleanups {
         [System.Collections.Generic.IDictionary[string, bool]]$FetchLookup = $null,
 
         [AllowNull()]
-        [array]$WorktreeRecords = $null,
-
-        [hashtable]$GhBudget = (New-SCDCollectionGhBudget),
-
-        [bool]$IsDegradedCwd = $false
+        [array]$WorktreeRecords = $null
+        # Issue #922 (I-2): -GhBudget and -IsDegradedCwd are gone. This function
+        # DISCOVERS candidates and no longer evaluates them, so it holds neither a
+        # budget nor a suppression flag; Resolve-SCDCandidateEligibility owns both,
+        # and owns them across the whole candidate set rather than per collection.
     )
 
     $cleanups = @()
@@ -933,14 +1103,19 @@ function Get-SCDSiblingWorktreeCleanups {
                     }
 
                     if (Test-SCDRemoteHeadMissing -RemoteName $upstreamBranch.RemoteName -BranchPattern $upstreamBranch.BranchName) {
-                        $eligibility = Get-SCDGatedEligibility -Budget $GhBudget -Category 'sibling' -BranchName $branchName -DefaultBranch $DefaultBranch -IsDegradedCwd $IsDegradedCwd
+                        # Issue #922 (I-2): discovery only. Eligibility is resolved by
+                        # Resolve-SCDCandidateEligibility once EVERY candidate has been
+                        # discovered, so no candidate's free evidence can be denied by
+                        # budget an earlier candidate spent.
                         $cleanups += @{
                             BranchName         = $branchName
                             WorktreePath       = $normalizedPath
-                            Reason             = $eligibility.Evidence
-                            Eligible           = $eligibility.Eligible
-                            ManualReviewReason = $eligibility.ManualReviewReason
-                            Outcome            = $eligibility.Outcome
+                            Category           = 'sibling'
+                            NeedsEligibility   = $true
+                            Reason             = $null
+                            Eligible           = $false
+                            ManualReviewReason = $null
+                            Outcome            = $null
                             IsLocked           = $record.IsLocked
                             LockReason         = $record.LockReason
                             IsPrunable         = $record.IsPrunable
@@ -969,15 +1144,18 @@ function Get-SCDSiblingWorktreeCleanups {
                 # was dropped here, before any evidence was gathered, not even as a
                 # candidate needing review. The eligibility gate is now the only
                 # component producing a merged verdict.
-                $eligibility = Get-SCDGatedEligibility -Budget $GhBudget -Category 'sibling' -BranchName $branchName -DefaultBranch $DefaultBranch -IsDegradedCwd $IsDegradedCwd
+                #
+                # Issue #922 (I-2): discovery only — see the upstream-deleted arm above.
                 $cleanups += @{
                     BranchName         = $branchName
                     WorktreePath       = $normalizedPath
-                    Reason             = $eligibility.Evidence
+                    Category           = 'sibling'
+                    NeedsEligibility   = $true
+                    Reason             = $null
                     RemoteDefaultRef   = $remoteDefault.RefName
-                    Eligible           = $eligibility.Eligible
-                    ManualReviewReason = $eligibility.ManualReviewReason
-                    Outcome            = $eligibility.Outcome
+                    Eligible           = $false
+                    ManualReviewReason = $null
+                    Outcome            = $null
                     IsLocked           = $record.IsLocked
                     LockReason         = $record.LockReason
                     IsPrunable         = $record.IsPrunable
@@ -1171,11 +1349,11 @@ function Get-SCDOrphanBranchCleanups {
         [System.Collections.Generic.IDictionary[string, bool]]$FetchLookup = $null,
 
         [AllowNull()]
-        [array]$WorktreeRecords = $null,
-
-        [hashtable]$GhBudget = (New-SCDCollectionGhBudget),
-
-        [bool]$IsDegradedCwd = $false
+        [array]$WorktreeRecords = $null
+        # Issue #922 (I-2): -GhBudget and -IsDegradedCwd are gone. This function
+        # DISCOVERS candidates and no longer evaluates them, so it holds neither a
+        # budget nor a suppression flag; Resolve-SCDCandidateEligibility owns both,
+        # and owns them across the whole candidate set rather than per collection.
     )
 
     $cleanups = @()
@@ -1218,14 +1396,17 @@ function Get-SCDOrphanBranchCleanups {
                 # Issue #922 (decision D1 / AC10): shape-only candidacy — see the
                 # sibling arm above. The ancestry test dropped squash-merged orphan
                 # branches before any evidence was gathered.
-                $eligibility = Get-SCDGatedEligibility -Budget $GhBudget -Category 'orphan' -BranchName $branchName -DefaultBranch $DefaultBranch -IsDegradedCwd $IsDegradedCwd
+                # Issue #922 (I-2): discovery only; eligibility resolved in two
+                # passes once every candidate is known.
                 $cleanups += @{
                     BranchName         = $branchName
-                    Reason             = $eligibility.Evidence
+                    Category           = 'orphan'
+                    NeedsEligibility   = $true
+                    Reason             = $null
                     RemoteDefaultRef   = $remoteDefault.RefName
-                    Eligible           = $eligibility.Eligible
-                    ManualReviewReason = $eligibility.ManualReviewReason
-                    Outcome            = $eligibility.Outcome
+                    Eligible           = $false
+                    ManualReviewReason = $null
+                    Outcome            = $null
                     Kind               = 'orphan-no-upstream'
                 }
             }
@@ -1251,13 +1432,15 @@ function Get-SCDOrphanBranchCleanups {
         }
 
         if (Test-SCDRemoteHeadMissing -RemoteName $upstreamBranch.RemoteName -BranchPattern $upstreamBranch.BranchName) {
-            $eligibility = Get-SCDGatedEligibility -Budget $GhBudget -Category 'orphan' -BranchName $branchName -DefaultBranch $DefaultBranch -IsDegradedCwd $IsDegradedCwd
+            # Issue #922 (I-2): discovery only.
             $cleanups += @{
                 BranchName         = $branchName
-                Reason             = $eligibility.Evidence
-                Eligible           = $eligibility.Eligible
-                ManualReviewReason = $eligibility.ManualReviewReason
-                Outcome            = $eligibility.Outcome
+                Category           = 'orphan'
+                NeedsEligibility   = $true
+                Reason             = $null
+                Eligible           = $false
+                ManualReviewReason = $null
+                Outcome            = $null
                 Kind               = 'orphan-upstream'
             }
         }
@@ -1348,6 +1531,9 @@ function Invoke-SessionCleanupDetector {
     $upstreamDeletedBranchPrefixes = @('feature/issue-')
     $fetchLookup = New-SCDStringLookup
     $ghBudget = New-SCDCollectionGhBudget
+    # Issue #922 (decision D5): the free-evidence phase's own bound, separate from
+    # the gh budget above so invariant I-2 stays satisfiable.
+    $freeEvidenceBudget = New-SCDFreeEvidenceBudget
 
     # Issue #874 s3: best-effort — see the doc comment on
     # Import-SCDGoalRunLibIfAvailable for why this never halts the detector on failure.
@@ -1427,14 +1613,18 @@ function Invoke-SessionCleanupDetector {
                     # but the manual-review reason is now surfaced so an ineligible
                     # stale branch is visibly flagged rather than silently presented
                     # as if the composite command were unconditionally safe to run.
-                    $staleEligibility = Get-SCDGatedEligibility -Budget $ghBudget -Category 'current' -BranchName $currentBranch -DefaultBranch $defaultBranch -IsDegradedCwd $isDegradedCwd
+                    #
+                    # Issue #922 (I-2): discovery only; this candidate joins the
+                    # shared two-pass resolution below with the others.
                     $staleBranch = @{
                         BranchName         = $currentBranch
                         IssueId            = $branchIssueId
-                        Eligible           = $staleEligibility.Eligible
-                        Evidence           = $staleEligibility.Evidence
-                        ManualReviewReason = $staleEligibility.ManualReviewReason
-                        Outcome            = $staleEligibility.Outcome
+                        Category           = 'current'
+                        NeedsEligibility   = $true
+                        Eligible           = $false
+                        Evidence           = $null
+                        ManualReviewReason = $null
+                        Outcome            = $null
                     }
                 }
             }
@@ -1460,15 +1650,18 @@ function Invoke-SessionCleanupDetector {
                         # `merge-base --is-ancestor` exit 1 and `git diff --quiet` exit 0,
                         # and the check reported five other worktrees while omitting it
                         # entirely.
-                        $eligibility = Get-SCDGatedEligibility -Budget $ghBudget -Category 'current' -BranchName $currentBranch -DefaultBranch $defaultBranch -IsDegradedCwd $isDegradedCwd
+                        #
+                        # Issue #922 (I-2): discovery only.
                         $currentNoUpstreamWorktree = @{
                             BranchName         = $currentBranch
                             RemoteDefaultRef   = $remoteDefault.RefName
                             WorktreePath       = $currentLocationPath
-                            Eligible           = $eligibility.Eligible
-                            Evidence           = $eligibility.Evidence
-                            ManualReviewReason = $eligibility.ManualReviewReason
-                            Outcome            = $eligibility.Outcome
+                            Category           = 'current'
+                            NeedsEligibility   = $true
+                            Eligible           = $false
+                            Evidence           = $null
+                            ManualReviewReason = $null
+                            Outcome            = $null
                         }
                     }
                 }
@@ -1476,8 +1669,26 @@ function Invoke-SessionCleanupDetector {
         }
     }
 
-    $siblingWorktreeCleanups = @(Get-SCDSiblingWorktreeCleanups -CurrentWorktreePath $currentLocationPath -DefaultBranch $defaultBranch -NoUpstreamBranchPrefixes $noUpstreamBranchPrefixes -UpstreamDeletedBranchPrefixes $upstreamDeletedBranchPrefixes -FetchLookup $fetchLookup -WorktreeRecords $worktreeRecords -GhBudget $ghBudget -IsDegradedCwd $isDegradedCwd)
-    $orphanBranchCleanups = @(Get-SCDOrphanBranchCleanups -CurrentBranch $currentBranch -DefaultBranch $defaultBranch -NoUpstreamBranchPrefixes $noUpstreamBranchPrefixes -UpstreamDeletedBranchPrefixes $upstreamDeletedBranchPrefixes -FetchLookup $fetchLookup -WorktreeRecords $worktreeRecords -GhBudget $ghBudget -IsDegradedCwd $isDegradedCwd)
+    $siblingWorktreeCleanups = @(Get-SCDSiblingWorktreeCleanups -CurrentWorktreePath $currentLocationPath -DefaultBranch $defaultBranch -NoUpstreamBranchPrefixes $noUpstreamBranchPrefixes -UpstreamDeletedBranchPrefixes $upstreamDeletedBranchPrefixes -FetchLookup $fetchLookup -WorktreeRecords $worktreeRecords)
+    $orphanBranchCleanups = @(Get-SCDOrphanBranchCleanups -CurrentBranch $currentBranch -DefaultBranch $defaultBranch -NoUpstreamBranchPrefixes $noUpstreamBranchPrefixes -UpstreamDeletedBranchPrefixes $upstreamDeletedBranchPrefixes -FetchLookup $fetchLookup -WorktreeRecords $worktreeRecords)
+
+    # ============================================================
+    # STEP 1b: TWO-PASS ELIGIBILITY (issue #922, invariant I-2 / decision D5)
+    # Every candidate from every category is now known, so the free (local git)
+    # evidence runs for ALL of them before ANY of them spends gh budget. The
+    # pre-#922 shape interleaved discovery and evaluation — each collection
+    # evaluated as it found, and the current-branch candidate was evaluated
+    # before either collection ran — so a merged candidate enumerated behind
+    # enough network-costly ones was refused evidence it never needed the
+    # network to obtain.
+    # ============================================================
+    $allCandidates = @()
+    if ($null -ne $staleBranch) { $allCandidates += $staleBranch }
+    if ($null -ne $currentNoUpstreamWorktree) { $allCandidates += $currentNoUpstreamWorktree }
+    $allCandidates += @($siblingWorktreeCleanups | Where-Object { $_.NeedsEligibility })
+    $allCandidates += @($orphanBranchCleanups | Where-Object { $_.NeedsEligibility })
+
+    Resolve-SCDCandidateEligibility -Candidates $allCandidates -DefaultBranch $defaultBranch -GhBudget $ghBudget -FreeBudget $freeEvidenceBudget -IsDegradedCwd $isDegradedCwd
 
     # Issue #874 s3: protected goal-run/* candidates never flow through the
     # ordinary Eligible/ManualReview split below (they carry neither key) —

@@ -2398,11 +2398,39 @@ Describe 'session-cleanup-detector.ps1 — Issue #889 s4: shared eligibility gat
                 -Because 'zero candidates must never spend the gh mock (or a real gh call in production)'
         }
 
+        It 'issue #922 AC4/I-2: a candidate the FREE pass settled spends no gh budget at all, even when the budget is already exhausted' {
+            # The heart of the cost inversion. Before #922 the wrapper charged a
+            # budget unit BEFORE delegating, and it was the only call site of the
+            # budget predicate — so a merged candidate enumerated behind enough
+            # network-costly ones was refused its own free evidence and reported as
+            # un-evaluable. Here the budget is exhausted before the call and the
+            # candidate is still resolved from its free evidence.
+            $budget = New-SCDCollectionGhBudget -PerCategoryLimit 0 -GlobalSeconds 0
+            $settledFree = @{
+                Resolved = $true
+                Result   = @{
+                    Eligible           = $true
+                    Evidence           = 'merged into origin/main (tree-equivalent)'
+                    ManualReviewReason = $null
+                    Outcome            = 'eligible'
+                }
+            }
+            $result = Get-SCDGatedEligibility -Budget $budget -Category 'orphan' -BranchName 'claude/free-resolved-abcdef' -DefaultBranch 'main' -FreeEvidence $settledFree
+            $result.Eligible | Should -Be $true -Because 'free evidence must never be denied because other candidates spent the network budget'
+            $result.Evidence | Should -BeExactly 'merged into origin/main (tree-equivalent)'
+            $budget.CategoryCounts.Count | Should -Be 0 -Because 'no budget unit may be charged for a candidate that needed no gh call'
+        }
+
         It 'finding D (#889 fix cycle): a per-category COUNT-cap exhaustion is reported with the distinct "too many candidates" reason, not GhTimeout' {
             $budget = New-SCDCollectionGhBudget -PerCategoryLimit 1 -GlobalSeconds 999
             # Spend the single count-cap slot for this category.
             Get-SCDCollectionGhBudgetOutcome -Budget $budget -Category 'orphan' | Should -BeNullOrEmpty
-            $result = Get-SCDGatedEligibility -Budget $budget -Category 'orphan' -BranchName 'feature/issue-1-x' -DefaultBranch 'main'
+            $result = Get-SCDGatedEligibility -Budget $budget -Category 'orphan' -BranchName 'feature/issue-1-x' -DefaultBranch 'main' -FreeEvidence @{
+                Resolved      = $false
+                PaidRung      = 'rung2'
+                PendingReason = "couldn't verify: no conclusive merge evidence"
+                Result        = @{ Eligible = $false; Evidence = $null; ManualReviewReason = $null; Outcome = 'not-eligible' }
+            }
             $result.Eligible | Should -Be $false
             $result.ManualReviewReason | Should -BeExactly "could not verify: too many candidates this run" `
                 -Because 'a count-cap exhaustion means no gh call was even attempted — GhTimeout is reserved for a genuine per-call timeout'
@@ -2416,7 +2444,12 @@ Describe 'session-cleanup-detector.ps1 — Issue #889 s4: shared eligibility gat
             # candidates told there were too many of them. No category exceeded five.
             $budget = New-SCDCollectionGhBudget -PerCategoryLimit 999 -GlobalSeconds 0
             Start-Sleep -Milliseconds 5
-            $result = Get-SCDGatedEligibility -Budget $budget -Category 'orphan' -BranchName 'feature/issue-2-x' -DefaultBranch 'main'
+            $result = Get-SCDGatedEligibility -Budget $budget -Category 'orphan' -BranchName 'feature/issue-2-x' -DefaultBranch 'main' -FreeEvidence @{
+                Resolved      = $false
+                PaidRung      = 'rung2'
+                PendingReason = "couldn't verify: no conclusive merge evidence"
+                Result        = @{ Eligible = $false; Evidence = $null; ManualReviewReason = $null; Outcome = 'not-eligible' }
+            }
             $result.Eligible | Should -Be $false
             $result.ManualReviewReason | Should -BeExactly "could not verify: ran out of evaluation time this run" `
                 -Because 'the elapsed-time cap is a different cause from the count cap, and the customer is told which one applied'

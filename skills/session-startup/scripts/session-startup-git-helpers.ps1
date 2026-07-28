@@ -950,6 +950,13 @@ function Test-WorktreeBranchRemovalEligible {
         Non-goal: this primitive performs no structural (primary/current
         worktree) guarding — that is a separate shared helper (s2) called by
         the callers. It does not delete anything.
+
+        Issue #922 (invariant I-2, decision D5): the router is split into
+        Get-SCDFreeEligibilityEvidence (everything obtainable with no network
+        cost) and Resolve-SCDPaidEligibility (the gh rungs). This function
+        composes the two and keeps its original whole-evaluation contract for the
+        cleanup executor; the detector calls the halves separately so it can run
+        the free pass over EVERY candidate before ANY candidate spends gh budget.
     #>
     [CmdletBinding()]
     param(
@@ -962,6 +969,35 @@ function Test-WorktreeBranchRemovalEligible {
         [string]$Repo
     )
 
+    $free = Get-SCDFreeEligibilityEvidence -BranchName $BranchName -DefaultBranch $DefaultBranch
+    if ($free.Resolved) { return $free.Result }
+    return Resolve-SCDPaidEligibility -FreeEvidence $free -BranchName $BranchName -DefaultBranch $DefaultBranch -Repo $Repo
+}
+
+function Get-SCDFreeEligibilityEvidence {
+    <#
+    .SYNOPSIS
+        Issue #922 (invariant I-2, decision D5): the network-free half of the
+        eligibility router. Runs only local git, spends no gh budget, and either
+        settles the candidate outright or reports which paid rung would settle it.
+    .OUTPUTS
+        Hashtable: @{
+            Resolved      = <bool>    # $true when no gh call is needed at all
+            Result        = @{ Eligible; Evidence; ManualReviewReason; Outcome }
+            PaidRung      = 'rung2' | 'rung3' | $null
+            PendingReason = <string|$null>   # the reason to report if the paid
+                                             # rung finds no matching merged PR
+        }
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$BranchName,
+
+        [Parameter(Mandatory)]
+        [string]$DefaultBranch
+    )
+
     $result = @{
         Eligible           = $false
         Evidence           = $null
@@ -970,6 +1006,7 @@ function Test-WorktreeBranchRemovalEligible {
         # reporting layer never string-matches a reason to decide what renders.
         Outcome            = $script:WorktreeEligibilityOutcomes.NotEligible
     }
+    $free = @{ Resolved = $true; Result = $result; PaidRung = $null; PendingReason = $null }
     $remoteDefault = Get-RemoteDefaultRef -DefaultBranch $DefaultBranch
 
     # Rung 1: unique-commit count (network-free, must run first)
@@ -983,7 +1020,7 @@ function Test-WorktreeBranchRemovalEligible {
 
     if ($countExit -ne 0) {
         $result.ManualReviewReason = $script:WorktreeEligibilityReasons.GitSignalFailed
-        return $result
+        return $free
     }
 
     # Finding I (#889 fix cycle): a successful (exit 0) but non-numeric or empty
@@ -1000,7 +1037,7 @@ function Test-WorktreeBranchRemovalEligible {
     }
     if (-not $countParsedOk) {
         $result.ManualReviewReason = $script:WorktreeEligibilityReasons.GitSignalFailed
-        return $result
+        return $free
     }
 
     if ($uniqueCount -ge 1) {
@@ -1035,7 +1072,7 @@ function Test-WorktreeBranchRemovalEligible {
                 # the merge-tree-no-op shape — one of the two shapes AC1 mandates —
                 # was reportable only by mislabelling its own evidence.
                 $result.Evidence = "merged into $remoteDefault ($($mergeVerdict.Signal))"
-                return $result
+                return $free
             }
         }
         elseif ($mergeVerdict.Verdict -eq 'definitively-unmerged') {
@@ -1046,48 +1083,69 @@ function Test-WorktreeBranchRemovalEligible {
             # evidence was inconclusive, not for ones it settled.
             $result.ManualReviewReason = $script:WorktreeEligibilityReasons.UnmergedCommits
             $result.Outcome = $script:WorktreeEligibilityOutcomes.DefinitivelyUnmerged
-            return $result
+            return $free
         }
         elseif ($mergeVerdict.Cause -eq $script:BranchMergeUndeterminedCauses.GitSignalFailed) {
             $evidenceGatheringFailed = $true
         }
 
-        $pr = Get-SCDMergedPrByHeadOid -Branch $BranchName -DefaultBranch $DefaultBranch
-        if ($pr.Status -eq 'matched') {
-            $result.Eligible = $true
-            $result.Outcome = $script:WorktreeEligibilityOutcomes.Eligible
-            $result.Evidence = "PR #$($pr.Number) merged"
-            return $result
+        # Nothing free settles this candidate. Hand the paid rung the reason to
+        # report if it finds no matching merged PR.
+        #
+        # Issue #922 (AC6/I-3): that reason is the INCONCLUSIVE one. The pre-#922
+        # form reported 'unmerged commits' here, asserting a conclusive negative it
+        # had not established — the conflation AC6 removes, and the steady state
+        # for any worktree older than one merge. 'unmerged commits' is now
+        # reachable only from the A2.1 verdict above. When the gathering itself
+        # failed (I-5), the failure is reported instead.
+        $free.Resolved = $false
+        $free.PaidRung = 'rung2'
+        $free.PendingReason = if ($evidenceGatheringFailed) {
+            $script:WorktreeEligibilityReasons.GitSignalFailed
         }
-        if ($pr.Status -eq 'timeout') {
-            $result.ManualReviewReason = $script:WorktreeEligibilityReasons.GhTimeout
-            return $result
+        else {
+            $script:WorktreeEligibilityReasons.InconclusiveMergeEvidence
         }
-        if ($pr.Status -eq 'unavailable') {
-            $result.ManualReviewReason = $script:WorktreeEligibilityReasons.GhUnavailable
-            return $result
-        }
-        # 'no-match' — a same-name PR may exist but its headRefOid does not match
-        # the current branch tip (M4's OID-mismatch guard), or no PR exists at all.
-        if ($evidenceGatheringFailed) {
-            # Issue #922 (I-5): report the gathering failure, not a conclusive
-            # negative we never established.
-            $result.ManualReviewReason = $script:WorktreeEligibilityReasons.GitSignalFailed
-            return $result
-        }
-        # Issue #922 (AC6/I-3): reaching here means the content signals were
-        # INCONCLUSIVE — merge-tree conflicted, or tree-equivalence was withheld
-        # because every unique commit was empty — and no matching merged PR was
-        # found. The pre-#922 form reported 'unmerged commits' here, asserting a
-        # conclusive negative it had not established; that is the conflation AC6
-        # removes, and it is the steady state for any worktree older than one merge.
-        # 'unmerged commits' is now reachable ONLY from the A2.1 verdict above.
-        $result.ManualReviewReason = $script:WorktreeEligibilityReasons.InconclusiveMergeEvidence
-        return $result
+        return $free
     }
 
-    # Rung 3: 0 unique commits — OID-checked merged-PR-by-head FIRST (D2 rung a),
-    # then closed-issue derivation.
+    # Rung 3: 0 unique commits. Nothing here is obtainable without gh — both the
+    # OID-checked merged-PR lookup and the closed-issue derivation are network
+    # calls — so the whole rung belongs to the paid phase.
+    $free.Resolved = $false
+    $free.PaidRung = 'rung3'
+    return $free
+}
+
+function Resolve-SCDPaidEligibility {
+    <#
+    .SYNOPSIS
+        Issue #922 (invariant I-2): the network-cost half of the eligibility
+        router. Runs only for candidates Get-SCDFreeEligibilityEvidence could not
+        settle locally, and only after the caller has decided the gh budget may
+        be spent on this candidate.
+    .OUTPUTS
+        Hashtable: @{ Eligible; Evidence; ManualReviewReason; Outcome } — the same
+        shape Test-WorktreeBranchRemovalEligible returns.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [hashtable]$FreeEvidence,
+
+        [Parameter(Mandatory)]
+        [string]$BranchName,
+
+        [Parameter(Mandatory)]
+        [string]$DefaultBranch,
+
+        [string]$Repo
+    )
+
+    if ($FreeEvidence.Resolved) { return $FreeEvidence.Result }
+
+    $result = $FreeEvidence.Result
+
     $pr = Get-SCDMergedPrByHeadOid -Branch $BranchName -DefaultBranch $DefaultBranch
     if ($pr.Status -eq 'matched') {
         $result.Eligible = $true
@@ -1104,7 +1162,14 @@ function Test-WorktreeBranchRemovalEligible {
         return $result
     }
 
-    # 'no-match' falls through to issue derivation.
+    if ($FreeEvidence.PaidRung -eq 'rung2') {
+        # 'no-match' — a same-name PR may exist but its headRefOid does not match
+        # the current branch tip (M4's OID-mismatch guard), or no PR exists at all.
+        $result.ManualReviewReason = $FreeEvidence.PendingReason
+        return $result
+    }
+
+    # Rung 3 'no-match' falls through to issue derivation.
     $issueId = Get-WorktreeBranchIssueId -BranchName $BranchName
     if (-not $issueId) {
         $result.ManualReviewReason = $script:WorktreeEligibilityReasons.NoIssueDerivable
