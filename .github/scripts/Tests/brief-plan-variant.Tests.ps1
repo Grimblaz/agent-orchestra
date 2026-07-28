@@ -29,6 +29,15 @@ BeforeAll {
     # A minimally-conforming brief: the six numbered sections the two shipped
     # briefs (#939, #941) both carry, read from those artifacts rather than
     # inferred from one sample.
+    #
+    # These headings are DELIBERATELY restated here rather than generated from
+    # $script:FVBriefRequiredSections, and the duplication is the point: a
+    # fixture derived from the constant would let a wrong constant validate
+    # itself, and it would destroy the number<->name coupling that makes a
+    # renumber of that constant turn this suite red. The constant is separately
+    # pinned to the doctrine below ("pins the required-section list ..."), so
+    # the two are one authoritative list plus one independent expectation —
+    # a contract test — not two sources of truth.
     $script:NewBriefPlan = {
         param(
             [string[]]$OmitSections = @(),
@@ -405,6 +414,43 @@ plan-variant: goal-contract
     }
 }
 
+Describe 'Brief plan variant — the required-section contract' -Tag 'unit' {
+
+    It 'pins the required-section list to the doctrine, number and name together' {
+        # The number<->name pairing is load-bearing beyond the heading: A3 in
+        # Documents/Design/chunked-delivery.md names "the brief's fourth
+        # section" as the container falsifiers reach the executor in, so a
+        # renumber falsifies a doctrine sentence. Asserted here so drift in the
+        # constant is caught by an independent expectation rather than
+        # accepted silently.
+        $expected = @(
+            @{ Number = 1; Name = 'Problem and observed evidence' }
+            @{ Number = 2; Name = 'Epistemic map' }
+            @{ Number = 3; Name = 'Acceptance criteria' }
+            @{ Number = 4; Name = 'Falsifiers' }
+            @{ Number = 5; Name = 'Context inventory' }
+            @{ Number = 6; Name = 'Evidence obligations' }
+        )
+
+        $actual = @($script:FVBriefRequiredSections)
+        $actual.Count | Should -Be $expected.Count
+
+        for ($i = 0; $i -lt $expected.Count; $i++) {
+            $actual[$i].Number | Should -Be $expected[$i].Number
+            $actual[$i].Name | Should -BeExactly $expected[$i].Name
+        }
+
+        ($actual | Where-Object { $_.Number -eq 4 }).Name | Should -BeExactly 'Falsifiers' `
+            -Because "chunked-delivery.md's A3 names the brief's FOURTH section as the falsifier container"
+    }
+
+    It 'keeps the doctrine sentence and the constant in agreement about section four' {
+        $doctrine = & $script:ReadRepoFile 'Documents/Design/chunked-delivery.md'
+        $doctrine.Contains("brief's fourth section") | Should -BeTrue
+        ($script:FVBriefRequiredSections | Where-Object { $_.Number -eq 4 }).Name | Should -BeExactly 'Falsifiers'
+    }
+}
+
 Describe 'Brief plan variant — the shared variant reader' -Tag 'unit' {
 
     It 'reads the declared variant from frontmatter' {
@@ -494,6 +540,36 @@ Describe 'Brief plan variant — consuming surfaces' -Tag 'unit' {
         $rendered | Should -Match '(?i)brief' -Because 'a brief must render the shape-aware message'
         $rendered | Should -Not -Match 'legacy-plan-shape' -Because 'a brief is not a legacy plan'
         $rendered | Should -Not -Match 'plan has no spine — see comment' -Because 'the plan-too-small message describes a size, not this shape'
+    }
+
+    It 'the spine renderer reports a brief+spine plan as ambiguous rather than as a normal brief' {
+        . (Join-Path $script:RepoRoot '.github/scripts/orchestra-spine.ps1')
+
+        $spine = @(
+            '<!-- frame-spine',
+            'spine_schema_version: 1',
+            'generated_at: 2026-05-05T11:00:00Z',
+            'coverage: complete',
+            'ports:',
+            '  implement-test: [s11]',
+            '-->'
+        ) -join "`n"
+        $body = & $script:NewBriefPlan -ExtraBody $spine
+        $commentsJson = (ConvertTo-Json -Depth 6 -InputObject @(
+                [pscustomobject]@{ id = 1; body = $body; created_at = '2026-07-28T00:00:00Z'; updated_at = '2026-07-28T00:00:00Z' }
+            ))
+
+        $rendered = [string](Invoke-OrchestraSpineRender -IssueNumber 941 -CommentsJson $commentsJson)
+
+        $rendered | Should -Match '(?i)ambiguous' -Because 'the validator fails this plan; the renderer must not present it as a normal brief'
+        $rendered | Should -Not -Match 'no spine by design' -Because 'a spine block is present, so that statement would be false'
+    }
+
+    It 'the planner does not tell a brief author to emit the plan-too-small size token' {
+        $content = & $script:ReadRepoFile 'agents/Issue-Planner.agent.md'
+
+        $content.Contains('A `plan-variant: brief` plan does NOT emit `spine-omitted: plan-too-small`') | Should -BeTrue `
+            -Because 'a brief has zero implementation steps, so the fewer-than-3 rule would otherwise apply and contradict the brief contract'
     }
 
     It 'the planner spine-append escape covers the brief, not only the goal-contract variant' {
@@ -620,6 +696,19 @@ Describe 'Brief plan variant — review charter' -Tag 'unit' {
             -Because 'the standard adapter predicate stays keyed on changeset size'
     }
 
+    It 'leaves no unconditional standard-adapter dispatch in the planner body' {
+        # A fourth adapter-selection site the DA4 enumeration missed — the
+        # ordering rule in the planner body said "following the `standard`
+        # adapter" unconditionally, contradicting the brief selection rule
+        # earlier in the same file (#947 external review).
+        $content = & $script:ReadRepoFile 'agents/Issue-Planner.agent.md'
+
+        $content.Contains('following the `standard` adapter,') | Should -BeFalse `
+            -Because 'an unconditional standard dispatch contradicts the shape-based selection rule'
+        $content.Contains('the adapter selected by the plan''s shape') | Should -BeTrue `
+            -Because 'the ordering rule must defer to the selection step rather than naming one adapter'
+    }
+
     It 'the planner charter no longer prescribes the five-pass panel for a brief' {
         # `Contains('brief')` is TRUE on origin/main ("standard brief", "context
         # brief"), so it never guarded anything (#947 review, M13).
@@ -645,10 +734,28 @@ Describe 'Brief plan variant — doctrine migration' -Tag 'unit' {
         }
     }
 
-    It 'CLAUDE.md Bound-2 mirror names the brief, not the goal-contract' {
+    It 'CLAUDE.md Bound-2 mirror names the brief and describes what a brief actually states' {
+        # The first draft swapped the noun but kept the goal-contract's field
+        # list — "targets, invariants, evidence obligations, halt conditions,
+        # and budget" — none of which are brief sections beyond the third.
+        # AC5 requires the sentence to READ TRUE, not merely to name the brief
+        # (#947 external review).
         $content = & $script:ReadRepoFile 'CLAUDE.md'
-        $content | Should -Match "each chunk's \*\*brief\*\* states targets, invariants, evidence obligations, halt conditions, and budget"
+
+        $content.Contains("each chunk's **brief** states") | Should -BeTrue
         $content.Contains("each chunk's **goal-contract** states") | Should -BeFalse
+        $content.Contains('halt conditions, and budget, then stops') | Should -BeFalse `
+            -Because 'the brief contract requires no halt-conditions or budget section; that list described the goal-contract'
+        $content.Contains('evidence obligations') | Should -BeTrue -Because 'A5 cites this sentence as proof the doctrine already required evidence obligations'
+    }
+
+    It 'chunked-delivery Bound 2 describes the brief''s actual contract, not the goal-contract field list' {
+        $content = & $script:ReadRepoFile 'Documents/Design/chunked-delivery.md'
+        $body = & $script:StripInterimNote $content
+
+        $body.Contains('halt conditions, and a budget') | Should -BeFalse `
+            -Because 'Bound 2 must describe what a brief hands the executor, not what a goal-contract did'
+        $body.Contains('evidence obligations') | Should -BeTrue
     }
 
     It 'CLAUDE.md operating rule names the brief' {

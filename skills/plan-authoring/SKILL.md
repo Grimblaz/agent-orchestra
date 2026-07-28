@@ -413,7 +413,7 @@ plan-variant: brief
 **Required sections**, in this order, each a `##`-level heading numbered as shown:
 
 1. `## 1. Problem and observed evidence` — what is wrong now, with the evidence that says so.
-2. `## 2. Epistemic map` — grounding claims split into **source-read**, **inferred/contestable**, and **known-unknown, left to the run**, per A2. An inferred claim may not set a tolerance or mandate a mechanism.
+2. `## 2. Epistemic map` — grounding claims split into **source-read**, **sample-inferred** (contestable), and **known-unknown, left to the run**, per A2. Use A2's two provenance tags verbatim — `source-read` and `sample-inferred` — since `#### Brief conformance check` property 2 rejects anything else as untagged. A sample-inferred claim may not set a tolerance or mandate a mechanism.
 3. `## 3. Acceptance criteria` — behaviour pins per A4, each stating its own proof standard per A5.
 4. `## 4. Falsifiers` — per A3, the vacuity traps the stress-test found, delivered as **prose the executor reads**, never as a check the run is graded on. A3 names this section by number; renumbering it falsifies a doctrine sentence.
 5. `## 5. Context inventory` — what the executor should know that the criteria do not say: adjacent constraints, budget guards, sequencing hazards, scope observations raised rather than acted on.

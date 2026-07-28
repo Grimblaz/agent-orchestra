@@ -95,7 +95,7 @@ When BDD is enabled (a `## BDD Framework` **line-start heading** at column 0), w
 
 - Before stress-test invocation, run the Tree-State Verification Discipline from `skills/plan-authoring/SKILL.md` and populate the plan's `**Verification Evidence**` block.
 
-Before presenting the plan, preserve this ordering: (1) Tree-State Verification Discipline first from `skills/plan-authoring/SKILL.md`, (2) adversarial-review dispatch atomically by loading `skills/adversarial-review/platforms/claude.md` and following the `standard` adapter, (3) post-judge reconciliation from `skills/plan-authoring/SKILL.md` before surfacing the final draft.
+Before presenting the plan, preserve this ordering: (1) Tree-State Verification Discipline first from `skills/plan-authoring/SKILL.md`, (2) adversarial-review dispatch atomically by loading `skills/adversarial-review/platforms/claude.md` and following the adapter selected by the plan's shape per `## Stress-Test Preparation` step 1 — `standard` for a spine-bearing plan, `design-challenge` plus the convergence filter for a `plan-variant: brief` chunk plan, (3) reconciliation at that adapter's terminal stage from `skills/plan-authoring/SKILL.md` before surfacing the final draft.
 
 ## 5. Refinement
 
@@ -140,6 +140,8 @@ The `<!-- frame-slice -->` blocks themselves do NOT go inside the plan comment. 
 The `<!-- phase-containment-ledger-ref: {comment_id} -->` pointer onto the plan comment (863-D11), immediately after the `<!-- plan-issue-{ID} -->` marker, is written by the same helper invocation as the ledger sibling itself — see `### Phase-containment emission (plan-stress-test)` below. Do not hand-author this pointer; it is created once, on first persist, as part of `Invoke-PersistPhaseLedger`'s plan-mode write.
 
 For plans with fewer than 3 implementation steps, emit `spine-omitted: plan-too-small` and do not emit any `<!-- frame-spine -->` frame-spine block or the `<!-- frame-slices-{ID} -->` sibling — this small-plan omission does not extend to the `<!-- phase-containment-ledger-{ID} -->` sibling, which is still created lazily and independently at emission time per § Phase-containment emission below, regardless of plan size.
+
+**A `plan-variant: brief` plan does NOT emit `spine-omitted: plan-too-small`**, even though it has zero implementation steps and would otherwise satisfy the fewer-than-3 rule above. The token is a statement about *size*; a brief's omission is a statement about *shape*, and the brief's own frontmatter already declares it (`skills/plan-authoring/SKILL.md § Brief plan variant`). Everywhere below that branches on `spine-omitted: plan-too-small` to decide whether to omit the `frame-slices` sibling and its burst-manifest entry, a brief takes the same omit path — keyed on the variant declaration, not on the token.
 
 Each frame-slice block carries the routing fields plus the step's Requirement Contract content. It is posted into the `<!-- frame-slices-{ID} -->` sibling comment, not the plan comment:
 

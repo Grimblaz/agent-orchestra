@@ -351,7 +351,16 @@ function Invoke-OrchestraSpineRender {
     # by design, so both the plan-too-small message ("too small") and the
     # legacy fall-through would describe it wrongly.
     if ((Get-FSCPlanVariant -CommentBody $planComment.Body) -eq 'brief') {
-        return 'plan uses the brief variant — no spine by design; see the plan comment for the contract'
+        # Report the ambiguity rather than hiding it. Invoke-FVPlanValidate fails
+        # a brief carrying a frame-spine block as ambiguous; returning the
+        # ordinary no-spine message here would render an invalid plan as a
+        # normal one and silently drop the spine it does carry (#947 external
+        # review, qodo finding 2).
+        if ($null -ne (Get-FSCSpineBlock -CommentBody $planComment.Body)) {
+            return 'plan is ambiguous: declares plan-variant: brief and also carries a frame-spine block — a plan must use exactly one mechanism; run frame-validate -Mode plan for the structural failure'
+        }
+
+        return 'plan uses the brief variant — no spine by design; the brief itself is the contract, see the plan comment'
     }
 
     if ($planComment.Body -match '(?m)^\s*spine-omitted\s*:\s*plan-too-small\s*$') {
