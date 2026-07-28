@@ -224,19 +224,28 @@ function Get-SCDGoalRunProtectedLines {
 # is produced by the detector itself as a structural guard and never by the primitive.
 $script:SCDDegradedCwdManualReviewReason = "could not verify: current worktree location not registered"
 
-# Detector-only manual-review reason for the collection-time gh budget cap
-# (finding D, #889 fix cycle). Test-SCDCollectionGhBudgetExceeded trips on EITHER
-# a per-category candidate COUNT cap or the elapsed-time cap for the run --
-# neither of which means a gh subprocess was actually invoked and hung.
-# Previously both cases were reported via
-# $script:WorktreeEligibilityReasons.GhTimeout (the reason the PRIMITIVE
-# itself uses for a genuine per-call gh timeout inside
-# Invoke-SCDGhWithTimeout), which conflated "we deliberately declined to
-# spend more of the gh budget for this run" with "a gh call actually hung".
-# This reason is used only for the collection-budget short-circuit;
-# GhTimeout is reserved for genuine per-call timeouts surfaced by the
-# primitive itself.
-$script:SCDCollectionBudgetExceededManualReviewReason = "could not verify: too many candidates this run"
+# Detector-only manual-review reasons for the collection-time gh budget caps
+# (finding D, #889 fix cycle; split per issue #922 Defect C / AC8).
+#
+# The budget trips on EITHER a per-category candidate COUNT cap or the
+# elapsed-time cap for the run — neither of which means a gh subprocess was
+# actually invoked and hung, which is why these are distinct from
+# $script:WorktreeEligibilityReasons.GhTimeout (reserved for a genuine per-call
+# timeout surfaced by Invoke-SCDGhWithTimeout inside the primitive).
+#
+# Issue #922: until now ONE literal covered BOTH caps, and it named the count
+# cap. Measured across three runs against the live tree: 15.3 s total runtime
+# against the 10 s elapsed cap, 8 candidates against the 20-per-category count
+# cap, 4 candidates reported as cut off "because there were too many". No
+# category exceeded five; the count cap never fired. The message was wrong on
+# every candidate it described. Each cap now states its own cause.
+$script:SCDCollectionCountCapManualReviewReason = "could not verify: too many candidates this run"
+$script:SCDCollectionTimeCapManualReviewReason = "could not verify: ran out of evaluation time this run"
+
+# Detector-only manual-review reason for the free-evidence phase's own bound
+# (decision D5 / AC5). Exceeding it yields an inconclusive result for candidates
+# the local pass never reached — never silence, and never a conclusive negative.
+$script:SCDFreePhaseBoundManualReviewReason = "could not verify: local evidence pass ran out of time"
 
 function Test-SCDCurrentLocationMatchesWorktreeRecord {
     <#
@@ -302,7 +311,19 @@ function New-SCDCollectionGhBudget {
     }
 }
 
-function Test-SCDCollectionGhBudgetExceeded {
+function Get-SCDCollectionGhBudgetOutcome {
+    <#
+    .SYNOPSIS
+        Issue #922 (Defect C / AC8): charges one unit of the collection-time gh
+        budget and reports WHICH cap tripped when one does. Replaces the
+        pre-#922 Test-SCDCollectionGhBudgetExceeded, whose boolean return
+        forced a single caller-side reason literal to stand for two different
+        causes — and it named the wrong one on every live candidate measured.
+    .OUTPUTS
+        $null when the candidate is within budget (and one unit has been
+        charged); otherwise the manual-review reason for the cap that actually
+        tripped. Elapsed is checked first, matching the pre-#922 precedence.
+    #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
@@ -313,7 +334,7 @@ function Test-SCDCollectionGhBudgetExceeded {
     )
 
     if ($Budget.Stopwatch.Elapsed.TotalSeconds -ge $Budget.GlobalSeconds) {
-        return $true
+        return $script:SCDCollectionTimeCapManualReviewReason
     }
 
     $count = 0
@@ -321,11 +342,11 @@ function Test-SCDCollectionGhBudgetExceeded {
         $count = $Budget.CategoryCounts[$Category]
     }
     if ($count -ge $Budget.PerCategoryLimit) {
-        return $true
+        return $script:SCDCollectionCountCapManualReviewReason
     }
 
     $Budget.CategoryCounts[$Category] = $count + 1
-    return $false
+    return $null
 }
 
 function Get-SCDGatedEligibility {
@@ -358,11 +379,24 @@ function Get-SCDGatedEligibility {
     )
 
     if ($IsDegradedCwd) {
-        return @{ Eligible = $false; Evidence = $null; ManualReviewReason = $script:SCDDegradedCwdManualReviewReason }
+        return @{
+            Eligible           = $false
+            Evidence           = $null
+            ManualReviewReason = $script:SCDDegradedCwdManualReviewReason
+            Outcome            = $script:WorktreeEligibilityOutcomes.NotEligible
+        }
     }
 
-    if (Test-SCDCollectionGhBudgetExceeded -Budget $Budget -Category $Category) {
-        return @{ Eligible = $false; Evidence = $null; ManualReviewReason = $script:SCDCollectionBudgetExceededManualReviewReason }
+    $budgetReason = Get-SCDCollectionGhBudgetOutcome -Budget $Budget -Category $Category
+    if ($budgetReason) {
+        return @{
+            Eligible           = $false
+            Evidence           = $null
+            # Issue #922 (AC8): the cap that actually tripped, not one literal
+            # standing in for both.
+            ManualReviewReason = $budgetReason
+            Outcome            = $script:WorktreeEligibilityOutcomes.NotEligible
+        }
     }
 
     return Test-WorktreeBranchRemovalEligible -BranchName $BranchName -DefaultBranch $DefaultBranch
@@ -921,6 +955,7 @@ function Get-SCDSiblingWorktreeCleanups {
                             Reason             = $eligibility.Evidence
                             Eligible           = $eligibility.Eligible
                             ManualReviewReason = $eligibility.ManualReviewReason
+                            Outcome            = $eligibility.Outcome
                             IsLocked           = $record.IsLocked
                             LockReason         = $record.LockReason
                             IsPrunable         = $record.IsPrunable
@@ -950,6 +985,7 @@ function Get-SCDSiblingWorktreeCleanups {
                         RemoteDefaultRef   = $remoteDefault.RefName
                         Eligible           = $eligibility.Eligible
                         ManualReviewReason = $eligibility.ManualReviewReason
+                        Outcome            = $eligibility.Outcome
                         IsLocked           = $record.IsLocked
                         LockReason         = $record.LockReason
                         IsPrunable         = $record.IsPrunable
@@ -1196,6 +1232,7 @@ function Get-SCDOrphanBranchCleanups {
                         RemoteDefaultRef   = $remoteDefault.RefName
                         Eligible           = $eligibility.Eligible
                         ManualReviewReason = $eligibility.ManualReviewReason
+                        Outcome            = $eligibility.Outcome
                         Kind               = 'orphan-no-upstream'
                     }
                 }
@@ -1228,6 +1265,7 @@ function Get-SCDOrphanBranchCleanups {
                 Reason             = $eligibility.Evidence
                 Eligible           = $eligibility.Eligible
                 ManualReviewReason = $eligibility.ManualReviewReason
+                Outcome            = $eligibility.Outcome
                 Kind               = 'orphan-upstream'
             }
         }
@@ -1404,6 +1442,7 @@ function Invoke-SessionCleanupDetector {
                         Eligible           = $staleEligibility.Eligible
                         Evidence           = $staleEligibility.Evidence
                         ManualReviewReason = $staleEligibility.ManualReviewReason
+                        Outcome            = $staleEligibility.Outcome
                     }
                 }
             }
@@ -1431,6 +1470,7 @@ function Invoke-SessionCleanupDetector {
                                 Eligible           = $eligibility.Eligible
                                 Evidence           = $eligibility.Evidence
                                 ManualReviewReason = $eligibility.ManualReviewReason
+                                Outcome            = $eligibility.Outcome
                             }
                         }
                     }
@@ -1448,6 +1488,34 @@ function Invoke-SessionCleanupDetector {
     # always-visible report block instead of the generic sibling renderer.
     $goalRunProtectedCandidates = @($siblingWorktreeCleanups | Where-Object { $_.IsGoalRunProtected })
     $siblingWorktreeCleanups = @($siblingWorktreeCleanups | Where-Object { -not $_.IsGoalRunProtected })
+
+    # ============================================================
+    # Issue #922 (decision D4 / AC13 / criterion 3): a candidate whose FINAL
+    # eligibility outcome is not-eligible-because-definitively-unmerged renders
+    # nothing at all — no finding line, no command argument, and no contribution
+    # to the signal names or the render cap. It is live work, not a leftover, and
+    # a manual-review line for every in-flight worktree at every session start is
+    # the permanent-noise condition this design rejects by name.
+    #
+    # This keys on the gate's Outcome, never on the intermediate git-only verdict
+    # (Amendment A1.3): a branch that reads inconclusive on content and is then
+    # cleared by a merged pull request must still be surfaced. Filtering here
+    # rather than at the line renderers means the early-return gate below also
+    # sees an all-silent session as "nothing to report".
+    #
+    # The stale-branch site is deliberately NOT filtered: under the issue #889
+    # decision it emits its -FeatureBranch argument regardless of eligibility
+    # because the executor re-verifies, and AC2 excludes that site by name.
+    $isDefinitivelyUnmerged = {
+        param($Candidate)
+        $null -ne $Candidate -and
+        $Candidate.Outcome -eq $script:WorktreeEligibilityOutcomes.DefinitivelyUnmerged
+    }
+    $siblingWorktreeCleanups = @($siblingWorktreeCleanups | Where-Object { -not (& $isDefinitivelyUnmerged $_) })
+    $orphanBranchCleanups = @($orphanBranchCleanups | Where-Object { -not (& $isDefinitivelyUnmerged $_) })
+    if (& $isDefinitivelyUnmerged $currentNoUpstreamWorktree) {
+        $currentNoUpstreamWorktree = $null
+    }
 
     # ============================================================
     # STEP 2: TRACKING FILE CHECK (existing logic, intact)

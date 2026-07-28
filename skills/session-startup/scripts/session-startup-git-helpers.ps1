@@ -21,12 +21,29 @@ $script:ClaudeBranchIssueRegex = '^claude/.*-(\d+)-[0-9a-f]{6}$'
 # verbatim by Test-WorktreeBranchRemovalEligible callers in s2/s3/s4. Do not
 # introduce a differently-worded literal elsewhere; parity is checked downstream.
 $script:WorktreeEligibilityReasons = @{
-    UnmergedCommits    = 'unmerged commits'
-    NoIssueDerivable   = 'no issue number derivable'
-    IssueStillOpen     = "issue #{0} still open"
-    GhUnavailable      = "couldn't verify: gh unavailable"
-    GhTimeout          = "couldn't verify: gh timeout"
-    GitSignalFailed    = "couldn't verify: git signal failed"
+    UnmergedCommits           = 'unmerged commits'
+    NoIssueDerivable          = 'no issue number derivable'
+    IssueStillOpen            = "issue #{0} still open"
+    GhUnavailable             = "couldn't verify: gh unavailable"
+    GhTimeout                 = "couldn't verify: gh timeout"
+    GitSignalFailed           = "couldn't verify: git signal failed"
+    # Issue #922 (AC6/I-3): before this, 'unmerged commits' carried BOTH "content
+    # evidence shows this branch is not merged" and "we obtained no conclusive
+    # evidence either way" — the conflation AC6 exists to remove, and the reason a
+    # merge-tree-conflicting branch (the steady state for any worktree older than
+    # one merge) was reported as though it had been judged. 'unmerged commits' is
+    # now exclusively the conclusive negative; this literal is the inconclusive case.
+    InconclusiveMergeEvidence = "couldn't verify: no conclusive merge evidence"
+}
+
+# Issue #922 (I-3/AC13/D4): the eligibility outcome, kept separate from
+# ManualReviewReason so the reporting layer never has to string-match a reason to
+# decide whether a candidate renders. Decision D4 renders 'definitively-unmerged'
+# silently; every other not-eligible outcome renders with its cause.
+$script:WorktreeEligibilityOutcomes = @{
+    Eligible             = 'eligible'
+    DefinitivelyUnmerged = 'definitively-unmerged'
+    NotEligible          = 'not-eligible'
 }
 
 function Get-SCDPersistentTrackingExclusions {
@@ -896,21 +913,32 @@ function Test-WorktreeBranchRemovalEligible {
         This is the single foundation primitive s2 (structural guarding), s3
         (executor rewiring), and s4 (detector gating) build on and call.
     .OUTPUTS
-        Hashtable: @{ Eligible = <bool>; Evidence = <string|$null>; ManualReviewReason = <string|$null> }
+        Hashtable: @{ Eligible = <bool>; Evidence = <string|$null>;
+                      ManualReviewReason = <string|$null>; Outcome = <string> }
     .NOTES
         Reason enum (single authoritative source, consumed verbatim by s2/s3/s4
         — see $script:WorktreeEligibilityReasons):
         'unmerged commits' | 'no issue number derivable' | 'issue #N still open' |
         "couldn't verify: gh unavailable" | "couldn't verify: gh timeout" |
-        "couldn't verify: git signal failed"
+        "couldn't verify: git signal failed" |
+        "couldn't verify: no conclusive merge evidence"   (issue #922)
+
+        Outcome enum ($script:WorktreeEligibilityOutcomes, issue #922):
+        'eligible' | 'definitively-unmerged' | 'not-eligible'. Decision D4 renders
+        'definitively-unmerged' silently; 'not-eligible' always renders its cause.
 
         Router:
           1. unique-commit count via `git rev-list <remoteDefaultRef>..<branch> --count`.
              Git failure -> retain, 'couldn't verify: git signal failed'.
-          2. >=1 unique commit -> git-only tree-equivalence (Test-BranchTreeEquivalentToDefault,
-             NO name-only gh fallback) -> eligible, "merged into <ref> (tree-equivalent)";
-             else OID-checked merged-PR-by-head -> eligible, "PR #N merged";
-             else not eligible, 'unmerged commits'.
+          2. >=1 unique commit -> content-evidence merge verdict
+             (Get-SCDBranchMergeVerdict, NO name-only gh fallback):
+               'merged'                -> eligible, "merged into <ref> (<signal>)";
+               'definitively-unmerged' -> not eligible, 'unmerged commits',
+                                          outcome 'definitively-unmerged' (no gh spend);
+               'undetermined'          -> OID-checked merged-PR-by-head ->
+                                          eligible, "PR #N merged"; else not eligible,
+                                          "couldn't verify: no conclusive merge evidence"
+                                          (or the gathering-failure reason).
           3. 0 unique commits -> OID-checked merged-PR-by-head FIRST (D2 rung a);
              then derive issue id, and if derivable AND the issue is CLOSED ->
              eligible, "issue #N closed (no code changes)"; else not eligible
@@ -934,7 +962,14 @@ function Test-WorktreeBranchRemovalEligible {
         [string]$Repo
     )
 
-    $result = @{ Eligible = $false; Evidence = $null; ManualReviewReason = $null }
+    $result = @{
+        Eligible           = $false
+        Evidence           = $null
+        ManualReviewReason = $null
+        # Issue #922 (I-3): the outcome travels alongside the reason so the
+        # reporting layer never string-matches a reason to decide what renders.
+        Outcome            = $script:WorktreeEligibilityOutcomes.NotEligible
+    }
     $remoteDefault = Get-RemoteDefaultRef -DefaultBranch $DefaultBranch
 
     # Rung 1: unique-commit count (network-free, must run first)
@@ -993,6 +1028,7 @@ function Test-WorktreeBranchRemovalEligible {
             }
             elseif (-not $allUniqueCommitsEmpty) {
                 $result.Eligible = $true
+                $result.Outcome = $script:WorktreeEligibilityOutcomes.Eligible
                 # Issue #922 Amendment A2.4: name the signal that actually fired.
                 # The pre-#922 form was one unconditional assignment saying
                 # "tree-equivalent" whichever signal established the verdict, so
@@ -1009,6 +1045,7 @@ function Test-WorktreeBranchRemovalEligible {
             # merged-PR rung — that rung exists for candidates whose content
             # evidence was inconclusive, not for ones it settled.
             $result.ManualReviewReason = $script:WorktreeEligibilityReasons.UnmergedCommits
+            $result.Outcome = $script:WorktreeEligibilityOutcomes.DefinitivelyUnmerged
             return $result
         }
         elseif ($mergeVerdict.Cause -eq $script:BranchMergeUndeterminedCauses.GitSignalFailed) {
@@ -1018,6 +1055,7 @@ function Test-WorktreeBranchRemovalEligible {
         $pr = Get-SCDMergedPrByHeadOid -Branch $BranchName -DefaultBranch $DefaultBranch
         if ($pr.Status -eq 'matched') {
             $result.Eligible = $true
+            $result.Outcome = $script:WorktreeEligibilityOutcomes.Eligible
             $result.Evidence = "PR #$($pr.Number) merged"
             return $result
         }
@@ -1037,7 +1075,14 @@ function Test-WorktreeBranchRemovalEligible {
             $result.ManualReviewReason = $script:WorktreeEligibilityReasons.GitSignalFailed
             return $result
         }
-        $result.ManualReviewReason = $script:WorktreeEligibilityReasons.UnmergedCommits
+        # Issue #922 (AC6/I-3): reaching here means the content signals were
+        # INCONCLUSIVE — merge-tree conflicted, or tree-equivalence was withheld
+        # because every unique commit was empty — and no matching merged PR was
+        # found. The pre-#922 form reported 'unmerged commits' here, asserting a
+        # conclusive negative it had not established; that is the conflation AC6
+        # removes, and it is the steady state for any worktree older than one merge.
+        # 'unmerged commits' is now reachable ONLY from the A2.1 verdict above.
+        $result.ManualReviewReason = $script:WorktreeEligibilityReasons.InconclusiveMergeEvidence
         return $result
     }
 
@@ -1046,6 +1091,7 @@ function Test-WorktreeBranchRemovalEligible {
     $pr = Get-SCDMergedPrByHeadOid -Branch $BranchName -DefaultBranch $DefaultBranch
     if ($pr.Status -eq 'matched') {
         $result.Eligible = $true
+        $result.Outcome = $script:WorktreeEligibilityOutcomes.Eligible
         $result.Evidence = "PR #$($pr.Number) merged"
         return $result
     }
@@ -1077,6 +1123,7 @@ function Test-WorktreeBranchRemovalEligible {
 
     if ($issueState.State -eq 'CLOSED') {
         $result.Eligible = $true
+        $result.Outcome = $script:WorktreeEligibilityOutcomes.Eligible
         $result.Evidence = "issue #$issueId closed (no code changes)"
         return $result
     }

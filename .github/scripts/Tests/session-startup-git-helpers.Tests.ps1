@@ -377,16 +377,24 @@ exit $LASTEXITCODE
                 param($MockDir)
                 $result = Test-WorktreeBranchRemovalEligible -BranchName $branch -DefaultBranch 'main'
                 $result.Eligible | Should -Be $false
-                $result.ManualReviewReason | Should -Be 'unmerged commits'
+                # Issue #922 (AC6): the content signals were INCONCLUSIVE here — the tip
+                # differs and merge-tree conflicts — so the honest reason is that no
+                # conclusive merge evidence was obtained, not the conclusive negative
+                # 'unmerged commits'. The assertion's subject (an OID-mismatched
+                # name-match is not eligible) is unchanged.
+                $result.ManualReviewReason | Should -BeExactly "couldn't verify: no conclusive merge evidence"
+                $result.Outcome | Should -BeExactly 'not-eligible' -Because 'an inconclusive candidate must not be silenced as definitively unmerged'
             }
         }
 
-        It 'TC-Router-4: commit-carrying branch with no PR and unmerged cherry output retains as unmerged commits' {
+        It 'TC-Router-4: commit-carrying branch whose content signals are inconclusive and has no matching PR retains as inconclusive, NOT as unmerged commits (#922 AC6)' {
             $branch = 'feature/issue-4-unmerged'
             & $script:WithMockedGit -GitConfig ($script:DefaultGitConfig + @{
                 "rev-list-count-origin/main..$branch" = 1
                 "diff-quiet-exit-$branch"              = 1
                 "merge-tree-exit-$branch"              = 1
+                # Patch history says "unmerged". Under Amendment A1.1 that no longer
+                # establishes the conclusive negative, so the reason must not claim it.
                 "cherry-$branch"                       = '+ deadbee Unmerged tip commit'
                 "rev-parse-$branch"                    = 'currenttipsha'
             }) -GhConfig @{
@@ -395,7 +403,34 @@ exit $LASTEXITCODE
                 param($MockDir)
                 $result = Test-WorktreeBranchRemovalEligible -BranchName $branch -DefaultBranch 'main'
                 $result.Eligible | Should -Be $false
-                $result.ManualReviewReason | Should -Be 'unmerged commits'
+                $result.ManualReviewReason | Should -BeExactly "couldn't verify: no conclusive merge evidence"
+                $result.Outcome | Should -BeExactly 'not-eligible'
+            }
+        }
+
+        It 'TC-Router-4b: a clean merge-tree whose result differs IS the conclusive negative, reported as unmerged commits and marked for silence (#922 A2.1 / D4)' {
+            # Issue #922 Amendment A2.1: this is the ONLY producer of the conclusive
+            # negative after A1.1 demoted patch history. Without it, decision D4's
+            # silence category has no constructible input at all.
+            $branch = 'feature/issue-4b-really-unmerged'
+            $mergedTreeOid = 'tree-differs-oid'
+            & $script:WithMockedGit -GitConfig ($script:DefaultGitConfig + @{
+                "rev-list-count-origin/main..$branch" = 1
+                "diff-quiet-exit-$branch"              = 1
+                "merge-tree-exit-$branch"              = 0
+                "merge-tree-output-$branch"            = $mergedTreeOid
+                "diff-quiet-exit-$mergedTreeOid"       = 1
+                "rev-parse-$branch"                    = 'currenttipsha'
+            }) -GhConfig @{
+                'pr-list-default-exit' = 0
+            } -Body {
+                param($MockDir)
+                $result = Test-WorktreeBranchRemovalEligible -BranchName $branch -DefaultBranch 'main'
+                $result.Eligible | Should -Be $false
+                $result.ManualReviewReason | Should -BeExactly 'unmerged commits'
+                $result.Outcome | Should -BeExactly 'definitively-unmerged'
+                $ghCallLog = Join-Path $MockDir 'gh-mock-calls.log'
+                (Test-Path $ghCallLog) | Should -Be $false -Because 'conclusive content evidence must not fall through to the paid merged-PR rung'
             }
         }
 

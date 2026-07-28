@@ -2286,20 +2286,43 @@ Describe 'session-cleanup-detector.ps1 — Issue #889 s4: shared eligibility gat
         It 'finding D (#889 fix cycle): a per-category COUNT-cap exhaustion is reported with the distinct "too many candidates" reason, not GhTimeout' {
             $budget = New-SCDCollectionGhBudget -PerCategoryLimit 1 -GlobalSeconds 999
             # Spend the single count-cap slot for this category.
-            Test-SCDCollectionGhBudgetExceeded -Budget $budget -Category 'orphan' | Should -Be $false
+            Get-SCDCollectionGhBudgetOutcome -Budget $budget -Category 'orphan' | Should -BeNullOrEmpty
             $result = Get-SCDGatedEligibility -Budget $budget -Category 'orphan' -BranchName 'feature/issue-1-x' -DefaultBranch 'main'
             $result.Eligible | Should -Be $false
-            $result.ManualReviewReason | Should -Be "could not verify: too many candidates this run" `
+            $result.ManualReviewReason | Should -BeExactly "could not verify: too many candidates this run" `
                 -Because 'a count-cap exhaustion means no gh call was even attempted — GhTimeout is reserved for a genuine per-call timeout'
         }
 
-        It 'finding D (#889 fix cycle): an elapsed-time budget-cap exhaustion is reported with the distinct "too many candidates" reason, not GhTimeout' {
+        It 'issue #922 Defect C / AC8: an elapsed-time budget-cap exhaustion names the TIME cap, not the count cap' {
+            # This test previously asserted the elapsed-time cap reported "too many
+            # candidates this run" — Defect C written down as correct behaviour. The
+            # live measurement that motivated #922: 15.3 s against the 10 s elapsed
+            # cap, 8 candidates against the 20-per-category count cap, and 4
+            # candidates told there were too many of them. No category exceeded five.
             $budget = New-SCDCollectionGhBudget -PerCategoryLimit 999 -GlobalSeconds 0
             Start-Sleep -Milliseconds 5
             $result = Get-SCDGatedEligibility -Budget $budget -Category 'orphan' -BranchName 'feature/issue-2-x' -DefaultBranch 'main'
             $result.Eligible | Should -Be $false
-            $result.ManualReviewReason | Should -Be "could not verify: too many candidates this run" `
-                -Because 'the elapsed-time cap is also a collection-budget decision, not a genuine gh subprocess timeout'
+            $result.ManualReviewReason | Should -BeExactly "could not verify: ran out of evaluation time this run" `
+                -Because 'the elapsed-time cap is a different cause from the count cap, and the customer is told which one applied'
+            $result.ManualReviewReason | Should -Not -BeExactly "could not verify: too many candidates this run"
+        }
+
+        It 'issue #922 AC8: the two caps are keyed to which condition actually fired, not merely distinct from one another' {
+            # Distinctness is not accuracy. Each assertion below independently
+            # establishes which cap CAN fire — the count budget is unlimited in time,
+            # the time budget is unlimited in count — so the reason is attributable.
+            $countOnly = New-SCDCollectionGhBudget -PerCategoryLimit 1 -GlobalSeconds 9999
+            Get-SCDCollectionGhBudgetOutcome -Budget $countOnly -Category 'sibling' | Should -BeNullOrEmpty
+            $countOnly.Stopwatch.Elapsed.TotalSeconds | Should -BeLessThan 9999 -Because 'the elapsed cap demonstrably cannot be the cause here'
+            Get-SCDCollectionGhBudgetOutcome -Budget $countOnly -Category 'sibling' |
+                Should -BeExactly "could not verify: too many candidates this run"
+
+            $timeOnly = New-SCDCollectionGhBudget -PerCategoryLimit 9999 -GlobalSeconds 0
+            Start-Sleep -Milliseconds 5
+            $timeOnly.CategoryCounts.Count | Should -Be 0 -Because 'no category has spent a slot, so the count cap demonstrably cannot be the cause here'
+            Get-SCDCollectionGhBudgetOutcome -Budget $timeOnly -Category 'sibling' |
+                Should -BeExactly "could not verify: ran out of evaluation time this run"
         }
     }
 
