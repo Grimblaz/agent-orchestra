@@ -2,6 +2,8 @@
 
 Ratified 2026-07-26 (issue #920, process outcome of the #848 tree review). The operative summary lives in [CLAUDE.md § Chunked delivery](../../CLAUDE.md); this document carries the full doctrine and rationale.
 
+> **Unfamiliar with a term?** `Bound 1 / Bound 2`, `A1`–`A5`, and `DA{N}` are all defined in the [plain-language vocabulary](../../HOW-IT-WORKS.md#vocab).
+
 ## Why
 
 Shift-left works on **specification defects** — requirements, contracts, interfaces — where analysis is cheaper than rework. It does not extend to **operational unknowns**: how software actually behaves once it runs. Those are discovered cheapest by running real code, not by deeper analysis. Chunked delivery takes both benefits — waterfall's coherent upstream decisions made once, iterative development's ground truth between decisions — by bounding **where detail is allowed to live** at two distinct levels. Both bounds are load-bearing; enforcing only one recreates the waterfall failure mode one level down.
@@ -41,14 +43,16 @@ The trial exposed a third category of unknown that the two bounds do not name. B
 *Required instead:* the plan stress-test keeps its strongest catch — targets satisfiable without the fix — but delivers each finding as **prose the plan artifact carries to the executor**, alongside a standing obligation to show that completion evidence could have come out negative.
 
 **A4 — Behavior pins, and a floor check before launch.**
-*Forbidden:* a target naming a file path, a test name, or a per-file count ("the suite contains at least 24 tests"; "file X exists"); and any absolute suite floor asserted without checking it.
-*Required instead:* targets pin **observable behavior** — the thing that suite or file exists to demonstrate. Any absolute floor is verified satisfiable against the launch baseline *before* the run starts. Both trial runs were halt-bound from the moment they began because nobody did that arithmetic.
+*Forbidden:* a target naming a file path, a test name, or a per-file count ("file X exists"; "the slug module gains at least 6 tests").
+*Required instead:* targets pin **observable behavior** — the thing that file or those tests exist to demonstrate. Separately, a target may state an absolute **suite-wide** floor, but only if that floor is verified satisfiable against the launch baseline *before* the run starts; an unchecked floor is forbidden, a checked one is not. Both trial runs were halt-bound from the moment they began because nobody did that arithmetic.
 
 **A5 — Evidence obligations: properties fixed, format free.**
 *Forbidden:* an acceptance criterion that names no proof standard, and evidence offered with no properties at all. Free-format-with-no-properties is not a hypothetical failure: both trial runs produced evidence, self-reported green, and carried roughly a dozen defects each.
 *Required instead:* every acceptance criterion states what would count as proof, and the proof offered is **discriminating** (it could have come out negative — a test that passes identically against the pre-change tree is not evidence), **attributed** (it says where the number came from: "3,792 randomized paths against a reference implementation", not "the tests pass"), and **per-criterion** (it maps to one criterion, not to one aggregate green). The *format* stays the executor's choice; review is the check on whether the chosen format actually proved the criterion. These three properties' standing home is [skills/verification-before-completion/SKILL.md](../../skills/verification-before-completion/SKILL.md).
 
-A1–A4 govern what the plan **says**; A5 governs what the run must **show**. All five are rules about how a chunk plan specifies, so each is true from the moment it lands, independently of which plan artifact is in use.
+A1–A4 govern what the plan **says**. A5 straddles: its first half is also a rule about what the plan says — every criterion must name its proof standard — and its second half is the only rule here about what the **run must show**. All five are rules about how a chunk plan specifies, so each is true from the moment it lands, independently of which plan artifact is in use.
+
+**What is not yet true: nothing enforces these at authoring time.** Following this document's own convention for unwired doctrine (see `## Deferred follow-up` below), A1–A5 are applied by the planner and by review, not by command prose or a schema. #924 owns wiring provenance marking and the chunk fast path into `plan-authoring` and `upstream-onboarding`; #941 owns the conformance check that would catch an artifact-pinned criterion before a run starts. Until then, a plan can violate any of A1–A5 and still validate.
 
 ## Deferred follow-up
 
@@ -58,31 +62,35 @@ Once the doctrine has been exercised on a real parent/chunk tree: wire the chunk
 
 <!-- interim-migration-note:begin -->
 
-## Interim behavior: doctrine sentences still scheduled to change
+## Doctrine sentences still scheduled to change
 
-> **Deliberate historical reference.** This section quotes doctrine text that later chunks of #936 replace, so that a reader is not misled by wording this document and `CLAUDE.md` still carry. It is the one place in either file where the retired vocabulary appears on purpose — a completeness check counting those terms across the two files should exclude the region between the `interim-migration-note` markers. Issue #943 removes this section once chunks 2–5 have landed.
+> **Deliberate historical reference.** This section quotes doctrine text that later chunks of #936 replace, so that a reader is not misled by wording this document and `CLAUDE.md` still carry. It is the one place in either file where the retired vocabulary appears on purpose — a completeness check counting those terms across the two files should exclude everything between the pair of HTML-comment sentinels that open and close this section, named `interim-migration-note` with a `:begin` and `:end` suffix. (Those two literals are described rather than quoted here, so that a reader extracting the region between them does not match this sentence and stop early.) Every passage named below is owned by #941 or #942, so the section is retirable once those two have landed; #943 is the last chunk in the sequence, which is why the removal sits there.
 
-A1–A5 above are true as written and need no interim caveat. Several *other* sentences still describe the delivery path #936 is replacing. Each one moves when the chunk that makes its replacement true lands.
+Most of A1–A5 above is true as written and needs no interim caveat. The one exception is A3's *required-instead* half, whose row is in the table below. Several *other* sentences still describe the delivery path #936 is replacing. Each one moves when the chunk that makes its replacement true lands.
 
-Quotations below are verbatim, so that a search for one lands on the passage it names. Emphasis is never added inside a quotation.
+Quotations below are verbatim, so that a search for one lands on the passage it names. Emphasis is never added inside a quotation. Each row carries exactly one owner, because a reader landing on a row needs to know whether the passage is theirs — where the parent's own record folds several passages under one owner, the row does too, and where it splits them, so does the row.
 
 | Passage | Replaced when | Chunk |
 | --- | --- | --- |
 | **This file, Bound 2:** "Each chunk's goal-contract plan (the #848/#872 plan variant consumed by `/goal-run`)" | the brief contract lands, then the harness retires | #941, then #942 |
-| **This file, operating rules:** "goes straight to the planner in goal-contract mode", "One chunk = one sub-issue = one goal-contract plan = one `/goal-run` = one pull request (PR)." and the "the harness's plan marker, run-state, and halt plumbing are all issue-scoped" rationale | as above | #941, then #942 |
+| **This file, operating rules:** "goes straight to the planner in goal-contract mode", "One chunk = one sub-issue = one goal-contract plan = one `/goal-run` = one pull request (PR)." and the "the harness's plan marker, run-state, and halt plumbing are all issue-scoped" rationale — folded under one owner because #936's own migration record folds them | the brief contract lands, then the harness retires | #941, then #942 |
 | **This file, operating rules:** "the chunk's goal-contract cites the parent decisions it implements" | the brief contract lands | #941 |
 | **This file, operating rules:** "**Panel depth earns its way down.** Chunk plans start with the full adversarial plan review" | the plan-review charter changes | #941 |
 | **This file:** the `## Deferred follow-up` section and its "**Interim behavior until that wiring lands:**" paragraph on the `/plan` pre-flight | that skill wiring lands | #941 |
+| **This file, A3's *required instead*:** "prose the plan artifact carries to the executor" — specialized to the brief's fourth section once the brief exists | the brief contract lands | #941 |
 | **`CLAUDE.md` § Chunked delivery:** the Bound-2 mirror, "each chunk's goal-contract states targets, invariants, evidence obligations, halt conditions, and budget, then stops." | the brief contract lands | #941 |
-| **`CLAUDE.md` § Chunked delivery, operating-rules sentence:** "one chunk = one sub-issue = one goal-contract = one `/goal-run` = one PR", plus "never PR-level splits since harness plumbing is issue-scoped" and "chunk-plan panel depth relaxes only via phase-containment-ledger evidence" | as above | #941, then #942 |
+| **`CLAUDE.md` § Chunked delivery, operating-rules sentence:** "one chunk = one sub-issue = one goal-contract = one `/goal-run` = one PR" | the brief contract lands, then the harness retires | #941, then #942 |
+| **`CLAUDE.md` § Chunked delivery, same sentence:** "never PR-level splits since harness plumbing is issue-scoped" — still true until the harness is gone, so **not** #941's to touch | the harness retires | #942 |
+| **`CLAUDE.md` § Chunked delivery, same sentence:** "chunk-plan panel depth relaxes only via phase-containment-ledger evidence" | the plan-review charter changes | #941 |
 | **`CLAUDE.md` § Orchestration:** the line documenting `/goal-run` as a live command | the harness retires | #942 |
-| **This section itself** | chunks 2–5 have landed | #943 |
+| **This section itself** | #941 and #942 have both landed | #943 |
 
-Where one sentence has two triggers, the wording it takes in between is fixed here rather than left to whoever lands the first change:
+Where one sentence has two triggers, the wording it takes in between is fixed here rather than left to whoever lands the first change. Two distinct sentences are affected and they are not textually identical, so each is given separately:
 
-- The operating rule becomes "one chunk = one brief = one `/goal-run` = one PR" after #941, and #942 then replaces the command with "one goal-lane run".
+- **This file's** operating rule becomes "One chunk = one sub-issue = one brief = one `/goal-run` = one pull request (PR)." after #941; #942 then replaces the command, giving "One chunk = one sub-issue = one brief = one goal-lane run = one pull request (PR)."
+- **`CLAUDE.md`'s** shorter mirror becomes "one chunk = one sub-issue = one brief = one `/goal-run` = one PR" after #941, then "one chunk = one sub-issue = one brief = one goal-lane run = one PR" after #942.
 - Bound 2 names the brief after #941 while keeping its harness-consumer clause; #942 removes that clause.
 
-**If chunks 2–5 never land** — #936 makes revocation of the new lane a designed outcome, not a failure — this section still goes away, and A1–A5 stay. The amendments bind any chunk plan whatever artifact carries it, and every passage in the table above remains an accurate description of the path still in use. Only this note's *promise* of change would be stale, so #943 removes it either on completion or by recording the revocation.
+**If #941 and #942 never land** — #936 makes revocation of the new lane a designed outcome, not a failure — A1–A5 stay, because the amendments bind any chunk plan whatever artifact carries it, and every passage in the table above remains an accurate description of the path still in use. Only this note's *promise* of change would be stale. Retiring it in that case is not #943's stated obligation, which covers the completion path only; revocation routes back to #936, which owns the decision and would say what becomes of this section.
 
 <!-- interim-migration-note:end -->

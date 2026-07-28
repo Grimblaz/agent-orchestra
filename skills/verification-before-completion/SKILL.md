@@ -25,7 +25,7 @@ The gap between "I wrote the code" and "it works correctly" is where bugs hide.
 
 If evidence is missing, the work is not complete yet.
 
-**And evidence that could not have come out negative is missing evidence.** A proof that would read exactly the same against the unchanged tree tells you nothing about the change; it is a claim wearing evidence's clothes. The three properties every offered proof must carry — discriminating, attributed, per-criterion — are defined once under [Evidence Obligations](#evidence-obligations) and are carried by each checklist and table below. The *form* the proof takes is always your choice.
+**And evidence that could not have come out negative is missing evidence.** A proof that would read exactly the same against the unchanged tree tells you nothing about the change; it is a claim wearing evidence's clothes. The three properties every offered proof must carry — discriminating, attributed, per-criterion — are defined once under [Evidence Obligations](#evidence-obligations), and every checklist item and table row below **that prescribes or accepts proof** carries them in place. Sections that check something other than proof — code quality, integration, documentation, release and demo readiness — are unchanged and carry no such obligation. The *form* the proof takes is always your choice.
 
 ## Universal Verification Checklist
 
@@ -51,8 +51,8 @@ If evidence is missing, the work is not complete yet.
 
 - [ ] All existing tests pass
 - [ ] New tests written for new code
-- [ ] **Each new test proven able to fail** — run against the pre-change code (stash, prior commit, reverted patch) and observed red, or otherwise shown to go red without the fix
-- [ ] No test in the change would pass identically against the pre-change tree; if one would, it is documenting behavior, not verifying the change, and cannot be offered as evidence for a criterion
+- [ ] **Every test offered as evidence for a criterion proven able to fail** — run against the pre-change code (stash, prior commit, reverted patch) and observed red, or otherwise shown to go red without the fix
+- [ ] Any test that would pass identically against the pre-change tree is identified as such — a characterization test, a regression guard, a test added alongside a refactor. Those are legitimate and worth keeping; they are simply not evidence that this change did anything, and are not offered as proof of a criterion
 - [ ] No test computes its expected value using the thing under test
 - [ ] Tests cover happy path
 - [ ] Tests cover error/edge cases
@@ -89,7 +89,7 @@ If evidence is missing, the work is not complete yet.
 [your-build-command]  # Ensure it builds
 ```
 
-These commands establish that the tree is healthy. They are **not** per-criterion evidence: a whole-suite green is one aggregate result, and it is the same green you would have got before the change. To turn a run into evidence for a criterion, scope it to the tests that exercise that criterion and pair it with the run where they failed.
+These commands establish that the tree is healthy. They are **not** per-criterion evidence: a whole-suite green is one aggregate result, and if the suite was already green before the change it is also the same green you would have got by changing nothing. To turn a run into evidence for a criterion, scope it to the tests that exercise that criterion and pair it with the run where they failed. A suite that was genuinely red before and is green now already is that pairing — say which tests moved and at which commit, and it becomes per-criterion evidence.
 
 ## Context-Specific Checklists
 
@@ -136,7 +136,7 @@ A note on the second and third: attribution and scoping are what make discrimina
 
 ### Acceptable Evidence
 
-Each form below is acceptable **only when it carries the three obligations above** — the qualifier on each is what supplies the discriminating half.
+Each form below is acceptable **only when it carries all three obligations above**. That gate governs every entry: a form that satisfies its own qualifier but fails *discriminating*, *attributed*, or *per-criterion* is not acceptable. The qualifiers below supply whichever property the bare form most often omits — usually the discriminating half, but for the counted-measurement entry it is attribution, and that entry still has to be discriminating on its own account.
 
 - ✅ Screenshot of passing tests — paired with the same tests failing before the change, and naming the commit or working state each was taken at
 - ✅ Link to successful CI/CD run — paired with the run, commit, or job where the same checks failed without the fix; a green run on its own shows the suite is green, not that the change did anything
@@ -144,12 +144,12 @@ Each form below is acceptable **only when it carries the three obligations above
 - ✅ Query results showing correct data — with the before-state alongside, naming the query and the dataset it ran against
 - ✅ Logs showing expected behavior — including the line that was absent or wrong before, and naming the run they came from
 - ✅ A differential: the same input through the old and new paths, with the outputs that differ
-- ✅ A counted measurement over a named population — how many, out of what, and how the population was enumerated
+- ✅ A counted measurement over a named population — how many, out of what, and how the population was enumerated, **plus the count the same measurement returned before the change**; a count that was already at its target proves nothing
 - ✅ For a guidance or documentation change: a concrete artifact the old text accepted, shown being rejected by the new text — never the mere presence of the new wording
 
 ### Insufficient Evidence
 
-The first four object to vagueness and staleness. The rest object to **non-discrimination**: proof that could not have come out negative.
+The first four object to vagueness, staleness, and unverified assumption. Of the rest, most object to **non-discrimination** — proof that could not have come out negative — and two do not: the aggregate-green entry is a *per-criterion* objection, and the no-population entry is an *attribution* objection. Each entry names which property it fails.
 
 - ❌ "I tested it locally" (no proof)
 - ❌ "It worked yesterday" (not now)
@@ -160,12 +160,14 @@ The first four object to vagueness and staleness. The rest object to **non-discr
 - ❌ A test whose expected value is computed by the function under test (it agrees with itself under every implementation)
 - ❌ One aggregate green offered against several acceptance criteria at once (not per-criterion)
 - ❌ Evidence that the change is *present* offered as evidence that it is *sufficient* — a diff, a field that was added, a term that now appears in a document
-- ❌ A number with no population behind it ("most cases", "all the ones I checked")
+- ❌ A number with no population behind it — "most cases", "all the ones I checked" (not attributed)
 - ❌ A consistency check that passes when nothing moved (agreement across locations is not the same as change)
 
 ## Verification Log Template
 
-One block per acceptance criterion. The three lines under each are the three obligations; a criterion whose "Could have failed" line is empty has no evidence yet.
+One block per acceptance criterion — the block structure is what makes the evidence *per-criterion*. Within each block, "Could have failed" carries *discriminating* and "Provenance" carries *attributed*; "Proof offered" is the evidence itself, not an obligation. A criterion whose "Could have failed" line is empty has no evidence yet.
+
+The "Verified by" and "Date" fields at the end attribute the **log**, not the evidence — each criterion still carries its own provenance line.
 
 ```markdown
 ## Verification: [Ticket/Feature ID]
@@ -195,8 +197,7 @@ One block per acceptance criterion. The three lines under each are the three obl
 - [Any criterion whose evidence is weaker than the three obligations require,
   named here rather than left for the reviewer to notice]
 
-Verified by: [Name] — and the "Verified by"/"Date" pair attributes the log,
-not the evidence; each criterion still carries its own provenance line above.
+Verified by: [Name]
 Date: [Date]
 ```
 
@@ -268,7 +269,6 @@ Do not mark complete while any of these are true:
 
 - [ ] [Minimum coverage requirement]
 - [ ] [Required test types]
-- [ ] Every new or changed test observed red without the change — coverage counts what ran, not what could have failed
 
 ### Documentation
 
@@ -279,6 +279,8 @@ Do not mark complete while any of these are true:
 - [ ] [Required approvals]
 - [ ] [Required notifications]
 ```
+
+Whatever you fill the Testing section with, coverage counts what *ran*, not what *could have failed* — a coverage threshold is not a substitute for showing that the tests offered as evidence were able to go red. This obligation is stated here rather than inside the block above, because a project customizing that block would otherwise overwrite it.
 
 ## Gotchas
 
