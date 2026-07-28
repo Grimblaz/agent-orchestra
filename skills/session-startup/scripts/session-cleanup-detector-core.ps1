@@ -721,35 +721,20 @@ function Test-SCDGitRefExists {
     }
 }
 
-function Test-SCDMergeBaseAncestor {
-    param(
-        [Parameter(Mandatory)]
-        [string]$BranchName,
-
-        [Parameter(Mandatory)]
-        [string]$TargetRef,
-
-        [string]$WorktreePath = ''
-    )
-
-    if ([string]::IsNullOrWhiteSpace($BranchName) -or [string]::IsNullOrWhiteSpace($TargetRef)) {
-        return $false
-    }
-
-    try {
-        if ([string]::IsNullOrWhiteSpace($WorktreePath)) {
-            git merge-base --is-ancestor $BranchName $TargetRef 2>$null
-        }
-        else {
-            git -C $WorktreePath merge-base --is-ancestor $BranchName $TargetRef 2>$null
-        }
-
-        return ($LASTEXITCODE -eq 0)
-    }
-    catch {
-        return $false
-    }
-}
+# Issue #922 (decision D1 / AC10): Test-SCDMergeBaseAncestor is REMOVED, not
+# renamed and not repaired in place. It gated all three candidate paths on
+# whether a branch's own commits were ancestors of the remote default — a merged
+# verdict, rendered before any evidence was gathered, and necessarily the weaker
+# of the two: a squash merge writes a new commit, so a squash-merged branch is
+# never an ancestor and was discarded silently.
+#
+# Teaching that predicate to also consult tree-equivalence would have been the
+# cheaper fix and would satisfy most of this issue's criteria, but it leaves a
+# second merged verdict in the codebase under a name describing only one of the
+# signals it would then consult — the split-authority shape that let issue #513's
+# fix correct the gate and leave this predicate behind. The eligibility gate
+# (Test-WorktreeBranchRemovalEligible) is now the sole author of the verdict, and
+# candidacy consults only shape: branch prefix and upstream state.
 
 function Get-SCDWorktreeRecords {
     param([string[]]$PorcelainLines)
@@ -976,20 +961,26 @@ function Get-SCDSiblingWorktreeCleanups {
                     continue
                 }
 
-                if (Test-SCDMergeBaseAncestor -BranchName $branchName -TargetRef $remoteDefault.RefName -WorktreePath $record.WorktreePath) {
-                    $eligibility = Get-SCDGatedEligibility -Budget $GhBudget -Category 'sibling' -BranchName $branchName -DefaultBranch $DefaultBranch -IsDegradedCwd $IsDegradedCwd
-                    $cleanups += @{
-                        BranchName         = $branchName
-                        WorktreePath       = $normalizedPath
-                        Reason             = $eligibility.Evidence
-                        RemoteDefaultRef   = $remoteDefault.RefName
-                        Eligible           = $eligibility.Eligible
-                        ManualReviewReason = $eligibility.ManualReviewReason
-                        Outcome            = $eligibility.Outcome
-                        IsLocked           = $record.IsLocked
-                        LockReason         = $record.LockReason
-                        IsPrunable         = $record.IsPrunable
-                    }
+                # Issue #922 (decision D1 / AC10): candidacy is decided by SHAPE alone —
+                # branch prefix and upstream state, both already checked above. The
+                # ancestry test that used to gate this append rendered a merged
+                # verdict of its own: a squash merge writes a new commit, so a
+                # squash-merged branch is never an ancestor of the remote default and
+                # was dropped here, before any evidence was gathered, not even as a
+                # candidate needing review. The eligibility gate is now the only
+                # component producing a merged verdict.
+                $eligibility = Get-SCDGatedEligibility -Budget $GhBudget -Category 'sibling' -BranchName $branchName -DefaultBranch $DefaultBranch -IsDegradedCwd $IsDegradedCwd
+                $cleanups += @{
+                    BranchName         = $branchName
+                    WorktreePath       = $normalizedPath
+                    Reason             = $eligibility.Evidence
+                    RemoteDefaultRef   = $remoteDefault.RefName
+                    Eligible           = $eligibility.Eligible
+                    ManualReviewReason = $eligibility.ManualReviewReason
+                    Outcome            = $eligibility.Outcome
+                    IsLocked           = $record.IsLocked
+                    LockReason         = $record.LockReason
+                    IsPrunable         = $record.IsPrunable
                 }
             }
             catch {
@@ -1224,17 +1215,18 @@ function Get-SCDOrphanBranchCleanups {
 
         if (Test-SCDGitRefExists -RefName $remoteDefault.RefName) {
             foreach ($branchName in $noUpstreamCandidates) {
-                if (Test-SCDMergeBaseAncestor -BranchName $branchName -TargetRef $remoteDefault.RefName) {
-                    $eligibility = Get-SCDGatedEligibility -Budget $GhBudget -Category 'orphan' -BranchName $branchName -DefaultBranch $DefaultBranch -IsDegradedCwd $IsDegradedCwd
-                    $cleanups += @{
-                        BranchName         = $branchName
-                        Reason             = $eligibility.Evidence
-                        RemoteDefaultRef   = $remoteDefault.RefName
-                        Eligible           = $eligibility.Eligible
-                        ManualReviewReason = $eligibility.ManualReviewReason
-                        Outcome            = $eligibility.Outcome
-                        Kind               = 'orphan-no-upstream'
-                    }
+                # Issue #922 (decision D1 / AC10): shape-only candidacy — see the
+                # sibling arm above. The ancestry test dropped squash-merged orphan
+                # branches before any evidence was gathered.
+                $eligibility = Get-SCDGatedEligibility -Budget $GhBudget -Category 'orphan' -BranchName $branchName -DefaultBranch $DefaultBranch -IsDegradedCwd $IsDegradedCwd
+                $cleanups += @{
+                    BranchName         = $branchName
+                    Reason             = $eligibility.Evidence
+                    RemoteDefaultRef   = $remoteDefault.RefName
+                    Eligible           = $eligibility.Eligible
+                    ManualReviewReason = $eligibility.ManualReviewReason
+                    Outcome            = $eligibility.Outcome
+                    Kind               = 'orphan-no-upstream'
                 }
             }
         }
@@ -1461,17 +1453,22 @@ function Invoke-SessionCleanupDetector {
                     Invoke-SCDNonInteractiveFetchOnce -RemoteName $remoteDefault.RemoteName -CacheKey $remoteDefault.RefName -FetchLookup $fetchLookup
 
                     if (Test-SCDGitRefExists -RefName $remoteDefault.RefName) {
-                        if (Test-SCDMergeBaseAncestor -BranchName $currentBranch -TargetRef $remoteDefault.RefName) {
-                            $eligibility = Get-SCDGatedEligibility -Budget $ghBudget -Category 'current' -BranchName $currentBranch -DefaultBranch $defaultBranch
-                            $currentNoUpstreamWorktree = @{
-                                BranchName         = $currentBranch
-                                RemoteDefaultRef   = $remoteDefault.RefName
-                                WorktreePath       = $currentLocationPath
-                                Eligible           = $eligibility.Eligible
-                                Evidence           = $eligibility.Evidence
-                                ManualReviewReason = $eligibility.ManualReviewReason
-                                Outcome            = $eligibility.Outcome
-                            }
+                        # Issue #922 (decision D1 / AC10 / AC3): shape-only candidacy on
+                        # the third and last ancestry-gated path. This is the path that
+                        # produced the live reproduction — after PR #926 was squash-merged,
+                        # `claude/agent-orchestra-experience-912-76d96c` had
+                        # `merge-base --is-ancestor` exit 1 and `git diff --quiet` exit 0,
+                        # and the check reported five other worktrees while omitting it
+                        # entirely.
+                        $eligibility = Get-SCDGatedEligibility -Budget $ghBudget -Category 'current' -BranchName $currentBranch -DefaultBranch $defaultBranch -IsDegradedCwd $isDegradedCwd
+                        $currentNoUpstreamWorktree = @{
+                            BranchName         = $currentBranch
+                            RemoteDefaultRef   = $remoteDefault.RefName
+                            WorktreePath       = $currentLocationPath
+                            Eligible           = $eligibility.Eligible
+                            Evidence           = $eligibility.Evidence
+                            ManualReviewReason = $eligibility.ManualReviewReason
+                            Outcome            = $eligibility.Outcome
                         }
                     }
                 }

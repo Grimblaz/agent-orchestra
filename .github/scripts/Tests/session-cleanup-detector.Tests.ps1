@@ -308,6 +308,24 @@ if ($a.Count -ge 4 -and $a[0] -eq 'diff' -and $a[1] -eq '--quiet') {
     exit ([int]$exitValue)
 }
 
+if ($a.Count -ge 4 -and $a[0] -eq 'merge-tree' -and $a[1] -eq '--write-tree') {
+    # git merge-tree --write-tree <baseRef> <branch> (issue #922). Carries BOTH
+    # remaining content signals: exit 0 with a resulting tree that equals the
+    # remote default is the merge-tree no-op (merged); exit 0 with a tree that
+    # DIFFERS is Amendment A2.1's conclusive negative; exit 1 is a conflict and
+    # yields no conclusive verdict in either direction.
+    #
+    # DEFAULT (unconfigured) is exit 1 — conflict, no verdict. That is the
+    # conservative default and it is rarely reached, because the diff-quiet
+    # default above is 0 (tree-equivalent) and resolves first.
+    $targetBranch = $a[3]
+    $mergeTreeOutput = Get-MockConfigValue "merge-tree-output-$targetBranch"
+    $mergeTreeExit = Get-MockConfigValue "merge-tree-exit-$targetBranch"
+    if ($null -eq $mergeTreeExit) { $mergeTreeExit = 1 }
+    if ($null -ne $mergeTreeOutput -and $mergeTreeOutput -ne '') { Write-Output $mergeTreeOutput }
+    exit ([int]$mergeTreeExit)
+}
+
 if ($a.Count -ge 5 -and $a[0] -eq 'log' -and $a[1] -eq '--no-merges' -and $a[2] -eq '--pretty=format:' -and $a[3] -eq '--name-only') {
     # git log --no-merges --pretty=format: --name-only <range> (Issue #889 fix
     # cycle, finding C — Test-SCDUniqueCommitsAllEmpty). DEFAULT (unconfigured) is
@@ -763,8 +781,27 @@ exit $LASTEXITCODE
             # covered by the $mergeBaseCalls assertions below.
             $result['GitCalls'] | Should -Contain "config`t--get`tbranch.main.remote"
             $result['GitCalls'] | Should -Contain "show-ref`t--verify`t--quiet`trefs/remotes/upstream/main"
-            $mergeBaseCalls | Should -Contain "merge-base`t--is-ancestor`t$branch`trefs/remotes/upstream/main"
-            $mergeBaseCalls | Should -Not -Contain "merge-base`t--is-ancestor`t$branch`trefs/remotes/origin/main"
+            # Issue #922 (decision D1): the two merge-base assertions that used to
+            # close this test are gone with the predicate they observed. Accounting
+            # for what they were watching, honestly:
+            #
+            #   * "the site targets the upstream-derived ref" — RELOCATED to the
+            #     show-ref assertion above plus the negative below. The site still
+            #     resolves and verifies a remote-default ref; only the ancestry test
+            #     that consumed it is removed.
+            #     (The origin-side negative cannot be asserted on show-ref: the
+            #     default-branch resolver probes origin/main before consulting the
+            #     branch.<X>.remote config, so an origin show-ref legitimately occurs.)
+            #   * "the ref is paired with THIS branch" — NOT relocated. There is no
+            #     longer any site-level call that pairs a branch with the derived ref,
+            #     because candidacy no longer consults the branch's history at all.
+            #     That is decision D1's whole point, and the pairing cannot be
+            #     re-observed without reintroducing a second merged verdict.
+            #
+            # The remaining discriminating claim is the origin-vs-upstream derivation,
+            # which is what this test is named for.
+            $mergeBaseCalls.Count | Should -Be 0 `
+                -Because 'decision D1 removes the candidate-side ancestry predicate entirely; a reappearing merge-base call means a second merged verdict is back'
         }
 
         It 'T3 AC3 leaves an unmerged current no-upstream claude worktree unflagged' {
@@ -976,25 +1013,37 @@ exit $LASTEXITCODE
             $fetchCalls.Count | Should -Be 1 -Because 'one remote/default refresh is enough for all sibling no-upstream candidates in the run'
         }
 
-        It 'T3 AC3 leaves an unmerged sibling claude worktree unflagged' {
+        It 'T3 AC3 leaves an unmerged sibling claude worktree unflagged — and does so by EVALUATING it to the conclusive negative, not by dropping it unexamined (#922 criterion 3)' {
             $workDir = Join-Path $TestDrive 'sibling-claude-unmerged-current'
             $siblingDir = Join-Path $TestDrive 'sibling-claude-unmerged-other'
             New-Item -ItemType Directory -Path $workDir, $siblingDir -Force | Out-Null
             $currentPath = & $script:ToPorcelainPath -Path $workDir
             $siblingPath = & $script:ToPorcelainPath -Path $siblingDir
             $branch = 'claude/in-flight-zyxwv'
+            $mergedTreeOid = 'tree-sibling-unmerged-oid'
             $worktreeList = @(
                 (& $script:NewWorktreeRecord -Path $currentPath -Branch 'main'),
                 (& $script:NewWorktreeRecord -Path $siblingPath -Branch $branch)
             ) -join "`n`n"
 
-            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GitConfig @{
+            # Issue #922: this fixture used to express "unmerged" ONLY as
+            # `merge-base ... = 1` (not an ancestor). That is the pre-filter's
+            # verdict, which decision D1 removes — and silence produced by the
+            # pre-filter dropping a candidate unexamined is already true at
+            # 0da36d6, so it establishes nothing. The branch is now given genuinely
+            # absent content: merge-tree merges cleanly and the resulting tree still
+            # differs from the remote default, which is Amendment A2.1's conclusive
+            # negative and the only constructible input to decision D4's silence.
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -IncludeGitCalls -GitConfig @{
                 'branch--show-current'                        = 'main'
                 'symbolic-ref-origin-HEAD'                    = 'refs/remotes/origin/main'
                 'worktree-list-porcelain'                     = $worktreeList
                 'show-ref-refs/remotes/origin/main'           = 0
                 'fetch-exit'                                  = 0
-                "merge-base-$branch-refs/remotes/origin/main" = 1
+                "diff-quiet-exit-$branch"                     = 1
+                "merge-tree-exit-$branch"                     = 0
+                "merge-tree-output-$branch"                   = $mergedTreeOid
+                "diff-quiet-exit-$mergedTreeOid"              = 1
                 'path-configs'                                = @{
                     "$siblingPath" = @{
                         'branch--show-current' = $branch
@@ -1005,6 +1054,55 @@ exit $LASTEXITCODE
 
             $result.ExitCode | Should -Be 0
             $result.Output | Should -Match '^\{\s*\}$'
+            # The candidate must have been EVALUATED to that silence. Without this,
+            # the assertion above is satisfied by any regression that stops
+            # considering the branch at all — which is the defect being fixed.
+            $evaluationCalls = @($result['GitCalls'] | Where-Object { $_ -match "^merge-tree\t--write-tree\t.+\t$([regex]::Escape($branch))$" })
+            $evaluationCalls.Count | Should -BeGreaterThan 0 -Because 'silence must be the result of gathering evidence about this branch, not of never looking at it'
+        }
+
+        It 'T3b (#922 criterion 3): a sibling whose content evidence is INCONCLUSIVE is reported with its cause rather than silenced' {
+            # The companion to the case above, and the reason silence keys on the
+            # final outcome rather than "not merged". A merge-tree CONFLICT — the
+            # steady state for any worktree older than one merge — is not evidence
+            # of anything, so it must not inherit the conclusive negative's silence.
+            $workDir = Join-Path $TestDrive 'sibling-claude-inconclusive-current'
+            $siblingDir = Join-Path $TestDrive 'sibling-claude-inconclusive-other'
+            New-Item -ItemType Directory -Path $workDir, $siblingDir -Force | Out-Null
+            $currentPath = & $script:ToPorcelainPath -Path $workDir
+            $siblingPath = & $script:ToPorcelainPath -Path $siblingDir
+            $branch = 'claude/conflicted-abcdef'
+            $worktreeList = @(
+                (& $script:NewWorktreeRecord -Path $currentPath -Branch 'main'),
+                (& $script:NewWorktreeRecord -Path $siblingPath -Branch $branch)
+            ) -join "`n`n"
+
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GhConfig @{
+                # gh is reachable and simply finds no matching merged PR, so the
+                # reported cause must be the inconclusive content evidence rather
+                # than a gh-availability failure.
+                "pr-list-merged-$branch" = '[]'
+            } -GitConfig @{
+                'branch--show-current'              = 'main'
+                'symbolic-ref-origin-HEAD'          = 'refs/remotes/origin/main'
+                'worktree-list-porcelain'           = $worktreeList
+                'show-ref-refs/remotes/origin/main' = 0
+                'fetch-exit'                        = 0
+                "diff-quiet-exit-$branch"           = 1
+                "merge-tree-exit-$branch"           = 1
+                'path-configs'                      = @{
+                    "$siblingPath" = @{
+                        'branch--show-current' = $branch
+                        'rev-parse-exit'       = 128
+                    }
+                }
+            }
+            $context = & $script:GetAdditionalContext -Output $result.Output
+
+            $result.ExitCode | Should -Be 0
+            $context | Should -Match ([regex]::Escape($branch)) -Because 'an inconclusive candidate must be reported, never silently dropped'
+            $context | Should -Match ([regex]::Escape("couldn't verify: no conclusive merge evidence")) -Because 'the stated cause must be the inconclusiveness, not a conclusive negative that was never established'
+            $context | Should -Not -Match ([regex]::Escape('-SiblingWorktrees')) -Because 'being unable to establish that a branch is finished is not permission to delete it (invariant I-4)'
         }
 
         It 'T4b AC4 fails open for <CaseName> and preserves no-op output' -TestCases @(
@@ -1359,8 +1457,15 @@ exit $LASTEXITCODE
                 'show-ref-refs/remotes/origin/main'                   = 0
                 'fetch-exit'                                          = 0
                 'for-each-ref-refs/heads/claude/'                     = @($currentBranch, $attachedBranch, $mergedOrphan, $unmergedOrphan)
-                "merge-base-$mergedOrphan-refs/remotes/origin/main"   = 0
-                "merge-base-$unmergedOrphan-refs/remotes/origin/main" = 1
+                # Issue #922 (D1/A2.1): merged-ness and unmerged-ness are stated as
+                # content evidence, not as the removed ancestry predicate. The merged
+                # orphan is tree-equivalent (the mock's diff-quiet default, exit 0);
+                # the unmerged one merges cleanly into the remote default and still
+                # changes its tree, which is the conclusive negative D4 silences.
+                "diff-quiet-exit-$unmergedOrphan"                     = 1
+                "merge-tree-exit-$unmergedOrphan"                     = 0
+                "merge-tree-output-$unmergedOrphan"                   = 'tree-unmerged-orphan-oid'
+                'diff-quiet-exit-tree-unmerged-orphan-oid'            = 1
                 'path-configs'                                        = @{
                     "$siblingPath" = @{
                         'branch--show-current' = $attachedBranch
@@ -1380,7 +1485,17 @@ exit $LASTEXITCODE
             $insideFence | Should -Not -Match 'git branch -D ' -Because 'raw git branch -D must not appear in fenced block for orphan category'
             $context | Should -Not -Match ([regex]::Escape($unmergedOrphan))
             $insideFence | Should -Not -Match ([regex]::Escape("git branch -D '$unmergedOrphan'"))
-            $context | Should -Not -Match ([regex]::Escape($attachedBranch))
+            # Issue #922 (decision D1): the attached sibling branch is now a
+            # legitimate SIBLING candidate — it is a claude/* worktree with no
+            # upstream, and candidacy is shape-only, so it is reported by the
+            # sibling arm. This assertion's subject is the ORPHAN sweep subtracting
+            # branches that are attached to a worktree, so it is asserted against the
+            # -OrphanBranches argument rather than the whole rendered context, which
+            # would otherwise silently start asserting the sibling arm's behaviour too.
+            $orphanArgs = @([regex]::Matches($insideFence, "-OrphanBranches @\(([^)]*)\)") | ForEach-Object { $_.Groups[1].Value }) -join ' '
+            $orphanArgs | Should -Not -Match ([regex]::Escape($attachedBranch)) -Because 'a branch attached to a worktree is not an orphan'
+            $orphanArgs | Should -Not -Match ([regex]::Escape($currentBranch)) -Because 'the current branch is not an orphan'
+            $orphanArgs | Should -Match ([regex]::Escape($mergedOrphan))
             $insideFence | Should -Not -Match ([regex]::Escape("git branch -D '$attachedBranch'"))
             $insideFence | Should -Not -Match ([regex]::Escape("git branch -D '$currentBranch'"))
         }
