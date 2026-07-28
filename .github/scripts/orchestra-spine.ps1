@@ -338,6 +338,14 @@ function Invoke-OrchestraSpineRender {
         return 'plan uses the goal-contract variant — no spine; see the plan comment for the contract'
     }
 
+    # #941: same precedence for the brief variant, and hoisted above the
+    # plan-too-small escape for the same reason — a brief never emits a spine
+    # by design, so both the plan-too-small message ("too small") and the
+    # legacy fall-through would describe it wrongly.
+    if ((Get-FSCPlanVariant -CommentBody $planComment.Body) -eq 'brief') {
+        return 'plan uses the brief variant — no spine by design; see the plan comment for the contract'
+    }
+
     if ($planComment.Body -match '(?m)^\s*spine-omitted\s*:\s*plan-too-small\s*$') {
         return 'plan has no spine — see comment for prose plan'
     }

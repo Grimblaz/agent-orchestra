@@ -348,6 +348,65 @@ function script:ConvertFrom-FSCSpineYamlInternal {
     }
 }
 
+function Get-FSCPlanVariant {
+    <#
+    .SYNOPSIS
+        Returns the plan comment's declared `plan-variant:` value, or $null.
+
+    .DESCRIPTION
+        Frontmatter-anchored, never a body-wide line match: a plan whose prose
+        quotes the literal `plan-variant: brief` -- documentation, a migration
+        table, a design record -- must not be misclassified as one. Lives here
+        rather than in either caller because both plan-comment readers need it
+        (frame-validate-core.ps1's structural branch and orchestra-spine.ps1's
+        no-spine message), and a second hand-rolled copy is how the two drift.
+
+        Deliberately NOT folded into goal-contract-core.ps1's
+        Test-GCVariantFrontmatter, which encodes the same rule for one literal:
+        that function is the goal-contract library's public surface and retires
+        with the variant it names (#936 D3/#942), so teaching it a second
+        variant name would couple a retiring library to the surviving one.
+    #>
+    [CmdletBinding()]
+    param([AllowNull()][AllowEmptyString()][string]$CommentBody)
+
+    if ([string]::IsNullOrWhiteSpace($CommentBody)) { return $null }
+
+    $lines = (script:ConvertTo-FSCNormalizedText -Text $CommentBody) -split "`n"
+
+    # Skip leading HTML-comment marker lines and blank lines -- a persisted plan
+    # comment carries `<!-- plan-issue-{ID} -->` and often a
+    # `<!-- phase-containment-ledger-ref: ... -->` pointer above the frontmatter.
+    $index = 0
+    while ($index -lt $lines.Count -and (($lines[$index].Trim() -eq '') -or $lines[$index].Trim().StartsWith('<!--'))) {
+        $index++
+    }
+
+    if ($index -ge $lines.Count -or $lines[$index].Trim() -ne '---') { return $null }
+
+    # Collect the frontmatter region first and require a closing fence before
+    # reading anything out of it. Scanning line-by-line without that check
+    # would run past an unterminated region into the plan body, where a prose
+    # line beginning `plan-variant:` at column 0 reads as a declaration -- the
+    # same false-positive class the frontmatter anchoring exists to prevent.
+    $frontmatterLines = [System.Collections.Generic.List[string]]::new()
+    $closed = $false
+    for ($i = $index + 1; $i -lt $lines.Count; $i++) {
+        if ($lines[$i].Trim() -eq '---') { $closed = $true; break }
+        $frontmatterLines.Add($lines[$i]) | Out-Null
+    }
+
+    if (-not $closed) { return $null }
+
+    foreach ($line in $frontmatterLines) {
+        if ($line -match '^plan-variant:\s*(?:"(?<value>[^"]+)"|''(?<value>[^'']+)''|(?<value>\S+))\s*$') {
+            return ([string]$Matches['value']).Trim()
+        }
+    }
+
+    return $null
+}
+
 function Get-FSCSpineBlock {
     param([AllowNull()][string]$CommentBody)
 

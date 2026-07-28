@@ -141,6 +141,8 @@ If no customer-facing surface exists, state why `ce_gate: false` is justified.
 
 Include the fixed adversarial review pipeline: five-pass two-layer prosecution panel (2 generalist + 3 specialist), merged findings ledger, one defense pass, one judge pass, and local resolution of accepted findings before completion.
 
+A plan in the **brief** shape takes a different charter (#936 D5), because the brief is a design-shaped artifact rather than a step-bearing one: the `#### Brief conformance check` over its four mechanical properties, plus the prosecution-only `design-challenge` shape for the investigative half. See `## Stress-Test Preparation` for the dispatch.
+
 ## Tree-State Verification Discipline
 
 After drafting the plan and before stress-test preparation, verify every load-bearing acceptance criterion against the current repository tree. Populate the plan's `**Verification Evidence**` block before adversarial review so prosecutors evaluate the plan and its evidence together. The Grounding Pass (`### 4. Grounding Pass` in `## Discovery Workflow`) is its pre-draft counterpart: it owns step-prose artifact claims and upstream write-back before drafting, while this discipline owns load-bearing AC evidence after drafting.
@@ -183,7 +185,8 @@ Specialized rule: when a Verification Evidence row reaches the same conclusion a
 
 Before approval, prepare the draft plan for adversarial review:
 
-1. Load `skills/adversarial-review/platforms/claude.md` and follow the `standard` adapter checklist from `skills/adversarial-review/adapters/standard.md` for atomic prosecution, defense, and judge dispatch. Load-bearing judge-sustained findings that the maintainer must adjudicate use the **escalation tier** per `skills/solution-authoring/SKILL.md §Rule: Decision brief structure` (#556).
+1. **Select the adapter from the plan's shape** (#936 D5, corrected landing sites per #936 DA4). A plan whose frontmatter declares `plan-variant: brief` selects `skills/adversarial-review/adapters/design-challenge.md` — three prosecution-only lenses, no defense, no judge — and the author runs `#### Brief conformance check` (`## Plan Style Guide` › `### Brief plan variant`) before dispatching and the reviewer runs it as the first act of the review. Every other plan shape selects `standard` as before. Do not re-aim this by editing a pass count: `skills/adversarial-review/adapters/standard.md` is the **code-review** adapter (`applies-when: changeset.totalLines >= 200`), selected by `commands/orchestra-review.md` for local code review, so editing its declaration would relax every code review over that size threshold. The change is adapter *selection* here, at the dispatch point.
+1. Load `skills/adversarial-review/platforms/claude.md` and follow the selected adapter's checklist for its dispatch sequence — `standard` for atomic prosecution, defense, and judge; `design-challenge` for the three-pass prosecution-only panel, whose findings keep the pre-judge disposition triad (see `### Post-Judge Reconciliation`). Load-bearing judge-sustained findings that the maintainer must adjudicate use the **escalation tier** per `skills/solution-authoring/SKILL.md §Rule: Decision brief structure` (#556).
 1. Do not consume prosecution dispositions, edit the plan, or ask for finding-level maintainer action until the judge rules.
 1. After the judge rules, perform Post-Judge Reconciliation, update the `Plan Stress-Test` summary, and present approval using `## Plan Approval Prompt Format`.
 
@@ -293,6 +296,8 @@ Omit the spine only when the plan has fewer than three implementation steps. In 
 
 A plan whose frontmatter declares `plan-variant: goal-contract` is a separate, size-independent carve-out from this omission rule: it never emits `spine-omitted: plan-too-small`, and it never emits a frame-spine block for any reason — not because the plan is too small, but because the goal-contract block replaces the spine outright. See `### Goal-contract plan variant` below.
 
+A plan whose frontmatter declares `plan-variant: brief` is the same kind of carve-out, and for the same reason: the brief is a **shape**, not a size. It never emits a frame-spine block, never emits a frame-slices sibling, and does not emit `spine-omitted: plan-too-small` — that token licenses omission below three implementation steps, and a brief has no numbered implementation steps by construction, so borrowing it would be declaring a size fact rather than the shape actually in use. See `### Brief plan variant` below.
+
 Legacy plans stay legacy when amended. Do not retrofit a frame spine into an older approved plan during amendment; preserve its original routing model unless a new planning pass explicitly replaces the plan.
 
 Each implementation slice must declare `provides:` unless it uses the exploratory escape hatch. Allowed `provides:` values are the `frame/ports/*.yaml` filename stems except the deferred `process-retrospective` port: `ce-gate-api`, `ce-gate-browser`, `ce-gate-canvas`, `ce-gate-cli`, `design`, `experience`, `implement-code`, `implement-docs`, `implement-refactor`, `implement-test`, `plan`, `post-fix-review`, `post-pr`, `process-review`, `release-hygiene`, `review`. Use a flow-style list, for example `provides: [implement-test]`. The spine and slice must agree: every port reference in the spine must have a matching slice anchor.
@@ -383,6 +388,51 @@ Write the literal 64-zero placeholder shown above into `contract_hash` while the
 **Structural validation matrix (872-D5) and its accepted carve-out** (post-review finding M3): `Invoke-FVPlanValidate` (`.github/scripts/lib/frame-validate-core.ps1`) classifies every plan comment against three yes/no signals — `plan-variant: goal-contract` frontmatter present, a `<!-- frame-spine -->` block present, and a `<!-- goal-contract -->` contract block present — giving six reachable states (some spine/contract combinations collapse together): variant-declared plans with no spine and a valid contract pass; variant-declared plans that also carry a spine are rejected as ambiguous; variant-declared plans with neither a spine nor a contract block are rejected as incomplete; a contract block present with no variant frontmatter and no spine block is rejected as "contract block without variant metadata"; and the two pre-existing spine-only states (no variant, spine present, no contract) and (no variant, no spine, no contract) are unchanged from pre-#872 behavior. The one state this matrix does **not** enforce is a contract block present alongside a spine block with no variant frontmatter — this half of the "contract block without variant metadata" row is intentionally unchecked, because `Get-GCContractBlock` is markdown-blind and cannot distinguish a real contract block from one quoted inside a fenced documentation example inside spine-bearing plan prose. Extending the check to the spine-present case would break the existing false-positive guard (`.github/scripts/Tests/frame-validate-plan-mode.Tests.ps1:617`) that requires a frame-spine plan with a fenced goal-contract authoring example to still pass as an ordinary spine plan. This is a known, accepted gap, not an oversight — see the matching comment in `frame-validate-core.ps1` immediately above the spine-parsing branch.
 
 **Migration-type issues are out of scope for the goal-contract variant for now** (post-review finding M15): the `#### Migration-type issues` guidance below requires Step 1 of a migration-type plan to be an exhaustive repo scan, gated by an operational `migration-scan: true` marker that lives inside a `<!-- frame-slice -->` block. A goal-contract plan never emits a frame-slice sibling, so that marker has nowhere to live and this requirement is currently unenforceable for the goal-contract variant. Disposition chosen here: do not author goal-contract plans for migration-type issues until this gap is resolved; use the standard frame-spine plan shape for migration-type work instead. A candidate future path worth noting: `invariants` is already an open string array (only two literals — `full-pester-suite-no-new-failures` and `test-diff-integrity` — are schema-required; repo-specific entries may be appended without a schema change), so a future revision could carry the migration-scan intent as an additional invariant literal (for example `migration-exhaustive-scan-required`) paired with a `structure-presence` target verifying the scan artifact exists. That path is not implemented here — it needs a validator that actually reads and enforces the new invariant literal, which is out of scope for this documentation-only pass.
+
+### Brief plan variant
+
+A **brief** is the plan-seat artifact for a chunk sub-issue of a designed parent, ratified by `Documents/Design/chunked-delivery.md` (issue #936, doctrine amendments A1–A5). Bound 2 of that doctrine says a chunk plan states the contract and stops; the brief is the shape that says it. It replaces the frame-spine mechanism rather than layering on it — no `<!-- frame-spine ... -->` block, no `<!-- frame-slice ... -->` blocks, no `<!-- frame-slices-{ID} -->` sibling, no `slice_comment_id`. **Spine-Runner is ineligible to walk a brief**: there is no spine to fetch.
+
+**The brief is a variant, not the new default.** Spine-bearing plans remain the shape for non-chunk work, and `/plan` on an ordinary issue still authors one. Only a chunk sub-issue of a designed parent is authored as a brief. (Recorded because the doctrine and the wider repository pull in opposite directions here: the doctrine says the brief is what a chunk plan *is*, which argues for making it the default; every non-chunk plan in the repository is spine-bearing, which argues for a variant. Making it the default would silently change the shape of every plan for work the doctrine never spoke about, so the variant reading wins until a chunk tree is the normal case. #924 owns *recognising* that a given issue is a chunk and selecting this shape for it — this section owns only the shape's contract.)
+
+**Frontmatter**: add `plan-variant: brief` alongside the existing `status`/`priority`/`issue_id`/`created`/`ce_gate` keys:
+
+```yaml
+---
+status: pending
+priority: { priority }
+issue_id: { issue-id }
+created: { date }
+ce_gate: { true|false }
+plan-variant: brief
+---
+```
+
+**Required sections**, in this order, each a `##`-level heading numbered as shown:
+
+1. `## 1. Problem and observed evidence` — what is wrong now, with the evidence that says so.
+2. `## 2. Epistemic map` — grounding claims split into **source-read**, **inferred/contestable**, and **known-unknown, left to the run**, per A2. An inferred claim may not set a tolerance or mandate a mechanism.
+3. `## 3. Acceptance criteria` — behaviour pins per A4, each stating its own proof standard per A5.
+4. `## 4. Falsifiers` — per A3, the vacuity traps the stress-test found, delivered as **prose the executor reads**, never as a check the run is graded on. A3 names this section by number; renumbering it falsifies a doctrine sentence.
+5. `## 5. Context inventory` — what the executor should know that the criteria do not say: adjacent constraints, budget guards, sequencing hazards, scope observations raised rather than acted on.
+6. `## 6. Evidence obligations` — the standing statement that format is the executor's choice and the three properties are not (`skills/verification-before-completion/SKILL.md`), plus any per-criterion note about what would *not* count.
+
+A heading may carry trailing qualifier text after the section name (`## 4. Falsifiers — executor guidance, not checks`). `Invoke-FVPlanValidate` (`.github/scripts/lib/frame-validate-core.ps1`) accepts a brief carrying all six, and rejects a document that declares itself a brief while carrying none of them — recognising the token is not validating the shape. It rejects a brief that also carries a frame-spine or `<!-- goal-contract -->` block as ambiguous, and it still rejects a plan that is neither brief, spine-bearing, nor a declared variant.
+
+**What the brief does not carry.** No numbered implementation steps, no Requirement Contracts, no execution modes, no per-step validation commands. Those are the recipe Bound 2 forbids: mechanism inside the chunk belongs to the executor's run. An unknown that could void a criterion or the chunk boundary is not an in-box unknown — route it up as a **parent design amendment** rather than resolving it in the brief.
+
+The plan-comment sections outside this list are authored as for any other plan shape: the `## Plan: {Title}` heading, `## Verification`, `## Decisions`, and `## Named Decisions`. **One exception, and it is load-bearing**: the stress-test summary must carry the line-start literal `**Plan Stress-Test**` from the plan-markdown template, not an `## Plan Stress-Test` heading. Writer rule 8 above explains why — `Test-EmissionMarkerPresent`'s honest fallback matches that exact literal, so an H2 form silently breaks the fallback for any plan comment that does not carry a `phase-containment-ledger-ref` pointer. Both briefs shipped before this rule was written used the H2 form and were saved only by always having the pointer; do not rely on that. The summary names the adapter actually used (`design-challenge`), not `standard`.
+
+#### Brief conformance check
+
+Run this before dispatching a brief for review, and again as the first act of reviewing one. It covers the four near-mechanical properties #936 D5 named — the ones a lens-based investigation reads past because they are text properties rather than reasoning defects. A brief failing any of them is corrected before the investigative passes run, not argued about after.
+
+1. **No artifact-pinned criterion** (A4). Read every acceptance criterion. Reject any that names a file path, a test name, a per-file count, or any other artifact — "the slug module gains at least 6 tests", "file X exists". A criterion must pin the observable behaviour that artifact exists to demonstrate. A suite-wide floor is permitted only under property 4.
+2. **Every grounding claim carries provenance** (A2). Every claim in the epistemic map is tagged **source-read** or **sample-inferred**. Reject an untagged claim, and reject any sample-inferred claim that sets a comparison tolerance or mandates a mechanism — an inferred claim reaches the executor as contestable guidance only.
+3. **Every criterion states a proof standard** (A5). Reject a criterion that names no proof standard, and reject an evidence-obligations section that offers format freedom without stating the three properties the proof must have (discriminating, attributed, per-criterion). Format is the executor's choice; the properties are not.
+4. **Any absolute suite floor is checked satisfiable** (A4). If a criterion states a suite-wide floor, the brief must show the arithmetic against the launch baseline. An unchecked floor is forbidden — a halt-bound run that was halt-bound from the moment it began is the failure this catches.
+
+The check is a reviewer and author activity, not a validator branch: properties 1 and 3 need a reading of what a criterion *means*, and property 4 needs a number the text does not contain. Do not infer that a brief passing `Invoke-FVPlanValidate` has passed this check — structural validation says the shape is present, and says nothing about whether what is written in it conforms.
 
 ### Adapter and executor selection
 

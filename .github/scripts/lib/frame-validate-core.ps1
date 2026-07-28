@@ -376,6 +376,54 @@ function Test-FVPlanSpineOmittedPlanTooSmall {
     return ($normalized -match '(?m)^\s*spine-omitted\s*:\s*plan-too-small\s*$')
 }
 
+# The sections a brief-shaped chunk plan must carry (issue #941). Read from the
+# two briefs already in production (#939's and #941's own plan comments), not
+# inferred from one sample. Section 4 is load-bearing beyond this list: the
+# chunked-delivery doctrine's A3 names "the brief's fourth section" as the
+# container falsifiers reach the executor in, so renumbering these breaks a
+# doctrine sentence, not just a heading.
+$script:FVBriefRequiredSections = @(
+    [pscustomobject]@{ Number = 1; Name = 'Problem and observed evidence' }
+    [pscustomobject]@{ Number = 2; Name = 'Epistemic map' }
+    [pscustomobject]@{ Number = 3; Name = 'Acceptance criteria' }
+    [pscustomobject]@{ Number = 4; Name = 'Falsifiers' }
+    [pscustomobject]@{ Number = 5; Name = 'Context inventory' }
+    [pscustomobject]@{ Number = 6; Name = 'Evidence obligations' }
+)
+
+function Invoke-FVBriefPlanValidate {
+    <#
+    .SYNOPSIS
+        Validates a plan comment that declares `plan-variant: brief`.
+
+    .DESCRIPTION
+        Deliberately minimal (#936 D2): it checks the shape the doctrine
+        requires, not the quality of what is written in it. Recognising the
+        token is not validating the shape, so a document declaring itself a
+        brief while carrying none of the required sections fails here. The
+        judgment half -- artifact-pinned criteria, unmarked provenance, missing
+        proof standards -- is the Brief conformance check in
+        skills/plan-authoring/SKILL.md, which a reviewer runs; it is not
+        mechanically decidable from the text and is deliberately not attempted
+        here.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$CommentBody
+    )
+
+    $structuralViolations = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($section in $script:FVBriefRequiredSections) {
+        $pattern = '(?im)^##\s+' + [regex]::Escape("$($section.Number).") + '\s+' + [regex]::Escape($section.Name) + '\b'
+        if ($CommentBody -notmatch $pattern) {
+            $structuralViolations.Add("brief is missing its required section $($section.Number) '$($section.Name)'.") | Out-Null
+        }
+    }
+
+    return (New-FVStructuralCoverageResult -StructuralViolations $structuralViolations.ToArray() -CoverageGaps @())
+}
+
 function Get-FVPlanAcceptanceCriterionId {
     param([AllowNull()][string]$CommentBody)
 
@@ -537,8 +585,29 @@ function Invoke-FVPlanValidate {
     # anchored (Test-GCVariantFrontmatter), never a body-wide line match, so
     # a plan that merely quotes the literal in prose is not misclassified.
     $isGoalContractVariant = Test-GCVariantFrontmatter -CommentBody $commentBody
+    $isBriefVariant = ((Get-FSCPlanVariant -CommentBody $commentBody) -eq 'brief')
     $spineBlock = Get-FSCSpineBlock -CommentBody $commentBody
     $contractPayload = Get-GCContractBlock -CommentBody $commentBody
+
+    # #941: the brief is a lawful plan shape in its own right, hoisted above the
+    # frame-spine null-check for the same reason the goal-contract branch is --
+    # otherwise a brief falls through to `Missing frame-spine block.` and the
+    # shape the doctrine ratifies is rejected in practice. A brief needs no
+    # `spine-omitted: plan-too-small` token: that carve-out licenses omission
+    # below three implementation steps, which is a statement about size, and a
+    # brief has no numbered steps by construction. Briefs persisted before this
+    # branch existed still carry the token; it is simply not read here.
+    if ($isBriefVariant) {
+        if ($null -ne $spineBlock) {
+            return (New-FVAggregateResult -Results @((New-FVCheckResult -Name 'PlanStructuralCoverage' -Passed $false -Detail 'Ambiguous plan: declares plan-variant: brief frontmatter and also carries a frame-spine block; a plan must use exactly one mechanism.')))
+        }
+
+        if ($null -ne $contractPayload) {
+            return (New-FVAggregateResult -Results @((New-FVCheckResult -Name 'PlanStructuralCoverage' -Passed $false -Detail 'Ambiguous plan: declares plan-variant: brief frontmatter and also carries a <!-- goal-contract --> block; a plan must use exactly one mechanism.')))
+        }
+
+        return (Invoke-FVBriefPlanValidate -CommentBody $commentBody)
+    }
 
     if ($isGoalContractVariant) {
         if ($null -ne $spineBlock) {
