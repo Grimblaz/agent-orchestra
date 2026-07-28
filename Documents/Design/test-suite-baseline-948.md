@@ -111,7 +111,8 @@ already made — "there are exactly N specialist roles declared in the plugin
 configuration". The derived form checks that claim directly, and it is strictly stronger
 here, not weaker: `Get-AntigravitySubagents` silently drops a declared agent whose file
 does not resolve on disk, so with 17 declared and one dropped the literal `16` would have
-**passed wrongly**. See the detection enumeration below for the evidence.
+**passed wrongly**. See the detection enumeration below for the evidence, including the two
+cases where the derived form is *also* blind and what covers them.
 
 ### `bootstrap-antigravity.Tests.ps1` — `wrapper executes cleanly and outputs valid JSON`
 
@@ -249,23 +250,60 @@ ability to detect a real regression.
 
 **1. `bootstrap-antigravity.Tests.ps1` — literal expected count replaced by a derived one.**
 Lost: the "the agent roster changed at all" alarm. Retained and strengthened: detection of
-a declared agent that fails to resolve. This is a net increase, and it is demonstrated
-rather than asserted — against a fixture manifest declaring two agents where only one
-exists on disk, the derived assertion fails (2 declared, 1 resolved) while a literal count
-matching the resolved value passes. The lost alarm is not lost from the suite: the roster
-is enumerated shell-by-shell in `claude-body-resolution-contract.Tests.ps1`'s
-`$ExpectedShells` table, which fails by *name* on an unregistered addition or removal —
-a strictly better signal than a moved number. The assertion is not tautological, because
-the resolver drops non-resolving entries silently rather than erroring.
+a *partially* dropped roster — a declared agent that fails to resolve. Demonstrated rather
+than asserted: against a fixture manifest declaring two agents where only one exists on
+disk, the derived assertion fails (2 declared, 1 resolved) while a literal count matching
+the resolved value passes. The assertion is not tautological, because the resolver drops
+non-resolving entries silently rather than erroring.
+
+**Two cases where the derived form is nonetheless blind**, both surfaced by adversarial
+review and both reproduced against fixtures:
+
+- **Total** manifest breakage. When *every* declared path fails to resolve,
+  `Get-AntigravitySubagents` falls back to a directory scan of `agents/`, so resolved
+  equals declared and the assertion passes. Partial breakage is still caught; only the
+  all-entries case escapes.
+- Manifest **shrink**. Subject and oracle both read `.claude-plugin/plugin.json`, so
+  removing entries moves both sides together.
+
+Neither is a suite-level detection loss: `manifest-agents-array.Tests.ps1` builds the
+expected list from disk and asserts set-equality plus length against the manifest, which
+fails on both shapes. **That test — not
+`claude-body-resolution-contract.Tests.ps1` — is the backstop for anything manifest-scoped.**
+`claude-body-resolution-contract.Tests.ps1`'s `$ExpectedShells` table covers the different
+case named above as the lost alarm, a shell added to or removed from `agents/`, and fails
+by *name* rather than by a moved number; it never parses the manifest at all. Do not retire
+`manifest-agents-array.Tests.ps1` as redundant on the strength of this file's coverage.
 
 **2. `copilot-sunset-skip-discipline.Tests.ps1` — guard pattern narrowed.**
-Lost: nothing that the guard was built to catch. What no longer matches is
-`-Skip:(<condition>)`, which is platform gating rather than de-obligation. Verified
-discriminating against four cases: bare `-Skip {` (the form every real Copilot
-de-obligation in this repository uses) still matches; unconditional `-Skip:$true` still
-matches, so the de-obligation escape hatch stays closed; both parenthesised platform-gate
-forms correctly do not match. A `-Skip:$someVariable` written without parentheses would
-still be flagged, which is the conservative direction.
+Lost: nothing that the guard was built to catch. The exemption is keyed on the condition
+being a **platform predicate** — `$IsWindows`, `$IsLinux`, `$IsMacOS`, optionally negated —
+and not on the presence of parentheses.
+
+That distinction is load-bearing, and the first version of this change got it wrong. An
+earlier lookahead exempted *every* parenthesised condition, which meant an unconditional
+skip wearing parentheses (`-Skip:($true)`, `-Skip:(1 -eq 1)`, `-Skip:(-not $false)`) or an
+environment-scoped disable (`-Skip:($env:CI -eq 'true')`) stopped being flagged. All five
+are de-obligations that the pre-change pattern caught, so that was a real detection
+reduction — introduced by the fix, in the exact property this document certifies. Adversarial
+review caught it; four of five prosecution passes found it independently.
+
+The failure was not that the original four verification cases were vacuous — each could
+have come out negative. It was that the case set was not **exhaustive over the class the
+lookahead exempted**. Choosing an exemption boundary obliges you to enumerate what falls on
+the far side of it, not to confirm the cases you had in mind.
+
+Verified discriminating against eleven cases: bare `-Skip {` (the form every real Copilot
+de-obligation in this repository uses), `-Skip:$true`, and all five parenthesised
+non-platform spellings above are flagged; the four platform-gate forms
+(`-Skip:(-not $IsWindows)`, `-Skip:($IsWindows)`, `-Skip:(-not $IsLinux)`,
+`-Skip:($IsMacOS)`) are exempt. A `-Skip:$someVariable` written without parentheses is
+still flagged, which is the conservative direction.
+
+Pre-existing blind spots this guard has always had, and which this change neither widened
+nor closed: a double-quoted test name (`It "x" -Skip`), a parameter between the name and
+the switch (`It 'x' -Tag 'y' -Skip`), `Context`-level skips, and `Set-ItResult -Skipped`
+inside a body.
 
 **3. `phase-containment-report.Tests.ps1` — probe directory narrowed to a private path.**
 Lost: nothing. The assertion, its subject, and its failure condition are unchanged; only

@@ -20,9 +20,12 @@ Describe 'Antigravity Compatibility Bootstrap Runner Contract' {
         # does not resolve on disk (bootstrap-antigravity-core.ps1 resolves each entry with
         # -ErrorAction SilentlyContinue), so comparing the resolved count against the
         # declared count is a real drop detector rather than a tautology.
+        # Filter out nulls before counting: @($null).Count is 1 in PowerShell, so a manifest
+        # with the 'agents' key renamed or removed would otherwise yield a phantom count of 1
+        # and pass the non-empty guard below that exists to rule exactly that case out.
         $script:DeclaredAgentCount = @(
             (Get-Content -Path (Join-Path $script:RepoRoot '.claude-plugin/plugin.json') -Raw |
-                ConvertFrom-Json).agents
+                ConvertFrom-Json).agents | Where-Object { $_ }
         ).Count
     }
 

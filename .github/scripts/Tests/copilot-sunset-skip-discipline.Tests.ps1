@@ -16,16 +16,20 @@ Describe 'Copilot sunset skip discipline (#651)' {
     It 'every -Skip annotation added for the Copilot sunset carries the #651-option1-remove token' {
         # Find de-obligating It -Skip lines.
         #
-        # `-Skip` followed by a parenthesised condition -- `-Skip:(-not $IsWindows)` -- is
-        # platform gating, not a Copilot de-obligation: the test still runs, on the hosts
-        # where it applies. Enrolling those on the #651 Option-1 removal checklist would be
-        # wrong, because Option-1 removal must not delete platform-gated tests.
+        # The exemption is keyed on the CONDITION being a platform predicate, not on the
+        # mere presence of parentheses. `-Skip:(-not $IsWindows)` is platform gating rather
+        # than a Copilot de-obligation -- the test still runs, on the hosts where it applies
+        # -- and enrolling those on the #651 Option-1 removal checklist would be wrong,
+        # because Option-1 removal must not delete platform-gated tests.
         #
-        # Everything else stays in scope. Bare `-Skip {` -- the form every real Copilot
-        # de-obligation in this repository uses -- still matches, and so does an
-        # unconditional `-Skip:$true`, so the de-obligation escape hatch stays covered.
+        # Exempting every parenthesised condition instead would be a detection hole: an
+        # unconditional skip wearing parentheses (`-Skip:($true)`, `-Skip:(1 -eq 1)`) or an
+        # environment-scoped disable (`-Skip:($env:CI -eq 'true')`) is a de-obligation, and
+        # must still land on the removal checklist. Only $IsWindows / $IsLinux / $IsMacOS,
+        # optionally negated, are exempt; every other spelling -- including bare `-Skip {`
+        # and `-Skip:$true` -- stays in scope.
         $skipLines = Get-ChildItem -Path $script:TestsRoot -Filter '*.Tests.ps1' -Recurse |
-            Select-String -Pattern "It\s+'[^']*'\s+-Skip(?!:\s*\()" |
+            Select-String -Pattern "It\s+'[^']*'\s+-Skip(?!:\s*\(\s*(-not\s+)?\`$Is(Windows|Linux|MacOS)\s*\))" |
             Where-Object { $_.Line -notmatch '#651-option1-remove' }
 
         $skipLines | ForEach-Object { Write-Host "Missing token: $($_.Filename):$($_.LineNumber): $($_.Line.Trim())" }
