@@ -305,5 +305,37 @@
     "register": "stable-code",
     "kind": "atomic",
     "expansion": "`Get-FCLOriginContext` (the CI-safe origin predicate in .github/scripts/lib/Get-FCLOriginContext.ps1 that classifies a PR as orchestrated or non-orchestrated; primary signal $env:GITHUB_HEAD_REF, fallback PR-body linked-issue markers)"
+  },
+  {
+    "term": "chunked delivery",
+    "register": "self-describing",
+    "kind": "atomic",
+    "expansion": "chunked delivery (splitting a designed parent issue into plan-only sub-issues, one sub-issue = one plan = one pull request)"
+  },
+  {
+    "term": "Bound 1 / Bound 2",
+    "register": "self-describing",
+    "kind": "family",
+    "decode": "Bound 1 = the parent design stops at the seams; Bound 2 = the chunk plan is a contract, not a recipe. See Documents/Design/chunked-delivery.md."
+  },
+  {
+    "term": "A1–A5 (doctrine amendments)",
+    "register": "stable-code",
+    "kind": "family",
+    "expansion": "A1–A5 (the five chunked-delivery doctrine amendments governing how a chunk plan may specify)",
+    "decode": "A1 = discovery-neutral targets; A2 = provenance-marked grounding; A3 = falsifiers as executor guidance, never a graded check; A4 = behavior pins plus a pre-launch floor check; A5 = evidence obligations. See Documents/Design/chunked-delivery.md section 'How a chunk plan specifies'."
+  },
+  {
+    "term": "DA{N} (parent-design amendments)",
+    "register": "stable-code",
+    "kind": "family",
+    "expansion": "DA{N} (an amendment to a parent design recorded after that design phase closed)",
+    "decode": "Numbered DA{N} deliberately to avoid collision with the doctrine amendments A1–A5. Lives in the 'Design Amendments' section of the parent issue, e.g. issue #936."
+  },
+  {
+    "term": "discriminating / attributed / per-criterion",
+    "register": "self-describing",
+    "kind": "family",
+    "decode": "The three properties completion evidence must carry (A5). discriminating = it could have come out negative; attributed = it says where the number came from; per-criterion = it maps to one acceptance criterion. See skills/verification-before-completion/SKILL.md."
   }
 ]

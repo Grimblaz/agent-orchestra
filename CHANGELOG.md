@@ -2,6 +2,17 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.4.15] — 2026-07-28
+
+### Changed
+
+- **Chunked-delivery doctrine gains amendments A1-A5** (#939, chunk 1 of #936). `Documents/Design/chunked-delivery.md` now carries five rules governing the knowledge level a chunk plan may specify at: discovery-neutral targets (A1), provenance-marked grounding (A2), falsifiers as executor guidance rather than check hardening (A3), behavior pins plus a pre-launch floor check (A4), and evidence obligations with fixed properties and free format (A5). Each states what it forbids and what it requires instead.
+- **`skills/verification-before-completion/SKILL.md` amended to reject non-discriminating evidence.** A5's three properties — discriminating, attributed, per-criterion — are defined once under a new Evidence Obligations section and carried in place by all twelve regions of the file that prescribe or accept proof: the requirements and testing checklists, the verification-command block, the before-pull-request checklist, both Acceptable and Insufficient Evidence lists, the verification log template, the almost-done and rationalization tables, the red flags, the definition-of-done template, and the gotchas table. Sections that check something other than proof are unchanged. Previously the file blessed proof (a passing-test screenshot, a green CI link) that would read identically against the pre-change tree while its insufficient-evidence list objected only to vagueness and staleness.
+- **`CLAUDE.md` gains a compact pointer** stating what each of A1-A5 binds and where the full doctrine and A5's standing home live, sized to keep the file within its 200-line diet guard.
+- **Migration note added** to the doctrine document naming every doctrine sentence that later chunks of #936 replace and which single chunk replaces it, with the in-between wording fixed for the passages that change twice. Marked as a deliberate historical reference between machine-readable sentinels so the migration completeness check stays meaningful. Issue #943 retires it.
+- **Vocabulary and naming-register entries added** for `A1`-`A5`, `DA{N}`, `Bound 1 / Bound 2`, and the three evidence properties, so the new numbered families decode without leaving the surface that names them.
+- **"Discriminating" is defined by whether the check could have failed, not by whether its result changed.** A criterion claiming something *new* is true needs a result that differs from the pre-change tree; a criterion claiming something is *preserved* — a refactor, a backward-compatibility guarantee, "no breaking changes to dependents" — is evidenced by a parity run, provided you say what that run would have caught. Without this split the guidance would reject the correct evidence for every preservation criterion.
+
 ## [3.4.14] — 2026-07-27
 
 ### Fixed
