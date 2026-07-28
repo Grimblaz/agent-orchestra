@@ -115,7 +115,7 @@ We remove later checks **only with evidence, never on a cost argument**: a stage
 
 ## Chunked delivery: design to the seams, plan to the contract
 
-Full doctrine and rationale: [Documents/Design/chunked-delivery.md](Documents/Design/chunked-delivery.md). Two load-bearing detail bounds — enforcing only one recreates the waterfall failure mode one level down:
+Full doctrine and rationale: [Documents/Design/chunked-delivery.md](Documents/Design/chunked-delivery.md), which also carries amendments **A1–A5** — binding on every chunk plan, governing the knowledge level it may specify at (discovery-neutral targets; provenance-marked grounding; falsifiers as executor guidance, never check hardening; behavior pins plus a pre-launch floor check) and what its evidence must prove (A5, whose three properties — discriminating, attributed, per-criterion — have their standing home in [skills/verification-before-completion/SKILL.md](skills/verification-before-completion/SKILL.md)). Two load-bearing detail bounds — enforcing only one recreates the waterfall failure mode one level down:
 
 1. **The parent design stops at the seams**: the design decides chunk boundaries — interfaces, data shapes, spanning invariants, chunk sequence — and never a chunk's internals.
 2. **The chunk plan is a contract, not a recipe**: each chunk's goal-contract states targets, invariants, evidence obligations, halt conditions, and budget, then stops. The planner must not pre-solve unknowns inside the chunk — plan-phase discovery is read-only grounding for checkable targets; an unknown that could void a target or boundary escalates as a parent design gap instead.

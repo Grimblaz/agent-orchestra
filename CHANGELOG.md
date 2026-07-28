@@ -2,6 +2,15 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.4.15] — 2026-07-28
+
+### Changed
+
+- **Chunked-delivery doctrine gains amendments A1-A5** (#939, chunk 1 of #936). `Documents/Design/chunked-delivery.md` now carries five rules governing the knowledge level a chunk plan may specify at: discovery-neutral targets (A1), provenance-marked grounding (A2), falsifiers as executor guidance rather than check hardening (A3), behavior pins plus a pre-launch floor check (A4), and evidence obligations with fixed properties and free format (A5). Each states what it forbids and what it requires instead.
+- **`skills/verification-before-completion/SKILL.md` amended to reject non-discriminating evidence.** A5's three properties — discriminating, attributed, per-criterion — are defined once under a new Evidence Obligations section and carried in place by every checklist and table in the file that prescribes or accepts proof: the requirements and testing checklists, the verification-command block, both Acceptable and Insufficient Evidence lists, the verification log template, the almost-done and rationalization tables, the red flags, the definition-of-done template, and the gotchas table. Previously the file blessed proof (a passing-test screenshot, a green CI link) that would read identically against the pre-change tree while its insufficient-evidence list objected only to vagueness and staleness.
+- **`CLAUDE.md` gains a compact pointer** naming A1-A5 and where they live, sized to stay within the 200-line diet guard.
+- **Interim-behavior note added** to the doctrine document naming every doctrine sentence that later chunks of #936 replace and which chunk replaces it, marked as a deliberate historical reference so the migration completeness check stays meaningful. Issue #943 retires it.
+
 ## [3.4.14] — 2026-07-27
 
 ### Fixed
