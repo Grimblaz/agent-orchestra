@@ -588,6 +588,19 @@ exit 1
             $mainHasStray | Should -Contain 'stray.txt' `
                 -Because 'the fixture requires the stray commit to have been cherry-picked onto main; if this fails, the cherry-pick did, and the outcome assertion below is meaningless'
 
+            # The cherry-pick landing is necessary but not sufficient: this test's
+            # premise is that the branch is TREE-IDENTICAL to the remote default, so
+            # the merged check clears it on content evidence with no gh call. Pin
+            # that directly, and report the actual signal state on failure, so a
+            # platform difference localises itself instead of surfacing as the
+            # downstream "branch was not absorbed".
+            $branchTree = (& git -C $repoPath rev-parse "${branch}^{tree}" 2>$null)
+            $remoteTree = (& git -C $repoPath rev-parse 'origin/main^{tree}' 2>$null)
+            & git -C $repoPath diff --quiet --ignore-cr-at-eol 'origin/main' $branch 2>$null
+            $tolerantDiffExit = $LASTEXITCODE
+            "$branchTree" | Should -BeExactly "$remoteTree" `
+                -Because "the branch must be tree-identical to origin/main for this fixture to mean what it claims (tolerant diff exit was $tolerantDiffExit)"
+
             # git cherry should show '-' for the feature commit (patch-equivalent)
             $branchTip = (& git -C $repoPath rev-parse $branch 2>$null).Trim()
             $shimPath  = & $script:NewPassingGhShim -ParentPath $repoPath -State 'CLOSED' -HeadRefOid $branchTip
