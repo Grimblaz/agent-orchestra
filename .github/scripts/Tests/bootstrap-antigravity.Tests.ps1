@@ -14,6 +14,19 @@ Describe 'Antigravity Compatibility Bootstrap Runner Contract' {
 
         # Dot-source the library
         . $script:CoreLibPath
+
+        # Derived, not hard-coded: the manifest is the declaration of record for how many
+        # agent shells exist. Get-AntigravitySubagents silently drops a declared path that
+        # does not resolve on disk (bootstrap-antigravity-core.ps1 resolves each entry with
+        # -ErrorAction SilentlyContinue), so comparing the resolved count against the
+        # declared count is a real drop detector rather than a tautology.
+        # Filter out nulls before counting: @($null).Count is 1 in PowerShell, so a manifest
+        # with the 'agents' key renamed or removed would otherwise yield a phantom count of 1
+        # and pass the non-empty guard below that exists to rule exactly that case out.
+        $script:DeclaredAgentCount = @(
+            (Get-Content -Path (Join-Path $script:RepoRoot '.claude-plugin/plugin.json') -Raw |
+                ConvertFrom-Json).agents | Where-Object { $_ }
+        ).Count
     }
 
     It 'bootstrap core library loads successfully' {
@@ -34,8 +47,9 @@ Describe 'Antigravity Compatibility Bootstrap Runner Contract' {
             $script:Subagents = Get-AntigravitySubagents -RootPath $script:RepoRoot
         }
 
-        It 'resolves exactly 16 subagents' {
-            $script:Subagents.Count | Should -Be 16 -Because 'there are exactly 16 specialist roles declared in the plugin configuration'
+        It 'resolves every subagent declared in the plugin manifest' {
+            $script:DeclaredAgentCount | Should -BeGreaterThan 0 -Because 'the manifest must declare at least one agent for this comparison to mean anything'
+            $script:Subagents.Count | Should -Be $script:DeclaredAgentCount -Because 'every agent shell declared in .claude-plugin/plugin.json must resolve to a subagent; a declared path that no longer exists on disk is dropped silently'
         }
 
         It 'all subagents carry the required schema properties' {
@@ -81,7 +95,7 @@ Describe 'Antigravity Compatibility Bootstrap Runner Contract' {
             Test-Path $tempOutput | Should -BeTrue -Because 'the script should have generated the output JSON file'
 
             $parsedJson = Get-Content -Path $tempOutput -Raw | ConvertFrom-Json
-            $parsedJson.Count | Should -Be 16 -Because 'the output JSON file should parse to exactly 16 objects'
+            $parsedJson.Count | Should -Be $script:DeclaredAgentCount -Because 'the output JSON file should carry one object per agent declared in .claude-plugin/plugin.json'
 
             if (Test-Path $tempOutput) { Remove-Item $tempOutput -Force }
         }
