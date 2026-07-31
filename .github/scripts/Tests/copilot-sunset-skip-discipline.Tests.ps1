@@ -28,8 +28,13 @@ Describe 'Copilot sunset skip discipline (#651)' {
         # must still land on the removal checklist. Only $IsWindows / $IsLinux / $IsMacOS,
         # optionally negated, are exempt; every other spelling -- including bare `-Skip {`
         # and `-Skip:$true` -- stays in scope.
+        #
+        # The name group accepts BOTH quote styles. Pester discovers `It "name"` exactly as
+        # it discovers `It 'name'`, so a single-quote-only group let any double-quoted test
+        # carry `-Skip` straight past this guard. 158 double-quoted It names exist in this
+        # suite; none carries -Skip today, which is why the gap was latent rather than live.
         $skipLines = Get-ChildItem -Path $script:TestsRoot -Filter '*.Tests.ps1' -Recurse |
-            Select-String -Pattern "It\s+'[^']*'\s+-Skip(?!:\s*\(\s*(-not\s+)?\`$Is(Windows|Linux|MacOS)\s*\))" |
+            Select-String -Pattern "It\s+(['`"])[^'`"]*\1\s+-Skip(?!:\s*\(\s*(-not\s+)?\`$Is(Windows|Linux|MacOS)\s*\))" |
             Where-Object { $_.Line -notmatch '#651-option1-remove' }
 
         $skipLines | ForEach-Object { Write-Host "Missing token: $($_.Filename):$($_.LineNumber): $($_.Line.Trim())" }
