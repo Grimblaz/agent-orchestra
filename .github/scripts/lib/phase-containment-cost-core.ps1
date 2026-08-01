@@ -406,6 +406,7 @@ function Get-ReviewCostRollup {
     $planStressTestDefenseKillContribs = [System.Collections.Generic.List[PSCustomObject]]::new()
     $designChallengeContribs = [System.Collections.Generic.List[PSCustomObject]]::new()
     $briefReviewContribs = [System.Collections.Generic.List[PSCustomObject]]::new()
+    $planDefenseKillBriefSkipCount = 0
 
     # PR numbers (Surface = 'pr') carrying ANY cost-surface marker at all —
     # used for the forward-gap count.
@@ -523,7 +524,15 @@ function Get-ReviewCostRollup {
             # prosecution-only, so there is no defense pass whose kills could
             # be counted. Feeding it a zero would silently dilute the plan
             # arm's rate with issues that never had the concept.
-            if (-not $isBriefIssue) {
+            if ($isBriefIssue) {
+                # Disclosed, never silent (#963 review, finding Q). Every other
+                # exclusion path in this file surfaces a counter; a denominator
+                # that quietly loses issues is exactly the shape a maintainer
+                # cannot audit, and it is how a mis-declared issue would drop
+                # out of the plan arm without leaving a trace.
+                $planDefenseKillBriefSkipCount++
+            }
+            else {
                 for ($i = 0; $i -lt $bodies.Count; $i++) {
                     if (Test-JudgeRulingsRealHeadPresent -Body ([string]$bodies[$i]) -Surface $headCheckSurface) {
                         $judgeRulingsCandidateIdx.Add($i)
@@ -581,9 +590,19 @@ function Get-ReviewCostRollup {
             # below: the brief head only ever lives on an issue's ledger
             # sibling.
             if ($isBriefIssue) {
+                # Ledger-scoped, for the same reason the emission check's own
+                # counting loop is (#963 review, finding P): without it the
+                # LATEST brief-marked body wins, so any later comment from any
+                # author outranks the real ledger sibling as this rate's
+                # source — and `filtered_count` sits in both the numerator and
+                # the denominator, so a supplied value drives the reported
+                # rate wherever its author wants it.
+                $briefLedgerMarker = "<!-- phase-containment-ledger-$number -->"
                 $briefCandidateIdx = [System.Collections.Generic.List[int]]::new()
                 for ($i = 0; $i -lt $bodies.Count; $i++) {
-                    if (Test-EmissionMarkerPresent -Surface 'brief-review' -Body ([string]$bodies[$i])) {
+                    $b = [string]$bodies[$i]
+                    if (-not $b.Contains($briefLedgerMarker, [System.StringComparison]::Ordinal)) { continue }
+                    if (Test-EmissionMarkerPresent -Surface 'brief-review' -Body $b) {
                         $briefCandidateIdx.Add($i)
                     }
                 }
@@ -684,7 +703,8 @@ function Get-ReviewCostRollup {
             PerSource            = $perSourceTable
         }
         PlanStressTest  = [PSCustomObject]@{
-            DefenseKillRate = $planStressTestDefenseKillRate
+            DefenseKillRate       = $planStressTestDefenseKillRate
+            BriefRoutedSkipCount  = $planDefenseKillBriefSkipCount
         }
     }
 }
@@ -874,6 +894,11 @@ function Format-ReviewCostSection {
     $lines.Add('  Value-side reference: see the Stage: plan-stress-test block in the report above.')
     $planRate = $Rollup.PlanStressTest.DefenseKillRate
     $lines.Add("  Defense-kill rate: $(Format-CostRateDisplayValue -RateSection $planRate -FetchUnavailable $fetchUnavailable -FetchSource $Rollup.FetchSource)")
+    $planBriefSkips = if ($Rollup.PlanStressTest.PSObject.Properties.Match('BriefRoutedSkipCount').Count -gt 0) { [int]$Rollup.PlanStressTest.BriefRoutedSkipCount } else { 0 }
+    if ($planBriefSkips -gt 0) {
+        $issueWord = if ($planBriefSkips -eq 1) { 'issue' } else { 'issues' }
+        $lines.Add("  ($planBriefSkips brief-routed $issueWord excluded from this rate: a brief review is prosecution-only, so a defense-kill rate is undefined for it rather than zero)")
+    }
     $lines.Add('')
 
     # ---- code-review ----

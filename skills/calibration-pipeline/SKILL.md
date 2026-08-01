@@ -27,7 +27,7 @@ Reusable entryway for deterministic tooling, committed assets, and pipeline-metr
 - `scripts/` contains calibration writers, aggregation tools, improvement-issue helpers, and related shared helpers
 - `assets/` contains committed pipeline configuration and data consumed by those scripts
 - `references/` contains extracted pipeline-metrics contract material that other skills and agents can load directly
-- `schemas/phase-containment.schema.json` is the validation schema for `<!-- phase-containment-{ID} -->` ledger entries; the ledger's warn-only enforcement surface is `.github/scripts/phase-containment-emission-check.ps1` (hub maintainers only — repo-relative, does not resolve from a consumer repo's CWD), which sweeps code-review, design-challenge, and plan-stress-test surfaces for judge-sustained findings missing a paired ledger block and reports the gap; it never blocks a caller flow
+- `schemas/phase-containment.schema.json` is the validation schema for `<!-- phase-containment-{ID} -->` ledger entries; the ledger's warn-only enforcement surface is `.github/scripts/phase-containment-emission-check.ps1` (hub maintainers only — repo-relative, does not resolve from a consumer repo's CWD), which sweeps the code-review, post-review-observer, design-challenge, plan-stress-test and brief-review surfaces for upheld findings missing a paired ledger block and reports the gap; it never blocks a caller flow. "Upheld" is deliberately not "judge-sustained": the design-challenge and brief-review surfaces are prosecution-only and authorize counting without a judge, which is the whole point of issue #951. Issue surfaces are routed per issue, so a brief-declared issue is swept on brief-review and not on plan-stress-test
 
 ## Composite References
 

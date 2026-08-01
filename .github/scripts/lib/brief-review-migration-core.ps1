@@ -65,7 +65,7 @@ $script:BRMPlannedCorrections = @(
         ExpectedReason       = 'filter-not-run'
         ExpectedSustained    = 0
         ExpectedBlockCount   = 0
-        Note                 = 'Withdrawn by issue #951: this review ran three prosecution lenses with the convergence filter SKIPPED, and no judge stage. Its 27 rows were raw, unnarrowed prosecution output written under `judge_ruling: sustained`. They are withdrawn rather than relabelled, because an unfiltered population is not a graded one and moving it under `brief-review` would carry the same contamination into the new sub-arm. The dispositions the panel recorded are preserved below for the record, under a head that declares `convergence_filter_ran: false` and therefore authorizes no count at all.'
+        Note                 = 'Withdrawn by issue #951: this review ran three prosecution lenses with the convergence filter SKIPPED, and no judge stage. Its 27 rows were raw, unnarrowed prosecution output written under `judge_ruling: sustained`. They are withdrawn rather than relabelled, because an unfiltered population is not a graded one and moving it under `brief-review` would carry the same contamination into the new sub-arm. The finding IDENTIFIERS the panel raised are listed below for the record, under a head that declares `convergence_filter_ran: false` and therefore authorizes no count at all. Their `disposition` values are NOT preserved and are not claimed to be: the original record carried a judge ruling per finding and no disposition field at all, so there is nothing to carry across. The uniform `incorporate` below is a placeholder required by the head shape, not a statement about what any panel decided.'
     }
 )
 
@@ -97,7 +97,7 @@ function Get-BRMJudgeRulingsFindingIds {
         prose mention of an id must not be promoted into the rewritten head.
     #>
     param([Parameter(Mandatory)][AllowEmptyString()][string]$Body)
-    $ids = [System.Collections.Generic.List[string]]::new()
+    $ids = [System.Collections.Generic.List[object]]::new()
     # Returned WITHOUT a leading comma. `return ,$array` wraps the array in an
     # outer one-element array; every call site here wraps the result in @(),
     # and @() does not flatten that nesting — the whole id list arrives as a
@@ -106,8 +106,14 @@ function Get-BRMJudgeRulingsFindingIds {
     # cleanly as ONE upheld finding against 29 blocks.
     $headMatch = [regex]::Match($Body, '(?ms)<!--\s*judge-rulings\b.*?-->')
     if (-not $headMatch.Success) { return $ids.ToArray() }
-    foreach ($m in [regex]::Matches($headMatch.Value, '(?m)^\s*-\s+finding_id\s*:\s*(\S+)\s*$')) {
-        $ids.Add($m.Groups[1].Value)
+    # Each id is paired with the ruling recorded against it, so the rewritten
+    # head can carry what the record actually said rather than a uniform
+    # placeholder (#963 review, finding X). An id whose ruling cannot be read
+    # is returned with a null ruling and fails loud downstream — the one thing
+    # this migration must never do is invent a disposition, since inventing
+    # provenance is the defect it exists to remove.
+    foreach ($m in [regex]::Matches($headMatch.Value, '(?ms)^\s*-\s+finding_id\s*:\s*(\S+)\s*$\s*^\s*judge_ruling\s*:\s*(\S+)\s*$')) {
+        $ids.Add([PSCustomObject]@{ Id = $m.Groups[1].Value; Ruling = $m.Groups[2].Value })
     }
     return $ids.ToArray()
 }
@@ -125,21 +131,36 @@ function New-BRMBriefHead {
         see this file's header for why that is a sanctioned exception.
     #>
     param(
-        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$FindingIds,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Findings,
         [Parameter(Mandatory)][bool]$ConvergenceFilterRan,
         [Parameter(Mandatory)][int]$FilteredCount
     )
+    # The ONLY ruling→disposition mapping this migration will make. A
+    # judge-rulings `sustained` and a brief `incorporate` both mean "this
+    # finding was upheld and is being acted on", so the translation is
+    # faithful. `defense-sustained` has NO brief equivalent — the brief surface
+    # has no defense pass, which is the whole reason it exists — so it is not
+    # mapped and not guessed at.
+    # Emitted UNFENCED. A ```yaml fence around the head is cosmetic for the
+    # reader — Get-BriefReviewSustainedCountInternal isolates its region from
+    # the head to the next fence, so a fence merely bounds it — but it puts a
+    # fence pair upstream of every phase-containment block in the comment, and
+    # Get-PhaseContainmentBlock strips fences during extraction. That
+    # interaction was observed to drop block extraction to zero on a
+    # 29-block body, which would silently zero the very BlockCount the
+    # verdict guard checks. Not worth the decoration.
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add('```yaml')
     $lines.Add('brief_dispositions:')
     $lines.Add("  convergence_filter_ran: $($ConvergenceFilterRan.ToString().ToLowerInvariant())")
     $lines.Add("  filtered_count: $FilteredCount")
     $lines.Add('  findings:')
-    foreach ($id in $FindingIds) {
-        $lines.Add("    - finding_id: $id")
+    foreach ($f in $Findings) {
+        if ($f.Ruling -ne 'sustained') {
+            throw "New-BRMBriefHead: finding '$($f.Id)' carries judge_ruling '$($f.Ruling)', which has no faithful brief-review disposition. Refusing to guess — writing a disposition the record does not support is the false provenance this migration exists to remove."
+        }
+        $lines.Add("    - finding_id: $($f.Id)")
         $lines.Add('      disposition: incorporate')
     }
-    $lines.Add('```')
     return ($lines -join "`n")
 }
 
@@ -175,7 +196,7 @@ function Convert-BRMLedgerBody {
         return [PSCustomObject]@{ Body = $Body; Changed = $false; Reason = 'already-corrected' }
     }
 
-    $findingIds = @(Get-BRMJudgeRulingsFindingIds -Body $Body)
+    $findings = @(Get-BRMJudgeRulingsFindingIds -Body $Body)
     $new = $Body
 
     if ($plan.Action -eq 'relabel') {
@@ -199,9 +220,30 @@ function Convert-BRMLedgerBody {
         $new = [regex]::Replace($new, '(?m)^finding_key[ \t]*:[ \t]*plan-stress-test:', 'finding_key: brief-review:')
     }
     elseif ($plan.Action -eq 'withdraw') {
-        # Remove the rows entirely, open tag through close tag.
+        # Archive before deleting (#963 review, finding AB). The rows carry
+        # introduced_phase, catchable_phase, severity, systemic_fix_type and
+        # category — real analytical content that the withdrawal decision was
+        # never about. Withdrawing them from the COUNT is the decision;
+        # destroying them is not, and an instrument whose repair silently
+        # deletes evidence is a poor advertisement for itself.
+        #
+        # The archive is deliberately INERT: markers are rendered as text
+        # inside a fence with the HTML-comment delimiters stripped, so no
+        # sweep can ever re-parse it as live blocks. Same hygiene the emission
+        # check's own Format-InertMarkerLabel applies to its reports.
         $blockPattern = "(?ms)^<!--\s*phase-containment-$Issue\s*-->.*?^<!--\s*/phase-containment-$Issue\s*-->[ \t]*\r?\n?"
+        $withdrawn = @([regex]::Matches($new, $blockPattern) | ForEach-Object { $_.Value })
         $new = [regex]::Replace($new, $blockPattern, '')
+        if ($withdrawn.Count -gt 0) {
+            $inert = ($withdrawn -join "`n") -replace '<!--\s*', '' -replace '\s*-->', ''
+            $archive = "`n`n<details><summary>Withdrawn rows ($($withdrawn.Count)), archived inert for the record</summary>`n`n" +
+                       "These are the phase-containment blocks withdrawn from the count by the issue #951 correction. " +
+                       "The marker delimiters are stripped so no reader can parse them as live ledger rows; they are kept " +
+                       "because the withdrawal decision was about whether an unfiltered population may be COUNTED, not about " +
+                       "destroying the phase attribution the panel recorded.`n`n" +
+                       "``````text`n$inert`n```````n`n</details>"
+            $new = $new.TrimEnd() + $archive
+        }
     }
     else {
         throw "Convert-BRMLedgerBody: unknown action '$($plan.Action)' for issue #$Issue."
@@ -209,7 +251,7 @@ function Convert-BRMLedgerBody {
 
     # Replace the judge-rulings head with the brief head. Done last so the
     # finding ids were read from the head while it still existed.
-    $briefHead = New-BRMBriefHead -FindingIds $findingIds -ConvergenceFilterRan ($plan.Action -eq 'relabel') -FilteredCount $plan.FilteredCount
+    $briefHead = New-BRMBriefHead -Findings $findings -ConvergenceFilterRan ($plan.Action -eq 'relabel') -FilteredCount $plan.FilteredCount
     $replacement = $briefHead + "`n`n" + $plan.Note
     if ($hasJudgeHead) {
         # Instance Regex with an explicit count of 1, and a MatchEvaluator
@@ -306,11 +348,38 @@ function Test-BRMCorrectedVerdict {
         # row asserts the wrong adjudication standard and the rollup partition
         # files them under the wrong sub-arm. A CRLF-anchoring slip in the
         # relabel regex produced exactly this state.
-        if ([regex]::IsMatch($b, '(?m)^caught_stage[ \t]*:[ \t]*plan-stress-test[ \t]*\r?$')) {
-            $failures.Add("#${Issue}: a row still carries `caught_stage: plan-stress-test` after correction. The finding_key prefix and the stage must move together; a prefix-only rewrite counts correctly and grades wrongly.")
-        }
-        if ([regex]::IsMatch($b, '(?m)^finding_key[ \t]*:[ \t]*plan-stress-test:')) {
-            $failures.Add("#${Issue}: a row still carries a `plan-stress-test:` finding_key prefix after correction.")
+        #
+        # Checked through the PRODUCTION PARSER, not a third copy of the
+        # rewrite's own literal regex (#963 review, finding O). The parser
+        # accepts leading indentation and quoted values; the literal regexes
+        # do not. A guard whose discriminating power is narrower than the
+        # parser's acceptance reports success on precisely the inputs the
+        # rewrite silently skipped — the guard added to catch the decoupling
+        # was blind to the shapes most likely to cause it.
+        # DIRECT ASSIGNMENT, no @() and no pipeline. Get-PhaseContainmentBlock
+        # returns its result through the `return ,$array` idiom, which
+        # preserves the array for a direct assignment and collapses under
+        # `@(... | ...)` into a single element holding the whole array. Piping
+        # it through a `$_ -is [string]` filter therefore discarded all 29
+        # blocks and left this guard scanning nothing — it reported success on
+        # a corpus it had not looked at, which is the failure mode it exists to
+        # prevent. Get-EmissionGap assigns directly for the same reason.
+        $rawBlocks = Get-PhaseContainmentBlock -Text $b -Id $Issue
+        if ($null -eq $rawBlocks) { continue }
+        foreach ($raw in $rawBlocks) {
+            if ([string]::IsNullOrWhiteSpace($raw)) { continue }
+            $entry = ConvertFrom-PhaseContainmentYaml -Yaml $raw
+            $stage = [string]$entry['caught_stage']
+            $key = [string]$entry['finding_key']
+            if ($stage -eq 'plan-stress-test') {
+                $failures.Add("#${Issue}: a row still parses as caught_stage 'plan-stress-test' after correction. The finding_key prefix and the stage must move together; a prefix-only rewrite counts correctly and grades wrongly.")
+            }
+            if ($key.StartsWith('plan-stress-test:', [System.StringComparison]::Ordinal)) {
+                $failures.Add("#${Issue}: a row still parses with a 'plan-stress-test:' finding_key prefix after correction.")
+            }
+            if ($stage -eq 'brief-review' -and -not $key.StartsWith('brief-review:', [System.StringComparison]::Ordinal)) {
+                $failures.Add("#${Issue}: a row carries caught_stage 'brief-review' under a finding_key prefix of '$key' — schema-valid, parseable, and invisible to every reader.")
+            }
         }
     }
 

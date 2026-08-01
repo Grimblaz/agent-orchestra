@@ -336,12 +336,29 @@ Describe 'W2: the self-certification contradiction renders and names itself (iss
         $g.ParseStatus | Should -BeExactly 'ok'
     }
 
-    It 'A1(b): the check requires the declaration, so it would NOT have caught an undeclared historical brief' {
+    It 'A1(b): the check would NOT have caught the historical shape — judge head, no brief head, no declaration' {
         # Recorded as a test rather than only as prose, because D6's original
         # justification claimed the opposite and that claim was reported to the
         # maintainer as verified fact.
-        $ledger = script:New-BriefLedger -Head (script:New-BriefHead) -Rows (script:New-BriefRows -Count 2) -Extra $script:JudgeHead
+        #
+        # The fixture is the HISTORICAL shape specifically (#963 review,
+        # finding E): a sibling carrying a judge head and NO brief head, under
+        # an undeclared plan comment. Neither routing arm fires, so the issue
+        # is not a brief at all and the contradiction cannot arise. An earlier
+        # version of this test used a sibling carrying BOTH heads, which is not
+        # a shape the corpus ever had — and it passed only because the check
+        # was then keyed on the declaration alone, which was itself the defect.
+        $ledger = "<!-- phase-containment-ledger-$script:Id -->`n`n$script:JudgeHead"
         Test-BriefJudgeHeadContradiction -Bodies @((script:New-BriefPlanComment -Undeclared), $ledger) -Id $script:Id | Should -BeFalse
+    }
+
+    It 'the head arm IS guarded now: an undeclared issue whose sibling carries both heads is a contradiction' {
+        # The complement of the test above, and the reason it is not a
+        # regression. Before #963 the head arm could route an issue to the
+        # brief surface with no contradiction guard whatsoever, so a judge head
+        # sitting on the same sibling certified silently.
+        $ledger = script:New-BriefLedger -Head (script:New-BriefHead) -Rows (script:New-BriefRows -Count 2) -Extra $script:JudgeHead
+        Test-BriefJudgeHeadContradiction -Bodies @((script:New-BriefPlanComment -Undeclared), $ledger) -Id $script:Id | Should -BeTrue
     }
 }
 
@@ -471,15 +488,49 @@ Describe 'U5: the rollup partitions the plan arm by adjudication standard (issue
         # first, and one of these two counts would be 13 while the other was 0.
         $script:PlanArm.AdjudicationPartition['plan-stress-test'].N | Should -Be 6
         $script:PlanArm.AdjudicationPartition['brief-review'].N | Should -Be 7
-        ($script:PlanArm.AdjudicationPartition['plan-stress-test'].N + $script:PlanArm.AdjudicationPartition['brief-review'].N) | Should -Be $script:PlanArm.N
+        # The partition covers ALL standards, so it sums to NAllStandards —
+        # not to N, which is the single-standard headline population.
+        ($script:PlanArm.AdjudicationPartition['plan-stress-test'].N + $script:PlanArm.AdjudicationPartition['brief-review'].N) | Should -Be $script:PlanArm.NAllStandards
+        $script:PlanArm.NAllStandards | Should -Be 13
+        $script:PlanArm.N | Should -Be 6
     }
 
-    It 'each sub-arm computes its OWN rate over its OWN population' {
-        # 2 of 6 escapes judge-side, 0 of 7 brief-side. An unpartitioned rate
-        # would be 2/13 for both — a number belonging to neither standard.
+    It 'THE HEADLINE RATE IS COMPUTED OVER ONE STANDARD — brief rows cannot dilute it' {
+        # This is U5's actual claim, and an earlier version of this suite
+        # asserted its opposite: it pinned the pooled 2/13 as expected, three
+        # lines below a comment calling 2/13 "a number belonging to neither
+        # standard." The #963 review found the partition was render-only while
+        # EscapeRate and RelaxationEligible still pooled.
+        #
+        # 2 of 6 escapes judge-side, 0 of 7 brief-side. The headline must be
+        # the judge-adjudicated 2/6, never the pooled 2/13 — brief rows are
+        # structurally escape_distance 0, so pooling can only ever push the
+        # rate toward eligibility.
+        [Math]::Round($script:PlanArm.EscapeRate, 4) | Should -Be ([Math]::Round(2 / 6, 4))
         [Math]::Round($script:PlanArm.AdjudicationPartition['plan-stress-test'].EscapeRate, 4) | Should -Be ([Math]::Round(2 / 6, 4))
         $script:PlanArm.AdjudicationPartition['brief-review'].EscapeRate | Should -Be 0
-        [Math]::Round($script:PlanArm.EscapeRate, 4) | Should -Be ([Math]::Round(2 / 13, 4))
+    }
+
+    It 'DILUTION PROBE: adding brief rows to an ineligible arm cannot make it eligible' {
+        # The concrete exploit the review demonstrated, pinned as a standing
+        # property. Judge evidence alone says NOT eligible; piling on
+        # irreducible brief rows used to flip it.
+        $judgeOnly = @(1..5 | ForEach-Object { script:New-Entry -Stage 'plan-stress-test' -Distance $(if ($_ -eq 1) { 1 } else { 0 }) })
+        $armBefore = (Get-PhaseContainmentRollup -Entries $judgeOnly).Stages['plan-stress-test']
+        $armBefore.RelaxationEligible | Should -BeFalse
+
+        $diluted = @($judgeOnly + (1..45 | ForEach-Object { script:New-Entry -Stage 'brief-review' -Distance 0 }))
+        $armAfter = (Get-PhaseContainmentRollup -Entries $diluted).Stages['plan-stress-test']
+        $armAfter.RelaxationEligible | Should -BeFalse -Because 'brief-review rows are a different adjudication standard and must not reach the relaxation number'
+        $armAfter.EscapeRate | Should -Be $armBefore.EscapeRate -Because 'the headline rate must be identical with and without the brief population'
+    }
+
+    It 'the exclusion is disclosed in the render, not silent' {
+        $rendered = Format-PhaseContainmentReport -Context @{
+            Rollup = $script:MixedRollup; Source = 'rest'; Truncated = $false
+            WindowDays = 90; FetchedAt = ([datetime]'2026-08-01T00:00:00Z'); InvalidEntryCount = 0
+        }
+        ($rendered -join "`n") | Should -Match 'judge-adjudicated standard only: 7 of 13 row\(s\) excluded'
     }
 
     It 'the insufficiency guard is RE-DERIVED per sub-arm, not inherited from the parent population' {
@@ -800,5 +851,409 @@ Describe 'W1/W4: a lawful judge-free emission exists and its standard is machine
             systemic_fix_type = 'instruction'; category = 'pattern'
         }
         (Test-PhaseContainmentEntry -Entry $entry).IsValid | Should -BeTrue
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Forgery, shadowing and scoping — the defence classes the surface shipped
+# without, found by the PR #963 adversarial review. Every test here fails
+# against the pre-review implementation; they are the standing form of that
+# review's findings.
+# ---------------------------------------------------------------------------
+
+Describe 'Forgery and shadowing defences (PR #963 review)' {
+
+    Context 'duplicate-head guard (finding D)' {
+
+        It 'a FENCED decoy head above the real one fails loud instead of shadowing it' {
+            # The decoy needs no invention: it is a copy of the example the
+            # doctrine publishes. Pre-fix, first-match-wins plus region
+            # isolation at the next fence made the real head invisible.
+            $decoy = "``````yaml`n" + (script:New-BriefHead -FilterRan 'true' -Sustained 1) + "`n``````"
+            $ledger = script:New-BriefLedger -Head (script:New-BriefHead -FilterRan 'false' -Sustained 3) -Extra $decoy
+            $g = Get-EmissionGap -Bodies @((script:New-BriefPlanComment), $ledger) -Id $script:Id -Surface 'brief-review'
+            $g.ParseStatus | Should -BeExactly 'could-not-verify'
+            $g.Reason | Should -BeExactly 'duplicate-head'
+        }
+
+        It 'THE SHARP CASE: a decoy cannot convert an honest filter-not-run into clean' {
+            $decoy = "``````yaml`n" + (script:New-BriefHead -FilterRan 'true' -Sustained 2) + "`n``````"
+            $ledger = script:New-BriefLedger -Head (script:New-BriefHead -FilterRan 'false' -Sustained 2) -Rows (script:New-BriefRows -Count 2) -Extra $decoy
+            $g = Get-EmissionGap -Bodies @((script:New-BriefPlanComment), $ledger) -Id $script:Id -Surface 'brief-review'
+            $g.ParseStatus | Should -Not -BeExactly 'ok'
+        }
+
+        It 'CONTROL: exactly one head still parses' {
+            $ledger = script:New-BriefLedger -Head (script:New-BriefHead -FilterRan 'true' -Sustained 2) -Rows (script:New-BriefRows -Count 2)
+            (Get-EmissionGap -Bodies @((script:New-BriefPlanComment), $ledger) -Id $script:Id -Surface 'brief-review').ParseStatus | Should -BeExactly 'ok'
+        }
+    }
+
+    Context 'ledger scoping (finding C)' {
+
+        It 'a foreign comment cannot disarm the AC4 absence backstop' {
+            # Pre-fix this rendered a reassuring clean sustained=0 blocks=0 —
+            # the silent zero AC4 exists to close, reintroduced by any comment.
+            $foreign = "Unrelated comment.`n`n" + (script:New-BriefHead -FilterRan 'true' -Sustained 0 -Dismissed 2)
+            $g = Get-EmissionGap -Bodies @((script:New-BriefPlanComment), $foreign) -Id $script:Id -Surface 'brief-review'
+            $g.ParseStatus | Should -BeExactly 'could-not-verify'
+            $g.Reason | Should -BeExactly 'head-missing'
+        }
+
+        It 'a foreign comment cannot contribute to SustainedCount' {
+            $foreign = "Unrelated comment.`n`n" + (script:New-BriefHead -FilterRan 'true' -Sustained 4)
+            $ledger = script:New-BriefLedger -Head (script:New-BriefHead -FilterRan 'true' -Sustained 2) -Rows (script:New-BriefRows -Count 2)
+            $g = Get-EmissionGap -Bodies @((script:New-BriefPlanComment), $ledger, $foreign) -Id $script:Id -Surface 'brief-review'
+            $g.SustainedCount | Should -Be 2 -Because 'only the ledger sibling of this issue authorizes a count'
+        }
+
+        It 'a foreign comment cannot route the issue either' {
+            $foreign = "Unrelated.`n`n" + (script:New-BriefHead -FilterRan 'true' -Sustained 1)
+            ((Get-IssueEmissionSurfaces -Bodies @((script:New-BriefPlanComment -Undeclared), $foreign) -Id $script:Id) -join ',') |
+                Should -BeExactly 'design-challenge,plan-stress-test'
+        }
+    }
+
+    Context 'declaration predicate is fence-blind no longer (finding F)' {
+
+        It 'a plan comment that DOCUMENTS the declaration inside a fence does not declare' {
+            $documenting = @"
+<!-- plan-issue-$script:Id -->
+
+---
+spine-omitted: plan-too-small
+---
+
+A chunk brief declares its shape like this:
+
+``````yaml
+plan-variant: brief
+``````
+
+**Plan Stress-Test**: reviewed with a judge.
+"@
+            Test-BriefPlanVariantDeclared -Bodies @($documenting) -Id $script:Id | Should -BeFalse
+            ((Get-IssueEmissionSurfaces -Bodies @($documenting) -Id $script:Id) -join ',') | Should -BeExactly 'design-challenge,plan-stress-test'
+        }
+
+        It 'CONTROL: a real frontmatter declaration still declares' {
+            Test-BriefPlanVariantDeclared -Bodies @((script:New-BriefPlanComment)) -Id $script:Id | Should -BeTrue
+        }
+    }
+
+    Context 'block-scalar index anchoring (finding G)' {
+
+        It 'a disposition following a block scalar is COUNTED, not silently dropped' {
+            # The key anchor crosses newlines, so the match starts inside the
+            # preceding block scalar while the keyword itself does not.
+            # Filtering on the match index discarded a legitimate entry.
+            $head = @"
+brief_dispositions:
+  convergence_filter_ran: true
+  filtered_count: 1
+  findings:
+    - finding_id: N1
+      note: |
+        A multi-line rationale that occupies a block scalar
+        and ends with a trailing blank line.
+
+      disposition: dismiss
+    - finding_id: N2
+      disposition: incorporate
+"@
+            $t = Get-DispositionTally -Surface 'brief-review' -Body (script:New-BriefLedger -Head $head)
+            $t.ParseStatus | Should -BeExactly 'ok'
+            $t.SustainedCount | Should -Be 1
+            $t.DismissedCount | Should -Be 1 -Because 'the dismiss sits after a block scalar, not inside one'
+        }
+
+        It 'CONTROL: a disposition INSIDE a block scalar is still excluded' {
+            $head = @"
+brief_dispositions:
+  convergence_filter_ran: true
+  filtered_count: 0
+  findings:
+    - finding_id: N1
+      disposition: incorporate
+      rationale: |
+        The reviewer wrote disposition: dismiss inside this prose
+        and it must not be counted as a second entry.
+"@
+            $t = Get-DispositionTally -Surface 'brief-review' -Body (script:New-BriefLedger -Head $head)
+            $t.ParseStatus | Should -BeExactly 'ok'
+            $t.SustainedCount | Should -Be 1
+            $t.DismissedCount | Should -Be 0
+        }
+    }
+
+    Context 'head-level assertions belong to the head (finding K)' {
+
+        It 'an assertion nested inside a finding entry does not satisfy the head requirement' {
+            $head = @"
+brief_dispositions:
+  findings:
+    - finding_id: N1
+      disposition: incorporate
+      convergence_filter_ran: true
+      filtered_count: 4
+"@
+            $t = Get-DispositionTally -Surface 'brief-review' -Body (script:New-BriefLedger -Head $head)
+            $t.ParseStatus | Should -BeExactly 'could-not-verify'
+        }
+    }
+
+    Context 'fail-loud vocabulary (findings L, M, W, AA, Z)' {
+
+        It 'a non-canonical boolean reads as unreadable, not absent' {
+            $head = "brief_dispositions:`n  convergence_filter_ran: True`n  filtered_count: 1`n  findings:`n    - finding_id: N1`n      disposition: incorporate"
+            (Get-DispositionTally -Surface 'brief-review' -Body (script:New-BriefLedger -Head $head)).Reason | Should -BeExactly 'filter-value-unrecognized'
+        }
+
+        It 'an unbounded filtered_count fails loud instead of throwing out of the whole sweep' {
+            $head = "brief_dispositions:`n  convergence_filter_ran: true`n  filtered_count: 99999999999999999999`n  findings:`n    - finding_id: N1`n      disposition: incorporate"
+            $bodies = @((script:New-BriefPlanComment), (script:New-BriefLedger -Head $head))
+            { Get-EmissionGap -Bodies $bodies -Id $script:Id -Surface 'brief-review' } | Should -Not -Throw
+            (Get-EmissionGap -Bodies $bodies -Id $script:Id -Surface 'brief-review').Reason | Should -BeExactly 'head-corrupt'
+        }
+
+        It 'a duplicated filtered_count is corruption, not omission' {
+            $head = "brief_dispositions:`n  convergence_filter_ran: true`n  filtered_count: 8`n  filtered_count: 99`n  findings:`n    - finding_id: N1`n      disposition: incorporate"
+            (Get-DispositionTally -Surface 'brief-review' -Body (script:New-BriefLedger -Head $head)).Reason | Should -BeExactly 'head-corrupt'
+        }
+
+        It 'an unknown disposition value is refused rather than silently dropped' {
+            $head = "brief_dispositions:`n  convergence_filter_ran: true`n  filtered_count: 0`n  findings:`n    - finding_id: N1`n      disposition: defer`n    - finding_id: N2`n      disposition: incorporate"
+            (Get-DispositionTally -Surface 'brief-review' -Body (script:New-BriefLedger -Head $head)).Reason | Should -BeExactly 'unknown-disposition-value'
+        }
+
+        It 'a finding_id with no disposition is refused rather than reported as a smaller total' {
+            $head = "brief_dispositions:`n  convergence_filter_ran: true`n  filtered_count: 0`n  findings:`n    - finding_id: N1`n    - finding_id: N2`n      disposition: incorporate"
+            (Get-DispositionTally -Surface 'brief-review' -Body (script:New-BriefLedger -Head $head)).Reason | Should -BeExactly 'head-corrupt'
+        }
+
+        It 'a genuinely fully-filtered brief is a legal empty record, not corruption' {
+            # A convergence filter that removes the whole panel output is a
+            # real outcome. Pre-fix it rendered head-corrupt — "the head is
+            # unparseable" — about a head that parsed perfectly.
+            $head = "brief_dispositions:`n  convergence_filter_ran: true`n  filtered_count: 5`n  findings: []"
+            $t = Get-DispositionTally -Surface 'brief-review' -Body (script:New-BriefLedger -Head $head)
+            $t.ParseStatus | Should -BeExactly 'ok'
+            $t.SustainedCount | Should -Be 0
+            $t.FilteredCount | Should -Be 5
+        }
+    }
+
+    Context 'the writer refuses everything the reader refuses (findings B, H, I, J)' {
+
+        BeforeAll {
+            $script:WriterSrc = Get-Content -Raw -LiteralPath (Join-Path $script:RepoRoot 'skills/session-memory-contract/scripts/persist-phase-ledger-core.ps1')
+            $script:WrapperSrc = Get-Content -Raw -LiteralPath (Join-Path $script:RepoRoot 'skills/session-memory-contract/scripts/persist-phase-ledger.ps1')
+            $script:PlanSkill = Get-Content -Raw -LiteralPath (Join-Path $script:RepoRoot 'skills/plan-authoring/SKILL.md')
+        }
+
+        It 'the CLI wrapper — the path the doctrine names — accepts -Mode brief and -BriefHeadContent' {
+            # Finding B: the wrapper was never touched, so the only documented
+            # interface rejected the mode outright while 59 library tests
+            # passed. Asserted at the wrapper's own parameter block.
+            $script:WrapperSrc | Should -Match "ValidateSet\('plan', 'design', 'brief'\)"
+            $script:WrapperSrc | Should -Match '\$BriefHeadContent'
+            $script:WrapperSrc | Should -Match '-BriefHeadContent \$BriefHeadContent'
+        }
+
+        It 'the wrapper no longer forces judge content on a mode that refuses it' {
+            $script:WrapperSrc | Should -Not -Match '\[Parameter\(Mandatory\)\]\[string\]\$JudgeRulingsContent'
+        }
+
+        It 'the doctrine invocation resolves against the wrapper parameters' {
+            $script:PlanSkill | Should -Match '-Mode brief'
+            $script:PlanSkill | Should -Match 'BriefHeadContent'
+        }
+
+        It 'Issue-Planner instructs the brief branch at the emission step' {
+            $planner = Get-Content -Raw -LiteralPath (Join-Path $script:RepoRoot 'agents/Issue-Planner.agent.md')
+            $planner | Should -Match '-Mode brief'
+            $planner | Should -Match 'brief-review:'
+        }
+
+        It 'the writer refuses a head missing filtered_count, declaring filter-not-run, or asserting only inside a finding' {
+            $script:WriterSrc | Should -Match 'no `filtered_count` as a key of the head'
+            $script:WriterSrc | Should -Match 'declares `convergence_filter_ran: false`'
+            $script:WriterSrc | Should -Match '\$headPreamble'
+        }
+    }
+
+    Context 'the brief finding_key prefix is documented (finding H)' {
+
+        It 'plan-authoring states the brief-review prefix and why a mismatch is invisible' {
+            $skill = Get-Content -Raw -LiteralPath (Join-Path $script:RepoRoot 'skills/plan-authoring/SKILL.md')
+            $skill | Should -Match 'finding_key: brief-review:'
+            $skill | Should -Match 'never cross-check'
+        }
+
+        It 'the hazard is real: a mismatched prefix validates and is then discarded' {
+            # Pinned so the doc sentence above is testable rather than merely
+            # asserted — this is the behaviour the sentence warns about.
+            $entry = @{
+                finding_key       = "plan-stress-test:$($script:Id):N1"
+                introduced_phase  = 'design'
+                catchable_phase   = 'plan'
+                caught_stage      = 'brief-review'
+                escape_distance   = 0
+                severity          = 'medium'
+                systemic_fix_type = 'instruction'
+                category          = 'pattern'
+            }
+            (Test-PhaseContainmentEntry -Entry $entry).IsValid | Should -BeTrue -Because 'nothing cross-checks prefix against stage'
+            $ledger = script:New-BriefLedger -Head (script:New-BriefHead -FilterRan 'true' -Sustained 1) -Rows (script:New-BriefRows -Count 1 -Prefix 'plan-stress-test')
+            (Get-EmissionGap -Bodies @((script:New-BriefPlanComment), $ledger) -Id $script:Id -Surface 'brief-review').BlockCount |
+                Should -Be 0 -Because 'the surface-attribution gate discards it unread'
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Remaining PR #963 review findings closed inline: O (guard narrower than the
+# parser), AB (withdrawal destroyed data), AF (WITHHELD render untested).
+# ---------------------------------------------------------------------------
+
+Describe 'Migration guard and render coverage (PR #963 review: O, AB, AF)' {
+
+    BeforeAll {
+        function script:New-ContaminatedForTail {
+            param([int]$Issue, [int]$Rows, [string]$Prefix = 'N', [string]$StageValue = 'plan-stress-test', [string]$Indent = '')
+            # LF-joined, not StringBuilder.AppendLine. AppendLine emits CRLF on
+            # Windows, and Get-PhaseContainmentBlock does not extract blocks
+            # from a CRLF body — so a CRLF fixture makes every block-grain
+            # assertion below vacuous. The bodies this migration actually
+            # handles arrive LF-normalised.
+            $lines = [System.Collections.Generic.List[string]]::new()
+            $lines.Add("<!-- phase-containment-ledger-$Issue -->")
+            $lines.Add('')
+            $lines.Add('<!-- judge-rulings')
+            for ($i = 1; $i -le $Rows; $i++) {
+                $lines.Add("- finding_id: ${Prefix}$i")
+                $lines.Add('  judge_ruling: sustained')
+            }
+            $lines.Add('-->')
+            $lines.Add('')
+            for ($i = 1; $i -le $Rows; $i++) {
+                $lines.Add("<!-- phase-containment-$Issue -->")
+                $lines.Add("${Indent}finding_key: plan-stress-test:${Issue}:${Prefix}$i")
+                $lines.Add("${Indent}introduced_phase: design")
+                $lines.Add("${Indent}catchable_phase: plan")
+                $lines.Add("${Indent}caught_stage: $StageValue")
+                $lines.Add("${Indent}escape_distance: 0")
+                $lines.Add("${Indent}severity: medium")
+                $lines.Add("${Indent}systemic_fix_type: instruction")
+                $lines.Add("${Indent}category: pattern")
+                $lines.Add("<!-- /phase-containment-$Issue -->")
+            }
+            return ($lines -join "`n") + "`n"
+        }
+        function script:New-HistPlan { param([int]$Issue) "<!-- plan-issue-$Issue -->`n`n---`nspine-omitted: plan-too-small`n---`n`n**Plan Stress-Test**: three lenses.`n" }
+    }
+
+    Context 'O: the verdict guard is as discriminating as the parser' {
+
+        It 'a QUOTED caught_stage the rewrite skips is caught by the guard' {
+            # Finding O, in full. The rewrite's literal regex does not match a
+            # quoted value; ConvertFrom-PhaseContainmentYaml strips the quotes
+            # and the entry validates. So the prefix moves, the stage does not,
+            # the rows still COUNT — and before this fix the guard added
+            # specifically to catch that decoupling was a third copy of the
+            # rewrite's own regex, and therefore blind to exactly the inputs
+            # the rewrite had skipped.
+            #
+            # 29 rows, matching the planned correction, so the count
+            # assertions PASS and only the parse-grain stage check can fail;
+            # otherwise a count mismatch would mask what this test is for.
+            $before = script:New-ContaminatedForTail -Issue 939 -Rows 29 -StageValue "'plan-stress-test'"
+            $after = (Convert-BRMLedgerBody -Body $before -Issue 939).Body
+            $v = Test-BRMCorrectedVerdict -Bodies @((script:New-HistPlan -Issue 939), $after) -Issue 939
+            $v.Ok | Should -BeFalse
+            ($v.Failures -join ' ') | Should -Match "caught_stage 'plan-stress-test'"
+            ($v.Failures -join ' ') | Should -Not -Match 'BlockCount' -Because 'the counts are correct here; only the stage did not move'
+        }
+
+        It 'a stage/prefix DECOUPLING is caught at parse grain, with the counts correct' {
+            # The real hazard the guard exists for, and the one a CRLF
+            # anchoring slip actually produced during implementation: the
+            # prefix moved and the stage did not, both halves validate, and
+            # BlockCount reads correct while every row grades wrongly.
+            $before = script:New-ContaminatedForTail -Issue 939 -Rows 29
+            $full = (Convert-BRMLedgerBody -Body $before -Issue 939).Body
+            $decoupled = [regex]::Replace($full, '(?m)^caught_stage[ 	]*:[ 	]*brief-review[ 	]*$', 'caught_stage: plan-stress-test')
+            $v = Test-BRMCorrectedVerdict -Bodies @((script:New-HistPlan -Issue 939), $decoupled) -Issue 939
+            $v.Ok | Should -BeFalse
+            ($v.Failures -join ' ') | Should -Match "caught_stage 'plan-stress-test'"
+            ($v.Failures -join ' ') | Should -Not -Match 'BlockCount' -Because 'the counts are correct here; only the stage did not move'
+        }
+
+        It 'an INDENTED field set the rewrite skips is caught by the guard' {
+            $before = script:New-ContaminatedForTail -Issue 939 -Rows 29 -Indent '  '
+            $after = (Convert-BRMLedgerBody -Body $before -Issue 939).Body
+            (Test-BRMCorrectedVerdict -Bodies @((script:New-HistPlan -Issue 939), $after) -Issue 939).Ok | Should -BeFalse
+        }
+
+        It 'CONTROL: the corpus shape the migration actually targets still verifies' {
+            $before = script:New-ContaminatedForTail -Issue 939 -Rows 29
+            $after = (Convert-BRMLedgerBody -Body $before -Issue 939).Body
+            (Test-BRMCorrectedVerdict -Bodies @((script:New-HistPlan -Issue 939), $after) -Issue 939).Ok | Should -BeTrue
+        }
+    }
+
+    Context 'AB: withdrawal removes rows from the count without destroying them' {
+
+        BeforeAll {
+            $script:WBefore = script:New-ContaminatedForTail -Issue 941 -Rows 27 -Prefix 'M'
+            $script:WAfter = (Convert-BRMLedgerBody -Body $script:WBefore -Issue 941).Body
+        }
+
+        It 'the rows no longer count' {
+            $v = Test-BRMCorrectedVerdict -Bodies @((script:New-HistPlan -Issue 941), $script:WAfter) -Issue 941
+            $v.Gap.BlockCount | Should -Be 0
+            $v.Ok | Should -BeTrue
+        }
+
+        It 'the phase attribution survives in an archive' {
+            $script:WAfter | Should -Match 'Withdrawn rows \(27\)'
+            $script:WAfter | Should -Match 'introduced_phase: design'
+            $script:WAfter | Should -Match 'systemic_fix_type: instruction'
+        }
+
+        It 'the archive is INERT — no live marker can be re-parsed out of it' {
+            # The whole point: an archive that a later sweep could read back as
+            # live rows would reinstate the contamination it exists to retire.
+            (Get-PhaseContainmentBlock -Text $script:WAfter -Id 941) | Should -BeNullOrEmpty
+            $script:WAfter | Should -Not -Match '<!--\s*/?phase-containment-941\s*-->'
+        }
+
+        It 'the archive does not break idempotency' {
+            $second = Convert-BRMLedgerBody -Body $script:WAfter -Issue 941
+            $second.Changed | Should -BeFalse
+            $second.Body | Should -BeExactly $script:WAfter
+        }
+    }
+
+    Context 'AF: the WITHHELD sub-arm line is rendered, not just flagged' {
+
+        It 'a sub-arm below the floor renders WITHHELD with its population visible' {
+            $mk = {
+                param($stage, $n)
+                1..$n | ForEach-Object {
+                    @{ finding_key = "${stage}:x"; introduced_phase = 'plan'; catchable_phase = 'plan'
+                       caught_stage = $stage; escape_distance = 0; severity = 'low'
+                       systemic_fix_type = 'none'; category = 'pattern'; apparatus_meta = $false }
+                }
+            }
+            $entries = @((& $mk 'plan-stress-test' 8) + (& $mk 'brief-review' 3))
+            $rollup = Get-PhaseContainmentRollup -Entries $entries
+            $text = (Format-PhaseContainmentReport -Context @{
+                    Rollup = $rollup; Source = 'rest'; Truncated = $false
+                    WindowDays = 90; FetchedAt = ([datetime]'2026-08-01T00:00:00Z'); InvalidEntryCount = 0
+                }) -join "`n"
+            $text | Should -Match 'brief-review: n=3 — WITHHELD \(n<5\)'
+            $text | Should -Not -Match 'brief-review: n=3\s+escape='
+        }
     }
 }

@@ -207,6 +207,15 @@ function script:Format-EmissionGapLine {
             if ($reason -eq 'filter-not-run') {
                 return "  ${Surface} #${Id}: COULD NOT VERIFY -- treat as gap (the head declares ``convergence_filter_ran: false`` -- prosecution output that no convergence filter narrowed cannot authorize a count; the declaration is honest and is why this is not reported as corruption)"
             }
+            if ($reason -eq 'duplicate-head') {
+                return "  ${Surface} #${Id}: COULD NOT VERIFY -- treat as gap (two or more ``brief_dispositions`` heads are present on one body; a reader that picked one could be shadowed by a decoy — including a copy of the documented example — so no count is authorized until exactly one head remains)"
+            }
+            if ($reason -eq 'unknown-disposition-value') {
+                return "  ${Surface} #${Id}: COULD NOT VERIFY -- treat as gap (a ``disposition:`` value outside the closed ``incorporate|escalate|dismiss`` set is present; counting only the recognized ones would silently drop the finding from both the numerator and the denominator)"
+            }
+            if ($reason -eq 'filter-value-unrecognized') {
+                return "  ${Surface} #${Id}: COULD NOT VERIFY -- treat as gap (``convergence_filter_ran`` is present but its value is not the literal ``true`` or ``false`` — the assertion is not absent, it is unreadable)"
+            }
             if ($reason -eq 'filter-unasserted') {
                 return "  ${Surface} #${Id}: COULD NOT VERIFY -- treat as gap (the brief head carries no machine-readable ``convergence_filter_ran`` assertion, or declares the filter ran without a ``filtered_count``; the assertion is required, not an optional field)"
             }

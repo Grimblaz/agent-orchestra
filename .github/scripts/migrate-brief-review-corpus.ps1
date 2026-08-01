@@ -36,8 +36,19 @@
     this corpus is a documented failure mode: #944 records seven
     machine-invisible blocks produced that way. A hand edit also cannot express
     the coupled `caught_stage` + `finding_key` rewrite reliably, and cannot
-    perform the post-write re-parse that is the only guard against the
-    read-modify-write append race that cost #922 sixteen rows.
+    perform the post-write re-parse that catches a write which landed in the
+    wrong shape.
+
+    THE APPEND RACE IS NARROWED, NOT CLOSED — corrected here after the #963
+    review found the original claim false. Re-reading immediately before the
+    PATCH shrinks the window; the post-write re-parse does NOT close it. A
+    concurrent append landing between the read and the PATCH is clobbered, and
+    because the verification asserts the EXPECTED row count, the corpus is left
+    at exactly that count and the check passes on the loss — the same shape
+    that cost #922 sixteen rows. `gh api PATCH` offers no If-Match/ETag
+    precondition for issue comments, so the only real mitigations are
+    operational: run this when nothing else is writing to #939/#941, and
+    confirm the pre-write body length reported below matches what you expect.
 
     HONEST LIMIT, recorded rather than papered over: this narrows the
     enforcement gap, it does not close it. Someone still has to run it. A test
@@ -105,8 +116,8 @@ foreach ($issueNumber in $plannedIssues) {
     # Read LIVE, immediately before writing. The ledger sibling is an append
     # target by contract, so a body fetched minutes ago may already be stale;
     # #922 lost sixteen rows to exactly that read-modify-write window.
-    # Re-reading narrows the window. Only the post-write re-parse below closes
-    # it.
+    # Re-reading NARROWS the window. Nothing here closes it — see the header's
+    # "THE APPEND RACE IS NARROWED, NOT CLOSED".
     $comments = script:Get-IssueComments -Number $issueNumber
     $ledgerMarker = "<!-- phase-containment-ledger-$issueNumber -->"
     $sibling = @($comments | Where-Object { $_.body -and $_.body.Contains($ledgerMarker) }) | Select-Object -First 1

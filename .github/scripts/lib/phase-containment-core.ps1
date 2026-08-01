@@ -563,7 +563,11 @@ function Get-PhaseContainmentFindingKey {
         Fallback: if stable_finding_key starts with 'warn:', returns 'warn:{finding_id}' prefixed
         with surface — signals instability.
     .PARAMETER Surface
-        One of: code-review, design-challenge, plan-stress-test
+        One of: code-review, design-challenge, plan-stress-test,
+        brief-review, post-review-observer. Must stay in step with
+        $script:ValidCaughtStages -- the prefix this builds is what the
+        emission check attributes a block to, and a prefix naming a stage
+        the enum does not carry produces a block no surface will count.
     .PARAMETER StableFindingKey
         The surface-specific stable key segment (without the surface prefix).
     .OUTPUTS

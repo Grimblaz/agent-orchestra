@@ -75,10 +75,21 @@
 param(
     [Parameter(Mandatory)][string]$Owner,
     [Parameter(Mandatory)][string]$Repo,
-    [Parameter(Mandatory)][ValidateSet('plan', 'design')][string]$Mode,
+    [Parameter(Mandatory)][ValidateSet('plan', 'design', 'brief')][string]$Mode,
     [int]$IssueNumber,
     [long]$DesignCommentId,
-    [Parameter(Mandatory)][string]$JudgeRulingsContent,
+    # Issue #951 added -Mode brief, whose authorizing record is a
+    # `brief_dispositions:` head rather than a judge-rulings block — a brief
+    # review has no judge stage, so there is no judge ruling that could
+    # describe it. -JudgeRulingsContent is therefore no longer unconditionally
+    # Mandatory: requiring it under -Mode brief would force every caller to
+    # invent judge content for a mode that refuses judge content, which is the
+    # false-provenance shape #951 exists to remove. It stays required for plan
+    # and design (design accepts and discards it, per the long-standing
+    # signature-uniformity note in the core), enforced below rather than by the
+    # attribute.
+    [string]$JudgeRulingsContent = '',
+    [string]$BriefHeadContent = '',
     [string[]]$PhaseContainmentBlocks = @()
 )
 
@@ -87,9 +98,22 @@ param(
 . (Join-Path $PSScriptRoot '../../../.github/scripts/lib/phase-containment-emission-check-core.ps1')
 . (Join-Path $PSScriptRoot 'persist-phase-ledger-core.ps1')
 
+# Per-mode companion-parameter validation, moved off the [Parameter(Mandatory)]
+# attributes because the requirement now differs by mode. Kept at the wrapper
+# so a CLI caller gets the same refusal the library would give.
+if ($Mode -ne 'brief' -and [string]::IsNullOrWhiteSpace($JudgeRulingsContent)) {
+    Write-Error "persist-phase-ledger: -Mode $Mode requires -JudgeRulingsContent."
+    exit 1
+}
+if ($Mode -eq 'brief' -and [string]::IsNullOrWhiteSpace($BriefHeadContent)) {
+    Write-Error 'persist-phase-ledger: -Mode brief requires -BriefHeadContent (the `brief_dispositions:` authorizing head). A brief review has no judge stage, so -JudgeRulingsContent cannot substitute for it.'
+    exit 1
+}
+
 $result = Invoke-PersistPhaseLedger -Owner $Owner -Repo $Repo -Mode $Mode `
     -IssueNumber $IssueNumber -DesignCommentId $DesignCommentId `
-    -JudgeRulingsContent $JudgeRulingsContent -PhaseContainmentBlocks $PhaseContainmentBlocks
+    -JudgeRulingsContent $JudgeRulingsContent -BriefHeadContent $BriefHeadContent `
+    -PhaseContainmentBlocks $PhaseContainmentBlocks
 
 # M12 fix (issue #878 judge-sustained review, AC2): surface the landed/
 # not-landed artifact manifest alongside the top-level Success/Reason on

@@ -607,8 +607,30 @@ function script:Set-PPLBriefHeadBlockOnComment {
         [regex]::IsMatch($BriefHeadContent, '(?m)^\s*(?:-\s+)?judge_ruling\s*:')) {
         return [PSCustomObject]@{ Success = $false; Reason = 'BriefHeadContent carries judge vocabulary (a judge-rulings head or a judge_ruling field). A brief review has no judge stage, so no judge ruling can describe it; refusing to write the exact false provenance issue #951 exists to remove'; Action = $null }
     }
-    if (-not [regex]::IsMatch($BriefHeadContent, '(?m)^[ \t]*convergence_filter_ran[ \t]*:[ \t]*(true|false)[ \t]*\r?$')) {
-        return [PSCustomObject]@{ Success = $false; Reason = 'BriefHeadContent carries no machine-readable `convergence_filter_ran: true|false` assertion; the emission check requires it and would render could-not-verify after this write had already landed'; Action = $null }
+    # The writer's refusal list must be a SUPERSET of what the reader requires
+    # (#963 review, finding J). It previously checked three things while the
+    # reader enforced five, so a head missing `filtered_count`, or declaring
+    # the filter did not run, or carrying its assertion only inside a finding
+    # entry, was written cheerfully and THEN rendered could-not-verify — the
+    # precise outcome this function's docstring says it exists to prevent.
+    #
+    # Scoped to the head's own preamble, mirroring the reader: a field nested
+    # under `findings:` is that finding's, not the head's, and accepting it
+    # here would let the reader and writer disagree about what was asserted.
+    $headPreamble = $BriefHeadContent
+    foreach ($p in @('(?m)^[ \t]*findings[ \t]*:', '(?m)^[ \t]*-[ \t]+')) {
+        $m = [regex]::Match($headPreamble, $p)
+        if ($m.Success) { $headPreamble = $headPreamble.Substring(0, $m.Index) }
+    }
+    $assertion = [regex]::Match($headPreamble, '(?m)^[ \t]*convergence_filter_ran[ \t]*:[ \t]*(true|false)[ \t]*\r?$')
+    if (-not $assertion.Success) {
+        return [PSCustomObject]@{ Success = $false; Reason = 'BriefHeadContent carries no machine-readable `convergence_filter_ran: true|false` assertion as a key of the head itself; the emission check requires it and would render could-not-verify after this write had already landed'; Action = $null }
+    }
+    if ($assertion.Groups[1].Value -ne 'true') {
+        return [PSCustomObject]@{ Success = $false; Reason = 'BriefHeadContent declares `convergence_filter_ran: false`. That is an honest declaration and it is why this is a refusal rather than a silent write: prosecution output no convergence filter narrowed cannot authorize a count, so persisting blocks against it would create rows no reader will ever count. Run the convergence filter, or record the review outcome in prose and emit no rows'; Action = $null }
+    }
+    if (-not [regex]::IsMatch($headPreamble, '(?m)^[ \t]*filtered_count[ \t]*:[ \t]*\d+[ \t]*\r?$')) {
+        return [PSCustomObject]@{ Success = $false; Reason = 'BriefHeadContent declares the filter ran but carries no `filtered_count` as a key of the head itself; the emission check consumes that count and would render could-not-verify after this write had already landed'; Action = $null }
     }
 
     $currentBody = script:Get-PPLCommentBodyById -Owner $Owner -Repo $Repo -CommentId $CommentId
@@ -924,7 +946,12 @@ function Invoke-PersistPhaseLedger {
         [Parameter(Mandatory)][ValidateSet('plan', 'design', 'brief')][string]$Mode,
         [int]$IssueNumber,
         [long]$DesignCommentId,
-        [Parameter(Mandatory)][string]$JudgeRulingsContent,
+        # No longer [Parameter(Mandatory)] (#963 review, finding B): -Mode
+        # brief has no judge ruling to supply, and forcing a caller to invent
+        # one for a mode that refuses judge content is the false-provenance
+        # shape this issue exists to remove. Required for plan and design,
+        # enforced per-mode in the dispatch below.
+        [string]$JudgeRulingsContent = '',
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$PhaseContainmentBlocks,
         [string]$BriefHeadContent = ''
     )
@@ -958,6 +985,10 @@ function Invoke-PersistPhaseLedger {
             return [PSCustomObject]@{ Success = $false; Reason = 'Mode brief requires -BriefHeadContent (the `brief_dispositions:` authorizing head). A brief review has no judge stage, so -JudgeRulingsContent cannot substitute for it'; Artifacts = (script:New-PPLPersistPhaseLedgerArtifactManifest) }
         }
         return script:Invoke-PPLPersistPhaseLedgerBriefMode -Owner $Owner -Repo $Repo -IssueNumber $IssueNumber -BriefHeadContent $BriefHeadContent -PhaseContainmentBlocks $PhaseContainmentBlocks
+    }
+
+    if ($Mode -ne 'brief' -and [string]::IsNullOrWhiteSpace($JudgeRulingsContent)) {
+        return [PSCustomObject]@{ Success = $false; Reason = "Mode $Mode requires -JudgeRulingsContent"; Artifacts = (script:New-PPLPersistPhaseLedgerArtifactManifest) }
     }
 
     if ($Mode -eq 'design') {

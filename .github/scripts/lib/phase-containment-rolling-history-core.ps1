@@ -2341,9 +2341,49 @@ function Get-PhaseContainmentRollup {
     # Build per-stage results
     $stages = @{}
     foreach ($stage in $stageToCatchablePhase.Keys) {
-        $nonApparatusEntries = @($stageEntries[$stage].NonApparatus)
+        $allNonApparatusEntries = @($stageEntries[$stage].NonApparatus)
+
+        # ---------------------------------------------------------------
+        # Issue #951 D4, COMPLETED by the #963 review (finding A).
+        #
+        # The partition below was originally computed and rendered while the
+        # headline `escapeRate` and `RelaxationEligible` went on being derived
+        # from the POOLED population. That made the partition a display and
+        # nothing more, and it left both harms D4 names fully intact: "brief
+        # rows pool into the plan arm's rates and its Relaxation signal line
+        # ... the arm whose review depth just changed would be the one whose
+        # eligibility number could not be trusted."
+        #
+        # It was worse than merely incomplete. A plan-catchable brief row has
+        # `escape_distance: 0` by construction, so brief rows can only ever
+        # push the pooled escape rate DOWN — toward eligibility — and inflate n
+        # past the >=5 floor. Probed: 5 judge rows with 1 escape render NOT
+        # ELIGIBLE; add 16 brief rows and the same judge evidence renders
+        # ELIGIBLE. And the M21 reconciliation exclusion directly below
+        # subtracted brief rows from the DataUntrustworthy check only, which
+        # disarmed the one guard that would have failed closed on the
+        # contaminated number.
+        #
+        # The headline population therefore EXCLUDES brief-review-caught rows,
+        # on exactly the terms the reconciliation already excluded them: a rate
+        # offered as this stage's relaxation evidence must be computed over one
+        # adjudication standard. The brief-review rows are not discarded — they
+        # carry their own rate in the partition, under their own re-derived
+        # sufficiency guard. If removing them drops the arm below the floor,
+        # WITHHELD is the honest answer: the judge-adjudicated population
+        # really is too small to relax on.
+        $briefCaughtEntries = @($allNonApparatusEntries | Where-Object {
+                $s = if ($_ -is [hashtable]) { [string]$_['caught_stage'] } else { [string]$_.caught_stage }
+                $s -eq 'brief-review'
+            })
+        $nonApparatusEntries = @($allNonApparatusEntries | Where-Object {
+                $s = if ($_ -is [hashtable]) { [string]$_['caught_stage'] } else { [string]$_.caught_stage }
+                $s -ne 'brief-review'
+            })
+
+        $nAllStandards = $allNonApparatusEntries.Count
         $n           = $nonApparatusEntries.Count
-        $denominator = $n   # Denominator == N (entries with this catchable_phase, excluding apparatus_meta)
+        $denominator = $n   # Denominator == N (entries with this catchable_phase, excluding apparatus_meta and other adjudication standards)
 
         $denominatorZero   = ($denominator -eq 0)
         $insufficientData  = $denominatorZero -or ($n -lt 5)
@@ -2367,13 +2407,16 @@ function Get-PhaseContainmentRollup {
         # RelaxationEligible=$false — for every caller that has not yet started
         # supplying brief-inclusive expectations, which today is all of them.
         $observerCaughtCount = 0
-        $briefCaughtCount = 0
         foreach ($e in $nonApparatusEntries) {
             $eCaughtStage = if ($e -is [hashtable]) { [string]$e['caught_stage'] } else { [string]$e.caught_stage }
             if ($eCaughtStage -eq 'post-review-observer') { $observerCaughtCount++ }
-            if ($eCaughtStage -eq 'brief-review')         { $briefCaughtCount++ }
         }
-        $nExcludingObserver = $n - $observerCaughtCount - $briefCaughtCount
+        # Brief-caught rows are already out of $n (they are out of the headline
+        # population entirely — see the adjudication-standard split above), so
+        # only the observer subtraction remains here. The count is still
+        # carried and disclosed so the exclusion is never silent.
+        $briefCaughtCount = $briefCaughtEntries.Count
+        $nExcludingObserver = $n - $observerCaughtCount
 
         $dataUntrustworthy       = $false
         $dataUntrustworthyReason = $null
@@ -2701,9 +2744,13 @@ function Get-PhaseContainmentRollup {
         # inside it would present a rate computed from two findings as though
         # it carried the parent's authority. A sub-arm that fails its own
         # guard renders WITHHELD, never a legitimate zero.
+        # Computed over ALL standards — the partition is where the excluded
+        # brief-review population becomes visible and gets its own rate. If it
+        # were computed over the headline population it would report only the
+        # standard the headline already reports, which is no partition at all.
         $partition = @{}
         $subArmGroups = @{}
-        foreach ($e in $nonApparatusEntries) {
+        foreach ($e in $allNonApparatusEntries) {
             $eStage = if ($e -is [hashtable]) { [string]$e['caught_stage'] } else { [string]$e.caught_stage }
             if ([string]::IsNullOrWhiteSpace($eStage)) { $eStage = '(unspecified)' }
             if (-not $subArmGroups.ContainsKey($eStage)) {
@@ -2750,6 +2797,11 @@ function Get-PhaseContainmentRollup {
             AdjudicationPartition     = $partition
             BriefCaughtCount          = $briefCaughtCount
             ObserverCaughtCount       = $observerCaughtCount
+            # The full population across every adjudication standard. N above
+            # is the HEADLINE population (one standard); a consumer that needs
+            # to know how many rows the arm holds in total reads this, and the
+            # two differing is the disclosure that an exclusion happened.
+            NAllStandards             = $nAllStandards
             Denominator               = $denominator
             DenominatorZero           = $denominatorZero
             EscapeRate                = $escapeRate
@@ -2898,12 +2950,27 @@ function Format-PhaseContainmentReport {
         $lines.Add("Stage: $stageName")
         $lines.Add("  Denominator ($catchableLabel): $($stage.Denominator)")
 
+        # Disclose the adjudication-standard exclusion wherever it changed the
+        # denominator (#963 review, finding A). A headline computed over fewer
+        # rows than the arm holds must say so on the same screen, or the
+        # partition below reads as supplementary detail rather than as the
+        # reason the headline population is what it is.
+        if ($stage.PSObject.Properties.Match('NAllStandards').Count -gt 0 -and
+            $stage.NAllStandards -gt $stage.N) {
+            $excluded = $stage.NAllStandards - $stage.N
+            $lines.Add("  (headline computed over the judge-adjudicated standard only: $excluded of $($stage.NAllStandards) row(s) excluded and reported separately below)")
+        }
+
         # Issue #951 D4: the per-adjudication-standard breakdown, rendered
         # whenever the arm has any population at all. Rendered unconditionally
         # rather than only when standards are mixed, because "no partition
         # line" and "one standard" would otherwise be indistinguishable — and
         # silence is never this instrument's success signal.
-        if ($stage.PSObject.Properties.Match('AdjudicationPartition').Count -gt 0 -and $stage.N -gt 0) {
+        # Gated on the ALL-standards population, not the headline one: an arm
+        # holding only brief-review rows has a headline N of 0 and still needs
+        # its partition rendered, or the rows vanish from the report entirely.
+        $partitionPopulation = if ($stage.PSObject.Properties.Match('NAllStandards').Count -gt 0) { $stage.NAllStandards } else { $stage.N }
+        if ($stage.PSObject.Properties.Match('AdjudicationPartition').Count -gt 0 -and $partitionPopulation -gt 0) {
             $lines.Add('  By adjudication standard:')
             foreach ($subName in (@($stage.AdjudicationPartition.Keys) | Sort-Object)) {
                 $sub = $stage.AdjudicationPartition[$subName]
