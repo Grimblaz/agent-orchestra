@@ -2,6 +2,20 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.7.0] — 2026-08-01
+
+### Added
+
+- **Phase-containment ledger: a lawful judge-free emission path for chunk-brief reviews (#951, chunk #956).** The ledger's plan surface could only authorize row emission with a judge ruling, so when #936 D5 re-aimed chunk-plan review to a prosecution-only shape with no judge stage, two runs emitted 56 rows under `judge_ruling: sustained` for reviews no judge adjudicated — and the emission check reported `clean` on both, because it verified that blocks were present, paired and counted against an authorizing record, never that the record's claims happened.
+  - New `caught_stage: brief-review` at stage projection 2, authorized by a distinct `brief_dispositions:` head. The token is deliberately not `finding_dispositions:` — what the design surface proves is the judge-free counting *rule*, not the literal, and reuse would have collided with an ungated detector and manufactured a permanent false design-challenge gap on every brief.
+  - The head must carry a machine-readable `convergence_filter_ran` assertion, checked over its full value domain: absent and `false` both render could-not-verify, only `true` (with a `filtered_count`) can reach clean.
+  - Surface routing is per issue, on either the plan comment's `plan-variant: brief` declaration or the ledger sibling's own brief head; `plan-stress-test` is suppressed on a brief-routed issue so the mandated `**Plan Stress-Test**` literal no longer forces a permanent false gap.
+  - A brief-declared issue whose ledger sibling carries a judge-rulings head renders could-not-verify naming the contradiction (scoped to the sibling, so a co-located code-review judge head does not trip it).
+  - The escape-rate rollup reports each arm partitioned by adjudication standard, with the sufficiency guard re-derived per sub-arm; a failed or empty sub-arm renders WITHHELD, never a legitimate zero.
+  - `persist-phase-ledger.ps1` gains `-Mode brief`; its dispatch is restructured from `if design … else assume-plan` into an explicit per-mode branch that refuses an unhandled mode instead of falling through into plan logic.
+  - The caught_stage drift guard rises from three-way to four-way, adding the assertion nothing made before: that the `finding_key` alternation names the same set as `caught_stage`. Without it, updating three of five sites left both prior guards green while every new block was silently discarded.
+  - `.github/scripts/migrate-brief-review-corpus.ps1` corrects the contaminated corpus: idempotent, bounded to #939 and #941, and self-verifying at verdict grain (it re-reads, re-parses and re-renders the emission verdict, since a count-grain recount passes on rows that are present, parseable and invisible to every reader). Running it is a precondition of closing #951, not of merging this change.
+
 ## [3.6.1] — 2026-07-28
 
 ### Fixed

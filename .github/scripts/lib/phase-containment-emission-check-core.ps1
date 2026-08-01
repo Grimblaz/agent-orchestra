@@ -76,7 +76,7 @@ $script:JudgeRulingsVocabGatePattern = '(?m)(?:^\s*(?:-\s+)?|[{,]\s*)(dispositio
 # -Surface uses the core's stage names exactly (StageProjections keys):
 # 'code-review', 'design-challenge', 'plan-stress-test', 'post-review-observer'
 # — see the four
-# [ValidateSet('code-review', 'design-challenge', 'plan-stress-test', 'post-review-observer')]
+# [ValidateSet('code-review', 'design-challenge', 'plan-stress-test', 'brief-review', 'post-review-observer')]
 # parameter attributes in this file for the single source of truth (M11:
 # removed the redundant, never-referenced $script:ValidEmissionCheckSurfaces
 # array — PowerShell's ValidateSet attribute requires compile-time constant
@@ -753,7 +753,7 @@ function Test-EmissionMarkerPresent {
         [bool] $true when a recognizable marker head is present, else $false.
     #>
     param(
-        [Parameter(Mandatory)][ValidateSet('code-review', 'design-challenge', 'plan-stress-test', 'post-review-observer')][string]$Surface,
+        [Parameter(Mandatory)][ValidateSet('code-review', 'design-challenge', 'plan-stress-test', 'brief-review', 'post-review-observer')][string]$Surface,
         [Parameter(Mandatory)][AllowEmptyString()][string]$Body
     )
 
@@ -773,6 +773,20 @@ function Test-EmissionMarkerPresent {
         $windowEnd = [Math]::Min($Body.Length, $headMatch.Index + $headMatch.Length + $lookaheadWindow)
         $window = $Body.Substring($headMatch.Index, $windowEnd - $headMatch.Index)
         return [regex]::IsMatch($window, '(?m)^\s*(disposition|finding_id|schema_version)\s*:')
+    }
+
+    # Issue #951: the brief-review surface, structurally parallel to
+    # design-challenge above — its own distinct head token plus its own
+    # vocab gate, and no relationship to the judge-rulings head below.
+    # `^finding_dispositions` cannot match `brief_dispositions:` and
+    # `^brief_dispositions` cannot match `finding_dispositions:`, so the two
+    # surfaces' head detection is unable to cross-fire in either direction.
+    if ($Surface -eq 'brief-review') {
+        $headMatch = [regex]::Match($Body, $script:BriefDispositionsHeadPattern)
+        if (-not $headMatch.Success) { return $false }
+        $windowEnd = [Math]::Min($Body.Length, $headMatch.Index + $headMatch.Length + $lookaheadWindow)
+        $window = $Body.Substring($headMatch.Index, $windowEnd - $headMatch.Index)
+        return [regex]::IsMatch($window, $script:BriefDispositionsVocabGatePattern)
     }
 
     # code-review and plan-stress-test share the judge-rulings marker head.
@@ -905,7 +919,7 @@ function Get-SustainedFindingCount {
           ParseStatus    [string] — 'ok' or 'could-not-verify'
     #>
     param(
-        [Parameter(Mandatory)][ValidateSet('code-review', 'design-challenge', 'plan-stress-test', 'post-review-observer')][string]$Surface,
+        [Parameter(Mandatory)][ValidateSet('code-review', 'design-challenge', 'plan-stress-test', 'brief-review', 'post-review-observer')][string]$Surface,
         [Parameter(Mandatory)][AllowEmptyString()][string]$Body
     )
 
@@ -919,6 +933,15 @@ function Get-SustainedFindingCount {
         # Get-DispositionTally, below). Re-project to the original two-field
         # shape here so this function's public output stays byte-identical.
         $internalResult = Get-DesignChallengeSustainedCountInternal -Body $Body
+        return [PSCustomObject]@{ SustainedCount = $internalResult.SustainedCount; ParseStatus = $internalResult.ParseStatus }
+    }
+
+    # Issue #951: brief-review re-projects to the same public two-field shape.
+    # Its richer internal result (ConvergenceFilterRan, FilteredCount, Reason)
+    # reaches Get-EmissionGap through Get-DispositionTally instead, so this
+    # function's contract stays byte-identical across every surface.
+    if ($Surface -eq 'brief-review') {
+        $internalResult = script:Get-BriefReviewSustainedCountInternal -Body $Body
         return [PSCustomObject]@{ SustainedCount = $internalResult.SustainedCount; ParseStatus = $internalResult.ParseStatus }
     }
 
@@ -1044,7 +1067,7 @@ function Get-DispositionTally {
           ParseStatus           [string] — 'ok' or 'could-not-verify'
     #>
     param(
-        [Parameter(Mandatory)][ValidateSet('code-review', 'design-challenge', 'plan-stress-test', 'post-review-observer')][string]$Surface,
+        [Parameter(Mandatory)][ValidateSet('code-review', 'design-challenge', 'plan-stress-test', 'brief-review', 'post-review-observer')][string]$Surface,
         [Parameter(Mandatory)][AllowEmptyString()][string]$Body
     )
 
@@ -1073,6 +1096,9 @@ function Get-DispositionTally {
             # Additive (issue #768 s4): DismissedCount, see the design-challenge
             # branch below and Get-DesignChallengeSustainedCountInternal.
             return [PSCustomObject]@{ Surface = $Surface; SustainedCount = 0; DefenseSustainedCount = 0; DismissedCount = 0; ParseStatus = 'could-not-verify' }
+        }
+        if ($Surface -eq 'brief-review') {
+            return [PSCustomObject]@{ Surface = $Surface; SustainedCount = 0; DefenseSustainedCount = 0; DismissedCount = 0; FilteredCount = $null; ConvergenceFilterRan = $null; ParseStatus = 'could-not-verify'; Reason = 'head-missing' }
         }
         # plan-stress-test (the only ValidateSet member remaining after the
         # post-review-observer throw above).
@@ -1115,6 +1141,30 @@ function Get-DispositionTally {
             DefenseSustainedCount = $inner.DefenseSustainedCount
             DismissedCount        = $inner.DismissedCount
             ParseStatus           = $inner.ParseStatus
+        }
+    }
+
+    # Issue #951: brief-review. DefenseSustainedCount is structurally always 0
+    # — this surface's review has no defense pass at all, which is the whole
+    # reason it exists — carried only for shape uniformity, exactly as the
+    # design-challenge branch above carries it. FilteredCount and
+    # ConvergenceFilterRan are the additive fields: FilteredCount is consumed
+    # by the brief-review dismiss-rate arm in phase-containment-cost-core.ps1,
+    # and ConvergenceFilterRan/Reason are what let Get-EmissionGap tell
+    # 'the assertion is missing' apart from 'the assertion says the filter did
+    # not run' — two different could-not-verify causes that A1(d) requires be
+    # distinguishable, not collapsed.
+    if ($Surface -eq 'brief-review') {
+        $inner = script:Get-BriefReviewSustainedCountInternal -Body $Body
+        return [PSCustomObject]@{
+            Surface               = $Surface
+            SustainedCount        = $inner.SustainedCount
+            DefenseSustainedCount = 0
+            DismissedCount        = $inner.DismissedCount
+            FilteredCount         = $inner.FilteredCount
+            ConvergenceFilterRan  = $inner.ConvergenceFilterRan
+            ParseStatus           = $inner.ParseStatus
+            Reason                = $inner.Reason
         }
     }
 
@@ -2310,6 +2360,176 @@ function script:Get-DesignChallengeSustainedCountInternal {
 
 #endregion
 
+#region Brief-review head (issue #951 D1/D3)
+
+# Issue #951 D1: the brief-review surface's authorizing head token. It reuses
+# the design surface's SEMANTICS (a finding counts as upheld when its
+# disposition is anything other than `dismiss` — a judge-free authorization
+# rule that already ships and is proved in production on the design surface)
+# but deliberately NOT its literal.
+#
+# Why not `finding_dispositions:` — the token the first design draft chose:
+#   1. Get-DesignChallengeSustainedCountInternal and Test-EmissionMarkerPresent
+#      both match `^finding_dispositions\s*:\s*$` with NO surface qualifier,
+#      and the check probes both issue surfaces from hard-coded lists. Reusing
+#      the literal would render a permanent false `design-challenge: GAP
+#      sustained=N blocks=0` on every brief — a manufactured gap inside the
+#      very gap table this instrument exists to protect.
+#   2. Its counts would leak into the design-phase dismiss rate in
+#      phase-containment-cost-core.ps1, whose own comment records that it does
+#      not gate on surface.
+#   3. SMC-19 (skills/solution-authoring/SKILL.md) scopes
+#      `finding_dispositions:` to `design-phase-complete` markers.
+# What the design surface proves is the counting RULE, not the token.
+$script:BriefDispositionsHeadPattern = '(?m)^brief_dispositions[ \t]*:[ \t]*\r?$'
+
+# Vocab gate, mirroring $script:JudgeRulingsVocabGatePattern's purpose: a head
+# match is only "real" when recognizable field vocabulary follows it, so a
+# maintainer describing the convention in prose does not force could-not-verify.
+$script:BriefDispositionsVocabGatePattern = '(?m)^\s*(?:-\s+)?(disposition|finding_id|convergence_filter_ran|filtered_count|findings)\s*:'
+
+# Issue #951 D3, restated by amendment A1(d) over the FULL value domain. The
+# head must carry a machine-readable convergence-filter assertion:
+#   absent  -> could-not-verify (the assertion is not a permissible omission)
+#   false   -> could-not-verify (an honest declared skip must NOT reach clean)
+#   true    -> may reach clean
+# A1(d) is the load-bearing half. D3 as originally written stated only that
+# ABSENCE renders could-not-verify, so an implementation keyed on key-absence
+# would satisfy its text while routing #941's exact shape — present, parseable,
+# honestly written `false` — straight to clean. That inverts the incentive the
+# assertion exists to create: it would reward the run that omits the field and
+# punish the scrupulous one that declares the skip.
+#
+# Why a required assertion at all, rather than simply declining to name the
+# "prosecution ran, filter did not" grade: without it the disposition
+# vocabulary contains no lexically-false word for an unfiltered run. #939 and
+# #941 were only ever discoverable because they had to borrow
+# `judge_ruling: sustained`, an obviously-wrong word both runs felt compelled
+# to apologise for in a comment. Declining to name the grade would remove the
+# tell that exposed the defect. A required assertion detects the case without
+# licensing it.
+$script:BriefConvergenceAssertionPattern = '(?m)^[ \t]*convergence_filter_ran[ \t]*:[ \t]*(true|false)[ \t]*\r?$'
+
+# The filtered count. Consumed (amendment A1(d) requires the count to have a
+# consumer, not merely a validator) by the brief-review dismiss-rate arm in
+# phase-containment-cost-core.ps1: convergence-filtered findings are the brief
+# surface's dismissed population, exactly as `disposition: dismiss` is the
+# design surface's, so they belong in that rate's numerator and denominator.
+$script:BriefFilteredCountPattern = '(?m)^[ \t]*filtered_count[ \t]*:[ \t]*(\d+)[ \t]*\r?$'
+
+function script:Get-BriefReviewSustainedCountInternal {
+    <#
+    .SYNOPSIS
+        Counts upheld findings inside a brief-review authorizing head, and
+        reports the convergence-filter assertion the head is required to carry.
+    .OUTPUTS
+        [PSCustomObject] with SustainedCount, DismissedCount, FilteredCount,
+        ConvergenceFilterRan ([bool] or $null when unasserted), ParseStatus,
+        and Reason ('ok' | 'head-missing' | 'head-corrupt' |
+        'filter-unasserted' | 'filter-not-run').
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Body
+    )
+
+    $none = {
+        param($reason)
+        [PSCustomObject]@{
+            SustainedCount       = 0
+            DismissedCount       = 0
+            FilteredCount        = $null
+            ConvergenceFilterRan = $null
+            ParseStatus          = 'could-not-verify'
+            Reason               = $reason
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($Body)) { return (& $none 'head-missing') }
+
+    $headMatch = [regex]::Match($Body, $script:BriefDispositionsHeadPattern)
+    if (-not $headMatch.Success) { return (& $none 'head-missing') }
+
+    # Region isolation mirrors the design surface: from the head to the next
+    # closing code fence, or end of body.
+    $regionStart = $headMatch.Index + $headMatch.Length
+    $closeFenceIdx = $Body.IndexOf('```', $regionStart, [System.StringComparison]::Ordinal)
+    $region = if ($closeFenceIdx -ge 0) {
+        $Body.Substring($regionStart, $closeFenceIdx - $regionStart)
+    }
+    else {
+        $Body.Substring($regionStart)
+    }
+
+    # Block-scalar exclusion: a free-text rationale written as a `key: |` block
+    # must never supply the assertion or a disposition. Same defence the design
+    # surface's GH-5 key-anchor fix applies, hardened here because this
+    # surface's assertion is a single line whose presence is load-bearing.
+    $spans = Get-BlockScalarSpans -Text $region
+
+    $keyAnchor = '(?:^\s*(?:-\s+)?|[{,]\s*)'
+    $dispositionMatches = @(
+        [regex]::Matches($region, "(?m)${keyAnchor}disposition\s*:\s*(incorporate|escalate|dismiss)\b") |
+            Where-Object { -not (Test-IndexInBlockScalarSpan -Index $_.Index -Spans $spans) }
+    )
+
+    $assertionMatches = @(
+        [regex]::Matches($region, $script:BriefConvergenceAssertionPattern) |
+            Where-Object { -not (Test-IndexInBlockScalarSpan -Index $_.Index -Spans $spans) }
+    )
+
+    # Fail loud on ambiguity (DD3): two contradictory assertions is not a
+    # case where one of them may be picked.
+    if ($assertionMatches.Count -eq 0) { return (& $none 'filter-unasserted') }
+    if ($assertionMatches.Count -gt 1) {
+        $distinct = @($assertionMatches | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+        if ($distinct.Count -gt 1) { return (& $none 'head-corrupt') }
+    }
+    $filterRan = ($assertionMatches[0].Groups[1].Value -eq 'true')
+
+    if ($dispositionMatches.Count -eq 0) { return (& $none 'head-corrupt') }
+
+    $filteredMatches = @(
+        [regex]::Matches($region, $script:BriefFilteredCountPattern) |
+            Where-Object { -not (Test-IndexInBlockScalarSpan -Index $_.Index -Spans $spans) }
+    )
+    $filteredCount = if ($filteredMatches.Count -eq 1) { [int]$filteredMatches[0].Groups[1].Value } else { $null }
+
+    $sustained = @($dispositionMatches | Where-Object { $_.Groups[1].Value -ne 'dismiss' })
+    $dismissed = $dispositionMatches.Count - $sustained.Count
+
+    if (-not $filterRan) {
+        # A1(d): present, parseable, honestly written `false`. The head parsed
+        # fine — this is not corruption — but a run whose convergence filter
+        # did not execute cannot authorize a count. Carry the real numbers so
+        # a maintainer can see what was claimed, with ParseStatus refusing it.
+        return [PSCustomObject]@{
+            SustainedCount       = 0
+            DismissedCount       = $dismissed
+            FilteredCount        = $filteredCount
+            ConvergenceFilterRan = $false
+            ParseStatus          = 'could-not-verify'
+            Reason               = 'filter-not-run'
+        }
+    }
+
+    # `convergence_filter_ran: true` without a filtered count is an incomplete
+    # head, not a clean one: the count is a consumed field (see
+    # $script:BriefFilteredCountPattern), so a missing or duplicated value
+    # leaves the brief-review dismiss rate unable to compute its denominator.
+    if ($null -eq $filteredCount) { return (& $none 'filter-unasserted') }
+
+    return [PSCustomObject]@{
+        SustainedCount       = $sustained.Count
+        DismissedCount       = $dismissed
+        FilteredCount        = $filteredCount
+        ConvergenceFilterRan = $true
+        ParseStatus          = 'ok'
+        Reason               = 'ok'
+    }
+}
+
+#endregion
+
 #region Get-ExternalSourceNovelSustainedCount (private, CR-8 seam)
 
 function script:Get-ExternalSourceNovelSustainedCount {
@@ -2438,6 +2658,184 @@ function script:Get-ExternalSourceNovelSustainedCount {
 
 #endregion
 
+#region Brief-review surface routing (issue #951 D2 as amended by A1(a))
+
+function Test-BriefPlanVariantDeclared {
+    <#
+    .SYNOPSIS
+        Reports whether THIS issue's own plan comment declares
+        `plan-variant: brief` (issue #951 D2 — the artifact-shape routing arm).
+    .DESCRIPTION
+        Scoped to a body carrying this issue's own `<!-- plan-issue-{Id} -->`
+        marker, so a plan comment belonging to a different issue quoted or
+        cross-posted here cannot declare on this one's behalf.
+
+        The declaration must appear at a real top-level YAML key position
+        (column 0), which is where plan frontmatter puts it. A prose mention
+        of the token does not declare.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Bodies,
+        [Parameter(Mandatory)][int]$Id
+    )
+    $planMarker = "<!-- plan-issue-$Id -->"
+    foreach ($body in $Bodies) {
+        if ([string]::IsNullOrWhiteSpace($body)) { continue }
+        if (-not $body.Contains($planMarker, [System.StringComparison]::Ordinal)) { continue }
+        if ([regex]::IsMatch($body, '(?m)^plan-variant[ \t]*:[ \t]*brief[ \t]*\r?$')) { return $true }
+    }
+    return $false
+}
+
+function Test-BriefLedgerHeadPresent {
+    <#
+    .SYNOPSIS
+        Reports whether THIS issue's own ledger sibling carries a real
+        brief-review head (issue #951 amendment A1(a) — the review-shape
+        routing arm).
+    .DESCRIPTION
+        A1(a) established that D2's declaration key cannot reach the corpus the
+        migration corrects: neither #939's nor #941's plan comment declares
+        `plan-variant` at all (both declare `spine-omitted: plan-too-small`;
+        #941's carries no frontmatter whatsoever), and retro-patching the
+        declaration onto them is forbidden — it would write a false shape
+        declaration onto numbered-step documents, introducing the very
+        false-provenance class this work exists to remove, using the migration
+        as the vehicle.
+
+        A1(a) named two candidate mechanisms and left the choice to the run.
+        This is the first: probe the brief surface when the LEDGER SIBLING
+        itself carries the brief head, mirroring the 863-s3 suppression's
+        precedent of binding a routing decision to the `-Id`-matched ledger
+        marker rather than to the plan comment.
+
+        Both arms are wired, as a union, because neither alone is sufficient:
+          - the declaration arm cannot reach the historical corpus (A1(a));
+          - the head arm cannot reach a brief that emitted NOTHING, which has
+            no head by construction — and AC4/AC5 require exactly that issue
+            to render could-not-verify ON THE BRIEF SURFACE rather than as a
+            plan-stress-test fallback attributed to the wrong surface.
+        Binding to the ledger marker (never to the write-only
+        `phase-containment-ledger-ref` pointer, which no reader may treat as
+        authoritative on its own) closes the same forgery vector the 863 M2
+        fix closed: a brief head belonging to a foreign run, left elsewhere on
+        the issue, must not route THIS issue.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Bodies,
+        [Parameter(Mandatory)][int]$Id
+    )
+    $ledgerMarker = "<!-- phase-containment-ledger-$Id -->"
+    foreach ($body in $Bodies) {
+        if ([string]::IsNullOrWhiteSpace($body)) { continue }
+        if (-not $body.Contains($ledgerMarker, [System.StringComparison]::Ordinal)) { continue }
+        if (Test-EmissionMarkerPresent -Surface 'brief-review' -Body $body) { return $true }
+    }
+    return $false
+}
+
+function Test-BriefJudgeHeadContradiction {
+    <#
+    .SYNOPSIS
+        Issue #951 D6 — the self-certification contradiction check.
+    .DESCRIPTION
+        A plan comment that declares `plan-variant: brief` is declaring a
+        review shape with no judge stage. A judge-rulings head on that same
+        issue's ledger sibling therefore asserts an adjudication the declared
+        shape structurally cannot have produced. That is a flat contradiction,
+        detectable with one regex and no authorship machinery, and it renders
+        could-not-verify rather than authorizing a count.
+
+        SCOPE / FALSE-POSITIVE BOUND (A1(b) requires this stated). The check
+        looks ONLY at bodies carrying this issue's own
+        `<!-- phase-containment-ledger-{Id} -->` marker. A legitimate
+        code-review judge-rulings head living elsewhere on the same issue — a
+        PR-review ruling cross-posted, a prior generation's surface, a
+        maintainer quoting the convention — does not trip it. The check can
+        therefore produce a false positive only when a genuine judge-rulings
+        head is deliberately written onto a brief-declared issue's own ledger
+        sibling, which is the condition it exists to name.
+
+        A1(b) ALSO CORRECTS D6's stated justification. D6 recorded that this
+        check "would have caught #939 and #941, both." It would have caught
+        NEITHER: its predicate requires the plan comment to declare
+        `plan-variant: brief`, and neither of those plan comments declares
+        `plan-variant` at all. The check is still worth having — it closes the
+        forge path for every brief authored after the declaration exists,
+        which is every brief from #956 onward — but the counterfactual that
+        justified it does not hold and is not repeated here.
+
+        Deliberately keyed on the DECLARATION arm only, never on
+        Test-BriefLedgerHeadPresent's head arm. Post-migration a corrected
+        historical ledger carries a brief head and no judge head, so keying on
+        the head arm would add nothing; keying on it would instead risk
+        flagging a mixed sibling during the migration's own write window.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Bodies,
+        [Parameter(Mandatory)][int]$Id
+    )
+    if (-not (Test-BriefPlanVariantDeclared -Bodies $Bodies -Id $Id)) { return $false }
+    $ledgerMarker = "<!-- phase-containment-ledger-$Id -->"
+    foreach ($body in $Bodies) {
+        if ([string]::IsNullOrWhiteSpace($body)) { continue }
+        if (-not $body.Contains($ledgerMarker, [System.StringComparison]::Ordinal)) { continue }
+        if ((Get-RealJudgeRulingsHeadMatches -Body $body).Count -gt 0) { return $true }
+    }
+    return $false
+}
+
+function Get-IssueEmissionSurfaces {
+    <#
+    .SYNOPSIS
+        The surface list to probe for an ISSUE, routed per issue (issue #951 D2).
+    .DESCRIPTION
+        THE SINGLE SEAM. Before #951 the issue surface list was a hard-coded
+        `@('design-challenge', 'plan-stress-test')` literal duplicated at two
+        call sites in phase-containment-emission-check.ps1 — single-target mode
+        and corpus mode. The design's own first pass missed both of them,
+        because it searched the library where the counting logic lives rather
+        than the entry point that invokes it; without them the new surface is
+        never scanned at all. Both call sites now route through this function,
+        so the class of defect "a new surface exists in the library and no
+        entry point asks for it" cannot recur silently.
+
+        On a brief-routed issue the list is design-challenge + brief-review,
+        and plan-stress-test is NOT probed. Suppressing it is not cosmetic: a
+        brief carries `<!-- plan-issue-` by construction and
+        `skills/plan-authoring/SKILL.md` MANDATES the line-start
+        `**Plan Stress-Test**` literal, so the 811-D1 honest fallback fires on
+        every brief by construction, and the 863-s3 suppression that would
+        rescue it cannot fire because it requires a judge-rulings head a brief
+        sibling will never carry. Left unrouted, every brief would render a
+        permanent plan-stress-test COULD NOT VERIFY, and the only way to dodge
+        it would be to drop a literal the doctrine calls load-bearing — which
+        inverts the incentive on that rule.
+
+        PR surfaces are unrouted and unchanged.
+    .OUTPUTS
+        [string[]] the surfaces to probe, in render order.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Bodies,
+        [Parameter(Mandatory)][int]$Id
+    )
+    $isBrief = (Test-BriefPlanVariantDeclared -Bodies $Bodies -Id $Id) -or
+               (Test-BriefLedgerHeadPresent   -Bodies $Bodies -Id $Id)
+    # Returned WITHOUT a leading comma, deliberately. `return ,$array` wraps
+    # the list in an outer one-element array, and every caller here collects
+    # the result with @(...) — which does not flatten that nesting. The caller
+    # then holds a single element that is itself an array, so `-contains
+    # 'brief-review'` is false and the surface loop probes one nonsense
+    # "surface". Both lists are always two elements, so normal unrolling is
+    # safe; the empty-array-preservation reason for the comma idiom
+    # (Get-BlockScalarSpans) does not apply.
+    if ($isBrief) { return @('design-challenge', 'brief-review') }
+    return @('design-challenge', 'plan-stress-test')
+}
+
+#endregion
+
 #region Get-EmissionGap
 
 function Get-EmissionGap {
@@ -2516,7 +2914,7 @@ function Get-EmissionGap {
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Bodies,
         [Parameter(Mandatory)][int]$Id,
-        [Parameter(Mandatory)][ValidateSet('code-review', 'design-challenge', 'plan-stress-test', 'post-review-observer')][string]$Surface
+        [Parameter(Mandatory)][ValidateSet('code-review', 'design-challenge', 'plan-stress-test', 'brief-review', 'post-review-observer')][string]$Surface
     )
 
     $totalSustained = 0
@@ -2540,6 +2938,25 @@ function Get-EmissionGap {
     $sawFallbackFired = $false
     $sawRealHeadCorrupt = $false
     $sawDecoyAmbiguous = $false
+    # Issue #951: brief-review's own could-not-verify causes. Kept as separate
+    # flags rather than folded into head-corrupt because A1(d) turns on
+    # telling them apart — 'the assertion is missing' and 'the assertion says
+    # the filter did not run' are different maintainer actions, and collapsing
+    # them would hide the honest declared skip inside a generic corruption
+    # label.
+    $sawBriefFilterUnasserted = $false
+    $sawBriefFilterNotRun = $false
+    $sawAnyBriefHead = $false
+
+    # Issue #951 D6, evaluated once at the AGGREGATION SEAM for the same
+    # reason 863-s3 lives here: the predicate is a question about the
+    # relationship between two DIFFERENT bodies on the issue (the plan
+    # comment's declaration and the ledger sibling's head), which no
+    # single-[string]$Body function can ask.
+    $briefJudgeContradiction = $false
+    if ($Surface -eq 'brief-review') {
+        $briefJudgeContradiction = Test-BriefJudgeHeadContradiction -Bodies $Bodies -Id $Id
+    }
 
     # 863-s3: the 811-D1 fallback below fires for a plan body carrying BOTH
     # the `<!-- plan-issue-` pointer marker and the `**Plan Stress-Test**`
@@ -2620,6 +3037,11 @@ function Get-EmissionGap {
             # classification is now actually unable to drift from what a real
             # head means elsewhere in this file.
             $isDesignChallenge = $Surface -eq 'design-challenge'
+            # Issue #951: brief-review has its own head regex and no
+            # duplicate-head guard, exactly like design-challenge — so it must
+            # never be routed through Get-RealJudgeRulingsHeadMatches, whose
+            # token it does not share.
+            $isBriefReview = $Surface -eq 'brief-review'
             # issue #817: capture the real-head-match set (not just a bool)
             # for the non-design-challenge branch, so the could-not-verify
             # path below can tell whether this body hit the M1 duplicate-head
@@ -2629,13 +3051,40 @@ function Get-EmissionGap {
             # duplicate-head guard (its head pattern is a single-shot
             # `^finding_dispositions\s*:\s*$` match, never counted), so it is
             # not a candidate for this diagnosis at all.
-            $realHeadMatches = if ($isDesignChallenge) { $null } else { Get-RealJudgeRulingsHeadMatches -Body $body }
+            $realHeadMatches = if ($isDesignChallenge -or $isBriefReview) { $null } else { Get-RealJudgeRulingsHeadMatches -Body $body }
             $hasRealHead = if ($isDesignChallenge) {
                 [regex]::IsMatch($body, '(?m)^finding_dispositions\s*:\s*$')
+            }
+            elseif ($isBriefReview) {
+                [regex]::IsMatch($body, $script:BriefDispositionsHeadPattern)
             }
             else {
                 $realHeadMatches.Count -gt 0
             }
+
+            # Issue #951: brief-review classifies its own could-not-verify
+            # cause from the tally's Reason rather than from the judge-rulings
+            # ladder below, which asks questions (duplicate real heads, decoy
+            # window bleed) that do not exist on this surface. Handled as a
+            # complete branch, not as an extra elseif inside that ladder — the
+            # writer's `if design ... else assume-plan` shape is exactly the
+            # structure that made a third value unsafe to append to, and the
+            # same trap applies to a reader.
+            if ($isBriefReview) {
+                if ($hasRealHead) { $sawAnyBriefHead = $true }
+                $briefTally = Get-DispositionTally -Surface 'brief-review' -Body $body
+                if ($briefTally.ParseStatus -eq 'could-not-verify') {
+                    $anyCouldNotVerify = $true
+                    switch ($briefTally.Reason) {
+                        'filter-unasserted' { $sawBriefFilterUnasserted = $true }
+                        'filter-not-run'    { $sawBriefFilterNotRun     = $true }
+                        'head-missing'      { $sawFallbackFired         = $true }
+                        default             { $sawRealHeadCorrupt       = $true }
+                    }
+                }
+                $totalSustained += $briefTally.SustainedCount
+            }
+            else {
 
             $sustainedResult = Get-SustainedFindingCount -Surface $Surface -Body $body
             if ($sustainedResult.ParseStatus -eq 'could-not-verify') {
@@ -2695,6 +3144,8 @@ function Get-EmissionGap {
                 }
             }
             $totalSustained += $sustainedResult.SustainedCount
+
+            } # end non-brief-review branch (issue #951)
         }
         # else: no recognizable marker head in this body — ordinary PR/issue
         # chatter, not a judge-rulings surface. Skip it (0 contribution,
@@ -2787,6 +3238,41 @@ function Get-EmissionGap {
         }
     }
 
+    # Issue #951 D6: the contradiction is unconditional and outranks every
+    # other classification on this surface. A brief-declared issue whose own
+    # ledger sibling carries a judge-rulings head cannot reach clean no matter
+    # how well the rest of it parses — that is the whole point of a
+    # self-certification check. Applied AFTER the per-body loop so a
+    # perfectly-parsing brief head cannot leave $anyCouldNotVerify false.
+    if ($briefJudgeContradiction) {
+        $anyCouldNotVerify = $true
+    }
+
+    # Issue #951 AC4 — the absence backstop, and the reason it cannot be left
+    # to the per-body loop. That loop only inspects bodies where
+    # Test-EmissionMarkerPresent returns true, so an issue that DECLARES the
+    # brief shape and then supplies no authorizing head at all touches nothing:
+    # it exits with ParseStatus 'ok', Gap 0, and renders the reassuring
+    # `clean -- sustained=0 blocks=0` that is indistinguishable from a
+    # genuinely verified-and-empty result. That silent zero is precisely what
+    # 811-D1 closed on the plan surface, and closing it on the OLD surfaces
+    # while leaving it open on the new one would reintroduce the defect one
+    # surface over.
+    #
+    # Gated on brief-ROUTEDNESS rather than fired unconditionally: a direct
+    # -Surface 'brief-review' call against an issue that neither declares the
+    # shape nor carries a brief head has no brief artifacts to report on, and
+    # manufacturing a gap for it would be the same false-gap failure mode D1
+    # rejected the shared head token to avoid.
+    if ($Surface -eq 'brief-review' -and -not $sawAnyBriefHead) {
+        $briefRouted = (Test-BriefPlanVariantDeclared -Bodies $Bodies -Id $Id) -or
+                       (Test-BriefLedgerHeadPresent   -Bodies $Bodies -Id $Id)
+        if ($briefRouted) {
+            $anyCouldNotVerify = $true
+            $sawFallbackFired = $true
+        }
+    }
+
     $parseStatus = if ($anyCouldNotVerify) { 'could-not-verify' } else { 'ok' }
     $gap = $totalSustained - $totalBlocks
 
@@ -2806,8 +3292,28 @@ function Get-EmissionGap {
     # $sawRealHeadCorrupt / $sawDecoyAmbiguous / $sawFallbackFired, never
     # more than one; the ladder below only ever has to break ties BETWEEN
     # different bodies in the same aggregation, not within one body.
+    #
+    # Issue #951 adds three brief-review-only reasons at the TOP of the
+    # ladder. 'judge-head-contradiction' first because D6 is an unconditional
+    # refusal rather than a parse diagnosis: whatever else is wrong with the
+    # comment, a maintainer's first action is removing the judge head that
+    # should never have been written under a declared brief. Then
+    # 'filter-not-run' ahead of 'filter-unasserted', because a head that
+    # honestly declares the skip is a more specific and more actionable
+    # finding than one that omits the field. All three are unreachable on
+    # every other surface — they are only ever set inside the brief-review
+    # branch or by the brief-only contradiction seam.
     $reason = if (-not $anyCouldNotVerify) {
         'ok'
+    }
+    elseif ($briefJudgeContradiction) {
+        'judge-head-contradiction'
+    }
+    elseif ($sawBriefFilterNotRun) {
+        'filter-not-run'
+    }
+    elseif ($sawBriefFilterUnasserted) {
+        'filter-unasserted'
     }
     elseif ($sawRealHeadCorrupt) {
         'head-corrupt'

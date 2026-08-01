@@ -405,6 +405,7 @@ function Get-ReviewCostRollup {
     $codeReviewDefenseKillContribs = [System.Collections.Generic.List[PSCustomObject]]::new()
     $planStressTestDefenseKillContribs = [System.Collections.Generic.List[PSCustomObject]]::new()
     $designChallengeContribs = [System.Collections.Generic.List[PSCustomObject]]::new()
+    $briefReviewContribs = [System.Collections.Generic.List[PSCustomObject]]::new()
 
     # PR numbers (Surface = 'pr') carrying ANY cost-surface marker at all —
     # used for the forward-gap count.
@@ -491,6 +492,12 @@ function Get-ReviewCostRollup {
             }
             foreach ($v in $perKeyLatestEntry.Values) { $reviewDispositionEntries.Add($v) }
 
+            # Issue #951: is this issue routed to the brief-review surface?
+            # Computed once per tuple and consulted by BOTH consumers below.
+            # PR tuples are never brief-routed.
+            $isBriefIssue = ($surface -eq 'issue') -and
+                            ((Get-IssueEmissionSurfaces -Bodies $bodies -Id $number) -contains 'brief-review')
+
             # --- judge-rulings marker: defense-kill rate (M1 (Surface, head) routing) ---
             $judgeRulingsCandidateIdx = [System.Collections.Generic.List[int]]::new()
             # CM2 (issue #842): pass the plan-stress-test surface hint only
@@ -498,9 +505,29 @@ function Get-ReviewCostRollup {
             # applies to plan-stress-test bodies only, matching
             # Test-EmissionMarkerPresent's own surface-scoped divergence.
             $headCheckSurface = if ($surface -eq 'issue') { 'plan-stress-test' } else { 'code-review' }
-            for ($i = 0; $i -lt $bodies.Count; $i++) {
-                if (Test-JudgeRulingsRealHeadPresent -Body ([string]$bodies[$i]) -Surface $headCheckSurface) {
-                    $judgeRulingsCandidateIdx.Add($i)
+            # Issue #951: a brief-routed issue is skipped entirely here, and
+            # the distinction between SKIPPED and ZERO is the whole point.
+            #
+            # Test-JudgeRulingsRealHeadPresent -Surface 'plan-stress-test'
+            # applies the 811-D1 prose-body fallback, which fires on any body
+            # carrying a `<!-- plan-issue-` marker plus the `**Plan
+            # Stress-Test**` heading — both of which a conformant brief carries
+            # BY CONSTRUCTION, the heading because the doctrine mandates it.
+            # Every compliant brief would therefore have entered the plan
+            # defense-kill candidate list and been tallied by
+            # Get-DispositionTally -Surface 'plan-stress-test', which reads the
+            # judge-rulings shape a brief does not have.
+            #
+            # Skipped rather than contributed-as-zero because a defense-kill
+            # rate is UNDEFINED for this surface, not zero: a brief's review is
+            # prosecution-only, so there is no defense pass whose kills could
+            # be counted. Feeding it a zero would silently dilute the plan
+            # arm's rate with issues that never had the concept.
+            if (-not $isBriefIssue) {
+                for ($i = 0; $i -lt $bodies.Count; $i++) {
+                    if (Test-JudgeRulingsRealHeadPresent -Body ([string]$bodies[$i]) -Surface $headCheckSurface) {
+                        $judgeRulingsCandidateIdx.Add($i)
+                    }
                 }
             }
             if ($judgeRulingsCandidateIdx.Count -gt 0) {
@@ -533,6 +560,46 @@ function Get-ReviewCostRollup {
                     $designCandidateIdx.Add($i)
                 }
             }
+            # --- brief_dispositions marker: brief-review dismiss-rate ---
+            # Issue #951, amendment A1(d). A1(d) required the head's
+            # `filtered_count` to have a CONSUMER, not merely a validator: a
+            # required field nothing reads is a field the next writer learns
+            # to fill with anything.
+            #
+            # This is that consumer, and the semantics are exact rather than
+            # convenient. On the design surface the dismiss rate's denominator
+            # is "dispositioned findings" and its numerator is the dismissed
+            # ones. A brief review's convergence filter removes findings from
+            # the panel's raw output for the same reason a design reviewer
+            # dismisses one — the finding did not survive scrutiny — so
+            # filtered findings ARE this surface's dismissed population and
+            # belong in both. Excluding them would report a dismiss rate over
+            # only the survivors, which is arithmetically guaranteed to
+            # understate it.
+            #
+            # Surface-gated to issue tuples, unlike the design-challenge branch
+            # below: the brief head only ever lives on an issue's ledger
+            # sibling.
+            if ($isBriefIssue) {
+                $briefCandidateIdx = [System.Collections.Generic.List[int]]::new()
+                for ($i = 0; $i -lt $bodies.Count; $i++) {
+                    if (Test-EmissionMarkerPresent -Surface 'brief-review' -Body ([string]$bodies[$i])) {
+                        $briefCandidateIdx.Add($i)
+                    }
+                }
+                if ($briefCandidateIdx.Count -gt 0) {
+                    $latestIdx = Select-LatestByCreatedAt -CreatedAtValues $createdAtValues -CandidateIndices $briefCandidateIdx.ToArray()
+                    $briefTally = Get-DispositionTally -Surface 'brief-review' -Body ([string]$bodies[$latestIdx])
+                    $briefFiltered = if ($null -ne $briefTally.FilteredCount) { [int]$briefTally.FilteredCount } else { 0 }
+                    $briefReviewContribs.Add([PSCustomObject]@{
+                            SustainedCount = $briefTally.SustainedCount
+                            DismissedCount = $briefTally.DismissedCount
+                            FilteredCount  = $briefFiltered
+                            ParseStatus    = $briefTally.ParseStatus
+                        }) | Out-Null
+                }
+            }
+
             if ($designCandidateIdx.Count -gt 0) {
                 # CM18 fix (issue #842): the review-dispositions and
                 # judge-rulings branches above both add the PR number to
@@ -584,6 +651,18 @@ function Get-ReviewCostRollup {
     $designNumerator = [int](($designOk | ForEach-Object { $_.DismissedCount } | Measure-Object -Sum).Sum)
     $designChallengeDismissRate = New-CostRateSubSection -Numerator $designNumerator -N $designN -CouldNotVerifyCount $designCouldNotVerify
 
+    # brief-review: dismiss-rate over dispositioned findings, where the
+    # convergence-filtered population counts as dismissed (issue #951 A1(d)).
+    # A could-not-verify brief head contributes to CouldNotVerifyCount and to
+    # neither the numerator nor the denominator — an unfiltered or unasserted
+    # run has no trustworthy count to contribute, and inventing a zero for it
+    # would let exactly the runs this work exists to catch drag the rate down.
+    $briefOk = @($briefReviewContribs | Where-Object { $_.ParseStatus -eq 'ok' })
+    $briefCouldNotVerify = @($briefReviewContribs | Where-Object { $_.ParseStatus -ne 'ok' }).Count
+    $briefN = [int](($briefOk | ForEach-Object { $_.SustainedCount + $_.DismissedCount + $_.FilteredCount } | Measure-Object -Sum).Sum)
+    $briefNumerator = [int](($briefOk | ForEach-Object { $_.DismissedCount + $_.FilteredCount } | Measure-Object -Sum).Sum)
+    $briefReviewDismissRate = New-CostRateSubSection -Numerator $briefNumerator -N $briefN -CouldNotVerifyCount $briefCouldNotVerify
+
     # forward gap: value-present PRs with no cost-surface marker at all.
     $forwardGapCount = @($ValuePresentPrNumbers | Where-Object { -not $costPresentPrNumbers.Contains([int]$_) }).Count
 
@@ -594,6 +673,9 @@ function Get-ReviewCostRollup {
         ForwardGapCount = $forwardGapCount
         DesignChallenge = [PSCustomObject]@{
             DismissRate = $designChallengeDismissRate
+        }
+        BriefReview     = [PSCustomObject]@{
+            DismissRate = $briefReviewDismissRate
         }
         CodeReview      = [PSCustomObject]@{
             PostJudgeDismissRate = $postJudgeDismissRate
@@ -771,6 +853,20 @@ function Format-ReviewCostSection {
     $designRate = $Rollup.DesignChallenge.DismissRate
     $lines.Add("  Dismiss-rate (over dispositioned findings): $(Format-CostRateDisplayValue -RateSection $designRate -FetchUnavailable $fetchUnavailable -FetchSource $Rollup.FetchSource)")
     $lines.Add('  Comparability caveat: convergence-filtered findings are excluded from this denominator; do not compare this rate directly against the code-review post-judge dismiss-rate without accounting for that exclusion.')
+    $lines.Add('')
+
+    # ---- brief-review (issue #951) ----
+    $lines.Add('Stage: brief-review')
+    $lines.Add('  Value-side reference: see the Stage: plan-stress-test block''s "By adjudication standard" breakdown in the report above.')
+    $briefRate = if ($Rollup.PSObject.Properties.Match('BriefReview').Count -gt 0) { $Rollup.BriefReview.DismissRate } else { $null }
+    if ($null -eq $briefRate) {
+        $lines.Add('  Dismiss-rate (over dispositioned findings): NOT MEASURED (no brief-review arm in this rollup)')
+    }
+    else {
+        $lines.Add("  Dismiss-rate (over dispositioned findings): $(Format-CostRateDisplayValue -RateSection $briefRate -FetchUnavailable $fetchUnavailable -FetchSource $Rollup.FetchSource)")
+    }
+    $lines.Add('  Denominator note: convergence-filtered findings ARE counted as dismissed here, which is the opposite of the design-challenge convention directly above. The two rates are therefore not directly comparable — a brief review has no judge, so its filter is the only narrowing step it has, and excluding it would report a dismiss rate over survivors alone.')
+    $lines.Add('  Defense-kill rate: NOT APPLICABLE — a brief review is prosecution-only and has no defense pass, so this rate is undefined for this surface rather than zero.')
     $lines.Add('')
 
     # ---- plan-stress-test ----

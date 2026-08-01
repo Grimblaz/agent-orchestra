@@ -20,7 +20,14 @@
     in the caller's scope, exactly as
     .github/scripts/Tests/persist-phase-ledger.Tests.ps1 does.
 
-    Two modes:
+    Three modes (issue #951 added the third):
+      brief  -- same sibling/pointer lifecycle as plan (both share
+                Resolve-PPLLedgerSibling), but writes a `brief_dispositions:`
+                authorizing head instead of a judge-rulings block, and refuses
+                head content carrying judge vocabulary. This is the lawful
+                judge-free emission path for a chunk brief's prosecution-only
+                review, which before #951 had no way to record its findings
+                except by borrowing a judge vocabulary that did not apply.
       plan   -- writes onto the `<!-- phase-containment-ledger-{ID} -->`
                 sibling comment, creating it (and a
                 `<!-- phase-containment-ledger-ref: {id} -->` pointer on the
@@ -555,6 +562,208 @@ function script:New-PPLPersistPhaseLedgerArtifactManifest {
     }
 }
 
+function script:Set-PPLBriefHeadBlockOnComment {
+    <#
+    .SYNOPSIS
+        Issue #951: writes the brief-review `brief_dispositions:` authorizing
+        head onto a known comment id — append when no head exists yet,
+        span-replace when one already does. Structurally parallel to
+        Set-PPLJudgeRulingsBlockOnComment above.
+    .DESCRIPTION
+        WHAT THIS REFUSES, and why refusing is the point. The whole reason
+        issue #951 exists is that a run with no judge stage could reach for
+        the judge vocabulary and nothing stopped it. A writer that would
+        cheerfully persist judge content under a brief head would leave that
+        path open at the one place best positioned to close it, so this
+        function fails loud on:
+          - content that is not a conformant brief head (no
+            `brief_dispositions:` key at a real line-start key position);
+          - content carrying ANY judge vocabulary — a `judge-rulings` head or a
+            `judge_ruling:` field. There is no legitimate reason for either to
+            appear in a brief's authorizing record, and D6's reader-side
+            contradiction check should never be the first thing to notice;
+          - content with no machine-readable `convergence_filter_ran`
+            assertion, which the emission check requires and would otherwise
+            render could-not-verify AFTER the write had already landed.
+        A caller that cannot satisfy these has nothing lawful to write, and
+        the honest outcome is a refusal plus no ledger rows — which is exactly
+        what `own-run-ledger-emission-951` asks a blocked run to do.
+    .OUTPUTS
+        [PSCustomObject] Success [bool], Reason [string], Action [string]
+        ('written' | 'replaced'; $null when Success=$false).
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Owner,
+        [Parameter(Mandatory)][string]$Repo,
+        [Parameter(Mandatory)][long]$CommentId,
+        [Parameter(Mandatory)][string]$ExpectedMarker,
+        [Parameter(Mandatory)][string]$BriefHeadContent
+    )
+
+    if (-not [regex]::IsMatch($BriefHeadContent, '(?m)^brief_dispositions[ \t]*:[ \t]*\r?$')) {
+        return [PSCustomObject]@{ Success = $false; Reason = 'BriefHeadContent carries no line-start `brief_dispositions:` head; refusing to write a head no reader will recognize'; Action = $null }
+    }
+    if ([regex]::IsMatch($BriefHeadContent, '(?m)^[ \t]*<!--\s*judge-rulings(?:\s|-->|$)') -or
+        [regex]::IsMatch($BriefHeadContent, '(?m)^\s*(?:-\s+)?judge_ruling\s*:')) {
+        return [PSCustomObject]@{ Success = $false; Reason = 'BriefHeadContent carries judge vocabulary (a judge-rulings head or a judge_ruling field). A brief review has no judge stage, so no judge ruling can describe it; refusing to write the exact false provenance issue #951 exists to remove'; Action = $null }
+    }
+    if (-not [regex]::IsMatch($BriefHeadContent, '(?m)^[ \t]*convergence_filter_ran[ \t]*:[ \t]*(true|false)[ \t]*\r?$')) {
+        return [PSCustomObject]@{ Success = $false; Reason = 'BriefHeadContent carries no machine-readable `convergence_filter_ran: true|false` assertion; the emission check requires it and would render could-not-verify after this write had already landed'; Action = $null }
+    }
+
+    $currentBody = script:Get-PPLCommentBodyById -Owner $Owner -Repo $Repo -CommentId $CommentId
+    if ($null -eq $currentBody) {
+        return [PSCustomObject]@{ Success = $false; Reason = "Could not read comment $CommentId body before writing the brief head"; Action = $null }
+    }
+    if (-not $currentBody.Contains($ExpectedMarker)) {
+        return [PSCustomObject]@{ Success = $false; Reason = "Comment does not contain expected marker '$ExpectedMarker' — refusing to write the brief head onto an unrelated comment"; Action = $null }
+    }
+
+    # Span-replace an existing brief head, so a re-persist replaces its own
+    # head rather than stacking a second one — two heads on one sibling is an
+    # ambiguity the reader is required to fail loud on.
+    $headMatch = [regex]::Match($currentBody, '(?ms)^brief_dispositions[ \t]*:[ \t]*\r?$.*?(?=^\S|\z)')
+    $newBody = if ($headMatch.Success) {
+        $currentBody.Substring(0, $headMatch.Index) + $BriefHeadContent + "`n" + $currentBody.Substring($headMatch.Index + $headMatch.Length)
+    }
+    else {
+        $currentBody.TrimEnd() + "`n`n" + $BriefHeadContent + "`n"
+    }
+
+    $writeResult = script:Set-PPLCommentBodyDirect -Owner $Owner -Repo $Repo -CommentId $CommentId -NewBody $newBody
+    if (-not $writeResult.Success) {
+        return [PSCustomObject]@{ Success = $false; Reason = $writeResult.Reason; Action = $null }
+    }
+    return [PSCustomObject]@{ Success = $true; Reason = $null; Action = $(if ($headMatch.Success) { 'replaced' } else { 'written' }) }
+}
+
+function script:Resolve-PPLLedgerSibling {
+    <#
+    .SYNOPSIS
+        Issue #951: resolves (finding or creating) the
+        `<!-- phase-containment-ledger-{ID} -->` sibling comment for an issue
+        and ensures the plan comment carries its pointer.
+    .DESCRIPTION
+        Extracted verbatim from plan mode so brief mode can reuse it rather
+        than grow a second copy. The sibling/pointer lifecycle is identical
+        for both shapes — only WHAT gets written onto the sibling differs —
+        and two copies of this logic would drift, with the divergence showing
+        up as lost ledger data rather than as a test failure.
+    .OUTPUTS
+        [PSCustomObject] Success [bool], Reason [string], SiblingId [long].
+        Mutates the supplied $Artifacts manifest's Sibling/Pointer fields.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Owner,
+        [Parameter(Mandatory)][string]$Repo,
+        [Parameter(Mandatory)][int]$IssueNumber,
+        [Parameter(Mandatory)][object]$Artifacts
+    )
+
+    $planMarker = "<!-- plan-issue-$IssueNumber -->"
+    $ledgerMarker = "<!-- phase-containment-ledger-$IssueNumber -->"
+    $artifacts = $Artifacts
+
+    $planComment = script:Find-PPLCommentIdByExactMarker -Owner $Owner -Repo $Repo -IssueNumber $IssueNumber -Marker $planMarker
+    if ($null -eq $planComment) {
+        return [PSCustomObject]@{ Success = $false; Reason = "Plan comment carrying marker '$planMarker' not found (line-anchored, whole-line match) on issue $IssueNumber"; SiblingId = $null }
+    }
+    $planCommentId = $planComment.Id
+    $planBody = $planComment.Body
+
+    $pointerMatch = [regex]::Match($planBody, '(?m)^[ \t]*<!--\s*phase-containment-ledger-ref:\s*(\d+)\s*-->[ \t]*\r?$')
+    if ($pointerMatch.Success) {
+        $siblingId = [long]$pointerMatch.Groups[1].Value
+        $artifacts.Sibling = 'reused'
+        $artifacts.Pointer = 'already-present'
+        return [PSCustomObject]@{ Success = $true; Reason = $null; SiblingId = $siblingId }
+    }
+
+    $existingSibling = script:Find-PPLCommentIdByExactMarker -Owner $Owner -Repo $Repo -IssueNumber $IssueNumber -Marker $ledgerMarker
+    if ($null -ne $existingSibling) {
+        $siblingId = $existingSibling.Id
+        $artifacts.Sibling = 'reused'
+    }
+    else {
+        $createdUrl = Find-OrUpsertComment -Type 'issue' -Number $IssueNumber -Marker $ledgerMarker -Body $ledgerMarker -Owner $Owner -Repo $Repo
+        if ($null -eq $createdUrl) {
+            $artifacts.Sibling = 'failed'
+            return [PSCustomObject]@{ Success = $false; Reason = 'Failed to create the phase-containment-ledger sibling comment (Find-OrUpsertComment returned $null)'; SiblingId = $null }
+        }
+        $siblingId = script:Get-PPLCommentIdFromUrl -Url $createdUrl
+        if ($null -eq $siblingId) {
+            $artifacts.Sibling = 'failed'
+            return [PSCustomObject]@{ Success = $false; Reason = "Could not extract a numeric comment id from the created sibling's url '$createdUrl'"; SiblingId = $null }
+        }
+        $artifacts.Sibling = 'created'
+    }
+
+    $newPlanBody = script:Set-PPLPointerLineAfterMarker -Body $planBody -Marker $planMarker -SiblingId $siblingId
+    $pointerResult = script:Set-PPLCommentBodyDirect -Owner $Owner -Repo $Repo -CommentId $planCommentId -NewBody $newPlanBody
+    if (-not $pointerResult.Success) {
+        $artifacts.Pointer = 'failed'
+        return [PSCustomObject]@{ Success = $false; Reason = "Failed to insert the phase-containment-ledger-ref pointer into the plan comment: $($pointerResult.Reason)"; SiblingId = $null }
+    }
+    $artifacts.Pointer = 'written'
+    return [PSCustomObject]@{ Success = $true; Reason = $null; SiblingId = $siblingId }
+}
+
+function script:Invoke-PPLPersistPhaseLedgerBriefMode {
+    <#
+    .SYNOPSIS
+        Issue #951: persists a brief-review authorizing head plus zero or more
+        phase-containment blocks onto the issue's ledger sibling.
+    .DESCRIPTION
+        Deliberately a THIRD MODE rather than a parameterization of plan mode.
+        Plan mode's contract is "a judge-rulings block first, then the blocks
+        it authorizes"; brief mode's is "a brief_dispositions head first, then
+        the blocks IT authorizes, and never a judge-rulings block at all".
+        Threading a flag through plan mode would have left the judge-rulings
+        write reachable from the brief path by omission — which is the same
+        shape of defect as the `if design … else assume-plan` dispatch this
+        change replaces.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Owner,
+        [Parameter(Mandatory)][string]$Repo,
+        [Parameter(Mandatory)][int]$IssueNumber,
+        [Parameter(Mandatory)][string]$BriefHeadContent,
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$PhaseContainmentBlocks
+    )
+
+    $ledgerMarker = "<!-- phase-containment-ledger-$IssueNumber -->"
+    $artifacts = script:New-PPLPersistPhaseLedgerArtifactManifest
+
+    $sibling = script:Resolve-PPLLedgerSibling -Owner $Owner -Repo $Repo -IssueNumber $IssueNumber -Artifacts $artifacts
+    if (-not $sibling.Success) {
+        return [PSCustomObject]@{ Success = $false; Reason = $sibling.Reason; Artifacts = $artifacts }
+    }
+
+    $headResult = script:Set-PPLBriefHeadBlockOnComment -Owner $Owner -Repo $Repo -CommentId $sibling.SiblingId -ExpectedMarker $ledgerMarker -BriefHeadContent $BriefHeadContent
+    if (-not $headResult.Success) {
+        # The manifest field is named JudgeRulings for historical reasons and
+        # is the generic "authorizing head" slot; brief mode writes no judge
+        # ruling of any kind.
+        $artifacts.JudgeRulings = 'failed'
+        return [PSCustomObject]@{ Success = $false; Reason = $headResult.Reason; Artifacts = $artifacts }
+    }
+    $artifacts.JudgeRulings = $headResult.Action
+
+    if ($PhaseContainmentBlocks.Count -gt 0) {
+        $blockResult = script:Set-PPLPhaseContainmentBlocksOnComment -Owner $Owner -Repo $Repo -CommentId $sibling.SiblingId -ExpectedMarker $ledgerMarker -Blocks $PhaseContainmentBlocks
+        if (-not $blockResult.Success) {
+            $artifacts.PhaseContainmentBlocks = 'failed'
+            return [PSCustomObject]@{ Success = $false; Reason = $blockResult.Reason; Artifacts = $artifacts }
+        }
+        $artifacts.PhaseContainmentBlocks = $blockResult.Action
+    }
+    else {
+        $artifacts.PhaseContainmentBlocks = 'skipped-empty'
+    }
+
+    return [PSCustomObject]@{ Success = $true; Reason = $null; Artifacts = $artifacts }
+}
+
 function script:Invoke-PPLPersistPhaseLedgerPlanMode {
     param(
         [Parameter(Mandatory)][string]$Owner,
@@ -564,87 +773,22 @@ function script:Invoke-PPLPersistPhaseLedgerPlanMode {
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$PhaseContainmentBlocks
     )
 
-    $planMarker = "<!-- plan-issue-$IssueNumber -->"
     $ledgerMarker = "<!-- phase-containment-ledger-$IssueNumber -->"
     $artifacts = script:New-PPLPersistPhaseLedgerArtifactManifest
 
-    $planComment = script:Find-PPLCommentIdByExactMarker -Owner $Owner -Repo $Repo -IssueNumber $IssueNumber -Marker $planMarker
-    if ($null -eq $planComment) {
-        return [PSCustomObject]@{ Success = $false; Reason = "Plan comment carrying marker '$planMarker' not found (line-anchored, whole-line match) on issue $IssueNumber"; Artifacts = $artifacts }
+    # Issue #951: the sibling/pointer lifecycle moved verbatim into
+    # Resolve-PPLLedgerSibling so brief mode reuses it instead of copying it.
+    # Every fix that logic already carries -- the F3 line-anchored pointer
+    # match, the M1 find-sibling-by-marker-before-upsert guard that stops
+    # Find-OrUpsertComment wiping an accumulated sibling, and the F2
+    # explicit -Owner/-Repo threading -- now protects both shapes from one
+    # place. Two copies would have drifted, and the drift would have shown up
+    # as lost ledger data rather than as a failing test.
+    $sibling = script:Resolve-PPLLedgerSibling -Owner $Owner -Repo $Repo -IssueNumber $IssueNumber -Artifacts $artifacts
+    if (-not $sibling.Success) {
+        return [PSCustomObject]@{ Success = $false; Reason = $sibling.Reason; Artifacts = $artifacts }
     }
-    $planCommentId = $planComment.Id
-    $planBody = $planComment.Body
-
-    # F3 fix (issue #878 review): anchored to a standalone line, matching
-    # this file's own established anchored-marker idiom (e.g.
-    # Set-PPLPointerLineAfterMarker's line-anchored match above, and
-    # Find-PPLCommentIdByExactMarker's whole-line marker match). The prior
-    # unanchored regex would match a prose mention of the pointer shape
-    # anywhere in the plan body and wrongly trust its captured id as the
-    # real sibling comment id. Outer whitespace is restricted to `[ \t]*`
-    # (never `\s*`, which also matches newlines) with an explicit `\r?`
-    # before the multiline `$` -- the same M2-fix precedent already applied
-    # to Set-PPLPointerLineAfterMarker's own line-anchored match in this file,
-    # so a CRLF-bodied comment cannot make this regex's greedy whitespace
-    # swallow past the line boundary.
-    $pointerMatch = [regex]::Match($planBody, '(?m)^[ \t]*<!--\s*phase-containment-ledger-ref:\s*(\d+)\s*-->[ \t]*\r?$')
-    if ($pointerMatch.Success) {
-        $siblingId = [long]$pointerMatch.Groups[1].Value
-        $artifacts.Sibling = 'reused'
-        $artifacts.Pointer = 'already-present'
-    }
-    else {
-        # M1 fix (issue #878 judge-sustained review): the pointer can go
-        # missing on the plan comment (e.g. a routine plan re-persist that
-        # rewrites the plan comment body without this helper's
-        # previously-inserted pointer line) even though the ledger sibling
-        # itself still exists, still full of accumulated content.
-        # Find-OrUpsertComment's PATCH path replaces a matched comment's
-        # body VERBATIM -- calling it directly here, with no prior existence
-        # check, would silently wipe that sibling back down to just
-        # $ledgerMarker. Always look for an existing sibling by its own
-        # durable marker FIRST (the same find-only, line-anchored selector
-        # already used for the plan comment lookup above), and only fall
-        # through to Find-OrUpsertComment's create-or-PATCH path when the
-        # sibling genuinely does not exist yet.
-        $existingSibling = script:Find-PPLCommentIdByExactMarker -Owner $Owner -Repo $Repo -IssueNumber $IssueNumber -Marker $ledgerMarker
-        if ($null -ne $existingSibling) {
-            $siblingId = $existingSibling.Id
-            $artifacts.Sibling = 'reused'
-        }
-        else {
-            # F2 fix (issue #878 review): thread -Owner/-Repo explicitly, same
-            # as this file's other gh-calling helpers (Get-PPLCommentBodyById,
-            # Set-PPLCommentBodyDirect, Find-PPLCommentIdByExactMarker) already do.
-            # Without them, Find-OrUpsertComment derived owner/repo from the
-            # ambient git remote instead of the caller-supplied -Owner/-Repo,
-            # so it could silently create the sibling comment in the wrong
-            # repo when cwd's remote did not match.
-            $createdUrl = Find-OrUpsertComment -Type 'issue' -Number $IssueNumber -Marker $ledgerMarker -Body $ledgerMarker -Owner $Owner -Repo $Repo
-            if ($null -eq $createdUrl) {
-                $artifacts.Sibling = 'failed'
-                return [PSCustomObject]@{ Success = $false; Reason = 'Failed to create the phase-containment-ledger sibling comment (Find-OrUpsertComment returned $null)'; Artifacts = $artifacts }
-            }
-            $siblingId = script:Get-PPLCommentIdFromUrl -Url $createdUrl
-            if ($null -eq $siblingId) {
-                $artifacts.Sibling = 'failed'
-                return [PSCustomObject]@{ Success = $false; Reason = "Could not extract a numeric comment id from the created sibling's url '$createdUrl'"; Artifacts = $artifacts }
-            }
-            $artifacts.Sibling = 'created'
-        }
-
-        # M1: the pointer must be (re-)inserted whether the sibling was just
-        # created OR found pre-existing without a pointer -- both share the
-        # exact same "plan comment currently has no pointer line" starting
-        # condition.
-        $newPlanBody = script:Set-PPLPointerLineAfterMarker -Body $planBody -Marker $planMarker -SiblingId $siblingId
-        $pointerResult = script:Set-PPLCommentBodyDirect -Owner $Owner -Repo $Repo -CommentId $planCommentId -NewBody $newPlanBody
-        if (-not $pointerResult.Success) {
-            $artifacts.Pointer = 'failed'
-            return [PSCustomObject]@{ Success = $false; Reason = "Failed to insert the phase-containment-ledger-ref pointer into the plan comment: $($pointerResult.Reason)"; Artifacts = $artifacts }
-        }
-        $artifacts.Pointer = 'written'
-    }
+    $siblingId = $sibling.SiblingId
 
     # Plan-mode ordering: judge-rulings FIRST, then phase-containment blocks.
     $judgeResult = script:Set-PPLJudgeRulingsBlockOnComment -Owner $Owner -Repo $Repo -CommentId $siblingId -ExpectedMarker $ledgerMarker -JudgeRulingsContent $JudgeRulingsContent
@@ -725,9 +869,20 @@ function Invoke-PersistPhaseLedger {
     .PARAMETER Repo
         Repository name.
     .PARAMETER Mode
-        'plan' or 'design'. Selects the persistence surface and required
-        companion parameter (-IssueNumber for plan, -DesignCommentId for
-        design).
+        'plan', 'design', or 'brief'. Selects the persistence surface and
+        required companion parameter (-IssueNumber for plan and brief,
+        -DesignCommentId for design; -BriefHeadContent additionally for brief).
+    .PARAMETER BriefHeadContent
+        Required when -Mode brief (issue #951). The complete
+        `brief_dispositions:` authorizing head — the judge-free record that
+        authorizes counting a brief review's phase-containment blocks, carrying
+        the mandatory `convergence_filter_ran` assertion and its
+        `filtered_count`. -JudgeRulingsContent is accepted under this mode (it
+        is Mandatory on the shared signature) and never forwarded: a brief
+        review has no judge stage, so there is no judge ruling that could
+        describe it, and Set-PPLBriefHeadBlockOnComment additionally refuses
+        head content carrying judge vocabulary. Same discard precedent as
+        design mode below.
     .PARAMETER IssueNumber
         Required when -Mode plan. The issue carrying the `<!--
         plan-issue-{ID} -->` comment.
@@ -766,12 +921,44 @@ function Invoke-PersistPhaseLedger {
     param(
         [Parameter(Mandatory)][string]$Owner,
         [Parameter(Mandatory)][string]$Repo,
-        [Parameter(Mandatory)][ValidateSet('plan', 'design')][string]$Mode,
+        [Parameter(Mandatory)][ValidateSet('plan', 'design', 'brief')][string]$Mode,
         [int]$IssueNumber,
         [long]$DesignCommentId,
         [Parameter(Mandatory)][string]$JudgeRulingsContent,
-        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$PhaseContainmentBlocks
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$PhaseContainmentBlocks,
+        [string]$BriefHeadContent = ''
     )
+
+    # ISSUE #951 — RESTRUCTURED, NOT APPENDED TO.
+    #
+    # This dispatch used to be `if ($Mode -eq 'design') { … }` followed by an
+    # unguarded fall-through that ASSUMED plan. That shape has no room for a
+    # third value: adding 'brief' to the ValidateSet would have routed every
+    # brief call into plan-mode logic — including the `$IssueNumber -le 0`
+    # guard, whose error message names plan, and the judge-rulings write a
+    # brief must never perform. The failure would have been silent at the
+    # dispatch and loud only much later, in the corpus.
+    #
+    # Now every mode is an explicit, named branch that validates its OWN
+    # companion parameter, and an unrecognized mode throws rather than
+    # defaulting into anyone's logic. A fourth review shape must add a branch
+    # here; it cannot arrive by omission.
+    switch ($Mode) {
+        'design' { break }
+        'plan'   { break }
+        'brief'  { break }
+        default  { throw "Invoke-PersistPhaseLedger: unhandled -Mode '$Mode'. Every mode must have an explicit branch below; a mode must never reach another mode's logic by fall-through." }
+    }
+
+    if ($Mode -eq 'brief') {
+        if ($IssueNumber -le 0) {
+            return [PSCustomObject]@{ Success = $false; Reason = 'Mode brief requires a positive -IssueNumber'; Artifacts = (script:New-PPLPersistPhaseLedgerArtifactManifest) }
+        }
+        if ([string]::IsNullOrWhiteSpace($BriefHeadContent)) {
+            return [PSCustomObject]@{ Success = $false; Reason = 'Mode brief requires -BriefHeadContent (the `brief_dispositions:` authorizing head). A brief review has no judge stage, so -JudgeRulingsContent cannot substitute for it'; Artifacts = (script:New-PPLPersistPhaseLedgerArtifactManifest) }
+        }
+        return script:Invoke-PPLPersistPhaseLedgerBriefMode -Owner $Owner -Repo $Repo -IssueNumber $IssueNumber -BriefHeadContent $BriefHeadContent -PhaseContainmentBlocks $PhaseContainmentBlocks
+    }
 
     if ($Mode -eq 'design') {
         if ($DesignCommentId -le 0) {

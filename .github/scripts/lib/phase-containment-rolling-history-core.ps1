@@ -2253,7 +2253,24 @@ function Get-PhaseContainmentRollup {
         [switch]$Truncated
     )
 
-    # Stage → catchable_phase mapping
+    # Stage → catchable_phase mapping.
+    #
+    # ISSUE #951 — 'brief-review' IS DELIBERATELY ABSENT FROM THIS MAP, and
+    # adding it would be a silent, hard-to-see data corruption rather than a
+    # feature. The routing loop below is `foreach stage { if match { add;
+    # break } }` over an UNORDERED hashtable. This map is injective on its
+    # values today, which is the only reason that first-match-then-break is
+    # deterministic. 'brief-review' is plan-catchable, so adding it would put
+    # two keys on 'plan' and every plan-catchable row — brief and
+    # judge-adjudicated alike — would land in whichever key PowerShell happened
+    # to enumerate first, varying between runs.
+    #
+    # Worse, the wreckage would produce its own success evidence: one sub-arm
+    # renders withheld and the other's pre-existing rates read unchanged, which
+    # is exactly what a correct partition also looks like from the outside.
+    # That is why the partition below keys on each ENTRY'S OWN caught_stage
+    # rather than on a stage→phase map, and why the partition assertions must
+    # examine sub-arm POPULATIONS, never just their verdicts.
     $stageToCatchablePhase = @{
         'design-challenge' = 'design'
         'plan-stress-test' = 'plan'
@@ -2339,12 +2356,24 @@ function Get-PhaseContainmentRollup {
         # observer surface, so leaving them in would spuriously fail
         # closed for every caller that has not yet started supplying
         # observer-inclusive expectations.
+        #
+        # Issue #951 (disposition M21, recorded as REQUIRED): brief-review-
+        # caught entries are excluded on exactly the same terms and for exactly
+        # the same reason. A caller's $SustainedCounts['plan-stress-test']
+        # expectation is derived from JUDGE-RULINGS sustained counts, a
+        # vocabulary that predates the brief surface and cannot describe it.
+        # Leaving brief rows in the observed count would spuriously fail closed
+        # — marking the whole plan arm DataUntrustworthy and forcing
+        # RelaxationEligible=$false — for every caller that has not yet started
+        # supplying brief-inclusive expectations, which today is all of them.
         $observerCaughtCount = 0
+        $briefCaughtCount = 0
         foreach ($e in $nonApparatusEntries) {
             $eCaughtStage = if ($e -is [hashtable]) { [string]$e['caught_stage'] } else { [string]$e.caught_stage }
             if ($eCaughtStage -eq 'post-review-observer') { $observerCaughtCount++ }
+            if ($eCaughtStage -eq 'brief-review')         { $briefCaughtCount++ }
         }
-        $nExcludingObserver = $n - $observerCaughtCount
+        $nExcludingObserver = $n - $observerCaughtCount - $briefCaughtCount
 
         $dataUntrustworthy       = $false
         $dataUntrustworthyReason = $null
@@ -2358,9 +2387,21 @@ function Get-PhaseContainmentRollup {
                 # observed M." wording); the observer-exclusion note is only
                 # appended when it actually changed the observed count.
                 $dataUntrustworthyReason = "Entry count mismatch: expected $expectedCount sustained findings for '$stage', observed $nExcludingObserver."
+                # Issue #951: both exclusions are disclosed, never silent. An
+                # unexplained "observed M" that is smaller than the raw
+                # population is precisely the kind of number a maintainer
+                # cannot audit.
+                $exclusionNotes = [System.Collections.Generic.List[string]]::new()
                 if ($observerCaughtCount -gt 0) {
                     $entryWord = if ($observerCaughtCount -eq 1) { 'entry' } else { 'entries' }
-                    $dataUntrustworthyReason = "Entry count mismatch: expected $expectedCount sustained findings for '$stage', observed $nExcludingObserver (excluding $observerCaughtCount observer-caught $entryWord)."
+                    $exclusionNotes.Add("$observerCaughtCount observer-caught $entryWord")
+                }
+                if ($briefCaughtCount -gt 0) {
+                    $briefWord = if ($briefCaughtCount -eq 1) { 'entry' } else { 'entries' }
+                    $exclusionNotes.Add("$briefCaughtCount brief-review-caught $briefWord")
+                }
+                if ($exclusionNotes.Count -gt 0) {
+                    $dataUntrustworthyReason = "Entry count mismatch: expected $expectedCount sustained findings for '$stage', observed $nExcludingObserver (excluding $($exclusionNotes -join ' and '))."
                 }
             }
         }
@@ -2637,9 +2678,78 @@ function Get-PhaseContainmentRollup {
             $relaxationEligibleReason = 'fetch truncated'
         }
 
+        # -----------------------------------------------------------------
+        # Issue #951 D4 — partition by adjudication standard.
+        #
+        # An arm's rows can be upheld under different standards: a
+        # judge-adjudicated plan-stress-test ruling, a brief-review
+        # prosecution consensus a convergence filter narrowed, an
+        # observer-caught escape. #761 relaxes a stage only on this
+        # instrument's evidence, and those standards do not carry the same
+        # weight — which is the entire reason the judge vocabulary
+        # distinguishes `sustained` from `defense-sustained` in the first
+        # place. A single headline rate assembled from all three tells a
+        # maintainer a number without telling them how sure to be.
+        #
+        # Keyed on each ENTRY'S OWN caught_stage — never on a stage→phase map
+        # (see the $stageToCatchablePhase comment above for why that
+        # alternative silently corrupts).
+        #
+        # The insufficiency guard is RE-DERIVED per sub-arm rather than
+        # inherited from the unpartitioned population. Inheriting it is the
+        # trap: an arm of 40 rows comfortably clears n>=5, so a 2-row sub-arm
+        # inside it would present a rate computed from two findings as though
+        # it carried the parent's authority. A sub-arm that fails its own
+        # guard renders WITHHELD, never a legitimate zero.
+        $partition = @{}
+        $subArmGroups = @{}
+        foreach ($e in $nonApparatusEntries) {
+            $eStage = if ($e -is [hashtable]) { [string]$e['caught_stage'] } else { [string]$e.caught_stage }
+            if ([string]::IsNullOrWhiteSpace($eStage)) { $eStage = '(unspecified)' }
+            if (-not $subArmGroups.ContainsKey($eStage)) {
+                $subArmGroups[$eStage] = [System.Collections.Generic.List[object]]::new()
+            }
+            $subArmGroups[$eStage].Add($e)
+        }
+        foreach ($subStage in $subArmGroups.Keys) {
+            $subEntries      = @($subArmGroups[$subStage])
+            $subN            = $subEntries.Count
+            $subDenomZero    = ($subN -eq 0)
+            $subInsufficient = $subDenomZero -or ($subN -lt 5)
+
+            $subEscapeRate      = $null
+            $subIrreducibleRate = $null
+            if (-not $subInsufficient) {
+                $subEscapes     = 0
+                $subIrreducible = 0
+                foreach ($e in $subEntries) {
+                    $dist = if ($e -is [hashtable]) { [int]$e['escape_distance'] } else { [int]$e.escape_distance }
+                    if ($dist -gt 0) { $subEscapes++ } else { $subIrreducible++ }
+                }
+                $subEscapeRate      = [double]$subEscapes     / [double]$subN
+                $subIrreducibleRate = [double]$subIrreducible / [double]$subN
+            }
+
+            $partition[$subStage] = [PSCustomObject]@{
+                CaughtStage      = $subStage
+                N                = $subN
+                InsufficientData = $subInsufficient
+                DenominatorZero  = $subDenomZero
+                # Withheld is the honest verdict for a sub-arm whose own
+                # population cannot support a rate. It is NOT the same as a
+                # rate of zero, and the renderer must never collapse the two.
+                Withheld         = $subInsufficient
+                EscapeRate       = $subEscapeRate
+                IrreducibleRate  = $subIrreducibleRate
+            }
+        }
+
         $stages[$stage] = [PSCustomObject]@{
             Stage                     = $stage
             N                         = $n
+            AdjudicationPartition     = $partition
+            BriefCaughtCount          = $briefCaughtCount
+            ObserverCaughtCount       = $observerCaughtCount
             Denominator               = $denominator
             DenominatorZero           = $denominatorZero
             EscapeRate                = $escapeRate
@@ -2787,6 +2897,32 @@ function Format-PhaseContainmentReport {
 
         $lines.Add("Stage: $stageName")
         $lines.Add("  Denominator ($catchableLabel): $($stage.Denominator)")
+
+        # Issue #951 D4: the per-adjudication-standard breakdown, rendered
+        # whenever the arm has any population at all. Rendered unconditionally
+        # rather than only when standards are mixed, because "no partition
+        # line" and "one standard" would otherwise be indistinguishable — and
+        # silence is never this instrument's success signal.
+        if ($stage.PSObject.Properties.Match('AdjudicationPartition').Count -gt 0 -and $stage.N -gt 0) {
+            $lines.Add('  By adjudication standard:')
+            foreach ($subName in (@($stage.AdjudicationPartition.Keys) | Sort-Object)) {
+                $sub = $stage.AdjudicationPartition[$subName]
+                if ($sub.Withheld) {
+                    # The population is always printed, even when the rates are
+                    # withheld: a reader must be able to see WHICH sub-arm the
+                    # rows landed in. A partition that silently mis-assigns
+                    # every row produces a withheld sub-arm and an unchanged
+                    # sibling — the same surface signature as a correct one —
+                    # and n is what tells the two apart.
+                    $lines.Add("    ${subName}: n=$($sub.N) — WITHHELD (n<5); escape rate and irreducible rate not computed for this standard")
+                }
+                else {
+                    $subEscape      = '{0:P1}' -f $sub.EscapeRate
+                    $subIrreducible = '{0:P1}' -f $sub.IrreducibleRate
+                    $lines.Add("    ${subName}: n=$($sub.N)  escape=$subEscape  irreducible=$subIrreducible")
+                }
+            }
+        }
 
         if ($stage.DataUntrustworthy) {
             $lines.Add("  DATA UNTRUSTWORTHY -- relaxation signal withheld (entry count mismatch)")
