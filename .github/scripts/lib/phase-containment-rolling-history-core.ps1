@@ -2365,13 +2365,38 @@ function Get-PhaseContainmentRollup {
         # contaminated number.
         #
         # The headline population therefore EXCLUDES brief-review-caught rows,
-        # on exactly the terms the reconciliation already excluded them: a rate
-        # offered as this stage's relaxation evidence must be computed over one
-        # adjudication standard. The brief-review rows are not discarded — they
-        # carry their own rate in the partition, under their own re-derived
-        # sufficiency guard. If removing them drops the arm below the floor,
-        # WITHHELD is the honest answer: the judge-adjudicated population
-        # really is too small to relax on.
+        # on exactly the terms the reconciliation already excluded them. The
+        # brief-review rows are not discarded — they carry their own rate in
+        # the partition, under their own re-derived sufficiency guard. If
+        # removing them drops the arm below the floor, WITHHELD is the honest
+        # answer: the judge-adjudicated population really is too small to
+        # relax on.
+        #
+        # Item-20 correction (#963 review): this exclusion is narrower than
+        # "one adjudication standard" — post-review-observer-caught rows
+        # (caught_stage='post-review-observer') are NOT excluded here and
+        # remain pooled into $nonApparatusEntries alongside judge-rulings-
+        # caught rows; only the completeness-reconciliation observed count a
+        # few lines below (M36, $observerCaughtCount) treats them specially.
+        # That is deliberate and direction-safe — but NOT because observer rows
+        # are unbiased. They are biased; the bias just runs the other way, and
+        # the earlier wording of this comment got that wrong (corrected by the
+        # post-fix review, finding M7).
+        #
+        # A plan-catchable brief row has escape_distance: 0 BY CONSTRUCTION, so
+        # brief rows can only push the pooled rate DOWN toward eligibility —
+        # see the probed 5-judge-rows-plus-16-brief-rows example above. An
+        # observer row is equally mechanical in the OPPOSITE direction:
+        # projection(post-review-observer) is 4 and the largest phase ordinal
+        # is 3, so Rule 11 makes escape_distance >= 1 for every observer row —
+        # `escape_distance: 0` does not even validate. Every pooled observer
+        # row is therefore counted an escape, pushing the rate UP, away from
+        # eligibility.
+        #
+        # So the honest statement is "biased, in the safe direction", not
+        # "unbiased": excluding brief rows removes a false-eligibility bias,
+        # while keeping observer rows can only ever make relaxation HARDER to
+        # reach. A guard that can only fail closed needs no exclusion.
         $briefCaughtEntries = @($allNonApparatusEntries | Where-Object {
                 $s = if ($_ -is [hashtable]) { [string]$_['caught_stage'] } else { [string]$_.caught_stage }
                 $s -eq 'brief-review'
@@ -2477,7 +2502,19 @@ function Get-PhaseContainmentRollup {
             # requires the veto to cover critical/high and the render to name both counts and
             # severity, so both counts are tallied here (not a bare boolean) for the renderer.
 
-            foreach ($e in $nonApparatusEntries) {
+            # THE VETO IS NOT A RATE (#963 review, item 26). $nonApparatusEntries
+            # is the brief-free population — correct for the RATE above, because
+            # a rate offered as relaxation evidence must be computed over one
+            # adjudication standard. The severity veto is a safety gate, not a
+            # rate: excluding rows from a safety gate can only ever LOOSEN it.
+            # Tallying it here over the same brief-excluded set meant a
+            # sustained critical or high brief-review finding vetoed nothing —
+            # the plan arm could render ELIGIBLE with an unaddressed critical
+            # finding sitting in the window, a regression this PR introduced
+            # via the rate fix. Tally over $allNonApparatusEntries — every
+            # adjudication standard — so severity evidence from a brief-review
+            # row still blocks relaxation exactly like a judge-adjudicated one.
+            foreach ($e in $allNonApparatusEntries) {
                 $sev = if ($e -is [hashtable]) { [string]$e['severity'] } else { [string]$e.severity }
                 if ($sev -eq 'critical') {
                     $criticalFindingCount++

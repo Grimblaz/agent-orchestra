@@ -600,8 +600,30 @@ function script:Set-PPLBriefHeadBlockOnComment {
         [Parameter(Mandatory)][string]$BriefHeadContent
     )
 
-    if (-not [regex]::IsMatch($BriefHeadContent, '(?m)^brief_dispositions[ \t]*:[ \t]*\r?$')) {
+    # HOW MANY HEADS, not just whether there is one (post-fix review, finding
+    # M2). Counting here is the ONLY guard that catches a payload carrying two
+    # concatenated `brief_dispositions:` heads, and that case is inside the
+    # accepted criterion for #963's item-3+7 ("second head in one payload not
+    # writer-refused"). Every other check below is structurally blind to it:
+    # the preamble scan truncates at the FIRST head's `findings:` key, so the
+    # second head's fields are out of scope and both uniqueness counts still
+    # read 1; and the column-0 check's `[regex]::Replace` is global, so on a
+    # two-head payload it strips BOTH key lines and collapses to the last
+    # head's body, which is fully indented and passes. Measured before this
+    # guard existed: a two-head payload was accepted and written, then read
+    # back `ParseStatus=could-not-verify Reason=duplicate-head` — the
+    # write-then-fail sequence this whole function exists to prevent.
+    #
+    # Deliberately ADDITIVE. Do not instead tighten the `[regex]::Replace`
+    # below to a single-replacement form: that global replace is precisely
+    # what makes the flat-head (column-0) check work, and narrowing it trades
+    # this defect for that one.
+    $headKeyMatches = @([regex]::Matches($BriefHeadContent, '(?m)^brief_dispositions[ \t]*:[ \t]*\r?$'))
+    if ($headKeyMatches.Count -eq 0) {
         return [PSCustomObject]@{ Success = $false; Reason = 'BriefHeadContent carries no line-start `brief_dispositions:` head; refusing to write a head no reader will recognize'; Action = $null }
+    }
+    if ($headKeyMatches.Count -gt 1) {
+        return [PSCustomObject]@{ Success = $false; Reason = "BriefHeadContent carries $($headKeyMatches.Count) line-start ``brief_dispositions:`` heads; this payload is two or more heads concatenated into one string. The reader fails loud on a duplicate head (DD3) and would render could-not-verify after this write had already landed. Refusing rather than writing one head's worth of a multi-head payload"; Action = $null }
     }
     if ([regex]::IsMatch($BriefHeadContent, '(?m)^[ \t]*<!--\s*judge-rulings(?:\s|-->|$)') -or
         [regex]::IsMatch($BriefHeadContent, '(?m)^\s*(?:-\s+)?judge_ruling\s*:')) {
@@ -622,15 +644,66 @@ function script:Set-PPLBriefHeadBlockOnComment {
         $m = [regex]::Match($headPreamble, $p)
         if ($m.Success) { $headPreamble = $headPreamble.Substring(0, $m.Index) }
     }
-    $assertion = [regex]::Match($headPreamble, '(?m)^[ \t]*convergence_filter_ran[ \t]*:[ \t]*(true|false)[ \t]*\r?$')
-    if (-not $assertion.Success) {
+    # AMBIGUITY IS ALSO A COULD-NOT-VERIFY CAUSE (#963 review, item 3+7). The
+    # original superset check verified PRESENCE — it never verified UNIQUENESS.
+    # A head with a duplicated assertion, a duplicated filtered_count, or an
+    # unrecognised disposition value wrote successfully here and then rendered
+    # could-not-verify at read time, exactly the write-then-fail sequence this
+    # function's docstring says it prevents. `-gt 1` refuses ambiguity the
+    # same way the reader's own `head-corrupt`/`unknown-disposition-value`
+    # paths do, rather than picking a match and hoping it was the right one.
+    $assertionMatches = @([regex]::Matches($headPreamble, '(?m)^[ \t]*convergence_filter_ran[ \t]*:[ \t]*(true|false)[ \t]*\r?$'))
+    if ($assertionMatches.Count -eq 0) {
         return [PSCustomObject]@{ Success = $false; Reason = 'BriefHeadContent carries no machine-readable `convergence_filter_ran: true|false` assertion as a key of the head itself; the emission check requires it and would render could-not-verify after this write had already landed'; Action = $null }
     }
-    if ($assertion.Groups[1].Value -ne 'true') {
+    if ($assertionMatches.Count -gt 1) {
+        return [PSCustomObject]@{ Success = $false; Reason = 'BriefHeadContent carries more than one `convergence_filter_ran` assertion; the reader fails loud on this ambiguity (DD3) and would render could-not-verify after this write had already landed. Refusing rather than picking one'; Action = $null }
+    }
+    if ($assertionMatches[0].Groups[1].Value -ne 'true') {
         return [PSCustomObject]@{ Success = $false; Reason = 'BriefHeadContent declares `convergence_filter_ran: false`. That is an honest declaration and it is why this is a refusal rather than a silent write: prosecution output no convergence filter narrowed cannot authorize a count, so persisting blocks against it would create rows no reader will ever count. Run the convergence filter, or record the review outcome in prose and emit no rows'; Action = $null }
     }
-    if (-not [regex]::IsMatch($headPreamble, '(?m)^[ \t]*filtered_count[ \t]*:[ \t]*\d+[ \t]*\r?$')) {
+    $filteredCountMatches = @([regex]::Matches($headPreamble, '(?m)^[ \t]*filtered_count[ \t]*:[ \t]*\d+[ \t]*\r?$'))
+    if ($filteredCountMatches.Count -eq 0) {
         return [PSCustomObject]@{ Success = $false; Reason = 'BriefHeadContent declares the filter ran but carries no `filtered_count` as a key of the head itself; the emission check consumes that count and would render could-not-verify after this write had already landed'; Action = $null }
+    }
+    if ($filteredCountMatches.Count -gt 1) {
+        return [PSCustomObject]@{ Success = $false; Reason = 'BriefHeadContent carries more than one `filtered_count` line; the reader treats a duplicated count as corruption (DD3) and would render could-not-verify after this write had already landed. Refusing rather than picking one'; Action = $null }
+    }
+    if ([regex]::IsMatch($headPreamble, '(?m)^[ \t]*-?[ \t]*(?:finding_id|disposition)[ \t]*:[ \t]*\S')) {
+        # A `disposition:`/`finding_id:` line in the PREAMBLE (before the
+        # `findings:` key or the first list item) means the caller's payload
+        # is malformed in a way the region split above cannot correct for.
+        #
+        # SCOPE, corrected by the post-fix review (finding M2). This check was
+        # originally described as catching "two heads concatenated". It does
+        # not, and cannot: the preamble is truncated at the FIRST head's
+        # `findings:` key, so a well-formed second head lies entirely outside
+        # the scanned region. Two-head payloads are caught by the head-key
+        # occurrence count at the top of this function; what this check
+        # actually catches is a head whose OWN preamble carries finding
+        # fields that belong under `findings:` — including the degenerate
+        # case of a second head flattened to column 0 so that its fields land
+        # in the first head's preamble.
+        #
+        # The `-?` alternative is NOT dead, though it is narrow: the list-item
+        # truncation pattern above is `^[ \t]*-[ \t]+` and REQUIRES whitespace
+        # after the hyphen, so a `-finding_id: X` line written without that
+        # space survives truncation and is caught only here.
+        return [PSCustomObject]@{ Success = $false; Reason = 'BriefHeadContent carries a `disposition:` or `finding_id:` line in the head''s own preamble, before its `findings:` key. Those fields belong to a finding entry, not to the head. Refusing — the reader would not attribute them as this head intends and would render a count the caller did not mean to assert'; Action = $null }
+    }
+    # A head whose body is not fully indented cannot be safely REPLACED on
+    # re-persist (#963 review, item 16). The span-replace below is bounded by
+    # the first following column-0 line, so a column-0 sub-key (a flat head)
+    # loses only its `brief_dispositions:` line on re-persist — every field
+    # after it survives, unindented, directly below the new head. Both count
+    # cross-checks then double together and ParseStatus stays `ok`: a SILENT
+    # doubling of the authorizing record's SustainedCount/DismissedCount, in
+    # the exact instrument #951 exists to make trustworthy. Refusing a flat
+    # head here is cheaper and more honest than making the span-replace
+    # correct for every possible indentation shape.
+    $headBodyAfterKey = [regex]::Replace($BriefHeadContent, '(?s)^.*?^brief_dispositions[ \t]*:[ \t]*\r?$\r?\n?', '', 'Multiline')
+    if ([regex]::IsMatch($headBodyAfterKey, '(?m)^\S')) {
+        return [PSCustomObject]@{ Success = $false; Reason = 'BriefHeadContent carries a column-0 (un-indented) line after `brief_dispositions:`; the head must be a single indented block so a re-persist''s span-replace always covers the WHOLE head. An un-indented head silently doubles the ledger''s counts on re-persist rather than replacing them'; Action = $null }
     }
 
     $currentBody = script:Get-PPLCommentBodyById -Owner $Owner -Repo $Repo -CommentId $CommentId
@@ -899,12 +972,15 @@ function Invoke-PersistPhaseLedger {
         `brief_dispositions:` authorizing head — the judge-free record that
         authorizes counting a brief review's phase-containment blocks, carrying
         the mandatory `convergence_filter_ran` assertion and its
-        `filtered_count`. -JudgeRulingsContent is accepted under this mode (it
-        is Mandatory on the shared signature) and never forwarded: a brief
-        review has no judge stage, so there is no judge ruling that could
-        describe it, and Set-PPLBriefHeadBlockOnComment additionally refuses
-        head content carrying judge vocabulary. Same discard precedent as
-        design mode below.
+        `filtered_count`. -JudgeRulingsContent is accepted under this mode and
+        never forwarded: a brief review has no judge stage, so there is no
+        judge ruling that could describe it, and
+        Set-PPLBriefHeadBlockOnComment additionally refuses head content
+        carrying judge vocabulary. Same discard precedent as design mode
+        below. (This sentence previously added "it is Mandatory on the shared
+        signature" — false since #963 review finding B made
+        -JudgeRulingsContent non-Mandatory with a '' default; corrected by the
+        post-fix review, finding M8.)
     .PARAMETER IssueNumber
         Required when -Mode plan. The issue carrying the `<!--
         plan-issue-{ID} -->` comment.

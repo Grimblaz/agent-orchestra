@@ -53,15 +53,24 @@
 .PARAMETER Repo
     Repository name.
 .PARAMETER Mode
-    'plan' or 'design'. See persist-phase-ledger-core.ps1's
-    Invoke-PersistPhaseLedger for the full parameter surface this selects
-    between.
+    'plan', 'design', or 'brief' (issue #951 chunk #956 added 'brief' — a
+    brief review's judge-free authorizing record). See
+    persist-phase-ledger-core.ps1's Invoke-PersistPhaseLedger for the full
+    parameter surface this selects between.
 .PARAMETER IssueNumber
     Required when -Mode plan.
 .PARAMETER DesignCommentId
     Required when -Mode design.
 .PARAMETER JudgeRulingsContent
-    The complete `<!-- judge-rulings ... -->` bare-head block text.
+    The complete `<!-- judge-rulings ... -->` bare-head block text. Required
+    for -Mode plan and -Mode design. Under -Mode brief it is accepted and
+    silently discarded, NOT rejected -- there is no mode gate on this
+    parameter. A brief review has no judge stage, so nothing here can be
+    written; the real refusal is content-shaped and lives in the writer, which
+    rejects judge vocabulary found inside -BriefHeadContent itself.
+.PARAMETER BriefHeadContent
+    The complete `brief_dispositions:` authorizing head text. Required for,
+    and only meaningful under, -Mode brief.
 .PARAMETER PhaseContainmentBlocks
     Zero or more complete phase-containment block strings. Defaults to an
     empty array (the legal zero-sustained-findings clean path).

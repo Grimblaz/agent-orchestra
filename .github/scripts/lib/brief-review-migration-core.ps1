@@ -112,8 +112,38 @@ function Get-BRMJudgeRulingsFindingIds {
     # is returned with a null ruling and fails loud downstream — the one thing
     # this migration must never do is invent a disposition, since inventing
     # provenance is the defect it exists to remove.
-    foreach ($m in [regex]::Matches($headMatch.Value, '(?ms)^\s*-\s+finding_id\s*:\s*(\S+)\s*$\s*^\s*judge_ruling\s*:\s*(\S+)\s*$')) {
-        $ids.Add([PSCustomObject]@{ Id = $m.Groups[1].Value; Ruling = $m.Groups[2].Value })
+    #
+    # Item-28 fix (#963 review), CORRECTED by the post-fix review (finding M1).
+    #
+    # The original single combined regex required BOTH lines to match as one
+    # unit, so a malformed or missing judge_ruling line silently dropped the
+    # finding_id too — the id never reached the caller, contradicting this
+    # function's own "returned with a null ruling" contract above. That is a
+    # real defect and is still fixed here.
+    #
+    # The FIRST attempt at the fix ran two separate `[regex]::Matches`
+    # enumerations and joined them on `.Index`, on the stated premise that
+    # "both regexes start matching at the same `^\s*-\s+finding_id` position".
+    # That premise is FALSE, and the post-fix panel measured it: the coupled
+    # pattern's greedy trailing `\s*$` consumes into the whitespace run
+    # BETWEEN entries, so `Matches` resumes its next scan one character past
+    # where the id-only pattern starts its next match. The `.Index` keys never
+    # collide and every id after the first reads back `Ruling = $null` —
+    # which `New-BRMBriefHead` then throws on. Measured: two blank lines
+    # between LF entries, or one blank line in a CRLF body, was enough
+    # (`N1=sustained N2=NULL N3=NULL`). Do NOT reintroduce an index join and
+    # try to correct the arithmetic; any such join stays hostage to that
+    # trailing `\s*`.
+    #
+    # ONE regex, with the judge_ruling half as an OPTIONAL non-capturing
+    # group. `Groups[2].Success` distinguishes "ruling read" from "ruling
+    # absent or malformed" without a second enumeration to reconcile. Safe
+    # against an id borrowing the NEXT entry's ruling because the inner `\s*`
+    # cannot cross the `-` list marker that opens the next entry.
+    $entryPattern = '(?m)^\s*-\s+finding_id\s*:\s*(\S+)\s*$(?:\s*^\s*judge_ruling\s*:\s*(\S+)\s*$)?'
+    foreach ($m in [regex]::Matches($headMatch.Value, $entryPattern)) {
+        $ruling = if ($m.Groups[2].Success) { $m.Groups[2].Value } else { $null }
+        $ids.Add([PSCustomObject]@{ Id = $m.Groups[1].Value; Ruling = $ruling })
     }
     return $ids.ToArray()
 }
@@ -190,8 +220,15 @@ function Convert-BRMLedgerBody {
     # resolved by re-running, never by diagnosis.
     $hasJudgeHead  = [regex]::IsMatch($Body, '(?m)^[ \t]*<!--\s*judge-rulings(?:\s|-->|$)')
     $hasBriefHead  = [regex]::IsMatch($Body, '(?m)^brief_dispositions[ \t]*:[ \t]*\r?$')
-    $hasOldPrefix  = [regex]::IsMatch($Body, '(?m)^finding_key[ \t]*:[ \t]*plan-stress-test:')
-    $hasOldStage   = [regex]::IsMatch($Body, '(?m)^caught_stage[ \t]*:[ \t]*plan-stress-test[ \t]*\r?$')
+    # Item-8 fix (#963 review): `[ \t]*` before the field name, matching
+    # Get-PhaseContainmentBlock's own tolerant field parser
+    # (phase-containment-core.ps1's `'^\s*finding_key\s*:...'` /
+    # `'^\s*caught_stage\s*:...'`). A column-0-only anchor here would leave a
+    # row the production reader accepts as indented silently undetected as
+    # "old" by this idempotency gate, which is the same class of bug the
+    # comment below already warns about for CRLF.
+    $hasOldPrefix  = [regex]::IsMatch($Body, '(?m)^[ \t]*finding_key[ \t]*:[ \t]*plan-stress-test:')
+    $hasOldStage   = [regex]::IsMatch($Body, '(?m)^[ \t]*caught_stage[ \t]*:[ \t]*plan-stress-test[ \t]*\r?$')
     if ((-not $hasJudgeHead) -and $hasBriefHead -and (-not $hasOldPrefix) -and (-not $hasOldStage)) {
         return [PSCustomObject]@{ Body = $Body; Changed = $false; Reason = 'already-corrected' }
     }
@@ -216,8 +253,14 @@ function Convert-BRMLedgerBody {
         # (Rule 12 never cross-checks prefix against stage) and the blocks
         # still COUNT, so a verdict check that only reads BlockCount reports
         # success on a corpus that was never relabelled.
-        $new = [regex]::Replace($new, '(?m)^caught_stage[ \t]*:[ \t]*plan-stress-test[ \t]*\r?$', 'caught_stage: brief-review')
-        $new = [regex]::Replace($new, '(?m)^finding_key[ \t]*:[ \t]*plan-stress-test:', 'finding_key: brief-review:')
+        # Item-8 fix (#963 review): capture and PRESERVE leading indentation
+        # rather than requiring column 0. Same rationale as the idempotency
+        # checks above — the production reader tolerates an indented field,
+        # so the rewrite must too, and stripping the indentation in the
+        # replacement would itself reshape a row the reader was already
+        # parsing correctly.
+        $new = [regex]::Replace($new, '(?m)^([ \t]*)caught_stage[ \t]*:[ \t]*plan-stress-test[ \t]*\r?$', '${1}caught_stage: brief-review')
+        $new = [regex]::Replace($new, '(?m)^([ \t]*)finding_key[ \t]*:[ \t]*plan-stress-test:', '${1}finding_key: brief-review:')
     }
     elseif ($plan.Action -eq 'withdraw') {
         # Archive before deleting (#963 review, finding AB). The rows carry

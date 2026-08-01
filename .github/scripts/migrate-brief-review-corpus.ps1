@@ -81,12 +81,56 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib/phase-containment-core.ps1')
 . (Join-Path $PSScriptRoot 'lib/phase-containment-emission-check-core.ps1')
 . (Join-Path $PSScriptRoot 'lib/brief-review-migration-core.ps1')
+# Item-5 fix (#963 review): dot-sourced for the shared
+# Get-MarkerWholeLinePattern builder. This script deliberately paginates the
+# REST comments endpoint directly (see script:Get-IssueComments) rather than
+# switching to that file's `gh issue view`-based comment listing.
+#
+# THIS DOT-SOURCE ALSO HAS A LOAD-TIME SIDE EFFECT, and it is load-bearing
+# (post-fix review, finding M16). marker-transport-core.ps1 sets
+# [Console]::OutputEncoding to UTF-8 as its own first top-level statement,
+# which fires here at dot-source time. That pin governs how `& gh api` stdout
+# is decoded on the reads below AND how the ConvertTo-Json payload is encoded
+# on its way into `gh api --input -`. This script had no such pin before.
+# Do NOT "simplify" this away by inlining a local one-line pattern builder:
+# the bodies are ASCII today, so nothing would visibly break, but the
+# protection against a non-ASCII round-trip would be silently gone.
+. (Join-Path $PSScriptRoot 'lib/marker-transport-core.ps1')
 
 function script:Get-IssueComments {
     param([Parameter(Mandatory)][int]$Number)
-    $raw = & gh api "repos/$RepoOwner/$RepoName/issues/$Number/comments" --paginate 2>$null
-    if ($LASTEXITCODE -ne 0) { throw "gh api failed reading comments for issue #$Number (exit $LASTEXITCODE)" }
-    return @(($raw | Out-String) | ConvertFrom-Json)
+    # Item-11 fix (#963 review): capture stderr instead of discarding it, so a
+    # `gh` failure's actual message (auth expired, rate-limited, network) rides
+    # along in the thrown error rather than forcing a re-run just to see it.
+    $raw = & gh api "repos/$RepoOwner/$RepoName/issues/$Number/comments" --paginate 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        $stderrText = ($raw | ForEach-Object { $_.ToString() }) -join "`n"
+        throw "gh api failed reading comments for issue #$Number (exit $LASTEXITCODE): $stderrText"
+    }
+    # Strip ErrorRecords before parsing (post-fix review, finding M3). `2>&1`
+    # is what lets the failure path above report gh's actual message, but it
+    # also merges stderr into $raw on the SUCCESS path, where any
+    # stderr-on-zero-exit line would be prepended to the JSON text and make
+    # ConvertFrom-Json throw a parse error instead. Keep the diagnostic, drop
+    # the hazard: only the stdout strings reach the parser.
+    return @((($raw | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] }) | Out-String) | ConvertFrom-Json)
+}
+
+function script:Get-SingleCommentBody {
+    param([Parameter(Mandatory)][long]$CommentId)
+    # Item-12 support: single-comment re-fetch used as the compare-and-swap
+    # check immediately before a PATCH (see the write branch below).
+    $raw = & gh api "repos/$RepoOwner/$RepoName/issues/comments/$CommentId" 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        $stderrText = ($raw | ForEach-Object { $_.ToString() }) -join "`n"
+        throw "gh api failed reading comment $CommentId immediately before PATCH (exit $LASTEXITCODE): $stderrText"
+    }
+    # Same ErrorRecord strip as Get-IssueComments (post-fix review, finding M3),
+    # and it matters more here: this call sits inside the compare-and-swap
+    # immediately before the PATCH, so a parse throw would abort the migration
+    # instead of producing the diagnosable abort item-12 was written to give.
+    $parsed = (($raw | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] }) | Out-String) | ConvertFrom-Json
+    return [string]$parsed.body
 }
 
 function script:Set-CommentBody {
@@ -95,8 +139,12 @@ function script:Set-CommentBody {
     # can send the literal path string, and never a shell-interpolated body:
     # these bodies contain backticks, dollar signs and newlines.
     $payload = @{ body = $Body } | ConvertTo-Json -Depth 3 -Compress
-    $payload | & gh api "repos/$RepoOwner/$RepoName/issues/comments/$CommentId" -X PATCH --input - > $null 2>&1
-    if ($LASTEXITCODE -ne 0) { throw "gh api PATCH failed for comment $CommentId (exit $LASTEXITCODE)" }
+    # Item-11 fix (#963 review): capture stderr instead of discarding it.
+    $patchOutput = $payload | & gh api "repos/$RepoOwner/$RepoName/issues/comments/$CommentId" -X PATCH --input - 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        $stderrText = ($patchOutput | ForEach-Object { $_.ToString() }) -join "`n"
+        throw "gh api PATCH failed for comment $CommentId (exit $LASTEXITCODE): $stderrText"
+    }
 }
 
 $plannedIssues = if ($Issue -gt 0) { @($Issue) } else { @($script:BRMPlannedCorrections | ForEach-Object { $_.Issue }) }
@@ -120,7 +168,13 @@ foreach ($issueNumber in $plannedIssues) {
     # "THE APPEND RACE IS NARROWED, NOT CLOSED".
     $comments = script:Get-IssueComments -Number $issueNumber
     $ledgerMarker = "<!-- phase-containment-ledger-$issueNumber -->"
-    $sibling = @($comments | Where-Object { $_.body -and $_.body.Contains($ledgerMarker) }) | Select-Object -First 1
+    # Item-5 fix (#963 review): line-anchored, whole-line match via the
+    # repo's shared Get-MarkerWholeLinePattern convention (see
+    # Find-CommentIdByExactMarker in marker-transport-core.ps1), not a
+    # substring .Contains() check. A substring match would select a comment
+    # that merely quotes the marker in prose ahead of the real sibling.
+    $ledgerLinePattern = Get-MarkerWholeLinePattern -Marker $ledgerMarker
+    $sibling = @($comments | Where-Object { $_.body -and ([regex]::IsMatch([string]$_.body, $ledgerLinePattern)) }) | Select-Object -First 1
     if ($null -eq $sibling) {
         Write-Host "  FAILED: no comment carrying $ledgerMarker found."
         $overallOk = $false
@@ -128,15 +182,61 @@ foreach ($issueNumber in $plannedIssues) {
     }
 
     $result = Convert-BRMLedgerBody -Body ([string]$sibling.body) -Issue $issueNumber
+    # Item-13 fix (#963 review): track the ACTUAL write outcome instead of
+    # inferring it later from $WhatIfPreference. ShouldProcess can return
+    # false without -WhatIf being set (a declined -Confirm prompt), and the
+    # old inference treated that case as "a real write happened" for
+    # verification purposes.
+    $didWrite = $false
     if (-not $result.Changed) {
         Write-Host "  no-op ($($result.Reason)) — this issue is already corrected. Re-running is how an interrupted run is resolved."
     }
     elseif ($PSCmdlet.ShouldProcess("comment $($sibling.id) on issue #$issueNumber", 'PATCH ledger sibling body')) {
+        # Item-12 fix (#963 review): compare-and-swap immediately before the
+        # PATCH. `gh api` offers no If-Match/ETag precondition for issue
+        # comments, so this cannot CLOSE the append race the header already
+        # documents as "narrowed, not closed" -- but it DETECTS the exact
+        # window that race describes (a concurrent append landing between the
+        # read above and this write) instead of silently clobbering it.
+        # `-cne`, never `-ne` (post-fix review, finding M13). PowerShell's `-ne`
+        # on strings is case-INSENSITIVE and culture-sensitive, so a concurrent
+        # edit differing only in letter case would compare EQUAL and sail
+        # through the very check whose only job is detecting a lost update.
+        # The ordinal form can produce a spurious abort where the loose one did
+        # not, which is the fail-closed direction and therefore acceptable.
+        $liveBodyNow = script:Get-SingleCommentBody -CommentId ([long]$sibling.id)
+        if ($liveBodyNow -cne [string]$sibling.body) {
+            $overallOk = $false
+            Write-Host "  ABORTED: comment $($sibling.id) changed since it was read (concurrent write detected). Re-run to pick up the new body rather than overwriting it."
+            continue
+        }
         script:Set-CommentBody -CommentId ([long]$sibling.id) -Body $result.Body
         Write-Host "  wrote comment $($sibling.id)."
+        $didWrite = $true
+    }
+    elseif ($WhatIfPreference) {
+        Write-Host "  WhatIf: would rewrite comment $($sibling.id) ($($result.Body.Length) chars vs $($sibling.body.Length))."
     }
     else {
-        Write-Host "  WhatIf: would rewrite comment $($sibling.id) ($($result.Body.Length) chars vs $($sibling.body.Length))."
+        # A DECLINED -Confirm, not a dry run (post-fix review, finding M14).
+        #
+        # ShouldProcess returns false for two very different reasons, and item-13
+        # originally collapsed them. `-WhatIf` is a dry run: the operator asked
+        # what WOULD happen, nothing is wrong, exit 0 is correct. A declined
+        # `-Confirm` is a REFUSAL: the operator was shown this exact write and
+        # said no, so the corpus is knowingly left uncorrected and the run must
+        # not report success. Before item-13 the decline fell through to the
+        # re-fetch branch, failed verification against the unchanged corpus and
+        # exited 1; item-13's $didWrite correctly redirected the verify TARGET
+        # but also made the decline verify green and exit 0 under the banner
+        # "Migration complete and verified at verdict grain." An automation
+        # wrapper keying on $LASTEXITCODE would read a refused migration as a
+        # completed one.
+        #
+        # $overallOk is set here rather than in a shared else branch on purpose:
+        # doing it for both cases would make a plain -WhatIf dry run exit 1.
+        $overallOk = $false
+        Write-Host "  DECLINED: the write to comment $($sibling.id) was not confirmed, so this issue is NOT corrected. Exiting non-zero so a caller cannot mistake a refusal for a completed migration."
     }
 
     # ------------------------------------------------------------------
@@ -149,9 +249,12 @@ foreach ($issueNumber in $plannedIssues) {
     # invisible to every reader, which is exactly what a caught_stage-only
     # relabel produces. Only re-rendering the verdict fails in that case.
     # ------------------------------------------------------------------
-    $verifyBodies = if ($WhatIfPreference -or -not $result.Changed) {
-        # Nothing was written: verify against the PROPOSED corpus so -WhatIf
-        # still exercises the real predicate rather than reporting nothing.
+    $verifyBodies = if (-not $didWrite) {
+        # Item-13 fix (#963 review): branch on the captured $didWrite outcome,
+        # not $WhatIfPreference -or -not $result.Changed. Covers -WhatIf, the
+        # already-corrected no-op, AND a declined -Confirm prompt uniformly:
+        # none of them wrote anything, so all three verify against the
+        # PROPOSED corpus rather than re-fetching as though the PATCH landed.
         @($comments | ForEach-Object {
                 if ($_.id -eq $sibling.id) { $result.Body } else { [string]$_.body }
             })

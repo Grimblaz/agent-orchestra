@@ -254,6 +254,100 @@ Describe 'U1: brief-review records carry no judge-adjudication vocabulary (issue
         $core | Should -Match 'BriefHeadContent carries judge vocabulary'
     }
 
+    Context 'M2: the writer is exercised, not just grepped' {
+
+        # The post-fix review (M9) found Set-PPLBriefHeadBlockOnComment was
+        # never INVOKED by any test — every reference in the tree was a
+        # source-text assertion, so the whole refusal block was deletable in
+        # silence. These cases call the real function. The network read is
+        # stubbed to $null, so reaching "Could not read comment" proves every
+        # validation passed and the function was about to write; any other
+        # Reason is a refusal that fired.
+        BeforeAll {
+            . (Join-Path $script:RepoRoot '.github/scripts/lib/find-or-upsert-comment.ps1')
+            . (Join-Path $script:RepoRoot '.github/scripts/lib/marker-transport-core.ps1')
+            . (Join-Path $script:RepoRoot 'skills/session-memory-contract/scripts/persist-phase-ledger-core.ps1')
+            function script:Get-PPLCommentBodyById { param($Owner, $Repo, $CommentId) return $null }
+
+            $script:CanonHead = @(
+                'brief_dispositions:'
+                '  convergence_filter_ran: true'
+                '  filtered_count: 8'
+                '  findings:'
+                '    - finding_id: N1'
+                '      disposition: incorporate'
+            ) -join "`n"
+
+            function script:InvokeWriter {
+                param([string]$Head)
+                $r = Set-PPLBriefHeadBlockOnComment -Owner o -Repo r -CommentId 1 -ExpectedMarker 'M' -BriefHeadContent $Head
+                # Normalise to 'accepted' / the refusal reason.
+                if ($r.Reason -like 'Could not read comment*') { return 'accepted' }
+                return [string]$r.Reason
+            }
+        }
+
+        It 'accepts a canonical head (LF and CRLF) — the guards are not simply refusing everything' {
+            # Without this, every refusal assertion below would pass just as
+            # well against a function that rejected its own valid input.
+            script:InvokeWriter -Head $script:CanonHead | Should -BeExactly 'accepted'
+            script:InvokeWriter -Head ($script:CanonHead -replace "`n", "`r`n") | Should -BeExactly 'accepted'
+        }
+
+        It 'REFUSES two concatenated heads — <label>' -TestCases @(
+            @{ label = 'LF' ; nl = "`n" }
+            @{ label = 'CRLF'; nl = "`r`n" }
+        ) {
+            param($label, $nl)
+            # The finding M2 case. Every other guard is structurally blind to
+            # it: the preamble scan truncates at the FIRST head's findings:
+            # key, so both uniqueness counts still read 1, and the column-0
+            # check's global replace collapses to the last head's body, which
+            # is properly indented. Only the head-key occurrence count sees it.
+            # Measured before the fix: accepted, written, then read back
+            # ParseStatus=could-not-verify Reason=duplicate-head.
+            $twoHeads = (($script:CanonHead + "`n" + $script:CanonHead) -replace "`n", $nl)
+            script:InvokeWriter -Head $twoHeads | Should -Match 'line-start .?brief_dispositions:.? heads'
+        }
+
+        It 'still refuses everything it refused before the two-head guard was added' {
+            # The two-head guard is ADDITIVE. If it had been implemented by
+            # narrowing the span-replace instead, the flat-head case below
+            # would have regressed — that is why the judge made "do not tighten
+            # the global replace" a binding constraint on this fix.
+            $flat = @(
+                'brief_dispositions:'
+                'convergence_filter_ran: true'
+                'filtered_count: 8'
+                'findings:'
+                '- finding_id: N1'
+                '  disposition: incorporate'
+            ) -join "`n"
+            script:InvokeWriter -Head $flat | Should -Match 'column-0 \(un-indented\) line'
+
+            script:InvokeWriter -Head ($script:CanonHead -replace '  filtered_count: 8', "  convergence_filter_ran: true`n  filtered_count: 8") |
+                Should -Match 'more than one .?convergence_filter_ran'
+            script:InvokeWriter -Head ($script:CanonHead -replace '  findings:', "  filtered_count: 9`n  findings:") |
+                Should -Match 'more than one .?filtered_count'
+            script:InvokeWriter -Head ($script:CanonHead -replace '      disposition: incorporate', '      judge_ruling: sustained') |
+                Should -Match 'carries judge vocabulary'
+            script:InvokeWriter -Head ($script:CanonHead -replace 'convergence_filter_ran: true', 'convergence_filter_ran: false') |
+                Should -Match 'declares .?convergence_filter_ran: false'
+            script:InvokeWriter -Head 'nothing_here: true' |
+                Should -Match 'no line-start .?brief_dispositions:.? head'
+        }
+
+        It 'refuses finding fields in the head''s own preamble, including the hyphen-without-space form' {
+            # The `-?` alternative in the preamble scan is narrow but NOT dead:
+            # the list-item truncation requires whitespace after the hyphen, so
+            # `-finding_id: X` survives truncation and is caught only here.
+            script:InvokeWriter -Head ($script:CanonHead -replace '  findings:', "  finding_id: X`n  findings:") |
+                Should -Match 'in the head''s own preamble'
+            script:InvokeWriter -Head ($script:CanonHead -replace '  findings:', "  -finding_id: X`n  findings:") |
+                Should -Match 'in the head''s own preamble'
+        }
+    }
+
     It 'every committed brief-review record in the tree is judge-free, and the enumeration is non-empty' {
         # Non-emptiness asserted SEPARATELY, so "no offending record" and
         # "no record at all" can never be the same green.
@@ -523,6 +617,41 @@ Describe 'U5: the rollup partitions the plan arm by adjudication standard (issue
         $armAfter = (Get-PhaseContainmentRollup -Entries $diluted).Stages['plan-stress-test']
         $armAfter.RelaxationEligible | Should -BeFalse -Because 'brief-review rows are a different adjudication standard and must not reach the relaxation number'
         $armAfter.EscapeRate | Should -Be $armBefore.EscapeRate -Because 'the headline rate must be identical with and without the brief population'
+    }
+
+    It 'THE SEVERITY VETO SPANS EVERY STANDARD — a sustained critical brief finding blocks relaxation' {
+        # Post-fix review, finding M5. The item-26 fix (tallying the veto over
+        # $allNonApparatusEntries rather than the brief-excluded
+        # $nonApparatusEntries) shipped with NO test, and the mutation proved
+        # it: reverting that one loop variable left the whole suite green
+        # while the rendered verdict flipped from NOT ELIGIBLE to ELIGIBLE.
+        #
+        # The distinction the veto turns on: a RATE offered as relaxation
+        # evidence must be computed over ONE adjudication standard (that is
+        # the dilution probe directly above). A VETO is a safety gate, not a
+        # rate — excluding rows from it can only ever LOOSEN it. So the
+        # headline rate stays judge-only while the veto spans everything.
+        $judgeOnly = @(1..5 | ForEach-Object { script:New-Entry -Stage 'plan-stress-test' -Distance 0 -Severity 'medium' })
+        $armClean = (Get-PhaseContainmentRollup -Entries $judgeOnly).Stages['plan-stress-test']
+        $armClean.RelaxationEligible | Should -BeTrue -Because 'five medium judge rows with zero escapes is the eligible baseline this test perturbs'
+
+        # One critical finding, caught at brief-review — a standard the
+        # headline rate deliberately excludes. It must still veto.
+        $withCritical = @($judgeOnly + @(script:New-Entry -Stage 'brief-review' -Distance 0 -Severity 'critical'))
+        $armVetoed = (Get-PhaseContainmentRollup -Entries $withCritical).Stages['plan-stress-test']
+        $armVetoed.RelaxationEligible | Should -BeFalse -Because 'an unaddressed critical finding in the window blocks relaxation regardless of which adjudication standard caught it'
+        $armVetoed.CriticalFindingCount | Should -Be 1
+
+        # The rate itself must be untouched — this is the veto firing, not the
+        # brief row leaking into the headline population.
+        $armVetoed.EscapeRate | Should -Be $armClean.EscapeRate -Because 'the veto spans standards but the RATE still must not'
+        $armVetoed.N | Should -Be $armClean.N
+
+        # Same for high severity, so the fix is not pinned on one enum value.
+        $withHigh = @($judgeOnly + @(script:New-Entry -Stage 'brief-review' -Distance 0 -Severity 'high'))
+        $armHigh = (Get-PhaseContainmentRollup -Entries $withHigh).Stages['brief-review']
+        (Get-PhaseContainmentRollup -Entries $withHigh).Stages['plan-stress-test'].RelaxationEligible | Should -BeFalse
+        (Get-PhaseContainmentRollup -Entries $withHigh).Stages['plan-stress-test'].HighFindingCount | Should -Be 1
     }
 
     It 'the exclusion is disclosed in the render, not silent' {
@@ -1189,16 +1318,121 @@ Describe 'Migration guard and render coverage (PR #963 review: O, AB, AF)' {
             ($v.Failures -join ' ') | Should -Not -Match 'BlockCount' -Because 'the counts are correct here; only the stage did not move'
         }
 
-        It 'an INDENTED field set the rewrite skips is caught by the guard' {
+        It 'an INDENTED field set is RELABELLED, not skipped, with its indentation preserved' {
+            # RETARGETED by item-8 of the PR #963 external review. This test
+            # previously asserted the opposite — that the rewrite SKIPS an
+            # indented field set and the guard catches the skip. That was a
+            # faithful pin of the behavior at the time, but the behavior was
+            # itself the defect: Get-PhaseContainmentBlock's field parser is
+            # `^\s*finding_key\s*:` / `^\s*caught_stage\s*:` (tolerant of
+            # indentation), so a column-0-only rewrite left rows the production
+            # reader accepts sitting un-migrated. Item-8 made the rewrite as
+            # tolerant as the parser, which retires this input from the
+            # "rewrite skips it" class entirely — the guard has nothing left to
+            # catch here because there is no longer a skip.
+            #
+            # The Context's charter (the guard is as discriminating as the
+            # parser) is unchanged and still covered by the two tests above,
+            # whose inputs the rewrite genuinely does skip. This test now pins
+            # item-8's own fix instead, and is discriminating in the same
+            # direction: reverting either relabel regex to a column-0 anchor
+            # turns every assertion below red, because neither half would move.
             $before = script:New-ContaminatedForTail -Issue 939 -Rows 29 -Indent '  '
             $after = (Convert-BRMLedgerBody -Body $before -Issue 939).Body
-            (Test-BRMCorrectedVerdict -Bodies @((script:New-HistPlan -Issue 939), $after) -Issue 939).Ok | Should -BeFalse
+
+            # Both halves of the coupled rewrite asserted SEPARATELY and at
+            # their literal indented shape — never a recount, which passes on
+            # the half-done state where the prefix moved and the stage did not.
+            ([regex]::Matches($after, '(?m)^  finding_key: brief-review:939:')).Count |
+                Should -Be 29 -Because 'every finding_key must relabel AND keep its two-space indentation'
+            ([regex]::Matches($after, '(?m)^  caught_stage: brief-review[ \t]*\r?$')).Count |
+                Should -Be 29 -Because 'every caught_stage must relabel AND keep its two-space indentation'
+            $after | Should -Not -Match '(?m)^(finding_key|caught_stage):' -Because 'the replacement must preserve indentation, not flatten the row to column 0'
+            $after | Should -Not -Match 'plan-stress-test:939:' -Because 'no old-prefix row may survive the rewrite'
+
+            # And the verdict — the grain that actually matters — now verifies.
+            (Test-BRMCorrectedVerdict -Bodies @((script:New-HistPlan -Issue 939), $after) -Issue 939).Ok | Should -BeTrue
+        }
+
+        It 'an INDENTED corpus is recognised as already-corrected on a second pass' {
+            # Item-8 also widened the idempotency gate's $hasOldPrefix /
+            # $hasOldStage probes to tolerate indentation. Without that half,
+            # re-running over an indented corpus that HAD been corrected would
+            # still read as needing work in one direction or the other; the
+            # migration's documented resolution for an interrupted run is
+            # "re-run", so a non-idempotent indented path breaks the only
+            # recovery procedure the script offers.
+            $before = script:New-ContaminatedForTail -Issue 939 -Rows 29 -Indent '  '
+            $once = (Convert-BRMLedgerBody -Body $before -Issue 939).Body
+            $twice = Convert-BRMLedgerBody -Body $once -Issue 939
+            $twice.Changed | Should -BeFalse
+            $twice.Reason | Should -BeExactly 'already-corrected'
+            $twice.Body | Should -BeExactly $once
         }
 
         It 'CONTROL: the corpus shape the migration actually targets still verifies' {
             $before = script:New-ContaminatedForTail -Issue 939 -Rows 29
             $after = (Convert-BRMLedgerBody -Body $before -Issue 939).Body
             (Test-BRMCorrectedVerdict -Bodies @((script:New-HistPlan -Issue 939), $after) -Issue 939).Ok | Should -BeTrue
+        }
+    }
+
+    Context 'M1: judge-rulings ids and their rulings survive blank lines and CRLF' {
+
+        BeforeAll {
+            function script:New-JudgeHead {
+                param([int]$Blanks = 0, [string]$Nl = "`n", [int]$OmitRulingFor = 0)
+                $lines = [System.Collections.Generic.List[string]]::new()
+                for ($i = 1; $i -le 3; $i++) {
+                    if ($i -gt 1) { for ($b = 0; $b -lt $Blanks; $b++) { $lines.Add('') } }
+                    $lines.Add("- finding_id: N$i")
+                    if ($i -ne $OmitRulingFor) { $lines.Add('  judge_ruling: sustained') }
+                }
+                $inner = $lines -join $Nl
+                return ('<!-- phase-containment-ledger-939 -->' + $Nl + $Nl + '<!-- judge-rulings' + $Nl + $inner + $Nl + '-->' + $Nl)
+            }
+        }
+
+        # The post-fix review (M1) found the FIRST attempt at this fix — two
+        # regex enumerations joined on .Index — silently returned Ruling=$null
+        # for every id after the first whenever entries were separated by blank
+        # lines, because the coupled pattern's greedy trailing \s*$ consumed
+        # into the gap and desynchronised the two enumerations. Downstream that
+        # is a hard throw in New-BRMBriefHead. These cases are the exact
+        # trigger boundaries the panel measured.
+        It 'reads every id and ruling across <label>' -TestCases @(
+            @{ label = 'LF, no blank lines';   blanks = 0; nl = "`n" }
+            @{ label = 'LF, one blank line';   blanks = 1; nl = "`n" }
+            @{ label = 'LF, two blank lines';  blanks = 2; nl = "`n" }
+            @{ label = 'LF, three blank lines'; blanks = 3; nl = "`n" }
+            @{ label = 'CRLF, no blank lines'; blanks = 0; nl = "`r`n" }
+            @{ label = 'CRLF, one blank line'; blanks = 1; nl = "`r`n" }
+            @{ label = 'CRLF, two blank lines'; blanks = 2; nl = "`r`n" }
+        ) {
+            param($label, $blanks, $nl)
+            $r = @(Get-BRMJudgeRulingsFindingIds -Body (script:New-JudgeHead -Blanks $blanks -Nl $nl))
+            $r.Count | Should -Be 3 -Because 'every finding_id in the head must be returned'
+            @($r | ForEach-Object { $_.Id }) -join ',' | Should -BeExactly 'N1,N2,N3'
+            @($r | Where-Object { $null -eq $_.Ruling }).Count | Should -Be 0 -Because 'every one of these entries carries a well-formed judge_ruling line'
+        }
+
+        It 'an id whose judge_ruling is ABSENT is returned with a null ruling, not dropped' {
+            # This is the case item-28 was accepted to fix in the first place.
+            # The pre-fix combined regex dropped the id entirely, producing a
+            # head with fewer findings than rows — the false-provenance shape
+            # this whole migration exists to remove.
+            $r = @(Get-BRMJudgeRulingsFindingIds -Body (script:New-JudgeHead -OmitRulingFor 2))
+            $r.Count | Should -Be 3 -Because 'the id must survive even when its ruling cannot be read'
+            @($r | ForEach-Object { $_.Id }) -join ',' | Should -BeExactly 'N1,N2,N3'
+            $r[1].Ruling | Should -BeNullOrEmpty
+            $r[0].Ruling | Should -BeExactly 'sustained'
+            $r[2].Ruling | Should -BeExactly 'sustained' -Because 'a ruling-less id must not consume the NEXT entry''s ruling'
+        }
+
+        It 'a null ruling reaches New-BRMBriefHead as a refusal, never an invented disposition' {
+            $findings = @(Get-BRMJudgeRulingsFindingIds -Body (script:New-JudgeHead -OmitRulingFor 2))
+            { New-BRMBriefHead -Findings $findings -ConvergenceFilterRan $true -FilteredCount 0 } |
+                Should -Throw -ExpectedMessage '*has no faithful brief-review disposition*'
         }
     }
 

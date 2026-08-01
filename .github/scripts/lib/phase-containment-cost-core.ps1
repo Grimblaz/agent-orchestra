@@ -805,10 +805,25 @@ function Format-ReviewCostSection {
     .DESCRIPTION
         Presentation-only: never computes rates itself (Get-ReviewCostRollup
         owns aggregation) and never touches the frozen value renderer in
-        phase-containment-rolling-history-core.ps1. Stage order mirrors
-        Format-PhaseContainmentReport's own stage order (design-challenge,
-        plan-stress-test, code-review) so the two sections read as one
-        coherent pass.
+        phase-containment-rolling-history-core.ps1.
+
+        STAGE ORDER, and the one place the two sections deliberately differ.
+        This section renders FOUR blocks: design-challenge, brief-review,
+        plan-stress-test, code-review. Format-PhaseContainmentReport renders
+        THREE — its $stageOrder is design-challenge, plan-stress-test,
+        code-review, and issue #951 recorded brief-review's absence from the
+        value-side stage map as a deliberate decision, not an oversight.
+        Brief-review has no value-report block of its own; it surfaces there
+        inside the plan-stress-test block's "By adjudication standard"
+        breakdown, which is exactly what this section's brief-review
+        value-side reference line points the reader at.
+
+        (Two prior versions of this paragraph were each wrong in one half:
+        the original claimed a three-stage order for this section, which
+        undercounted its own render; its #963 correction then claimed
+        Format-PhaseContainmentReport had gained a brief-review stage, which
+        it has not. Both halves are stated separately above so a future
+        reader can check each against its own file.)
 
         Per stage block, lines render in this order (issue #768 s5
         new-section ordering): a value-side reference line (pointing back

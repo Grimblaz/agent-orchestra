@@ -2919,11 +2919,15 @@ function Test-BriefJudgeHeadContradiction {
         which is every brief from #956 onward — but the counterfactual that
         justified it does not hold and is not repeated here.
 
-        Deliberately keyed on the DECLARATION arm only, never on
-        Test-BriefLedgerHeadPresent's head arm. Post-migration a corrected
-        historical ledger carries a brief head and no judge head, so keying on
-        the head arm would add nothing; keying on it would instead risk
-        flagging a mixed sibling during the migration's own write window.
+        CORRECTED (#963 review, item 25) — the paragraph that used to stand
+        here said this check was "deliberately keyed on the DECLARATION arm
+        only, never on Test-BriefLedgerHeadPresent's head arm." That became
+        false the moment finding E's fix (below) widened the predicate to the
+        union of both arms, and the two paragraphs sat twelve lines apart
+        making opposite claims about the same function. Keyed on the UNION:
+        see the implementation comment immediately below for why, and update
+        `skills/plan-authoring/SKILL.md` § Brief-review emission in step with
+        this file if the scope ever changes again.
     #>
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Bodies,
@@ -3119,6 +3123,7 @@ function Get-EmissionGap {
     # them would hide the honest declared skip inside a generic corruption
     # label.
     $sawBriefFilterUnasserted = $false
+    $sawBriefFilterValueUnrecognized = $false
     $sawBriefFilterNotRun = $false
     $sawAnyBriefHead = $false
     $sawBriefDuplicateHead = $false
@@ -3269,8 +3274,16 @@ function Get-EmissionGap {
                 if ($briefTally.ParseStatus -eq 'could-not-verify') {
                     $anyCouldNotVerify = $true
                     switch ($briefTally.Reason) {
+                        # Kept as two DISTINCT flags (#963 review, item 19).
+                        # Collapsing them here re-erased the exact distinction
+                        # Get-BriefReviewSustainedCountInternal was built to
+                        # make — "the assertion is absent" vs. "the assertion
+                        # is present with a value this reader does not
+                        # recognise" — sending a maintainer looking for a line
+                        # that is right in front of them, which is the finding
+                        # AA fix this regressed.
                         'filter-unasserted'         { $sawBriefFilterUnasserted = $true }
-                        'filter-value-unrecognized' { $sawBriefFilterUnasserted = $true }
+                        'filter-value-unrecognized' { $sawBriefFilterValueUnrecognized = $true }
                         'filter-not-run'            { $sawBriefFilterNotRun     = $true }
                         'head-missing'              { $sawFallbackFired         = $true }
                         'duplicate-head'            { $sawBriefDuplicateHead    = $true }
@@ -3516,6 +3529,12 @@ function Get-EmissionGap {
     }
     elseif ($sawBriefFilterNotRun) {
         'filter-not-run'
+    }
+    elseif ($sawBriefFilterValueUnrecognized) {
+        # Ahead of 'filter-unasserted' (#963 review, item 19): the assertion
+        # IS present here, so telling the maintainer it is missing points at
+        # the wrong edit — the field is right in front of them, unreadable.
+        'filter-value-unrecognized'
     }
     elseif ($sawBriefFilterUnasserted) {
         'filter-unasserted'
