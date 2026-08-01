@@ -3802,8 +3802,17 @@ Describe 'Add-JudgeRulingsBlock - sibling append primitive with entry-level posi
 # Restructured to scan BOTH files' raw source text.
 # ---------------------------------------------------------------------------
 
+# Issue #951: the guard rises from six to seven. Get-BriefReviewSustainedCountInternal
+# (phase-containment-emission-check-core.ps1) declares the seventh copy: the
+# brief-review surface counts dispositions under the same key-anchor discipline
+# the design-challenge surface's GH-5 fix established, so a free-text
+# disposition_rationale quoting "disposition: incorporate" cannot be miscounted
+# as a real entry. The count is bumped deliberately rather than the new copy
+# being exempted — the guard's whole value is that every copy is accounted for,
+# and an exemption would be the syntax-shaped narrowing that lets the next one
+# through unnoticed.
 Describe 'Key-anchor pattern — all literal copies stay byte-identical (PF2-F1 drift guard)' {
-    It 'finds exactly six literal copies of the key-anchor pattern across both files, all byte-identical' {
+    It 'finds exactly seven literal copies of the key-anchor pattern across both files, all byte-identical' {
         # M11 fix (issue #842 post-review): the search itself is
         # [regex]::Escape(...) of a fixed literal, so every match this scan
         # can possibly find is already byte-identical to that literal by
@@ -3819,7 +3828,7 @@ Describe 'Key-anchor pattern — all literal copies stay byte-identical (PF2-F1 
         $costCoreSrcPath = Join-Path $PSScriptRoot '..' 'lib' 'phase-containment-cost-core.ps1'
         $combinedSrc = (Get-Content -LiteralPath $emissionCheckSrcPath -Raw) + (Get-Content -LiteralPath $costCoreSrcPath -Raw)
         $copies = [regex]::Matches($combinedSrc, [regex]::Escape('(?:^\s*(?:-\s+)?|[{,]\s*)'))
-        $copies.Count | Should -Be 6
+        $copies.Count | Should -Be 7
     }
 }
 

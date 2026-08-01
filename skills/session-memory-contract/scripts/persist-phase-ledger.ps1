@@ -53,15 +53,24 @@
 .PARAMETER Repo
     Repository name.
 .PARAMETER Mode
-    'plan' or 'design'. See persist-phase-ledger-core.ps1's
-    Invoke-PersistPhaseLedger for the full parameter surface this selects
-    between.
+    'plan', 'design', or 'brief' (issue #951 chunk #956 added 'brief' — a
+    brief review's judge-free authorizing record). See
+    persist-phase-ledger-core.ps1's Invoke-PersistPhaseLedger for the full
+    parameter surface this selects between.
 .PARAMETER IssueNumber
     Required when -Mode plan.
 .PARAMETER DesignCommentId
     Required when -Mode design.
 .PARAMETER JudgeRulingsContent
-    The complete `<!-- judge-rulings ... -->` bare-head block text.
+    The complete `<!-- judge-rulings ... -->` bare-head block text. Required
+    for -Mode plan and -Mode design. Under -Mode brief it is accepted and
+    silently discarded, NOT rejected -- there is no mode gate on this
+    parameter. A brief review has no judge stage, so nothing here can be
+    written; the real refusal is content-shaped and lives in the writer, which
+    rejects judge vocabulary found inside -BriefHeadContent itself.
+.PARAMETER BriefHeadContent
+    The complete `brief_dispositions:` authorizing head text. Required for,
+    and only meaningful under, -Mode brief.
 .PARAMETER PhaseContainmentBlocks
     Zero or more complete phase-containment block strings. Defaults to an
     empty array (the legal zero-sustained-findings clean path).
@@ -75,10 +84,21 @@
 param(
     [Parameter(Mandatory)][string]$Owner,
     [Parameter(Mandatory)][string]$Repo,
-    [Parameter(Mandatory)][ValidateSet('plan', 'design')][string]$Mode,
+    [Parameter(Mandatory)][ValidateSet('plan', 'design', 'brief')][string]$Mode,
     [int]$IssueNumber,
     [long]$DesignCommentId,
-    [Parameter(Mandatory)][string]$JudgeRulingsContent,
+    # Issue #951 added -Mode brief, whose authorizing record is a
+    # `brief_dispositions:` head rather than a judge-rulings block — a brief
+    # review has no judge stage, so there is no judge ruling that could
+    # describe it. -JudgeRulingsContent is therefore no longer unconditionally
+    # Mandatory: requiring it under -Mode brief would force every caller to
+    # invent judge content for a mode that refuses judge content, which is the
+    # false-provenance shape #951 exists to remove. It stays required for plan
+    # and design (design accepts and discards it, per the long-standing
+    # signature-uniformity note in the core), enforced below rather than by the
+    # attribute.
+    [string]$JudgeRulingsContent = '',
+    [string]$BriefHeadContent = '',
     [string[]]$PhaseContainmentBlocks = @()
 )
 
@@ -87,9 +107,22 @@ param(
 . (Join-Path $PSScriptRoot '../../../.github/scripts/lib/phase-containment-emission-check-core.ps1')
 . (Join-Path $PSScriptRoot 'persist-phase-ledger-core.ps1')
 
+# Per-mode companion-parameter validation, moved off the [Parameter(Mandatory)]
+# attributes because the requirement now differs by mode. Kept at the wrapper
+# so a CLI caller gets the same refusal the library would give.
+if ($Mode -ne 'brief' -and [string]::IsNullOrWhiteSpace($JudgeRulingsContent)) {
+    Write-Error "persist-phase-ledger: -Mode $Mode requires -JudgeRulingsContent."
+    exit 1
+}
+if ($Mode -eq 'brief' -and [string]::IsNullOrWhiteSpace($BriefHeadContent)) {
+    Write-Error 'persist-phase-ledger: -Mode brief requires -BriefHeadContent (the `brief_dispositions:` authorizing head). A brief review has no judge stage, so -JudgeRulingsContent cannot substitute for it.'
+    exit 1
+}
+
 $result = Invoke-PersistPhaseLedger -Owner $Owner -Repo $Repo -Mode $Mode `
     -IssueNumber $IssueNumber -DesignCommentId $DesignCommentId `
-    -JudgeRulingsContent $JudgeRulingsContent -PhaseContainmentBlocks $PhaseContainmentBlocks
+    -JudgeRulingsContent $JudgeRulingsContent -BriefHeadContent $BriefHeadContent `
+    -PhaseContainmentBlocks $PhaseContainmentBlocks
 
 # M12 fix (issue #878 judge-sustained review, AC2): surface the landed/
 # not-landed artifact manifest alongside the top-level Success/Reason on

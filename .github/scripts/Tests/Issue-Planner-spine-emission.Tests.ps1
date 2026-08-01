@@ -276,10 +276,28 @@ Describe 'Issue-Planner frame spine emission contract' -Tag 'contract' {
     }
 
     It 'requires phase-containment blocks and judge-rulings to target the phase-containment-ledger-{ID} sibling, and the plan comment to carry the pointer back to it' {
-        $phaseContainmentSection = & $script:GetSection -Content $script:Content -HeadingPattern '### Phase-containment emission \(plan-stress-test\)'
+        # Heading widened by issue #951 (PR #963 review, finding I): the
+        # section now instructs BOTH emission surfaces, because a
+        # `plan-variant: brief` chunk plan has no judge and must not be
+        # persisted with -Mode plan. The ledger-sibling assertions below are
+        # unchanged and apply to both modes.
+        $phaseContainmentSection = & $script:GetSection -Content $script:Content -HeadingPattern '### Phase-containment emission \(plan-stress-test and brief-review\)'
         $phaseContainmentSection | Should -Match '<!--\s*phase-containment-ledger-\{ID\}\s*-->' -Because '863-D4: phase-containment blocks (and the co-moved judge-rulings block) append to the ledger sibling, not the plan comment'
         $phaseContainmentSection | Should -Not -Match '<!--\s*plan-issue-\{ID\}\s*-->' -Because 'the phase-containment append target must no longer name the plan comment marker'
         $phaseContainmentSection | Should -Match '<!--\s*phase-containment-ledger-ref' -Because '863-D11: the ledger sibling id is written back onto the plan comment as a pointer'
+    }
+
+    It 'requires the emission section to branch on plan shape, so a brief is never persisted with -Mode plan' {
+        # Issue #951 / PR #963 finding I. Before this, the section headed
+        # "(plan-stress-test)" mandated -Mode plan unconditionally and both
+        # worked examples hard-coded it — so the only executor-facing
+        # instruction told a brief run to write a judge ruling for a review
+        # that had no judge, which is the defect #951 exists to remove.
+        $section = & $script:GetSection -Content $script:Content -HeadingPattern '### Phase-containment emission \(plan-stress-test and brief-review\)'
+        $section | Should -Match '-Mode brief' -Because 'the brief branch must name its own mode'
+        $section | Should -Match 'BriefHeadContent' -Because 'brief mode is driven by the brief head, never by judge-rulings content'
+        $section | Should -Match 'brief-review:' -Because 'the finding_key prefix moves with the stage and nothing cross-checks them'
+        $section | Should -Match '(?i)plan-variant.{0,40}brief' -Because 'the executor must be told which plan shape selects the brief branch'
     }
 
     It 'requires the frame-slices-{ID} sibling to be stamped with frame-slices-generated-at equal to the spine generated_at' {

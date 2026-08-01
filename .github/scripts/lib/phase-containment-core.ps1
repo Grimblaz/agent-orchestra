@@ -23,9 +23,20 @@ $script:PhaseOrdinals = @{
 
 #region Stage projections (TOTAL map — rejection on invalid input)
 
+# Issue #951 D1: 'brief-review' sits at projection 2, the same projection as
+# 'plan-stress-test', because a brief's review catches at plan time exactly as
+# a plan stress-test does. The two stages differ in ADJUDICATION STANDARD, not
+# in pipeline location — a judge ruled on a plan-stress-test finding, whereas a
+# brief-review finding was upheld by a prosecution panel plus a convergence
+# filter and no judge at all. Recorded knowingly (D1): this encodes adjudication
+# grade into a field that names pipeline location. The code-review surface
+# already conflates three counting variants under one caught_stage, so the
+# conflation is pre-existing rather than introduced here; splitting the two
+# dimensions is routed to the parser/schema follow-up (#951 D7).
 $script:StageProjections = @{
     'design-challenge'     = 1
     'plan-stress-test'     = 2
+    'brief-review'         = 2
     'code-review'          = 3
     'post-review-observer' = 4
 }
@@ -36,7 +47,7 @@ $script:StageProjections = @{
 
 $script:ValidIntroducedPhases  = @('experience', 'design', 'plan', 'implementation')
 $script:ValidCatchablePhases   = @('experience', 'design', 'plan', 'implementation')
-$script:ValidCaughtStages      = @('design-challenge', 'plan-stress-test', 'code-review', 'post-review-observer')
+$script:ValidCaughtStages      = @('design-challenge', 'plan-stress-test', 'brief-review', 'code-review', 'post-review-observer')
 $script:ValidSeverities        = @('critical', 'high', 'medium', 'low')
 $script:ValidSystemicFixTypes  = @('instruction', 'skill', 'agent-prompt', 'plan-template', 'none')
 $script:ValidCategories        = @(
@@ -59,7 +70,18 @@ $script:ValidCategories        = @(
 # Drift between the two is asserted by the "finding_key pattern drift" test in
 # phase-containment-core.Tests.ps1 (follows the Get-PhaseContainmentEnumDriftStatus
 # precedent below).
-$script:FindingKeyPattern = '^(code-review|design-challenge|plan-stress-test|post-review-observer):.+'
+#
+# Issue #951: the alternation below MUST name the same set as
+# $script:ValidCaughtStages. Byte-equality against the schema does NOT imply
+# that — the two guards that existed before #951 asserted
+# projections/valid-stages/schema-enum set-equality on one side and
+# pattern byte-equality on the other, with nothing joining them, so updating
+# three of the five sites left both guards green while every block for the
+# missing stage silently failed Rule 12 and was then discarded by the
+# emission check's finding_key prefix gate. The four-way set-equality guard
+# (Get-PhaseContainmentStageSetDriftStatus, exercised by the core test suite)
+# closes that join; do not weaken it back to a three-way.
+$script:FindingKeyPattern = '^(code-review|design-challenge|plan-stress-test|brief-review|post-review-observer):.+'
 
 #endregion
 
@@ -541,7 +563,11 @@ function Get-PhaseContainmentFindingKey {
         Fallback: if stable_finding_key starts with 'warn:', returns 'warn:{finding_id}' prefixed
         with surface — signals instability.
     .PARAMETER Surface
-        One of: code-review, design-challenge, plan-stress-test
+        One of: code-review, design-challenge, plan-stress-test,
+        brief-review, post-review-observer. Must stay in step with
+        $script:ValidCaughtStages -- the prefix this builds is what the
+        emission check attributes a block to, and a prefix naming a stage
+        the enum does not carry produces a block no surface will count.
     .PARAMETER StableFindingKey
         The surface-specific stable key segment (without the surface prefix).
     .OUTPUTS
@@ -553,6 +579,78 @@ function Get-PhaseContainmentFindingKey {
     )
 
     return "${Surface}:${StableFindingKey}"
+}
+
+#endregion
+
+#region Get-PhaseContainmentStageSetDriftStatus (issue #951)
+
+function Get-PhaseContainmentStageSetDriftStatus {
+    <#
+    .SYNOPSIS
+        Reports whether all FOUR caught_stage-naming sites name the same set:
+        $script:StageProjections' keys, $script:ValidCaughtStages, the schema's
+        caught_stage enum, and the finding_key pattern's surface alternation.
+    .DESCRIPTION
+        WHY FOUR AND NOT THREE. Before issue #951 two guards existed and
+        neither joined these last two sites: a three-way set-equality over
+        projections/valid-stages/schema-enum, and a separate byte-equality
+        between $script:FindingKeyPattern and the schema's finding_key pattern.
+        Byte-equality between two copies of the alternation says the copies
+        agree with EACH OTHER; it says nothing about whether they agree with
+        caught_stage. So updating three of the five sites for a new stage left
+        both guards green while every block for that stage silently failed
+        Rule 12 and was discarded at the emission check's finding_key prefix
+        gate — rows present, parseable, schema-valid, and invisible.
+    .PARAMETER Projections
+    .PARAMETER ValidStages
+    .PARAMETER SchemaEnum
+    .PARAMETER FindingKeyPattern
+        Supplied explicitly rather than read from the live constants, so the
+        suite can feed deliberately-omitted sets and prove this function
+        actually fails on them. A guard only checked against a passing input
+        is a guard nobody has seen fail.
+    .OUTPUTS
+        [PSCustomObject] HasDrift [bool], DriftDetails [string[]].
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Projections,
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$ValidStages,
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$SchemaEnum,
+        [Parameter(Mandatory)][string]$FindingKeyPattern
+    )
+
+    $driftDetails = [System.Collections.Generic.List[string]]::new()
+
+    $alternationMatch = [regex]::Match($FindingKeyPattern, '^\^\(([^)]*)\)')
+    if (-not $alternationMatch.Success) {
+        $driftDetails.Add("finding_key pattern '$FindingKeyPattern' does not start with a '^(a|b|c)' surface alternation, so its stage set cannot be read.")
+        return [PSCustomObject]@{ HasDrift = $true; DriftDetails = $driftDetails.ToArray() }
+    }
+    $alternation = @($alternationMatch.Groups[1].Value -split '\|' | Where-Object { $_ -ne '' })
+
+    $sets = @(
+        @{ Name = 'StageProjections.Keys';    Values = $Projections  },
+        @{ Name = 'ValidCaughtStages';        Values = $ValidStages  },
+        @{ Name = 'schema caught_stage enum'; Values = $SchemaEnum   },
+        @{ Name = 'finding_key alternation';  Values = $alternation  }
+    )
+
+    $reference = ($sets[0].Values | Sort-Object) -join ','
+    foreach ($s in $sets[1..3]) {
+        $candidate = ($s.Values | Sort-Object) -join ','
+        if ($candidate -cne $reference) {
+            $driftDetails.Add(
+                "caught_stage set drift: $($sets[0].Name)=[$reference] vs $($s.Name)=[$candidate]. " +
+                'All four sites must name the same set — a stage present in some but not all is either rejected by validation or silently discarded by the finding_key prefix gate.'
+            )
+        }
+    }
+
+    return [PSCustomObject]@{
+        HasDrift     = ($driftDetails.Count -gt 0)
+        DriftDetails = $driftDetails.ToArray()
+    }
 }
 
 #endregion

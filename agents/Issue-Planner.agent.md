@@ -220,9 +220,21 @@ The canonical session-memory handoff artifacts remain `/memories/session/plan-is
 
 > **Survival**: Copilot plan and design caches are same-conversation state under `SMC-01` and `SMC-03`. Durable cross-tool handoff stays on the existing GitHub markers governed by `SMC-08`; Claude `/plan` uses the `SMC-01` GitHub marker instead of a Claude-local cache.
 
-### Phase-containment emission (plan-stress-test)
+### Phase-containment emission (plan-stress-test and brief-review)
 
-After emitting the plan approval burst, persist the `judge-rulings` machine block plus one `<!-- phase-containment-{ID} -->` block per sustained plan-stress-test finding by invoking `skills/session-memory-contract/scripts/persist-phase-ledger.ps1` with `-Mode plan` — never by hand-authoring the sibling comment, the pointer, or the blocks (863-D4/863-D11; see `skills/plan-authoring/SKILL.md` § Post-Judge Reconciliation → Phase-containment emission for the full field contract, including the co-moved `judge-rulings` block). The helper is the ONLY documented path for this write: it creates the `<!-- phase-containment-ledger-{ID} -->` sibling comment on first persist, writes the `<!-- phase-containment-ledger-ref: {comment_id} -->` pointer back onto the plan comment, and reuses both on re-persist. Validate each block against `skills/calibration-pipeline/schemas/phase-containment.schema.json` before passing it to `-PhaseContainmentBlocks`.
+**Pick the mode from the plan shape before you write anything.** A spine-bearing plan is reviewed with a judge and emits on the plan-stress-test surface, described below. A `plan-variant: brief` chunk plan is reviewed under the prosecution-only `design-challenge` charter and has no judge at all, so it emits on the **brief-review** surface instead — a different mode, a different authorizing head, and a different `finding_key` prefix. Using plan mode for a brief writes a judge ruling for a review no judge performed, which is the exact defect issue #951 exists to remove.
+
+For a brief, invoke the same helper with `-Mode brief` and `-BriefHeadContent` (never `-JudgeRulingsContent`, which brief mode refuses), emit one block per **convergence-sustained** finding with `caught_stage: brief-review`, and prefix each `finding_key` with `brief-review:` — the prefix and the stage must move together, because nothing cross-validates them and a mismatched pair is schema-valid, parseable and invisible to every reader. The head must carry `convergence_filter_ran` and `filtered_count` as its own keys. Full field contract, including the head shape and what each `convergence_filter_ran` value renders: `skills/plan-authoring/SKILL.md` § Brief-review emission.
+
+```powershell
+pwsh skills/session-memory-contract/scripts/persist-phase-ledger.ps1 `
+    -Owner {owner} -Repo {repo} -Mode brief -IssueNumber {ISSUE_NUMBER} `
+    -BriefHeadContent $briefDispositionsHeadText -PhaseContainmentBlocks @($block1, $block2)
+```
+
+If the convergence filter did not run, say so in the head (`convergence_filter_ran: false`) and expect the surface to render could-not-verify. That is the correct, honest outcome — an unfiltered panel raise is not an adjudicated finding. Do not omit the field to dodge it, and do not relabel the run.
+
+**Plan-stress-test (spine-bearing plans).** After emitting the plan approval burst, persist the `judge-rulings` machine block plus one `<!-- phase-containment-{ID} -->` block per sustained plan-stress-test finding by invoking `skills/session-memory-contract/scripts/persist-phase-ledger.ps1` with `-Mode plan` — never by hand-authoring the sibling comment, the pointer, or the blocks (863-D4/863-D11; see `skills/plan-authoring/SKILL.md` § Post-Judge Reconciliation → Phase-containment emission for the full field contract, including the co-moved `judge-rulings` block). The helper is the ONLY documented path for this write: it creates the `<!-- phase-containment-ledger-{ID} -->` sibling comment on first persist, writes the `<!-- phase-containment-ledger-ref: {comment_id} -->` pointer back onto the plan comment, and reuses both on re-persist. Validate each block against `skills/calibration-pipeline/schemas/phase-containment.schema.json` before passing it to `-PhaseContainmentBlocks`.
 
 Repo-relative (hub-repo contributors):
 

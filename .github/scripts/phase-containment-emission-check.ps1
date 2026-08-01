@@ -194,6 +194,35 @@ function script:Format-EmissionGapLine {
                 return "  ${Surface} #${Id}: COULD NOT VERIFY -- treat as gap (a nearby marker mention made this ambiguous, not necessarily corrupt: sustained=$($Gap.SustainedCount), blocks=$($Gap.BlockCount))"
             }
         }
+        # Issue #951: the brief-review surface's own could-not-verify causes.
+        # Each names the specific contradiction or omission rather than the
+        # generic "partial, do not trust" wording, because each has a
+        # different and unambiguous maintainer action — and because W2
+        # requires the rendered reason to IDENTIFY the contradiction, not
+        # merely to withhold a verdict.
+        if ($Surface -eq 'brief-review') {
+            if ($reason -eq 'judge-head-contradiction') {
+                return "  ${Surface} #${Id}: COULD NOT VERIFY -- treat as gap (self-certification contradiction: the plan comment declares ``plan-variant: brief`` -- a review shape with no judge stage -- while this issue's own ledger sibling carries a judge-rulings head; a brief's findings cannot be authorized by an adjudication its declared shape has no way to produce)"
+            }
+            if ($reason -eq 'filter-not-run') {
+                return "  ${Surface} #${Id}: COULD NOT VERIFY -- treat as gap (the head declares ``convergence_filter_ran: false`` -- prosecution output that no convergence filter narrowed cannot authorize a count; the declaration is honest and is why this is not reported as corruption)"
+            }
+            if ($reason -eq 'duplicate-head') {
+                return "  ${Surface} #${Id}: COULD NOT VERIFY -- treat as gap (two or more ``brief_dispositions`` heads are present on one body; a reader that picked one could be shadowed by a decoy — including a copy of the documented example — so no count is authorized until exactly one head remains)"
+            }
+            if ($reason -eq 'unknown-disposition-value') {
+                return "  ${Surface} #${Id}: COULD NOT VERIFY -- treat as gap (a ``disposition:`` value outside the closed ``incorporate|escalate|dismiss`` set is present; counting only the recognized ones would silently drop the finding from both the numerator and the denominator)"
+            }
+            if ($reason -eq 'filter-value-unrecognized') {
+                return "  ${Surface} #${Id}: COULD NOT VERIFY -- treat as gap (``convergence_filter_ran`` is present but its value is not the literal ``true`` or ``false`` — the assertion is not absent, it is unreadable)"
+            }
+            if ($reason -eq 'filter-unasserted') {
+                return "  ${Surface} #${Id}: COULD NOT VERIFY -- treat as gap (the brief head carries no machine-readable ``convergence_filter_ran`` assertion, or declares the filter ran without a ``filtered_count``; the assertion is required, not an optional field)"
+            }
+            if ($reason -eq 'head-missing') {
+                return "  ${Surface} #${Id}: COULD NOT VERIFY -- treat as gap (this issue declares or routes to the brief review shape but no ``brief_dispositions`` head authorizes a count: recorded-nothing, NOT verified-and-empty)"
+            }
+        }
         # M13 fix (issue #782 post-review): could-not-verify means the
         # sustained/blocks numbers reflect only the bodies that DID parse —
         # a skimming maintainer could otherwise mistake a small-looking
@@ -329,7 +358,10 @@ function Invoke-PhaseContainmentEmissionCheckSingleTarget {
     $lines.Add('Warn-only maintainer advisory (DD1-secondary framing) -- comment authorship is not filtered.')
     $lines.Add('')
 
-    $surfacesToCheck = if ($isPr) { @('code-review', 'post-review-observer') } else { @('design-challenge', 'plan-stress-test') }
+    # Issue #951 D2: the issue surface list is routed per issue (brief-declared
+    # or brief-headed -> design-challenge + brief-review, with plan-stress-test
+    # suppressed), never a hard-coded literal. See Get-IssueEmissionSurfaces.
+    $surfacesToCheck = if ($isPr) { @('code-review', 'post-review-observer') } else { @(Get-IssueEmissionSurfaces -Bodies $bodies -Id $targetId) }
     $scannedCount = 0
     $sustainedTotal = 0
     $blocksTotal = 0
@@ -432,7 +464,12 @@ function Invoke-PhaseContainmentEmissionCheckCorpus {
         $surfaceKind = [string]$tuple['Surface']
         $bodies = @($tuple['Bodies'])
 
-        $surfacesToCheck = if ($surfaceKind -eq 'pr') { @('code-review', 'post-review-observer') } else { @('design-challenge', 'plan-stress-test') }
+        # Issue #951 D2: same per-issue routing as single-target mode above.
+        # This is the second of the two hard-coded surface lists the design's
+        # first pass missed — it searched the core library rather than the
+        # entry point, and without this site the new surface is never scanned
+        # in a corpus sweep at all.
+        $surfacesToCheck = if ($surfaceKind -eq 'pr') { @('code-review', 'post-review-observer') } else { @(Get-IssueEmissionSurfaces -Bodies $bodies -Id $number) }
 
         foreach ($surface in $surfacesToCheck) {
             $gap = Get-EmissionGap -Bodies $bodies -Id $number -Surface $surface

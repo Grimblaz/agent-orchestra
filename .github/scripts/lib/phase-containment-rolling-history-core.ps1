@@ -2253,7 +2253,24 @@ function Get-PhaseContainmentRollup {
         [switch]$Truncated
     )
 
-    # Stage → catchable_phase mapping
+    # Stage → catchable_phase mapping.
+    #
+    # ISSUE #951 — 'brief-review' IS DELIBERATELY ABSENT FROM THIS MAP, and
+    # adding it would be a silent, hard-to-see data corruption rather than a
+    # feature. The routing loop below is `foreach stage { if match { add;
+    # break } }` over an UNORDERED hashtable. This map is injective on its
+    # values today, which is the only reason that first-match-then-break is
+    # deterministic. 'brief-review' is plan-catchable, so adding it would put
+    # two keys on 'plan' and every plan-catchable row — brief and
+    # judge-adjudicated alike — would land in whichever key PowerShell happened
+    # to enumerate first, varying between runs.
+    #
+    # Worse, the wreckage would produce its own success evidence: one sub-arm
+    # renders withheld and the other's pre-existing rates read unchanged, which
+    # is exactly what a correct partition also looks like from the outside.
+    # That is why the partition below keys on each ENTRY'S OWN caught_stage
+    # rather than on a stage→phase map, and why the partition assertions must
+    # examine sub-arm POPULATIONS, never just their verdicts.
     $stageToCatchablePhase = @{
         'design-challenge' = 'design'
         'plan-stress-test' = 'plan'
@@ -2324,9 +2341,74 @@ function Get-PhaseContainmentRollup {
     # Build per-stage results
     $stages = @{}
     foreach ($stage in $stageToCatchablePhase.Keys) {
-        $nonApparatusEntries = @($stageEntries[$stage].NonApparatus)
+        $allNonApparatusEntries = @($stageEntries[$stage].NonApparatus)
+
+        # ---------------------------------------------------------------
+        # Issue #951 D4, COMPLETED by the #963 review (finding A).
+        #
+        # The partition below was originally computed and rendered while the
+        # headline `escapeRate` and `RelaxationEligible` went on being derived
+        # from the POOLED population. That made the partition a display and
+        # nothing more, and it left both harms D4 names fully intact: "brief
+        # rows pool into the plan arm's rates and its Relaxation signal line
+        # ... the arm whose review depth just changed would be the one whose
+        # eligibility number could not be trusted."
+        #
+        # It was worse than merely incomplete. A plan-catchable brief row has
+        # `escape_distance: 0` by construction, so brief rows can only ever
+        # push the pooled escape rate DOWN — toward eligibility — and inflate n
+        # past the >=5 floor. Probed: 5 judge rows with 1 escape render NOT
+        # ELIGIBLE; add 16 brief rows and the same judge evidence renders
+        # ELIGIBLE. And the M21 reconciliation exclusion directly below
+        # subtracted brief rows from the DataUntrustworthy check only, which
+        # disarmed the one guard that would have failed closed on the
+        # contaminated number.
+        #
+        # The headline population therefore EXCLUDES brief-review-caught rows,
+        # on exactly the terms the reconciliation already excluded them. The
+        # brief-review rows are not discarded — they carry their own rate in
+        # the partition, under their own re-derived sufficiency guard. If
+        # removing them drops the arm below the floor, WITHHELD is the honest
+        # answer: the judge-adjudicated population really is too small to
+        # relax on.
+        #
+        # Item-20 correction (#963 review): this exclusion is narrower than
+        # "one adjudication standard" — post-review-observer-caught rows
+        # (caught_stage='post-review-observer') are NOT excluded here and
+        # remain pooled into $nonApparatusEntries alongside judge-rulings-
+        # caught rows; only the completeness-reconciliation observed count a
+        # few lines below (M36, $observerCaughtCount) treats them specially.
+        # That is deliberate and direction-safe — but NOT because observer rows
+        # are unbiased. They are biased; the bias just runs the other way, and
+        # the earlier wording of this comment got that wrong (corrected by the
+        # post-fix review, finding M7).
+        #
+        # A plan-catchable brief row has escape_distance: 0 BY CONSTRUCTION, so
+        # brief rows can only push the pooled rate DOWN toward eligibility —
+        # see the probed 5-judge-rows-plus-16-brief-rows example above. An
+        # observer row is equally mechanical in the OPPOSITE direction:
+        # projection(post-review-observer) is 4 and the largest phase ordinal
+        # is 3, so Rule 11 makes escape_distance >= 1 for every observer row —
+        # `escape_distance: 0` does not even validate. Every pooled observer
+        # row is therefore counted an escape, pushing the rate UP, away from
+        # eligibility.
+        #
+        # So the honest statement is "biased, in the safe direction", not
+        # "unbiased": excluding brief rows removes a false-eligibility bias,
+        # while keeping observer rows can only ever make relaxation HARDER to
+        # reach. A guard that can only fail closed needs no exclusion.
+        $briefCaughtEntries = @($allNonApparatusEntries | Where-Object {
+                $s = if ($_ -is [hashtable]) { [string]$_['caught_stage'] } else { [string]$_.caught_stage }
+                $s -eq 'brief-review'
+            })
+        $nonApparatusEntries = @($allNonApparatusEntries | Where-Object {
+                $s = if ($_ -is [hashtable]) { [string]$_['caught_stage'] } else { [string]$_.caught_stage }
+                $s -ne 'brief-review'
+            })
+
+        $nAllStandards = $allNonApparatusEntries.Count
         $n           = $nonApparatusEntries.Count
-        $denominator = $n   # Denominator == N (entries with this catchable_phase, excluding apparatus_meta)
+        $denominator = $n   # Denominator == N (entries with this catchable_phase, excluding apparatus_meta and other adjudication standards)
 
         $denominatorZero   = ($denominator -eq 0)
         $insufficientData  = $denominatorZero -or ($n -lt 5)
@@ -2339,11 +2421,26 @@ function Get-PhaseContainmentRollup {
         # observer surface, so leaving them in would spuriously fail
         # closed for every caller that has not yet started supplying
         # observer-inclusive expectations.
+        #
+        # Issue #951 (disposition M21, recorded as REQUIRED): brief-review-
+        # caught entries are excluded on exactly the same terms and for exactly
+        # the same reason. A caller's $SustainedCounts['plan-stress-test']
+        # expectation is derived from JUDGE-RULINGS sustained counts, a
+        # vocabulary that predates the brief surface and cannot describe it.
+        # Leaving brief rows in the observed count would spuriously fail closed
+        # — marking the whole plan arm DataUntrustworthy and forcing
+        # RelaxationEligible=$false — for every caller that has not yet started
+        # supplying brief-inclusive expectations, which today is all of them.
         $observerCaughtCount = 0
         foreach ($e in $nonApparatusEntries) {
             $eCaughtStage = if ($e -is [hashtable]) { [string]$e['caught_stage'] } else { [string]$e.caught_stage }
             if ($eCaughtStage -eq 'post-review-observer') { $observerCaughtCount++ }
         }
+        # Brief-caught rows are already out of $n (they are out of the headline
+        # population entirely — see the adjudication-standard split above), so
+        # only the observer subtraction remains here. The count is still
+        # carried and disclosed so the exclusion is never silent.
+        $briefCaughtCount = $briefCaughtEntries.Count
         $nExcludingObserver = $n - $observerCaughtCount
 
         $dataUntrustworthy       = $false
@@ -2358,9 +2455,21 @@ function Get-PhaseContainmentRollup {
                 # observed M." wording); the observer-exclusion note is only
                 # appended when it actually changed the observed count.
                 $dataUntrustworthyReason = "Entry count mismatch: expected $expectedCount sustained findings for '$stage', observed $nExcludingObserver."
+                # Issue #951: both exclusions are disclosed, never silent. An
+                # unexplained "observed M" that is smaller than the raw
+                # population is precisely the kind of number a maintainer
+                # cannot audit.
+                $exclusionNotes = [System.Collections.Generic.List[string]]::new()
                 if ($observerCaughtCount -gt 0) {
                     $entryWord = if ($observerCaughtCount -eq 1) { 'entry' } else { 'entries' }
-                    $dataUntrustworthyReason = "Entry count mismatch: expected $expectedCount sustained findings for '$stage', observed $nExcludingObserver (excluding $observerCaughtCount observer-caught $entryWord)."
+                    $exclusionNotes.Add("$observerCaughtCount observer-caught $entryWord")
+                }
+                if ($briefCaughtCount -gt 0) {
+                    $briefWord = if ($briefCaughtCount -eq 1) { 'entry' } else { 'entries' }
+                    $exclusionNotes.Add("$briefCaughtCount brief-review-caught $briefWord")
+                }
+                if ($exclusionNotes.Count -gt 0) {
+                    $dataUntrustworthyReason = "Entry count mismatch: expected $expectedCount sustained findings for '$stage', observed $nExcludingObserver (excluding $($exclusionNotes -join ' and '))."
                 }
             }
         }
@@ -2393,7 +2502,19 @@ function Get-PhaseContainmentRollup {
             # requires the veto to cover critical/high and the render to name both counts and
             # severity, so both counts are tallied here (not a bare boolean) for the renderer.
 
-            foreach ($e in $nonApparatusEntries) {
+            # THE VETO IS NOT A RATE (#963 review, item 26). $nonApparatusEntries
+            # is the brief-free population — correct for the RATE above, because
+            # a rate offered as relaxation evidence must be computed over one
+            # adjudication standard. The severity veto is a safety gate, not a
+            # rate: excluding rows from a safety gate can only ever LOOSEN it.
+            # Tallying it here over the same brief-excluded set meant a
+            # sustained critical or high brief-review finding vetoed nothing —
+            # the plan arm could render ELIGIBLE with an unaddressed critical
+            # finding sitting in the window, a regression this PR introduced
+            # via the rate fix. Tally over $allNonApparatusEntries — every
+            # adjudication standard — so severity evidence from a brief-review
+            # row still blocks relaxation exactly like a judge-adjudicated one.
+            foreach ($e in $allNonApparatusEntries) {
                 $sev = if ($e -is [hashtable]) { [string]$e['severity'] } else { [string]$e.severity }
                 if ($sev -eq 'critical') {
                     $criticalFindingCount++
@@ -2637,9 +2758,87 @@ function Get-PhaseContainmentRollup {
             $relaxationEligibleReason = 'fetch truncated'
         }
 
+        # -----------------------------------------------------------------
+        # Issue #951 D4 — partition by adjudication standard.
+        #
+        # An arm's rows can be upheld under different standards: a
+        # judge-adjudicated plan-stress-test ruling, a brief-review
+        # prosecution consensus a convergence filter narrowed, an
+        # observer-caught escape. #761 relaxes a stage only on this
+        # instrument's evidence, and those standards do not carry the same
+        # weight — which is the entire reason the judge vocabulary
+        # distinguishes `sustained` from `defense-sustained` in the first
+        # place. A single headline rate assembled from all three tells a
+        # maintainer a number without telling them how sure to be.
+        #
+        # Keyed on each ENTRY'S OWN caught_stage — never on a stage→phase map
+        # (see the $stageToCatchablePhase comment above for why that
+        # alternative silently corrupts).
+        #
+        # The insufficiency guard is RE-DERIVED per sub-arm rather than
+        # inherited from the unpartitioned population. Inheriting it is the
+        # trap: an arm of 40 rows comfortably clears n>=5, so a 2-row sub-arm
+        # inside it would present a rate computed from two findings as though
+        # it carried the parent's authority. A sub-arm that fails its own
+        # guard renders WITHHELD, never a legitimate zero.
+        # Computed over ALL standards — the partition is where the excluded
+        # brief-review population becomes visible and gets its own rate. If it
+        # were computed over the headline population it would report only the
+        # standard the headline already reports, which is no partition at all.
+        $partition = @{}
+        $subArmGroups = @{}
+        foreach ($e in $allNonApparatusEntries) {
+            $eStage = if ($e -is [hashtable]) { [string]$e['caught_stage'] } else { [string]$e.caught_stage }
+            if ([string]::IsNullOrWhiteSpace($eStage)) { $eStage = '(unspecified)' }
+            if (-not $subArmGroups.ContainsKey($eStage)) {
+                $subArmGroups[$eStage] = [System.Collections.Generic.List[object]]::new()
+            }
+            $subArmGroups[$eStage].Add($e)
+        }
+        foreach ($subStage in $subArmGroups.Keys) {
+            $subEntries      = @($subArmGroups[$subStage])
+            $subN            = $subEntries.Count
+            $subDenomZero    = ($subN -eq 0)
+            $subInsufficient = $subDenomZero -or ($subN -lt 5)
+
+            $subEscapeRate      = $null
+            $subIrreducibleRate = $null
+            if (-not $subInsufficient) {
+                $subEscapes     = 0
+                $subIrreducible = 0
+                foreach ($e in $subEntries) {
+                    $dist = if ($e -is [hashtable]) { [int]$e['escape_distance'] } else { [int]$e.escape_distance }
+                    if ($dist -gt 0) { $subEscapes++ } else { $subIrreducible++ }
+                }
+                $subEscapeRate      = [double]$subEscapes     / [double]$subN
+                $subIrreducibleRate = [double]$subIrreducible / [double]$subN
+            }
+
+            $partition[$subStage] = [PSCustomObject]@{
+                CaughtStage      = $subStage
+                N                = $subN
+                InsufficientData = $subInsufficient
+                DenominatorZero  = $subDenomZero
+                # Withheld is the honest verdict for a sub-arm whose own
+                # population cannot support a rate. It is NOT the same as a
+                # rate of zero, and the renderer must never collapse the two.
+                Withheld         = $subInsufficient
+                EscapeRate       = $subEscapeRate
+                IrreducibleRate  = $subIrreducibleRate
+            }
+        }
+
         $stages[$stage] = [PSCustomObject]@{
             Stage                     = $stage
             N                         = $n
+            AdjudicationPartition     = $partition
+            BriefCaughtCount          = $briefCaughtCount
+            ObserverCaughtCount       = $observerCaughtCount
+            # The full population across every adjudication standard. N above
+            # is the HEADLINE population (one standard); a consumer that needs
+            # to know how many rows the arm holds in total reads this, and the
+            # two differing is the disclosure that an exclusion happened.
+            NAllStandards             = $nAllStandards
             Denominator               = $denominator
             DenominatorZero           = $denominatorZero
             EscapeRate                = $escapeRate
@@ -2787,6 +2986,47 @@ function Format-PhaseContainmentReport {
 
         $lines.Add("Stage: $stageName")
         $lines.Add("  Denominator ($catchableLabel): $($stage.Denominator)")
+
+        # Disclose the adjudication-standard exclusion wherever it changed the
+        # denominator (#963 review, finding A). A headline computed over fewer
+        # rows than the arm holds must say so on the same screen, or the
+        # partition below reads as supplementary detail rather than as the
+        # reason the headline population is what it is.
+        if ($stage.PSObject.Properties.Match('NAllStandards').Count -gt 0 -and
+            $stage.NAllStandards -gt $stage.N) {
+            $excluded = $stage.NAllStandards - $stage.N
+            $lines.Add("  (headline computed over the judge-adjudicated standard only: $excluded of $($stage.NAllStandards) row(s) excluded and reported separately below)")
+        }
+
+        # Issue #951 D4: the per-adjudication-standard breakdown, rendered
+        # whenever the arm has any population at all. Rendered unconditionally
+        # rather than only when standards are mixed, because "no partition
+        # line" and "one standard" would otherwise be indistinguishable — and
+        # silence is never this instrument's success signal.
+        # Gated on the ALL-standards population, not the headline one: an arm
+        # holding only brief-review rows has a headline N of 0 and still needs
+        # its partition rendered, or the rows vanish from the report entirely.
+        $partitionPopulation = if ($stage.PSObject.Properties.Match('NAllStandards').Count -gt 0) { $stage.NAllStandards } else { $stage.N }
+        if ($stage.PSObject.Properties.Match('AdjudicationPartition').Count -gt 0 -and $partitionPopulation -gt 0) {
+            $lines.Add('  By adjudication standard:')
+            foreach ($subName in (@($stage.AdjudicationPartition.Keys) | Sort-Object)) {
+                $sub = $stage.AdjudicationPartition[$subName]
+                if ($sub.Withheld) {
+                    # The population is always printed, even when the rates are
+                    # withheld: a reader must be able to see WHICH sub-arm the
+                    # rows landed in. A partition that silently mis-assigns
+                    # every row produces a withheld sub-arm and an unchanged
+                    # sibling — the same surface signature as a correct one —
+                    # and n is what tells the two apart.
+                    $lines.Add("    ${subName}: n=$($sub.N) — WITHHELD (n<5); escape rate and irreducible rate not computed for this standard")
+                }
+                else {
+                    $subEscape      = '{0:P1}' -f $sub.EscapeRate
+                    $subIrreducible = '{0:P1}' -f $sub.IrreducibleRate
+                    $lines.Add("    ${subName}: n=$($sub.N)  escape=$subEscape  irreducible=$subIrreducible")
+                }
+            }
+        }
 
         if ($stage.DataUntrustworthy) {
             $lines.Add("  DATA UNTRUSTWORTHY -- relaxation signal withheld (entry count mismatch)")
