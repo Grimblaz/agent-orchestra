@@ -45,6 +45,8 @@ Pipeline-based agent orchestration:
 (CE Gate: @Code-Conductor delegates evidence capture to @Experience-Owner)
 ```
 
+> **Default posture for standalone work (#957):** the expected route is the open-for-work entrance — one conversation from the filed issue to a lawful brief or a continuation into design (`Documents/Design/open-for-work.md`) — with the phase pipeline above reached by explicitly requesting it (`/experience` or `/design`). The `/open` command ships with #957 chunk 3; until then the conversation runs manually per that document. The pipeline remains fully lawful on explicit request. **This entrance's `/plan`-side resume (`commands/plan.md`) is a Claude-only surface** (`<!-- scope: claude-only -->`); Copilot's `plan.prompt.md` dispatcher does not yet carry the pre-flight, so on Copilot the manual flow's brief-authoring step still needs the operator to apply `plan-authoring/SKILL.md` § Brief plan variant by hand.
+
 - **User-facing agents** (7): Experience-Owner, Solution-Designer, Issue-Planner, Code-Conductor, Code-Critic, Code-Review-Response, UI-Iterator
 - **Internal agents and runners** (9): Code-Smith, Test-Writer, Refactor-Specialist, Doc-Keeper, Research-Agent, Process-Review, Specification, Spine-Runner, Senior-Engineer (`user-invocable: false`)
 - **Skills** (42): Loaded on demand by agents from `skills/` (repo root)
@@ -91,6 +93,8 @@ Methodology checkpoints fire unconditionally. The user's only in-band lever to s
 See: `skills/solution-authoring/SKILL.md` § Rule: Classification gate; `skills/solution-authoring/SKILL.md` § Rule: Non-overridability; `skills/upstream-onboarding/SKILL.md` § Rule: Non-overridability; `skills/plan-authoring/SKILL.md` § Rule: Non-overridability. Also see: #575 and SMC-20 + `skills/engagement-record-emission/SKILL.md` (engagement-record-{phase}-{ID} marker contract; #576 v1.2) for the Segment-A maintainer-evidence path.
 
 <!-- engagement-gate-non-overridability:end -->
+
+*Pending (#957 chunk 3): the open-for-work affirmation gate joins this register when its surface ships; until then it binds via `Documents/Design/open-for-work.md` § Beat 1.*
 
 ## Build & Run
 

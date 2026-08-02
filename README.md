@@ -3,7 +3,7 @@
 > ⚠️ **GitHub Copilot / VS Code support is frozen and retiring after 2026-08-31.**
 > Claude Code is the actively supported path. See [COPILOT-DEPRECATION.md](Documents/Design/copilot-deprecation.md) for details and the reach-out channel if you depend on Copilot support.
 
-[![Version](https://img.shields.io/badge/version-v3.7.0-blue.svg)](../../releases)
+[![Version](https://img.shields.io/badge/version-v3.8.0-blue.svg)](../../releases)
 [![Ready for Production](https://img.shields.io/badge/status-production%20ready-green.svg)](../../releases)
 
 A multi-agent workflow system that orchestrates AI-assisted software development through specialized Claude Code agents. *(GitHub Copilot/VS Code: frozen and retiring after 2026-08-31 — see [COPILOT-DEPRECATION.md](Documents/Design/copilot-deprecation.md))*
@@ -194,6 +194,8 @@ That's it. You're ready to use agents.
 ```text
 @Experience-Owner → @Solution-Designer → @Issue-Planner → @Code-Conductor → PR
 ```
+
+> **Default posture for standalone work (#957):** the expected route is the open-for-work entrance — one conversation from the filed issue to a lawful brief or a continuation into design ([Documents/Design/open-for-work.md](Documents/Design/open-for-work.md)) — with the pipeline above reached by explicitly requesting it (`/experience` or `/design`). The `/open` command ships with #957 chunk 3; until then the conversation runs manually per that document. The pipeline remains fully lawful on explicit request.
 
 1. **@Experience-Owner** — frames the customer problem, defines user journeys and CE Gate scenarios (optional upstream step)
 2. **@Solution-Designer** — picks up the issue, explores the design space, updates the issue body with a design

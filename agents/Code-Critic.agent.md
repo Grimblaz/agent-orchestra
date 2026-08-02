@@ -117,7 +117,7 @@ If multiple selector lines are present, apply the conflict rule only across thos
 
 Design Review Mode is for feature designs and implementation plans, not code diffs. All three passes use `"Use design review perspectives"`.
 
-Issue-Planner runs the full five-pass two-layer prosecution -> merged ledger -> defense -> judge flow for a spine-bearing plan, and the three-pass prosecution-only design-challenge flow -> merged ledger -> convergence filter for a `plan-variant: brief` chunk plan (#936 D5, #941). Solution-Designer stops after the three design-challenge prosecution passes. Under design-challenge there is no defense or judge stage: do not expect one, and do not write a finding as though a later stage will rebut it.
+Issue-Planner runs the full five-pass two-layer prosecution -> merged ledger -> defense -> judge flow for a spine-bearing plan, and the three-pass prosecution-only design-challenge flow -> merged ledger -> convergence filter for a `plan-variant: brief` plan, whichever of the brief's two authority sources it carries — a chunk of a designed parent, or a standalone issue with an affirmed open-for-work framing record (#936 D5, #941, #957 D4). Solution-Designer stops after the three design-challenge prosecution passes. Under design-challenge there is no defense or judge stage: do not expect one, and do not write a finding as though a later stage will rebut it.
 
 Design findings are non-blocking. They inform the caller; they do not veto the design.
 

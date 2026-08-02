@@ -6,19 +6,24 @@ labels: ''
 assignees: ''
 ---
 
-## What happened?
+## The problem
 
-<!-- Describe the bug -->
+<!-- What is wrong? Describe the bug in plain language. -->
 
-## Steps to reproduce
+## Evidence it is real
 
-1. 
+<!-- What did you observe, and where? Steps to reproduce, logs, or output —
+     enough that someone else could see it too. Environment details (OS,
+     Claude Code version, plugin version) go here if relevant. -->
 
-## Expected behavior
+## Known vs unknown
 
-## Environment
+<!-- Which claims above are established, and which are open questions?
+     "Unknown" is a fine answer — say what you have not checked. -->
 
-<!-- OS, Claude Code version, plugin version if relevant -->
+<!-- That's the whole obligation — filing needs no proposed solution, design,
+     or scope decision (skills/safe-operations/SKILL.md §2f). Those happen
+     when the issue is opened for work. -->
 
 <!-- vocab-pointer -->
 > **Unfamiliar with a code or term?** Shortcodes like `SMC-NN`, `D1/D2/D3`, and `CE Gate` are defined in the [plain-language vocabulary](../../HOW-IT-WORKS.md#vocab).
