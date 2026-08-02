@@ -147,7 +147,7 @@ The affirmation record is what makes authority source (b) checkable rather than 
 
 ## The filing contract
 
-Filing an issue carries three things and nothing more (#957 d-filing-shape): the **problem**, the **evidence it is real**, and **what is known versus unknown**. No proposed solution, no design, no scope decision, and no scenarios are required to file — those are this conversation's job, later, if the issue is ever opened for work. The operative rule lives in `skills/safe-operations/SKILL.md` §2f, and the repository's issue templates ask for exactly these three things.
+Filing an issue's **required** content is three things (#957 d-filing-shape): the **problem**, the **evidence it is real**, and **what is known versus unknown**. No proposed solution, no design, no scope decision, and no scenarios are required to file — those are this conversation's job, later, if the issue is ever opened for work; a filer who already has a proposed solution in mind may include it, but its absence never blocks or discounts a filing. The operative rule lives in `skills/safe-operations/SKILL.md` §2f, and the repository's issue templates ask for exactly these three required things.
 
 ## Default posture
 
@@ -157,9 +157,10 @@ The open-for-work entrance is the **expected route for standalone work**; the th
 
 Until #957 chunk 3 ships the `/open` command and its skill, the flow runs **manually**, and that is a lawful, complete way to run it — #957's own framing conversation is the existence proof. Concretely, in any conversation:
 
-1. Say you want to open issue `{N}` for work, and walk the beats in this document top to bottom: worth-it check, beat 1 grounding with provenance tags, amendments-in-place, the affirmed what-statement.
+0. **Check the trivial floor first, before any of the below.** The floor is decided at pickup, from the filed issue alone (`skills/safe-operations/SKILL.md` §2a) — no conversation, affirmation, or routing artifact is a precondition for it. If the issue is below the floor: fix it directly and stop here — no brief, no run ceremony, no issue theatre.
+1. Above the floor: say you want to open issue `{N}` for work, and walk the beats in this document top to bottom: worth-it check, beat 1 grounding with provenance tags, amendments-in-place, the affirmed what-statement.
 2. Post the affirmation record in its interim practiced form (§ The affirmation record, property 2) **before** any routing artifact.
-3. Run beat 2's classification, then produce the arm's output: author the brief per `skills/plan-authoring/SKILL.md` § Brief plan variant (routine), or continue into `/design` (novel), or fix directly (below the floor).
+3. Run beat 2's classification and produce the arm's output: author the brief per `skills/plan-authoring/SKILL.md` § Brief plan variant (routine), or continue into `/design` (novel).
 
 A `/plan` invocation that finds an affirmed framing record on the issue resumes the conversation at beat 2 and, on a routine verdict, authors the plan as a brief under source (b) (#957 Amendment 10) — see the pre-flight in `commands/plan.md`. The record alone, with beat 2 unrun, does not authorize a brief.
 

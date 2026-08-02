@@ -209,6 +209,8 @@ Solution-Designer is the second upstream agent. It runs after customer framing (
 
 Issue-Planner reads the framed and designed issue and produces an implementation plan that Spine-Runner or Code-Conductor can execute slice by slice.
 
+**This section describes the spine-bearing plan shape** — the default for a phase-pipeline issue. A chunk sub-issue of a designed parent, or a standalone issue with an affirmed open-for-work framing record, is instead authored as a **brief**: no numbered slices, no frame-spine, no defense/judge stages, and Spine-Runner cannot walk it (`skills/plan-authoring/SKILL.md` § Brief plan variant; `Documents/Design/open-for-work.md`). The four subsections below describe only the spine-bearing shape.
+
 **Plan structure.** The plan is a YAML document (frame-spine format, `spine_schema_version: 2`) with an ordered list of slices. Each slice has a step ID, a commit index, an adapter path (the methodology file that governs that slice), a set of AC-refs (acceptance-criteria references), and a requirement contract (the precise deliverable for that slice).
 
 **CE Gate coverage.** Every slice in the plan is mapped to one or more acceptance criteria from the issue. This mapping ensures that when all slices are complete, every acceptance criterion has been addressed by at least one committed change.
