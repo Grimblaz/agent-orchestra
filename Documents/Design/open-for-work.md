@@ -141,6 +141,8 @@ The affirmation record is what makes authority source (b) checkable rather than 
 4. **Gate-decision token phasing.** Gate-decision tokens emitted by this conversation's checkpoints (the worth-it doors, the affirmation gate, plan approval on the routine arm) map to `phase: experience` — the conversation is the experience-replacement, and the token schema's closed five-value phase enum is deliberately not extended (#957 D5).
 5. **Durable record versus human-readable mirror.** The comment is the authoritative record. The affirmed what-statement **is** additionally mirrored into the issue body for human reading (#957 D5); if the two ever diverge, the comment governs, and the mirror is never the lawfulness source.
 
+**Trust model — self-attested, by decision (#957 Amendment 11).** The record does not evidence *who* typed the affirmation: it is self-attested by the conversation that posts it, consistent with every other engagement record in this system. A sixth attestation degree of freedom was considered and declined; the gate's protection is its non-overridability at question time (register entries: chunk 3), not authorship proof in the artifact.
+
 **Supersession.** When chunk 3 registers the marker family, new affirmations use the registered form. An interim-form record already on an issue remains a valid source-(b) authority for that issue — supersession changes the form of new records, it does not retroactively invalidate old ones. The escape hatch's "amend the framing record in place" posts a **new** record (same form rules, new timestamp) rather than editing the old comment, so the ordering evidence stays honest.
 
 ## The filing contract
@@ -159,7 +161,7 @@ Until #957 chunk 3 ships the `/open` command and its skill, the flow runs **manu
 2. Post the affirmation record in its interim practiced form (§ The affirmation record, property 2) **before** any routing artifact.
 3. Run beat 2's classification, then produce the arm's output: author the brief per `skills/plan-authoring/SKILL.md` § Brief plan variant (routine), or continue into `/design` (novel), or fix directly (below the floor).
 
-A `/plan` invocation that finds an affirmed framing record on the issue authors the plan as a brief under source (b) — see the pre-flight in `commands/plan.md`.
+A `/plan` invocation that finds an affirmed framing record on the issue resumes the conversation at beat 2 and, on a routine verdict, authors the plan as a brief under source (b) (#957 Amendment 10) — see the pre-flight in `commands/plan.md`. The record alone, with beat 2 unrun, does not authorize a brief.
 
 ## Relationship to neighbouring doctrine
 
