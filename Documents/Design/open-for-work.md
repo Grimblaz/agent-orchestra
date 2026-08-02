@@ -25,7 +25,7 @@ Before #957, a standalone issue had two routes to an executable artifact: the fu
 One entrance, one fork. The fork is about **knowledge, not size**; it lives inside the conversation; and both of its arms belong to this flow.
 
 ```text
-filed issue   (problem · evidence · known vs unknown — and nothing else; §2f)
+filed issue   (required: problem · evidence · known vs unknown; §2f)
       │
       ▼
   open it for work — ONE conversation
@@ -162,7 +162,7 @@ Until #957 chunk 3 ships the `/open` command and its skill, the flow runs **manu
 2. Post the affirmation record in its interim practiced form (§ The affirmation record, property 2) **before** any routing artifact.
 3. Run beat 2's classification and produce the arm's output: author the brief per `skills/plan-authoring/SKILL.md` § Brief plan variant (routine), or continue into `/design` (novel).
 
-A `/plan` invocation that finds an affirmed framing record on the issue resumes the conversation at beat 2 and, on a routine verdict, authors the plan as a brief under source (b) (#957 Amendment 10) — see the pre-flight in `commands/plan.md`. The record alone, with beat 2 unrun, does not authorize a brief.
+A `/plan` invocation that finds an affirmed framing record on the issue resumes the conversation at beat 2 and, on a routine verdict, authors the plan as a brief under source (b) (#957 Amendment 10) — see the pre-flight in `commands/plan.md`, a **Claude-only surface** (`<!-- scope: claude-only -->`). The record alone, with beat 2 unrun, does not authorize a brief.
 
 ## Relationship to neighbouring doctrine
 
