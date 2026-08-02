@@ -25,7 +25,16 @@ function Get-AcRefsFromIssue {
 
     # Read issue body via gh; suppress stderr so missing gh / missing issue
     # collapse to an empty body rather than a hard failure.
-    $body = gh issue view $IssueNumber --json body --jq '.body' 2>$null
+    #
+    # `--jq '.body'` emits RAW MULTI-LINE TEXT, and PowerShell captures
+    # multi-line external-process stdout as [System.Object[]] — one element per
+    # line. The section split below is vectorized over an array, so an unjoined
+    # capture never isolates the section and `$parts[1]` becomes the body's
+    # SECOND LINE. Join first (issue #977). Do not remove the join, and do not
+    # prove this path with an in-process `gh` function: a function mock returns
+    # a single string and cannot reproduce the array capture at all.
+    $bodyLines = gh issue view $IssueNumber --json body --jq '.body' 2>$null
+    $body = @($bodyLines) -join "`n"
     if (-not $body) { return @() }
 
     # Isolate the ## Acceptance Criteria section (case-insensitive, multiline).

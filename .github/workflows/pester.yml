@@ -44,6 +44,13 @@ jobs:
             '.github/scripts/Tests/Test-DeferralCriteria.Tests.ps1',
             '.github/scripts/Tests/Add-FollowUpIssue.Tests.ps1',
             '.github/scripts/Tests/code-review-deferral-integration.Tests.ps1',
+            # AC-helper capture path — registered per d-ci-gate-registration (#977).
+            # This suite is the ONLY coverage that drives the two AC helpers
+            # through a real external process. Every other test for them
+            # substitutes gh in-process, which yields a single string and passes
+            # against the broken code — that is how #977 shipped and survived a
+            # 27-test suite. An unregistered proof would protect nothing.
+            '.github/scripts/Tests/ac-helper-capture-path.Tests.ps1',
             '.github/scripts/Tests/gate-reconciliation.Tests.ps1',
             '.github/scripts/Tests/gate-hook-contract.Tests.ps1',
             '.github/scripts/Tests/path-migration-sweep-gate.Tests.ps1',

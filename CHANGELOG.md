@@ -2,6 +2,17 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.9.1] — 2026-08-02
+
+### Fixed
+
+- **AC cross-check helpers read the acceptance-criteria section again (#977).** `Get-AcRefsFromIssue` and `Get-AcTermsFromIssue` captured the issue body with `gh issue view N --json body --jq '.body'`, which emits raw multi-line text. PowerShell captures multi-line external-process stdout as `[System.Object[]]` — one element per line — and `-split` over an array is vectorized, so the section was never isolated: `$parts.Count` was the line count, the `Count -lt 2` guard never fired, and both helpers parsed **the body's second line**. Both now join the captured lines before splitting.
+  - The failure was a **wrong input**, not the silent-empty behaviour originally filed. Empty was merely the usual result, because line 2 of a conventionally formatted issue is blank. Against a body whose second line carried a backticked identifier, the helpers returned that identifier as an acceptance-criteria reference — a fabricated match that routes `force-accept`, which *overrides* a structural deferral verdict. The gate could fail open in both directions.
+  - Consequences now reversed: `ac_cross_check.source` is no longer pinned to `no-ac-section` on every call, and the `force-accept` and `disposition-gate` arms are reachable for the first time. Confirmed live — issue #968, the original reproduction that returned `@()`, now returns its real acceptance-criteria identifiers.
+  - The absent-section warning in `Get-AcTermsFromIssue` sat behind the same dead guard and had never been emitted for any real issue. It fires again. `Get-AcRefsFromIssue` has never carried a warning and deliberately still does not.
+  - New regression suite `.github/scripts/Tests/ac-helper-capture-path.Tests.ps1` (23 tests, registered in CI) drives both helpers through a **real external process** via a PATH shim. This is the only coverage that can see this defect class: every pre-existing test substitutes `gh` in-process, which yields a single string and passes against the broken code — measured, alongside the repository's own injected-path stand-in pattern, which fails the same way. The suite was demonstrated red against the unfixed helpers (12 failures) before the fix.
+  - `skills/review-judgment/references/multiline-capture-audit.md` records the sibling-call-site audit: no second live instance exists, established from three independently phrased searches and verified against a planted positive that all three detected.
+
 ## [3.9.0] — 2026-08-02
 
 ### Changed

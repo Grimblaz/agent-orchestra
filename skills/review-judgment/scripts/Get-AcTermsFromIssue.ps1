@@ -65,7 +65,17 @@ function Get-AcTermsFromIssue {
     )
 
     # Step 1 — fetch issue body via gh; collapse any gh error to empty body.
-    $body = gh issue view $IssueNumber --json body --jq '.body' 2>$null
+    #
+    # `--jq '.body'` emits RAW MULTI-LINE TEXT, and PowerShell captures
+    # multi-line external-process stdout as [System.Object[]] — one element per
+    # line. Step 2's split is vectorized over an array, so an unjoined capture
+    # never isolates the section, `$parts[1]` becomes the body's SECOND LINE,
+    # and the `Count -lt 2` guard (with its warning) never fires. Join first
+    # (issue #977). Do not remove the join, and do not prove this path with an
+    # in-process `gh` function: a function mock returns a single string and
+    # cannot reproduce the array capture at all.
+    $bodyLines = gh issue view $IssueNumber --json body --jq '.body' 2>$null
+    $body = @($bodyLines) -join "`n"
     if (-not $body) { return @() }
 
     # Step 2 — isolate the ## Acceptance Criteria H2 section (case-insensitive).

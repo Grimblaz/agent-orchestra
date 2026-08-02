@@ -398,6 +398,8 @@ Before writing any entry with `disposition: dismiss` or `disposition: defer` **a
 
 **Low-severity exemption.** Entries with severity `low` are exempt from this pre-condition (the validator also exempts them). Record them without `ac_cross_check`.
 
+> **A `source: no-ac-section` result recorded before 2026-08-02 is not trustworthy.** Until issue #977 landed, both AC helpers captured the issue body as a per-line array and split it as if it were one string, so they read the body's **second line** rather than the acceptance-criteria section. Every cross-check therefore reported `no-ac-section` regardless of what the issue actually said, and neither `force-accept` nor `disposition-gate` was reachable. Historical dispositions were deliberately **annotated rather than recomputed** (issue #977, maintainer decision) — a recompute reads issue bodies as amended since, which is a new claim, not a reconstruction. Both helpers now join the captured lines before splitting; do not remove that join, and see [references/multiline-capture-audit.md](references/multiline-capture-audit.md) before adding any new command-capture site.
+
 **`Add-FollowUpIssue` guard.** When the cross-check routes to `defer` and the agent calls `Add-FollowUpIssue` to file a follow-up issue, it MUST pass the `ac_cross_check` outcome as part of the issue body. Include a fenced YAML block in the body:
 
 ```yaml
