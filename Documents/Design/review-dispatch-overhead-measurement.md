@@ -56,29 +56,31 @@ The sum of core plus all four mode files (21,370 B) is slightly larger than the 
 
 Extracted with `.github/scripts/extract-dispatch-attribution.ps1` over the session's subagent transcripts. This is a grain the existing cost machinery cannot produce: `cost-attribution.ps1` maps every review dispatch into a single `review` port.
 
+Both tables below reproduce the four token columns the library emits, so every row satisfies `total = input + cache_write + cache_read + output`. `input` is the uncached prompt tokens actually billed as input; on a cache-hitting dispatch it is a two-digit residual, because virtually the whole prompt is served from cache — which is exactly why it must be shown rather than inferred.
+
 Before-run, full pipeline (five panel passes, defense, judge):
 
-| dispatch | model | selector | api calls | cache_write | cache_read | output | total |
-| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| pass 1 | sonnet | code | 50 | 157,768 | 5,437,317 | 24,051 | 5,619,236 |
-| pass 2 | fable | code | 15 | 135,671 | 1,210,585 | 24,879 | 1,371,165 |
-| pass 3 | opus-5 | code | 15 | 116,157 | 1,175,312 | 35,567 | 1,327,066 |
-| pass 4 | opus-5 | code | 36 | 111,681 | 3,132,850 | 38,322 | 3,282,925 |
-| pass 5 | opus-5 | code | 27 | 115,285 | 2,642,799 | 33,618 | 2,791,756 |
-| defense | opus | defense | 14 | 120,745 | 947,288 | 13,471 | 1,081,532 |
-| judge | fable | — | 13 | 132,747 | 944,150 | 50,739 | 1,127,662 |
-| **total** | | | **170** | **890,054** | **15,490,301** | **220,647** | **16,601,342** |
+| dispatch | model | selector | api calls | input | cache_write | cache_read | output | total |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| pass 1 | sonnet | code | 50 | 100 | 157,768 | 5,437,317 | 24,051 | 5,619,236 |
+| pass 2 | fable | code | 15 | 30 | 135,671 | 1,210,585 | 24,879 | 1,371,165 |
+| pass 3 | opus-5 | code | 15 | 30 | 116,157 | 1,175,312 | 35,567 | 1,327,066 |
+| pass 4 | opus-5 | code | 36 | 72 | 111,681 | 3,132,850 | 38,322 | 3,282,925 |
+| pass 5 | opus-5 | code | 27 | 54 | 115,285 | 2,642,799 | 33,618 | 2,791,756 |
+| defense | opus | defense | 14 | 28 | 120,745 | 947,288 | 13,471 | 1,081,532 |
+| judge | fable | — | 13 | 26 | 132,747 | 944,150 | 50,739 | 1,127,662 |
+| **total** | | | **170** | **340** | **890,054** | **15,490,301** | **220,647** | **16,601,342** |
 
 After-run, the three same-model specialist passes (the batch AC1 targets):
 
-| dispatch | model | selector | api calls | cache_write | cache_read | output | total |
-| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| pass 3 | opus-4-8 | code | 16 | 124,361 | 1,226,515 | 21,610 | 1,372,518 |
-| pass 4 | opus-4-8 | code | 14 | 88,313 | 977,754 | 15,936 | 1,082,031 |
-| pass 5 | opus-4-8 | code | 9 | 87,777 | 518,890 | 15,249 | 621,934 |
-| **total** | | | **39** | **300,451** | **2,723,159** | **52,795** | **3,076,483** |
+| dispatch | model | selector | api calls | input | cache_write | cache_read | output | total |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| pass 3 | opus-4-8 | code | 16 | 32 | 124,361 | 1,226,515 | 21,610 | 1,372,518 |
+| pass 4 | opus-4-8 | code | 14 | 28 | 88,313 | 977,754 | 15,936 | 1,082,031 |
+| pass 5 | opus-4-8 | code | 9 | 18 | 87,777 | 518,890 | 15,249 | 621,934 |
+| **total** | | | **39** | **78** | **300,451** | **2,723,159** | **52,795** | **3,076,483** |
 
-Same three passes, before vs after: **7,401,747 → 3,076,483 tokens**, a 58% reduction, with cache-read (6.94M → 2.72M) as the dominant term, tracking the drop in re-fetching.
+Same three passes, before vs after: **7,401,747 → 3,076,483 tokens**, a 58% reduction, with cache-read (6.95M → 2.72M) as the dominant term, tracking the drop in re-fetching.
 
 **Two confounds that keep this from being a clean same-model delta**, both of which the reader needs in order to size the number honestly:
 

@@ -45,7 +45,15 @@ function Read-DispatchTranscript {
         throw "Transcript file not found: $Path"
     }
 
-    $agentId = [System.IO.Path]::GetFileNameWithoutExtension($Path) -replace '^agent-', ''
+    # Test-Path validates through the PowerShell provider, but [System.IO.File]
+    # resolves a relative path against [Environment]::CurrentDirectory, which
+    # PowerShell does NOT keep in sync with Set-Location. A relative -Path could
+    # therefore pass validation and then throw FileNotFoundException naming a
+    # directory the caller never mentioned. Resolve once here and use the
+    # resolved value for every later filesystem access and for the emitted path.
+    $resolvedPath = (Resolve-Path -LiteralPath $Path).ProviderPath
+
+    $agentId = [System.IO.Path]::GetFileNameWithoutExtension($resolvedPath) -replace '^agent-', ''
 
     $firstUserContent = $null
     $models = [System.Collections.Generic.HashSet[string]]::new()
@@ -55,7 +63,7 @@ function Read-DispatchTranscript {
     # message.id -> usage record with final (max) output_tokens
     $usageById = [ordered]@{}
 
-    foreach ($line in [System.IO.File]::ReadLines($Path)) {
+    foreach ($line in [System.IO.File]::ReadLines($resolvedPath)) {
         if ([string]::IsNullOrWhiteSpace($line)) { continue }
         try {
             $obj = $line | ConvertFrom-Json
@@ -105,6 +113,12 @@ function Read-DispatchTranscript {
 
         if ($lineType -ne 'assistant') { continue }
 
+        # Presence-guarded for the same reason as the user branch above: under
+        # StrictMode an assistant row with no `message` property is a terminating
+        # error, and Get-DispatchAttribution's per-file catch would then discard
+        # the ENTIRE transcript — every valid usage row in it — instead of
+        # skipping this one nonconforming row.
+        if ($obj.PSObject.Properties.Match('message').Count -eq 0) { continue }
         $msg = $obj.message
         if ($null -eq $msg) { continue }
 
@@ -185,7 +199,7 @@ function Read-DispatchTranscript {
 
     return [pscustomobject]@{
         agent_id            = $agentId
-        transcript_path     = (Resolve-Path -LiteralPath $Path).Path
+        transcript_path     = $resolvedPath
         models              = @($models) -join ','
         selector            = $selector
         handshake_issued_at = $handshakeIssuedAt
@@ -213,6 +227,15 @@ function Get-DispatchAttribution {
     .PARAMETER Since
         Optional ISO-8601 lower bound; dispatches whose first timestamp is
         older are excluded. Bounds the extraction to one run window.
+
+        Timezone rule: a bound with no UTC designator or offset (for example
+        '2026-08-02T00:00:00' or '2026-08-02') is interpreted as UTC, matching
+        how record timestamps are normalized. Without this rule the same command
+        would select a different set of dispatches on machines in different
+        timezones. Qualify the bound explicitly to select any other zone.
+
+        The bound is validated before any transcript is read, so a malformed
+        value fails immediately rather than after the whole directory is parsed.
     .OUTPUTS
         Array of per-dispatch records sorted by first timestamp.
     #>
@@ -227,6 +250,24 @@ function Get-DispatchAttribution {
 
     if (-not (Test-Path -LiteralPath $TranscriptDir -PathType Container)) {
         throw "Transcript directory not found: $TranscriptDir"
+    }
+
+    # Validate the bound BEFORE the read loop. Parsing it after the loop means a
+    # malformed value aborts the run (callers set ErrorActionPreference=Stop)
+    # only once every transcript has already been parsed — all that work thrown
+    # away for an input error that was knowable up front. AssumeUniversal +
+    # AdjustToUniversal is the documented rule from .PARAMETER Since: an
+    # offset-less bound is UTC, so it agrees with the record stamps, which
+    # Read-DispatchTranscript already normalizes to a UTC round-trip form.
+    $bound = $null
+    if ($Since) {
+        $parsedBound = [datetimeoffset]::MinValue
+        if (-not [datetimeoffset]::TryParse($Since, [cultureinfo]::InvariantCulture,
+                ([System.Globalization.DateTimeStyles]::AssumeUniversal -bor
+                 [System.Globalization.DateTimeStyles]::AdjustToUniversal), [ref]$parsedBound)) {
+            throw "-Since must be an ISO-8601 timestamp (e.g. 2026-08-02T00:00:00Z): '$Since'"
+        }
+        $bound = $parsedBound
     }
 
     $files = @(Get-ChildItem -LiteralPath $TranscriptDir -Filter 'agent-*.jsonl' -File)
@@ -244,13 +285,16 @@ function Get-DispatchAttribution {
     }
     $records = @($records)
 
-    if ($Since) {
-        $bound = [datetimeoffset]::Parse($Since, [cultureinfo]::InvariantCulture)
+    if ($null -ne $bound) {
         $kept = [System.Collections.Generic.List[object]]::new()
         $droppedUnparseable = 0
         foreach ($rec in $records) {
             $stamp = $rec.first_timestamp
             if (-not $stamp) { $droppedUnparseable++; continue }
+            # Styles::None is correct here and NOT an asymmetry with the bound:
+            # Read-DispatchTranscript normalizes every stamp it emits with
+            # .ToString('o') on a UTC value, so record stamps always carry an
+            # offset and AssumeUniversal would have nothing to assume.
             $parsed = [datetimeoffset]::MinValue
             if (-not [datetimeoffset]::TryParse($stamp, [cultureinfo]::InvariantCulture,
                     [System.Globalization.DateTimeStyles]::None, [ref]$parsed)) {

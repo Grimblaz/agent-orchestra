@@ -10,7 +10,7 @@
 .EXAMPLE
     pwsh .github/scripts/extract-dispatch-attribution.ps1 -TranscriptDir "$HOME/.claude/projects/{slug}/{sessionId}/subagents"
 .EXAMPLE
-    pwsh .github/scripts/extract-dispatch-attribution.ps1 -TranscriptDir ./subagents -Since 2026-08-02T00:00:00Z -JsonOut run.json
+    pwsh .github/scripts/extract-dispatch-attribution.ps1 -TranscriptDir ./subagents -Since 2026-08-02T00:00:00Z -JsonOut .tmp/issue-975/dispatch-attribution.json
 #>
 [CmdletBinding()]
 param(
@@ -37,7 +37,10 @@ $ErrorActionPreference = 'Stop'
 
 $getParams = @{ TranscriptDir = $TranscriptDir }
 if ($Since) { $getParams.Since = $Since }
-$records = Get-DispatchAttribution @getParams
+# @(...) at the call site: a function returning an empty collection unrolls to
+# nothing, so a plain assignment leaves $records $null and the table call below
+# fails to bind — the zero-record run would die before ever reaching -JsonOut.
+$records = @(Get-DispatchAttribution @getParams)
 
 $table = Format-DispatchAttributionTable -Records $records
 
@@ -60,7 +63,16 @@ if ($JsonOut) {
             }
         }
     }
-    $lean | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $JsonOut -Encoding utf8NoBOM
+    # -InputObject, not the pipeline: piping unrolls the collection, so one
+    # record would serialize as a bare object and zero records would emit
+    # nothing at all — Set-Content would never run and the file would silently
+    # not exist while the script still exited 0. Zero records is reachable
+    # whenever -Since filters everything out, and this file is the AC4 evidence
+    # artifact. -InputObject on an already-array value preserves array shape at
+    # every count; adding -AsArray on top of it wraps a second time and emits
+    # [[...]] (measured on pwsh 7.6.3), so it is deliberately not used here.
+    $json = ConvertTo-Json -InputObject $lean -Depth 6
+    Set-Content -LiteralPath $JsonOut -Value $json -Encoding utf8NoBOM
 }
 
 Write-Output $table

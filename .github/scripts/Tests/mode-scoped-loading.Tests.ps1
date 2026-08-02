@@ -49,6 +49,19 @@ BeforeAll {
             ForEach-Object { [string]$_.marker }
     )
 
+    # The Mode-Scoped Loading table's data rows, row-by-row. Checking a selector
+    # and a mode-file leaf against the whole core file only proves both strings
+    # exist SOMEWHERE — it passes unchanged when two rows are swapped wholesale,
+    # which silently routes every defense dispatch to the design-review file.
+    # Row identity is the thing under test, so rows are kept separate here.
+    $script:LoadingTableRows = @(
+        ([regex]::Match($script:Core, '(?ms)^## Mode-Scoped Loading\b.*?(?=^## |\z)').Value -split "`r?`n") |
+            ForEach-Object { $_.Trim() } |
+            Where-Object { $_.StartsWith('|') } |
+            Where-Object { $_ -notmatch '^\|\s*Review mode selector\s*\|' } |   # header
+            Where-Object { $_ -notmatch '^\|[\s\-:|]+\|$' }                     # separator
+    )
+
     # Selector -> the mode file a dispatch carrying it must boot. The CE selector
     # is the documented no-mode-file case (its contract is inline in the body).
     $script:ExpectedModeForMarker = @{
@@ -112,21 +125,36 @@ Describe 'Mode-scoped loading — the core is scoped down but keeps shared conte
         $script:Core | Should -Match '## Mode-Scoped Loading'
     }
 
-    It 'every routing-config selector resolves to a mode file (or the documented CE no-file case)' {
+    It 'every routing-config selector resolves to a mode file in its own loading-table row' {
         $script:RoutingMarkers.Count | Should -BeGreaterThan 0 `
             -Because 'routing-config must expose the review_mode_routing marker set this check reads'
+        $script:LoadingTableRows.Count | Should -BeGreaterThan 0 `
+            -Because 'the core Mode-Scoped Loading table must parse into data rows for the row-identity check below'
 
         foreach ($marker in $script:RoutingMarkers) {
             $script:ExpectedModeForMarker.ContainsKey($marker) | Should -BeTrue `
                 -Because "routing-config selector '$marker' has no mode-file mapping — add it to modes/ and to the core Mode-Scoped Loading table, or record it as a no-mode-file case"
 
+            # Ordinal Contains, not -like/-match: selector text carries characters
+            # that wildcard and regex engines would reinterpret.
+            $rows = @($script:LoadingTableRows | Where-Object { ([string]$_).Contains($marker) })
+            $rows.Count | Should -Be 1 `
+                -Because "selector '$marker' must appear in exactly one Mode-Scoped Loading row; zero means it is unroutable and more than one is an ambiguous route"
+
             $modeKey = $script:ExpectedModeForMarker[$marker]
-            if ($null -eq $modeKey) { continue }   # CE: contract inline in the agent body
+            if ($null -eq $modeKey) {
+                # CE: contract inline in the agent body, so its row names no file.
+                $rows[0] | Should -Match '(?i)No mode file' `
+                    -Because "selector '$marker' is the documented no-mode-file case and its row must say so"
+                continue
+            }
 
             Test-Path -LiteralPath (Join-Path $script:RepoRoot $script:ModeFiles[$modeKey]) |
                 Should -BeTrue -Because "selector '$marker' maps to $modeKey, whose mode file must exist"
-            $script:Core | Should -Match ([regex]::Escape($marker)) `
-                -Because "the core Mode-Scoped Loading table must name selector '$marker'"
+
+            $leaf = ($script:ModeFiles[$modeKey] -split '/')[-1]
+            ([string]$rows[0]).Contains($leaf) | Should -BeTrue `
+                -Because "selector '$marker' must sit in the SAME table row as $leaf — a whole-file check passes even when two rows are swapped, which routes every '$marker' dispatch to the other row's mode file"
         }
     }
 

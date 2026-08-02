@@ -119,7 +119,7 @@ When the selector value is `"Use lite code review perspectives"`, use the canoni
 
 **7. Missed-gate detection** — For each load-bearing decision in the artifact under review (engagement-record decisions, finding_dispositions entries), check whether a corresponding L0 gate token exists in the session event log (`memories/session/gate-events-*.jsonl` or `.copilot-tracking/gate-events.jsonl`). Flag decisions with no token of `outcome: asked` and no lawful-skip token (gate-fails/declined/same-decision-resume/greenfield-defer). This is a detective perspective: it detects never-surfaced decisions, not implementation errors. Use the gate-decision-token schema at `skills/solution-authoring/schemas/gate-decision-token.schema.json` as the ground truth. A finding from this perspective carries `category: missed-gate`, `severity: medium`, and `systemic_fix_type: process-gap`.
 
-If multiple selector lines are present, apply the conflict rule only across those selector lines: priority order (most specific wins): defense > CE > proxy > design > lite > code. Exception: `"Use code review perspectives"` always overrides `"Use design review perspectives"` and forces Code Review Mode.
+If multiple selector lines are present, apply the conflict rule only across those selector lines: priority order (most specific wins): defense > CE > proxy > design > post-fix > lite > code. Exception: `"Use code review perspectives"` always overrides `"Use design review perspectives"` and forces Code Review Mode.
 
 ### Design And Plan Routing
 
