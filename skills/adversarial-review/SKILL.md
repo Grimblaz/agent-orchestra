@@ -21,6 +21,18 @@ Reusable review methodology for prosecution and defense passes.
 
 Hunt for real defects without inventing them. The goal is to apply a repeatable adversarial method, gather concrete evidence, and emit findings or disproofs that another agent can judge.
 
+## Mode-Scoped Loading
+
+This file is the shared core: evidence standards, pipeline shapes, atomic discipline, and ledger output discipline. The per-mode workflow checklists live in mode files under [modes/](modes/), loaded selector-conditionally so a dispatch boots only the methodology its selector names (#975). Load this core plus exactly the one mode file for the active review mode selector, and no other mode file:
+
+| Review mode selector | Mode file |
+| --- | --- |
+| `Use code review perspectives`, `Use lite code review perspectives`, `Use post-fix code review perspectives`, or no selector line (default) | [modes/code-prosecution.md](modes/code-prosecution.md) |
+| `Use design review perspectives` | [modes/design-review.md](modes/design-review.md) |
+| `Use defense review perspectives` | [modes/defense.md](modes/defense.md) |
+| `Score and represent GitHub review` | [modes/proxy-prosecution.md](modes/proxy-prosecution.md) |
+| `Use CE review perspectives` | No mode file — the CE contract is inline in `agents/Code-Critic.agent.md`; this core still applies |
+
 ## Pipeline Flow
 
 Adversarial review adapters run one of these stage shapes:
@@ -92,207 +104,6 @@ Use the smallest checks that can disconfirm or support a suspected defect:
 Write findings so a defense or judge pass can act on them without reconstructing your reasoning from scratch. Avoid vague summaries such as "looks risky" or "might break stuff."
 
 Coverage and economy are orthogonal axes, not a single dial: coverage governs whether a finding is reported at all — maximize it, reporting every finding with a statable failure mode regardless of severity or confidence — while economy governs how tersely a reported finding is written. Economy never justifies dropping a real finding; it only controls how much prose surrounds it.
-
-## Code Prosecution Workflow
-
-For standard code review, work through all six perspectives in sequence. For perspectives whose gate is not triggered, use the compact N/A pattern instead of expanding checklist items.
-
-### 1. Architecture
-
-Apply when runtime code, scripts, or runtime configuration changed.
-
-Check:
-
-- Architecture-rule compliance and layer direction
-- Integration wiring for new components
-- Data integration for newly introduced fields, constants, and maps
-- Domain-alignment mismatches across validators, parsers, and converters — identify peers via field-name grep, plan consultation for aliases, and call-chain tracing
-- Trace the sibling write-path guarantee parity: both write paths to the persisted target — the branch body plus every downstream helper the branch routes through — must be verified by name to carry every guarantee the sibling's path has (write-time preflight, schema validation, existence checks, post-write verification); a guarantee living only in a sibling's downstream call chain still counts as that sibling's guarantee
-
-### 2. Security
-
-Apply when the change touches source code, scripts, auth, or data handling.
-
-Check:
-
-- Secrets, credentials, and logging of sensitive data
-- Input validation and authorization boundaries
-- Full-record overwrite risks that can drop security-sensitive fields (when the risk spans a sibling write path, cross-reference the sibling write-path guarantee parity check in § Code Prosecution Workflow → 1. Architecture)
-
-### 3. Performance
-
-Apply when runtime execution paths changed.
-
-Check:
-
-- Algorithmic complexity
-- Re-render or repeated-computation costs
-- Memory or bottleneck risks
-
-### 4. Pattern
-
-Apply when source files changed. For docs-only changes, keep the documentation pattern concerns only.
-
-Check:
-
-- Appropriate pattern use and anti-pattern avoidance
-- DRY violations and contradictory guidance
-- SOLID pressure points
-- UI test querying patterns when test code is in scope
-
-### 5. Implementation Clarity
-
-Apply to all change types.
-
-Check:
-
-- Over-engineering
-- Readability and self-documenting structure
-- Unnecessary complexity
-- Comments that explain why rather than what
-
-### 6. Script And Automation
-
-Apply when script files changed or markdown includes runnable shell guidance.
-
-For script files, verify:
-
-- Native command exit-code checks at boundaries
-- Cross-references to authoritative enumerated values
-- PowerShell and pipeline semantics that preserve intended types
-
-For markdown-only command guidance, audit:
-
-- Runnable commands from repo root
-- Self-match hazards in grep-based validations
-- Correct post-change counts and expectations
-- Preference for built-in VS Code tools over terminal-first read-only guidance when an equivalent exists
-
-### 7. Missed-gate detection
-
-**7. Missed-gate detection** (gate-skip audit) — See `agents/Code-Critic.agent.md` for the full specification. This perspective audits whether load-bearing decisions in the artifact have corresponding L0 gate tokens; it fires as a detective pass alongside the standard six perspectives when the `solution-authoring` gate is in scope for the reviewed artifact.
-
-### Browser-Based Review
-
-When the change touches UI implementation:
-
-- Navigate only the affected routes or adjacent impacted flows
-- Capture screenshots to support visual findings
-- State route, action, expected behavior, observed behavior, and evidence
-
-### Compact N/A Rule
-
-When a perspective gate is not triggered, replace the full section with:
-
-```markdown
-### ⏭️ [Perspective Name]: N/A — [reason]
-```
-
-### Standard Code Review Output
-
-```markdown
-## Review Findings
-
-### ✅ Architecture: PASS/FAIL
-
-{findings or compact N/A}
-
-### ✅ Security: PASS/FAIL
-
-{findings or compact N/A}
-
-### ✅ Performance: PASS/FAIL
-
-{findings or compact N/A}
-
-### ✅ Patterns: PASS/FAIL
-
-{findings or compact N/A}
-
-### ✅ Implementation Clarity: PASS/FAIL
-
-{findings or compact N/A}
-
-### ✅ Script & Automation: PASS/FAIL
-
-{findings or compact N/A}
-
-## Summary
-
-{overall verdict and key actions}
-```
-
-## Design Review
-
-Use when the caller requests the design-review marker.
-
-Review with these perspectives:
-
-- Feasibility and Risk
-- Scope and Completeness
-- Integration and Impact
-
-Each finding should cite the challenged decision, acceptance criterion, or scope element, and explain what breaks if the concern is real.
-
-Output format:
-
-```markdown
-## Design Challenge Report
-
-### §D1 — Feasibility & Risk
-
-{findings or checked-no-issues summary}
-
-### §D2 — Scope & Completeness
-
-{findings or checked-no-issues summary}
-
-### §D3 — Integration & Impact
-
-{findings or checked-no-issues summary}
-
-### Summary
-
-{highest-risk items and overall confidence}
-```
-
-## Defense Workflow
-
-When defending against a prosecution ledger:
-
-1. Read the cited code or evidence independently
-2. Try to disprove the stated failure mode
-3. Use `disproved`, `conceded`, or `insufficient-to-disprove` per finding
-4. Only challenge items you can support with concrete counter-evidence
-
-Defense report format:
-
-```markdown
-## Defense Report
-
-### Finding: {id} — {title}
-
-Prosecution: {severity} ({points} pts) — {brief claim}
-Defense verdict: `disproved | conceded | insufficient-to-disprove`
-Evidence: {what was independently verified}
-Argument: {why the prosecution is wrong or why defense concedes}
-
-### Score Summary
-
-Findings reviewed: N
-Disproved: X | Conceded: Y | Insufficient: Z
-Points claimed: {sum of disproved finding values}
-Points at risk: {-2× sum of disproved finding values if rejected}
-```
-
-## Proxy Prosecution Workflow
-
-When representing an external review ledger:
-
-- Treat the ingested reviewer comments as the authoritative scope
-- Validate each claim rather than generating a fresh review
-- Preserve the no-net-new rule unless an unavoidable critical blocker appears
-- Attribute findings to the external reviewer rather than the current agent
 
 ## Related Guidance
 

@@ -57,7 +57,15 @@ You are a forensic investigator. Your job is to find what everyone else missed �
 
 A professional self-review agent that performs comprehensive analysis of code quality, architecture compliance, security vulnerabilities, and test coverage. Provides actionable, evidence-based feedback to improve code before release.
 
-Load `skills/adversarial-review/SKILL.md` for the reusable prosecution methodology, six-perspective review checklist, design review procedures, defense workflow, proxy-review scoring process, browser-review method, and standard report formats.
+Load `skills/adversarial-review/SKILL.md` for the shared review core: evidence standards, pipeline shapes, atomic discipline, finding-schema ownership, and ledger-output discipline. Then load **exactly the one mode file** its § Mode-Scoped Loading table names for the active review mode selector — and no other mode file (#975):
+
+- `Use code review perspectives`, `Use lite code review perspectives`, `Use post-fix code review perspectives`, or no selector line (default): `skills/adversarial-review/modes/code-prosecution.md` (six-perspective checklist + report format)
+- `Use design review perspectives`: `skills/adversarial-review/modes/design-review.md`
+- `Use defense review perspectives`: `skills/adversarial-review/modes/defense.md`
+- `Score and represent GitHub review`: `skills/adversarial-review/modes/proxy-prosecution.md`
+- `Use CE review perspectives`: no mode file — the CE contract is inline in this agent body under `## CE Prosecution Mode`; the core still applies
+
+Resolve the selector first (per `## Review Mode Routing` below), then load core + the single matching mode file. A dispatch must not load a mode file its selector does not name. Both platforms follow this identically — the split is skill-side only and changes no routing behavior.
 
 For terminal and validation execution guardrails while running review checks, load `skills/terminal-hygiene/SKILL.md`.
 
@@ -111,7 +119,7 @@ When the selector value is `"Use lite code review perspectives"`, use the canoni
 
 **7. Missed-gate detection** — For each load-bearing decision in the artifact under review (engagement-record decisions, finding_dispositions entries), check whether a corresponding L0 gate token exists in the session event log (`memories/session/gate-events-*.jsonl` or `.copilot-tracking/gate-events.jsonl`). Flag decisions with no token of `outcome: asked` and no lawful-skip token (gate-fails/declined/same-decision-resume/greenfield-defer). This is a detective perspective: it detects never-surfaced decisions, not implementation errors. Use the gate-decision-token schema at `skills/solution-authoring/schemas/gate-decision-token.schema.json` as the ground truth. A finding from this perspective carries `category: missed-gate`, `severity: medium`, and `systemic_fix_type: process-gap`.
 
-If multiple selector lines are present, apply the conflict rule only across those selector lines: priority order (most specific wins): defense > CE > proxy > design > lite > code. Exception: `"Use code review perspectives"` always overrides `"Use design review perspectives"` and forces Code Review Mode.
+If multiple selector lines are present, apply the conflict rule only across those selector lines: priority order (most specific wins): defense > CE > proxy > design > post-fix > lite > code. Exception: `"Use code review perspectives"` always overrides `"Use design review perspectives"` and forces Code Review Mode.
 
 ### Design And Plan Routing
 

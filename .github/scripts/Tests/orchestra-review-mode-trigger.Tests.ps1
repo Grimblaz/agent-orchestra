@@ -27,6 +27,7 @@ Describe 'orchestra-review lite mode trigger contract' {
         $script:RoutingConfig = Get-Content -Path $script:RoutingConfigPath -Raw | ConvertFrom-Json -AsHashtable
         $script:StandardMarker = 'Use code review perspectives'
         $script:LiteMarker = 'Use lite code review perspectives'
+        $script:PostFixMarker = 'Use post-fix code review perspectives'
 
         $script:ReviewModeRoutingSection = [regex]::Match(
             $script:CodeCriticBody,
@@ -84,6 +85,33 @@ Describe 'orchestra-review lite mode trigger contract' {
         $script:CodeReviewIntakeSkill | Should -Match 'Review mode selector: `?"Score and represent GitHub review"`?' -Because 'code-review-intake skill must describe proxy prosecution via the selector line'
         $script:CodeReviewIntakeSkill | Should -Match 'Review mode selector: `?"Use defense review perspectives"`?' -Because 'code-review-intake skill must describe defense via the selector line'
         $script:RoutingTablesSkill | Should -Match 'Review mode routing is driven by explicit top-level selector lines' -Because 'routing-tables skill must summarize the authoritative selector-line contract'
+    }
+
+    It 'maps the exact post-fix marker to the single-pass non-parallel routing entry' {
+        # code_prosecution_lite is pinned by three assertions in this file;
+        # code_prosecution_post_fix had none, so a rename or a routing change
+        # would have gone unnoticed everywhere except routing-config itself.
+        $entry = @(
+            $script:RoutingConfig.review_mode_routing.entries |
+                Where-Object { $_.marker -eq $script:PostFixMarker }
+        )
+
+        $entry.Count | Should -Be 1 -Because 'routing-config must have exactly one post-fix review entry'
+        $entry[0].mode | Should -Be 'code_prosecution_post_fix'
+        $entry[0].passes | Should -Be 1 -Because 'post-fix review is a single compact prosecution pass'
+        $entry[0].parallel | Should -BeFalse -Because 'post-fix review must stay non-parallel'
+    }
+
+    It 'orders code_prosecution_post_fix between design prosecution and lite in the conflict priority order' {
+        $priorityOrder = @($script:RoutingConfig.review_mode_routing.conflict_rule.priority_order)
+
+        $priorityOrder | Should -Contain 'code_prosecution_post_fix'
+        $priorityOrder.IndexOf('code_prosecution_post_fix') |
+            Should -BeGreaterThan $priorityOrder.IndexOf('design_plan_prosecution') `
+            -Because 'a design-review selector must still outrank the post-fix selector'
+        $priorityOrder.IndexOf('code_prosecution_post_fix') |
+            Should -BeLessThan $priorityOrder.IndexOf('code_prosecution_lite') `
+            -Because 'post-fix review must outrank lite, which in turn outranks the default fallback'
     }
 
     It 'keeps code_prosecution_lite in the conflict priority order ahead of default code prosecution' {

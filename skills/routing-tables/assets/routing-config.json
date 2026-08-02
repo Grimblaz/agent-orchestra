@@ -101,6 +101,12 @@
         "parallel": false
       },
       {
+        "marker": "Use post-fix code review perspectives",
+        "mode": "code_prosecution_post_fix",
+        "passes": 1,
+        "parallel": false
+      },
+      {
         "marker": "Use defense review perspectives",
         "mode": "defense",
         "passes": 1,
@@ -125,6 +131,7 @@
         "ce_prosecution",
         "proxy_prosecution",
         "design_plan_prosecution",
+        "code_prosecution_post_fix",
         "code_prosecution_lite",
         "code_prosecution"
       ],
