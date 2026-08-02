@@ -71,19 +71,19 @@ When authoring new issues under these rules, apply the outsider-first authoring 
 **The six structural criteria — canonical statement.** A change is **structural** if it would do any of the following (identifiers implemented one-for-one in `skills/review-judgment/scripts/Test-DeferralCriteria.ps1`, the canonical taxonomy):
 
 1. introduce a new abstraction, agent, skill, or public API (`S-new-abstraction`);
-2. cross an architecture layer boundary (`S-cross-cutting`);
+2. cross an architecture layer boundary, or span four or more modules (`S-cross-cutting` — the script checks the module count first);
 3. require a separate design decision (`S-design-decision`);
 4. change a schema or contract (`S-schema-or-contract`);
-5. touch a different surface than the work at hand (`S-different-surface`);
+5. touch a different surface than the work at hand (`S-different-surface`) — at pickup, read this as: the fix would land somewhere other than the surface the filed issue is about; at review time the script's operand is disjointness from the PR's file set;
 6. need a maintainer's judgment call (`S-maintainer-judgment`).
 
-A change that trips **none** of the six is below the structural floor. **The same six criteria decide three distinct moments** (#957 D6, decision `d-one-floor-three-moments`) — stated once, here, so that when the floor is wrong it is wrong in one place. An earlier revision of this rule carried a five-property prose paraphrase of inline eligibility ("small, single-file or single-system, …") alongside the six identifiers; the two lists were not the same set, and the paraphrase is retired — the six identifiers are the statement.
+A change that trips **none** of the six is below the structural floor. **The same six criteria decide three distinct moments** (#957 D6, decision `d-one-floor-three-moments`). This section is the canonical prose statement; the predicates live in `skills/review-judgment/scripts/Test-DeferralCriteria.ps1`, and two consumption-contract surfaces carry moment-3's PR-scoped operand detail — `agents/Code-Review-Response.agent.md` § Structural Deferral Guidelines and `Documents/Design/code-review.md` § Structural Criteria Taxonomy. Those are consumers of the same six identifiers, not second floors; at moment 3 the script's predicates govern wherever prose and predicate differ. An earlier revision of this rule carried a five-property prose paraphrase of inline eligibility ("small, single-file or single-system, …") alongside the six identifiers; the two lists were not the same set, and the paraphrase is retired — the six identifiers are the statement.
 
 **Moment 1 — the trivial floor at pickup (open-for-work).** Whether a filed issue is below the trivial floor is read from the **filed issue alone**, at the moment someone opens it for work: no pull request, no `$Finding` object, and no script invocation exists yet, so this is a reading of the six criteria by the person or agent picking the issue up, not a `Test-DeferralCriteria.ps1` run. **Risk guard (#957 D6)**: at this moment, a change touching **permission, authentication, or data-integrity behavior is never below the floor, regardless of size** — below the trivial floor there is no brief, no adversarial review, and no plan review, so pull-request review is the only review that will ever see the change, and the six structural criteria alone are not a safe proxy for risk on those three behaviors. Verdict below the floor: **fix it directly** — no brief, no run ceremony (`Documents/Design/open-for-work.md` § The trivial floor).
 
 **Moment 2 — mid-run follow-up disposition (this rule's original moment).** When any agent discovers an out-of-scope or non-blocking improvement during its work: if the change trips none of the six criteria, address it within the current task (or current PR if one is open). If it trips at least one, route the proposed follow-up through the **Filing Approval Gate** (§2e) — as a single-item batch when an interactive parent conversation is available, or via the headless queue when it is not — rather than filing it immediately, then continue with in-scope work. Do not block the current PR on the deferred improvement.
 
-**Moment 3 — review deferral.** `Test-DeferralCriteria.ps1` applies the same six identifiers to review findings, yielding `ACCEPT (fix inline)` when none match and `DEFERRED-SIGNIFICANT (structural)` when at least one does (consumption contract in `agents/Code-Review-Response.agent.md` § Structural Deferral Guidelines).
+**Moment 3 — review deferral.** `Test-DeferralCriteria.ps1` applies the same six identifiers to review findings, yielding `ACCEPT (fix inline)` when none match and `DEFERRED-SIGNIFICANT (structural)` when at least one does — with one override: the **AC cross-check takes absolute precedence**, so a finding that maps to an explicit acceptance criterion is force-accepted inline even when structural criteria match (consumption contract in `agents/Code-Review-Response.agent.md` § Structural Deferral Guidelines).
 
 > Supplementary rationale: as a quick sanity check, deferred (structural) issues typically represent more than a day of work, but structural-criteria match — not the effort estimate — is the load-bearing deferral criterion.
 
@@ -269,7 +269,7 @@ Some follow-up issues need a maintainer's approve/modify/drop decision before th
 
 ### 2f. Filing Content Standard (#957 `d-filing-shape`)
 
-Every subsection above governs the mechanics and placement of filing — priority labels, umbrella attachment, dedup, the approval gate. This one states what belongs **in** the issue body, and it is deliberately short. A filed issue carries three things:
+The other subsections here govern the mechanics and placement of filing — priority labels, umbrella attachment, dedup, the approval gate — and §2a governs the structural floor across its three moments. This one states what belongs **in** the issue body, and it is deliberately short. A filed issue carries three things:
 
 1. **The problem** — what is wrong or missing, in plain language.
 2. **The evidence it is real** — what was observed, where, and how someone else could see it too. A hunch is fine to file; say it is a hunch.

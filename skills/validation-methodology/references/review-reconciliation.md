@@ -127,7 +127,7 @@ Before treating any `DEFERRED-SIGNIFICANT (structural)` or REJECT categorization
 
 #### Structural-Criteria Checklist (Cross-Reference)
 
-Default to `✅ ACCEPT (fix inline)`. Only defer when the finding matches at least one structural criterion in the canonical taxonomy (`S-new-abstraction`, `S-cross-cutting`, `S-design-decision`, `S-schema-or-contract`, `S-different-surface`, `S-maintainer-judgment`). Quick checklist - any of these alone means inline-eligible: adding data to existing maps/constants, integrating data added in this PR, adding a field + consumers, modifying 1-3 functions in 1-3 files, adding validation/filtering, fixing a single-system design flaw. (Authoritative source: `agents/Code-Review-Response.agent.md` § Structural Deferral Guidelines; predicate implementation: `skills/review-judgment/scripts/Test-DeferralCriteria.ps1`.)
+Default to `✅ ACCEPT (fix inline)`. Only defer when the finding matches at least one structural criterion in the canonical taxonomy (`S-new-abstraction`, `S-cross-cutting`, `S-design-decision`, `S-schema-or-contract`, `S-different-surface`, `S-maintainer-judgment`). When in doubt, read the six identifiers — size and file-count are not criteria, and the retired size-based quick checklist that used to sit here was removed (#972 review M4): it stated an inline-eligibility rule not derivable from the six. (Canonical prose statement: `skills/safe-operations/SKILL.md` §2a; moment-3 consumption contract: `agents/Code-Review-Response.agent.md` § Structural Deferral Guidelines; predicate implementation: `skills/review-judgment/scripts/Test-DeferralCriteria.ps1`.)
 
 #### Auto-Tracking
 

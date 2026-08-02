@@ -16,8 +16,6 @@ assignees: ''
      enough that someone else could see it too. Environment details (OS,
      Claude Code version, plugin version) go here if relevant. -->
 
-1. 
-
 ## Known vs unknown
 
 <!-- Which claims above are established, and which are open questions?

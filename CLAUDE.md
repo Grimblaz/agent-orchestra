@@ -144,6 +144,7 @@ Methodology checkpoints fire unconditionally per D3. The user's only in-band lev
 See: `skills/solution-authoring/SKILL.md` § Rule: Classification gate (the three-leg load-bearing test that defines an engagement-gate methodology checkpoint); `skills/solution-authoring/SKILL.md` § Rule: Non-overridability; `skills/upstream-onboarding/SKILL.md` § Rule: Non-overridability; `skills/plan-authoring/SKILL.md` § Rule: Non-overridability. Also see: #575 and #576 (engagement-record-{phase}-{ID} marker contract, active for experience/design/plan/orchestration phases) for the Segment-A maintainer-evidence path.
 
 <!-- engagement-gate-non-overridability:end -->
+*Pending (#957 chunk 3): the open-for-work affirmation gate joins this register when its surface ships; until then it binds via [Documents/Design/open-for-work.md](Documents/Design/open-for-work.md) § Beat 1.*
 
 ## Auto-mode boundary
 

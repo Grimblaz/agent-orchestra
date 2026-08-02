@@ -94,6 +94,8 @@ See: `skills/solution-authoring/SKILL.md` § Rule: Classification gate; `skills/
 
 <!-- engagement-gate-non-overridability:end -->
 
+*Pending (#957 chunk 3): the open-for-work affirmation gate joins this register when its surface ships; until then it binds via `Documents/Design/open-for-work.md` § Beat 1.*
+
 ## Build & Run
 
 No build step. This is a configuration/documentation template.
