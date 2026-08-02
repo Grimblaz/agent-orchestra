@@ -11,7 +11,6 @@ This flow was designed in #957 and lands in three chunks. **After chunk 1 (this 
 
 - **The explicit `/open {issue}` command and `skills/open-for-work/SKILL.md`** — pending, #957 chunk 3. No `/open` command exists in the repository today; do not offer it as an invocable surface.
 - **The registered `open-for-work-affirmed-{N}` marker family** — pending, #957 chunk 3. Until it registers, the affirmation record uses the [interim practiced form](#the-affirmation-record) defined below (#957 Amendment 8).
-- **The strengthened brief-review teeth** — the vacuity property in the brief conformance check and the required vacuity question in the convergence cold read — pending, #957 chunk 2. Until then a brief from this flow takes today's brief charter unchanged.
 - **The affirmation gate's entries in the engagement-gate non-overridability register** (both platform surfaces) — pending, #957 chunk 3. The gate is binding as doctrine from this document; the register entries make it machine-audited.
 
 The central pending-machinery record for #957, with its retirement owner, lives in [chunked-delivery.md § Pending machinery owned by #957](chunked-delivery.md#pending-machinery-owned-by-957-open-for-work).
@@ -117,9 +116,8 @@ Whether an issue is below the trivial floor is decided **at pickup, from the fil
 
 ### Review
 
-A brief produced by this flow takes the same review a chunk brief takes — the **brief charter**: the `#### Brief conformance check` (author before dispatch, reviewer as first act), then the prosecution-only `design-challenge` shape (three lenses, no defense, no judge) plus the convergence filter over the merged ledger. The review runs once, after beat 2's artifact exists and before the worktree opens. The **routing call** — beat 2's routine-versus-novel classification against the still-open list — is a named review target. The alignment beat itself gets no adversarial pass: the person is ground truth for what they want built, and an agent prosecuting that would be prosecuting them (#957 d-review-shape).
+A brief produced by this flow takes the same review a chunk brief takes — the **brief charter**: the `#### Brief conformance check` (author before dispatch, reviewer as first act), then the prosecution-only `design-challenge` shape (three lenses, no defense, no judge) plus the convergence filter over the merged ledger. The review runs once, after beat 2's artifact exists and before the worktree opens. The **routing call** — beat 2's routine-versus-novel classification against the still-open list — is a named review target, and the charter aims at it: `skills/plan-authoring/SKILL.md` § The routing call as a review target has the reviewer locate the recorded verdict, re-ask beat 2's question over the brief's own known-unknown entries, and rule one of three ways — consistent, inconsistent (a finding), or **absent**, which under Amendment 10 is a review failure rather than a gap, since a framing record with beat 2 unrun does not authorize a brief at all. The vacuity question lands twice in the same charter (#957 D2): as conformance-check property 5, and as a required question in the convergence cold read whose answer is emitted whichever way it comes out. The alignment beat itself gets no adversarial pass: the person is ground truth for what they want built, and an agent prosecuting that would be prosecuting them (#957 d-review-shape).
 
-> **Pending (chunk 2):** the vacuity property in the conformance check ("is there a reading of the criteria under which every one passes and no work happens?") and the required vacuity question in the convergence cold read land with #957 chunk 2. Until then, the charter runs as it stands today.
 
 ### The close-out habit
 

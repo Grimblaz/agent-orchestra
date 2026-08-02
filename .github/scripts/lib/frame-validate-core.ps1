@@ -480,7 +480,9 @@ function Invoke-FVBriefPlanValidate {
         HTML comment carries none of them either, which is why the body is
         stripped of both before the scan (#947 review, M1). The judgment half
         -- artifact-pinned criteria, unmarked provenance, missing proof
-        standards -- is the Brief conformance check in
+        standards, and a criteria set carrying a reading under which every
+        criterion passes and no work happens (#957 chunk 2) -- is the Brief
+        conformance check in
         skills/plan-authoring/SKILL.md, which a reviewer runs; it is not
         mechanically decidable from the text and is deliberately not attempted
         here.

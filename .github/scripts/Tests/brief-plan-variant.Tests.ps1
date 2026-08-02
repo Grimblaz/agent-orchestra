@@ -18,7 +18,14 @@
          shape, while code review's `standard` adapter is untouched. (#941 AC4)
 
       3. The brief conformance check is reachable from where a reviewer works,
-         and covers the four mechanical properties #936 D5 named. (#941 AC6)
+         and covers the five properties the doctrine names -- the four
+         near-mechanical ones #936 D5 named, plus the vacuity reading-property
+         #957 D2 added. (#941 AC6; extended by #973)
+
+      4. The brief-review teeth #957 chunk 2 delivered are held, not merely
+         described: the vacuity question is a required part of a brief-target
+         convergence cold read AND has an instructed producer, and the routing
+         call is a named review target with every outcome arm defined. (#973)
 #>
 
 BeforeAll {
@@ -628,7 +635,7 @@ Describe 'Brief plan variant — authoring rule' -Tag 'unit' {
 
 Describe 'Brief plan variant — conformance check' -Tag 'unit' {
 
-    It 'declares the four mechanical properties #936 D5 named' {
+    It 'declares the five properties: four mechanical (#936 D5) plus the vacuity reading (#957 D2)' {
         $content = & $script:ReadRepoFile 'skills/plan-authoring/SKILL.md'
 
         $content | Should -Match '(?m)^####\s+Brief conformance check\s*$'
@@ -643,6 +650,37 @@ Describe 'Brief plan variant — conformance check' -Tag 'unit' {
         ($section.Contains('source-read') -and $section.Contains('sample-inferred')) | Should -BeTrue -Because 'property 2: provenance marking'
         $section.Contains('proof standard') | Should -BeTrue -Because 'property 3: evidence obligations present'
         $section.Contains('floor') | Should -BeTrue -Because 'property 4: suite floor satisfiable against the launch baseline'
+        $section.Contains('Is there a reading of the criteria under which every one passes and no work happens?') | Should -BeTrue `
+            -Because 'property 5: the vacuity question, verbatim as #957 D2 fixed it'
+    }
+
+    It 'makes property 5 an act of construction, so a bare "no" cannot discharge it' {
+        # The whole tooth is the READING. A property-5 phrased as a bare
+        # question is satisfied by "no reading exists" written without looking
+        # -- which is exactly what a reviewer who never looked would also
+        # write, so the emission would carry no information (#973 AC1).
+        $content = & $script:ReadRepoFile 'skills/plan-authoring/SKILL.md'
+        $section = ($content -split '(?m)^####\s+Brief conformance check\s*$')[1]
+        $section = ($section -split '(?m)^##')[0]
+
+        $section.Contains('Answering is an act of construction, not of assertion.') | Should -BeTrue `
+            -Because 'the expected act must be constructing the candidate reading, not answering the question'
+        $section.Contains('does **not** discharge this property') | Should -BeTrue `
+            -Because 'the bare-no answer must be named nonconforming, or the property lands vacuously'
+    }
+
+    It 'no longer frames the check as covering only near-mechanical text properties' {
+        # Property 5 appended while the framing sentence one paragraph above
+        # still said "the four near-mechanical properties" would leave the
+        # check disagreeing with itself about what it is (#973 falsifier 2).
+        $content = & $script:ReadRepoFile 'skills/plan-authoring/SKILL.md'
+        $section = ($content -split '(?m)^####\s+Brief conformance check\s*$')[1]
+        $section = ($section -split '(?m)^##')[0]
+
+        $section.Contains('It covers the four near-mechanical properties #936 D5 named') | Should -BeFalse `
+            -Because 'the framing sentence must admit the reading-property alongside the four'
+        $section.Contains('property 5 needs a reading of what the criteria mean *together*') | Should -BeTrue `
+            -Because 'the closing reading-enumeration goes stale on landing unless it grows with the new property'
     }
 
     It 'is reachable from every point that dispatches a brief review' {
@@ -650,6 +688,80 @@ Describe 'Brief plan variant — conformance check' -Tag 'unit' {
             $content = & $script:ReadRepoFile $path
             $content.Contains('Brief conformance check') | Should -BeTrue -Because "$path must let a reviewer reach the conformance check from where they work"
         }
+    }
+}
+
+Describe 'Brief review teeth — the routing call as a review target (#973)' -Tag 'unit' {
+
+    It 'is reachable from every point that dispatches a brief review' {
+        foreach ($path in @('commands/plan.md', 'skills/plan-authoring/SKILL.md', 'agents/Issue-Planner.agent.md')) {
+            $content = & $script:ReadRepoFile $path
+            $content.Contains('The routing call as a review target') | Should -BeTrue `
+                -Because "$path dispatches a brief review, so the routing-call target must be reachable from it"
+        }
+    }
+
+    It 'defines all three source-(b) outcome arms, including verdict-absent as a failure' {
+        $content = & $script:ReadRepoFile 'skills/plan-authoring/SKILL.md'
+        $section = ($content -split '(?m)^####\s+The routing call as a review target\s*$')[1]
+        $section | Should -Not -BeNullOrEmpty
+        $section = ($section -split '(?m)^##')[0]
+
+        $section.Contains('Present and consistent with the map') | Should -BeTrue -Because 'arm 1'
+        $section.Contains('Present and inconsistent') | Should -BeTrue -Because 'arm 2'
+        $section.Contains('not lawful under source (b)') | Should -BeTrue `
+            -Because 'arm 3: Amendment 10 makes a missing verdict a review failure, not a gap to note'
+    }
+
+    It 'pins the source-(a) n/a rationale and forbids the family-false one' {
+        # "no beat 2 ran" is FALSE for a chunk of a novel-arm parent, where
+        # beat 2 did run and its verdict rides the parent design marker
+        # (open-for-work.md, § The two outputs). Instructing that rationale
+        # would make every such n/a a false statement (#973 AC4).
+        $content = & $script:ReadRepoFile 'skills/plan-authoring/SKILL.md'
+        $section = ($content -split '(?m)^####\s+The routing call as a review target\s*$')[1]
+        $section = ($section -split '(?m)^##')[0]
+
+        $section.Contains('carries no routing verdict of its own') | Should -BeTrue `
+            -Because 'the n/a basis must be the one true across both source-(a) families'
+        $section.Contains('Do not write "no beat 2 ran"') | Should -BeTrue `
+            -Because 'the family-false rationale must be named and forbidden, not merely not-recommended'
+        $section.Contains('emission, not a skip') | Should -BeTrue `
+            -Because 'a skippable n/a is today behaviour with extra words'
+    }
+}
+
+Describe 'Brief review teeth — required cold-read vacuity question (#973)' -Tag 'unit' {
+
+    It 'the convergence cold read requires the vacuity question on a brief target, verbatim' {
+        $content = & $script:ReadRepoFile 'skills/design-exploration/SKILL.md'
+
+        $content.Contains('Is there a reading of the criteria under which every one passes and no work happens?') | Should -BeTrue `
+            -Because 'the cold read is the vacuity question''s load-bearing adversarial instance (#957 D2)'
+        $content.Contains('asked, no surviving reading') | Should -BeTrue `
+            -Because 'a clean result needs a stated sentence, or silence stays ambiguous between examined and never-examined'
+        $content.Contains('nonconforming run, not a clean one') | Should -BeTrue `
+            -Because 'a record with no vacuity sentence must be identifiable as nonconforming'
+    }
+
+    It 'scopes the requirement to brief targets and leaves the design path unchanged' {
+        $content = & $script:ReadRepoFile 'skills/design-exploration/SKILL.md'
+
+        $content.Contains('A design-target convergence pass is unchanged') | Should -BeTrue `
+            -Because 'an unscoped amendment would change every Solution-Designer design review (#957 P1-F12)'
+    }
+
+    It 'the required answer has an instructed producer, not only an asker' {
+        # A requirement written only into the dispatcher prose has no producer:
+        # the shell that PERFORMS the cold read is instructed by its own body,
+        # which scoped this dispatch shape to Solution-Designer and was
+        # therefore false by omission on the brief path (#973 AC3).
+        $content = & $script:ReadRepoFile 'agents/code-review-response.md'
+
+        $content.Contains('When dispatched by Solution-Designer for design-challenge convergence') | Should -BeFalse `
+            -Because 'the producer surface must not scope this dispatch shape to the wrong dispatcher'
+        $content.Contains('answering that section''s required vacuity question in part (a) is part of the contract') | Should -BeTrue `
+            -Because 'the shell performing the cold read must be told to answer, not only the dispatcher told to ask'
     }
 }
 
@@ -801,7 +913,15 @@ Describe 'Brief plan variant — doctrine migration' -Tag 'unit' {
         $body = & $script:StripInterimNote $content
         $body.Contains('a plan can violate any of A1–A5 and still validate') | Should -BeFalse `
             -Because 'the sentence claims nothing enforces A1-A5 at authoring time, which the conformance check falsifies'
-        $body.Contains('Neither reaches A1 or A3') | Should -BeTrue `
+        # The reach-claim MOVED with #973, and the pin moved in the same change.
+        # Property 5 performs the catch A3 names (targets satisfiable without
+        # the fix), so "Neither reaches A1 or A3" became false on landing --
+        # the noun-swapped-predicate-left-false class. What replaces it still
+        # states a limit (A1, and A3's own delivery-form rule), which is what
+        # this pin has always been defending.
+        $body.Contains('Neither reaches A1 or A3') | Should -BeFalse `
+            -Because 'the reading-property reaches the catch A3 names, so the old reach-claim is now false'
+        $body.Contains('What none of it reaches: A1, and the rule A3 itself states.') | Should -BeTrue `
             -Because 'the replacement must state what the new enforcement does NOT reach, or it overclaims in the other direction'
     }
 

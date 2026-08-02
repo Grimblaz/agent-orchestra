@@ -199,12 +199,20 @@ Use the adapter and dispatcher to run the three independent prosecution passes, 
 
 ### Convergence Filter
 
-After the 3 finders return and are merged into the pre-filter union, Solution-Designer dispatches the Fable-tier `agents/code-review-response.md` shell **once** for a single-dispatch, two-part convergence pass. This is Solution-Designer methodology layered on top of prosecution — it is not a fourth pipeline stage, and it does not change the `design-challenge` adapter's `[prosecution]`/`atomic: n/a` contract in `skills/adversarial-review/platforms/claude.md`.
+After the 3 finders return and are merged into the pre-filter union, the dispatching caller — **Solution-Designer** when the artifact under challenge is a proposed design, **Issue-Planner or the reviewer running the brief charter** when it is a `plan-variant: brief` plan — dispatches the Fable-tier `agents/code-review-response.md` shell **once** for a single-dispatch, two-part convergence pass. (Both callers of the `design-challenge` adapter run this filter; the section is written here because it originated as Solution-Designer methodology, and naming only that caller made it false by omission on the brief path.) This is methodology layered on top of prosecution — it is not a fourth pipeline stage, and it does not change the `design-challenge` adapter's `[prosecution]`/`atomic: n/a` contract in `skills/adversarial-review/platforms/claude.md`.
 
 This is **one** `Agent`-tool dispatch carrying a two-part prompt, not two separate dispatches:
 
 - **Part (a) — cold-read**: the prompt instructs the Fable shell to first cold-read the design directly and record its own independent observations, before the prompt reveals the 3 finder ledgers.
 - **Part (b) — synthesis**: within that same dispatch and response, the shell then proceeds to open the 3 finder ledgers, dedupe, rank, and merge them against its own Part (a) cold-read observations, then emit a kept/filtered rulings block spanning the **full pre-filter union** — every finder finding plus every cold-read observation, each marked `kept` or `filtered` with rationale.
+
+**Brief-target addendum — the required vacuity question (#957 D2).** When the artifact under convergence is a `plan-variant: brief` plan, part (a)'s prompt must carry this question **verbatim** — *"Is there a reading of the criteria under which every one passes and no work happens?"* — and must instruct the shell to answer it in the cold read, before the finder ledgers are revealed. The scoping condition is one the dispatcher provably knows: it selected the brief charter to arrive here. Three things are required of the answer:
+
+- **It is emitted in both polarities.** A surviving reading is a cold-read finding and enters part (b)'s rulings block like any other. A clean result is stated as the sentence **"asked, no surviving reading"**, carrying the reading that was constructed and the criterion that blocks it — a bare "no" is not an answer here for the same reason it is not one under `#### Brief conformance check` property 5.
+- **The persisted `**Plan Stress-Test**` summary is the carrying surface**, in both polarities. A clean result produces no rulings row of its own, so without this the record would hold nothing; the summary is where a later reader looks.
+- **A brief-review record with no vacuity sentence is a nonconforming run, not a clean one.** Silence must not be readable as examined-and-clean — that ambiguity is precisely what this requirement removes, and it is the same defect the ledger head's `convergence_filter_ran` key exists to remove for the filter itself.
+
+**A design-target convergence pass is unchanged**: this addendum does not apply to it, and nothing else in this section is conditioned on the target's shape. Scoping the requirement to brief targets is deliberate (#957 P1-F12) — a full design review keeps the behaviour it has today.
 
 The per-finding classification gate below (§ Dispositions) then fires on **convergence-sustained** (kept) findings only; filtered findings do not enter the classification gate but remain visible in the rulings block and in the disposition summary's pre-filter accounting (§ Dispositions).
 
