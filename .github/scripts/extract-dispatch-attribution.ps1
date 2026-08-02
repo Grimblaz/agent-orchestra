@@ -24,7 +24,10 @@ param(
     [string]$OutFile,
 
     [Parameter(Mandatory = $false)]
-    [string]$JsonOut
+    [string]$JsonOut,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$IncludeToolCallInputs
 )
 
 Set-StrictMode -Version Latest
@@ -44,6 +47,19 @@ if ($OutFile) {
 if ($JsonOut) {
     # prompt_text is bulky; keep the JSON dump lean but sufficient for AC evidence
     $lean = @($records | Select-Object -ExcludeProperty prompt_text -Property *)
+    if (-not $IncludeToolCallInputs) {
+        # A tool_call `input` is a verbatim command/url/prompt fragment. This dump
+        # is an evidence artifact that gets attached to issues and PRs, so the
+        # fragments are reduced to tool names unless the caller opts in. Counts
+        # and per-dispatch totals — what the attribution is for — are unaffected.
+        foreach ($rec in $lean) {
+            if ($null -ne $rec.tool_calls) {
+                $rec.tool_calls = @($rec.tool_calls | ForEach-Object {
+                        [pscustomobject]@{ tool = $_.tool }
+                    })
+            }
+        }
+    }
     $lean | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $JsonOut -Encoding utf8NoBOM
 }
 

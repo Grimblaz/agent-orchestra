@@ -39,6 +39,27 @@ BeforeAll {
         'defense'           = 'skills/adversarial-review/modes/defense.md'
         'proxy-prosecution' = 'skills/adversarial-review/modes/proxy-prosecution.md'
     }
+
+    # Canonical selector set, read from routing-config rather than restated here,
+    # so a selector added there without a loading-table row fails this file.
+    $script:RoutingConfig = (script:RepoText 'skills/routing-tables/assets/routing-config.json') | ConvertFrom-Json
+    $script:RoutingMarkers = @(
+        $script:RoutingConfig.review_mode_routing.entries |
+            Where-Object { $null -ne $_.marker } |
+            ForEach-Object { [string]$_.marker }
+    )
+
+    # Selector -> the mode file a dispatch carrying it must boot. The CE selector
+    # is the documented no-mode-file case (its contract is inline in the body).
+    $script:ExpectedModeForMarker = @{
+        'Use code review perspectives'          = 'code-prosecution'
+        'Use lite code review perspectives'     = 'code-prosecution'
+        'Use post-fix code review perspectives' = 'code-prosecution'
+        'Use design review perspectives'        = 'design-review'
+        'Use defense review perspectives'       = 'defense'
+        'Score and represent GitHub review'     = 'proxy-prosecution'
+        'Use CE review perspectives'            = $null
+    }
 }
 
 Describe 'Mode-scoped loading — mode files exist and carry their workflow (C, AC3)' {
@@ -80,6 +101,8 @@ Describe 'Mode-scoped loading — the core is scoped down but keeps shared conte
             -Because 'the defense workflow moved to modes/defense.md'
         $script:Core | Should -Not -Match '## Proxy Prosecution Workflow' `
             -Because 'the proxy workflow moved to modes/proxy-prosecution.md'
+        $script:Core | Should -Not -Match '(?m)^## Design Review\s*$' `
+            -Because 'the design-review skeleton moved to modes/design-review.md; a re-added core section would double-load it for every mode'
     }
 
     It 'core keeps the shared sections other contracts pin' {
@@ -87,6 +110,24 @@ Describe 'Mode-scoped loading — the core is scoped down but keeps shared conte
         $script:Core | Should -Match '### 4. Emit a Usable Ledger'
         $script:Core | Should -Match '## Atomic Pipeline Discipline'
         $script:Core | Should -Match '## Mode-Scoped Loading'
+    }
+
+    It 'every routing-config selector resolves to a mode file (or the documented CE no-file case)' {
+        $script:RoutingMarkers.Count | Should -BeGreaterThan 0 `
+            -Because 'routing-config must expose the review_mode_routing marker set this check reads'
+
+        foreach ($marker in $script:RoutingMarkers) {
+            $script:ExpectedModeForMarker.ContainsKey($marker) | Should -BeTrue `
+                -Because "routing-config selector '$marker' has no mode-file mapping — add it to modes/ and to the core Mode-Scoped Loading table, or record it as a no-mode-file case"
+
+            $modeKey = $script:ExpectedModeForMarker[$marker]
+            if ($null -eq $modeKey) { continue }   # CE: contract inline in the agent body
+
+            Test-Path -LiteralPath (Join-Path $script:RepoRoot $script:ModeFiles[$modeKey]) |
+                Should -BeTrue -Because "selector '$marker' maps to $modeKey, whose mode file must exist"
+            $script:Core | Should -Match ([regex]::Escape($marker)) `
+                -Because "the core Mode-Scoped Loading table must name selector '$marker'"
+        }
     }
 
     It 'core Mode-Scoped Loading table names all four mode files plus the CE no-file case' {

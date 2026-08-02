@@ -84,7 +84,15 @@ function Read-DispatchTranscript {
         if ($obj.PSObject.Properties.Match('type').Count -gt 0) { $lineType = $obj.type }
 
         if ($lineType -eq 'user' -and $null -eq $firstUserContent) {
-            $content = $obj.message.content
+            # Every property access here is presence-guarded: StrictMode turns a
+            # missing property into a terminating error, and the caller runs with
+            # ErrorActionPreference=Stop, so one nonconforming line would abort
+            # the whole batch rather than being skipped.
+            $content = $null
+            if ($obj.PSObject.Properties.Match('message').Count -gt 0 -and $null -ne $obj.message -and
+                $obj.message.PSObject.Properties.Match('content').Count -gt 0) {
+                $content = $obj.message.content
+            }
             if ($content -is [string]) {
                 $firstUserContent = $content
             }
@@ -132,11 +140,20 @@ function Read-DispatchTranscript {
         if (-not $msgId) { continue }
 
         $u = $msg.usage
+        # `??` does not help for an ABSENT property: StrictMode throws on the
+        # access before the coalesce runs. Presence must be tested first.
+        $usageField = {
+            param([object]$Usage, [string]$Name)
+            if ($Usage.PSObject.Properties.Match($Name).Count -eq 0) { return 0L }
+            $raw = $Usage.$Name
+            if ($null -eq $raw) { return 0L }
+            return [long]$raw
+        }
         $rec = [pscustomobject]@{
-            input_tokens                 = [long]($u.input_tokens ?? 0)
-            cache_creation_input_tokens  = [long]($u.cache_creation_input_tokens ?? 0)
-            cache_read_input_tokens      = [long]($u.cache_read_input_tokens ?? 0)
-            output_tokens                = [long]($u.output_tokens ?? 0)
+            input_tokens                 = & $usageField $u 'input_tokens'
+            cache_creation_input_tokens  = & $usageField $u 'cache_creation_input_tokens'
+            cache_read_input_tokens      = & $usageField $u 'cache_read_input_tokens'
+            output_tokens                = & $usageField $u 'output_tokens'
         }
         if ($usageById.Contains($msgId)) {
             # streaming chunk of the same request: keep the largest output_tokens
@@ -213,13 +230,41 @@ function Get-DispatchAttribution {
     }
 
     $files = @(Get-ChildItem -LiteralPath $TranscriptDir -Filter 'agent-*.jsonl' -File)
-    $records = @($files | ForEach-Object { Read-DispatchTranscript -Path $_.FullName })
+
+    # Per-file containment: one unreadable transcript must not cost the caller
+    # every other dispatch's attribution. Failures are surfaced, never silent.
+    $records = [System.Collections.Generic.List[object]]::new()
+    foreach ($file in $files) {
+        try {
+            $records.Add((Read-DispatchTranscript -Path $file.FullName))
+        }
+        catch {
+            Write-Warning "dispatch-attribution: skipped '$($file.Name)' — $($_.Exception.Message)"
+        }
+    }
+    $records = @($records)
 
     if ($Since) {
         $bound = [datetimeoffset]::Parse($Since, [cultureinfo]::InvariantCulture)
-        $records = @($records | Where-Object {
-                $_.first_timestamp -and ([datetimeoffset]::Parse($_.first_timestamp, [cultureinfo]::InvariantCulture) -ge $bound)
-            })
+        $kept = [System.Collections.Generic.List[object]]::new()
+        $droppedUnparseable = 0
+        foreach ($rec in $records) {
+            $stamp = $rec.first_timestamp
+            if (-not $stamp) { $droppedUnparseable++; continue }
+            $parsed = [datetimeoffset]::MinValue
+            if (-not [datetimeoffset]::TryParse($stamp, [cultureinfo]::InvariantCulture,
+                    [System.Globalization.DateTimeStyles]::None, [ref]$parsed)) {
+                $droppedUnparseable++
+                continue
+            }
+            if ($parsed -ge $bound) { $kept.Add($rec) }
+        }
+        if ($droppedUnparseable -gt 0) {
+            # A silent drop in a token-attribution tool is the undercount this
+            # instrument exists to prevent — always announce it.
+            Write-Warning "dispatch-attribution: -Since excluded $droppedUnparseable dispatch(es) with a missing or unparseable first timestamp."
+        }
+        $records = @($kept)
     }
 
     return @($records | Sort-Object first_timestamp)
@@ -245,10 +290,16 @@ function Format-DispatchAttributionTable {
     [void]$sb.AppendLine('| dispatch | model(s) | selector | api calls | input | cache_write | cache_read | output | total |')
     [void]$sb.AppendLine('| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |')
 
+    # A literal pipe in any text cell would split the row and silently shift
+    # every numeric column — the table is published as measurement evidence.
+    $escapeCell = { param([object]$Value) ([string]$Value) -replace '\|', '\|' -replace '\r?\n', ' ' }
+
     $tInput = 0L; $tCacheW = 0L; $tCacheR = 0L; $tOutput = 0L; $tTotal = 0L; $tCalls = 0
     foreach ($r in $Records) {
-        $sel = $r.selector ?? '(none)'
-        [void]$sb.AppendLine("| $($r.agent_id) | $($r.models) | $sel | $($r.api_calls) | $($r.input_tokens) | $($r.cache_creation_input_tokens) | $($r.cache_read_input_tokens) | $($r.output_tokens) | $($r.total_tokens) |")
+        $sel = & $escapeCell ($r.selector ?? '(none)')
+        $agent = & $escapeCell $r.agent_id
+        $models = & $escapeCell $r.models
+        [void]$sb.AppendLine("| $agent | $models | $sel | $($r.api_calls) | $($r.input_tokens) | $($r.cache_creation_input_tokens) | $($r.cache_read_input_tokens) | $($r.output_tokens) | $($r.total_tokens) |")
         $tInput += $r.input_tokens; $tCacheW += $r.cache_creation_input_tokens
         $tCacheR += $r.cache_read_input_tokens; $tOutput += $r.output_tokens
         $tTotal += $r.total_tokens; $tCalls += $r.api_calls
@@ -264,8 +315,11 @@ function Compare-DispatchPrompts {
     .DESCRIPTION
         Compares the UTF-8 byte sequences of each record's dispatched prompt
         against the first record's prompt and reports the first divergent byte
-        offset per pair. A pair with no divergence reports the shorter length
-        and identical=true.
+        offset per pair. `identical` is true only when the two byte sequences
+        match in full — same bytes AND same length. When one prompt is a strict
+        prefix of the other, `identical` is false and both shared_prefix_bytes
+        and first_divergent_byte report the shorter length (the offset where the
+        shorter sequence ran out).
     .PARAMETER Records
         Two or more records produced by Read-DispatchTranscript.
     .OUTPUTS

@@ -127,6 +127,59 @@ Describe 'Read-DispatchTranscript' {
     }
 }
 
+Describe 'Read-DispatchTranscript — nonconforming rows do not abort the run' {
+    BeforeAll {
+        $script:RobustDir = Join-Path $TestDrive 'robust'
+        New-Item -ItemType Directory -Path $script:RobustDir -Force | Out-Null
+
+        # A user line with no `content`, and one with no `message` at all. Under
+        # Set-StrictMode these are the accesses that used to throw.
+        $noContent = @(
+            '{"type":"user","timestamp":"2026-08-02T10:00:01.000Z","message":{"role":"user"}}'
+            '{"type":"user","timestamp":"2026-08-02T10:00:02.000Z"}'
+            '{"type":"user","timestamp":"2026-08-02T10:00:03.000Z","message":{"role":"user","content":"real prompt"}}'
+            '{"type":"assistant","timestamp":"2026-08-02T10:00:04.000Z","message":{"role":"assistant","id":"m1","model":"claude-opus-5","usage":{"input_tokens":1,"cache_creation_input_tokens":2,"cache_read_input_tokens":3,"output_tokens":4}}}'
+        ) -join "`n"
+        Set-Content -LiteralPath (Join-Path $script:RobustDir 'agent-nocontent.jsonl') -Value $noContent -Encoding utf8NoBOM
+
+        # usage present but missing three of the four token fields
+        $partialUsage = @(
+            '{"type":"user","timestamp":"2026-08-02T10:01:00.000Z","message":{"role":"user","content":"p"}}'
+            '{"type":"assistant","timestamp":"2026-08-02T10:01:01.000Z","message":{"role":"assistant","id":"m9","model":"claude-opus-5","usage":{"input_tokens":7,"output_tokens":9}}}'
+        ) -join "`n"
+        Set-Content -LiteralPath (Join-Path $script:RobustDir 'agent-partialusage.jsonl') -Value $partialUsage -Encoding utf8NoBOM
+    }
+
+    It 'reads a transcript whose user lines lack content or message, and still finds the real prompt' {
+        $rec = Read-DispatchTranscript -Path (Join-Path $script:RobustDir 'agent-nocontent.jsonl')
+        $rec.prompt_text | Should -BeExactly 'real prompt'
+        $rec.output_tokens | Should -Be 4
+    }
+
+    It 'treats absent usage token fields as zero instead of throwing' {
+        $rec = Read-DispatchTranscript -Path (Join-Path $script:RobustDir 'agent-partialusage.jsonl')
+        $rec.input_tokens | Should -Be 7
+        $rec.output_tokens | Should -Be 9
+        $rec.cache_creation_input_tokens | Should -Be 0
+        $rec.cache_read_input_tokens | Should -Be 0
+    }
+
+    It 'reconstructs a prompt from content-block array form' {
+        $arrayForm = @(
+            '{"type":"user","timestamp":"2026-08-02T10:02:00.000Z","message":{"role":"user","content":[{"type":"text","text":"line one"},{"type":"image"},{"type":"text","text":"line two"}]}}'
+        ) -join "`n"
+        $p = Join-Path $script:RobustDir 'agent-arrayform.jsonl'
+        Set-Content -LiteralPath $p -Value $arrayForm -Encoding utf8NoBOM
+        (Read-DispatchTranscript -Path $p).prompt_text | Should -BeExactly "line one`nline two"
+    }
+
+    It 'keeps every good dispatch when one transcript in the directory is unreadable' {
+        # A directory-level failure must cost the caller that file, not the batch.
+        $records = Get-DispatchAttribution -TranscriptDir $script:RobustDir -WarningAction SilentlyContinue
+        @($records).Count | Should -BeGreaterOrEqual 2
+    }
+}
+
 Describe 'Get-DispatchAttribution' {
     It 'returns one record per transcript, sorted by first timestamp' {
         $records = Get-DispatchAttribution -TranscriptDir $script:FixtureDir
@@ -144,6 +197,18 @@ Describe 'Get-DispatchAttribution' {
     It 'throws on a missing directory' {
         { Get-DispatchAttribution -TranscriptDir (Join-Path $TestDrive 'nope') } | Should -Throw '*not found*'
     }
+
+    It 'warns rather than silently dropping when -Since excludes an unparseable timestamp' {
+        $dir = Join-Path $TestDrive 'badstamp'
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $dir 'agent-bad.jsonl') -Encoding utf8NoBOM -Value (
+            '{"type":"user","timestamp":"not-a-date","message":{"role":"user","content":"x"}}'
+        )
+        $warnings = @()
+        $records = Get-DispatchAttribution -TranscriptDir $dir -Since '2026-08-02T00:00:00Z' -WarningVariable warnings -WarningAction SilentlyContinue
+        @($records).Count | Should -Be 0
+        ($warnings -join ' ') | Should -Match 'unparseable first timestamp'
+    }
 }
 
 Describe 'Format-DispatchAttributionTable' {
@@ -156,6 +221,19 @@ Describe 'Format-DispatchAttributionTable' {
         # totals: output 1050 + 700 = 1750; cache_read 55000 + 40000 = 95000
         $rows[-1] | Should -Match '\| 1750 \|'
         $rows[-1] | Should -Match '\| 95000 \|'
+    }
+
+    It 'escapes pipes in text cells so numeric columns cannot shift' {
+        $rec = [pscustomobject]@{
+            agent_id = 'a|b'; models = 'm'; selector = 'Use x | y'; api_calls = 1
+            input_tokens = 1; cache_creation_input_tokens = 0; cache_read_input_tokens = 0
+            output_tokens = 0; total_tokens = 1
+        }
+        $table = Format-DispatchAttributionTable -Records @($rec)
+        $rows = @($table -split "`n" | Where-Object { $_ -match '^\|' })
+        $headerCells = ($rows[0] -split '(?<!\\)\|').Count
+        $dataCells = ($rows[2] -split '(?<!\\)\|').Count
+        $dataCells | Should -Be $headerCells -Because 'an unescaped pipe would add columns and misalign every number'
     }
 }
 
