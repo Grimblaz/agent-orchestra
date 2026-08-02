@@ -19,6 +19,10 @@ BeforeAll {
         'skills/adversarial-review/platforms/claude.md',
         'skills/adversarial-review/SKILL.md',
         'skills/adversarial-review/adapters/design-challenge.md',
+        'skills/adversarial-review/modes/code-prosecution.md',
+        'skills/adversarial-review/modes/design-review.md',
+        'skills/adversarial-review/modes/defense.md',
+        'skills/adversarial-review/modes/proxy-prosecution.md',
         'agents/Code-Critic.agent.md',
         'skills/routing-tables/assets/routing-config.json',
         'skills/routing-tables/SKILL.md'

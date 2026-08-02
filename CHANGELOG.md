@@ -2,6 +2,12 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.9.0] — 2026-08-02
+
+### Changed
+
+- Cut fixed per-dispatch overhead in the standard adversarial review pipeline: same-model panel prompts share a cached prefix via a shared handshake timestamp, one raw provenance-labeled evidence packet replaces per-pass re-fetching, and a Code-Critic dispatch boots only its selector's review mode instead of the whole six-mode catalog. No change to stages, passes, tiers, selectors, or verdicts. Adds a per-dispatch token-attribution instrument. (#975)
+
 ## [3.8.0] — 2026-08-01
 
 ### Added

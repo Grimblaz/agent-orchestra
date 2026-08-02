@@ -1,6 +1,6 @@
 <!-- audit-meta
-last-verified: b500a9fab73e579278b8ebfb490d988f6064624e
-generated-at: 2026-07-20T19:48:22Z
+last-verified: 18a28ba1b3c7125f70c76890a9996f50e49fd82a
+generated-at: 2026-08-02T18:41:45Z
 -->
 
 ## Purpose
@@ -501,6 +501,18 @@ Copilot always reads from the source tree in the hub repo. This dual-resolved be
   - `skills/routing-tables/assets/gate-criteria.json`
   - `skills/routing-tables/assets/routing-config.json`
 - **notes**: JSON data assets nested within skill directories. Bare-relative paths 'assets/gate-criteria.json' and 'assets/routing-config.json' appearing in skill body text are relative references that map to this family. Routing logic that reads these files will hard-fail if they are missing.
+
+### `skills/*/modes/*.md`
+
+- **claude_resolves**: both
+- **copilot_resolves**: source-tree
+- **requires_version_bump**: true
+- **experience**: hard-failure
+- **examples**:
+  - `skills/adversarial-review/modes/code-prosecution.md`
+  - `skills/adversarial-review/modes/design-review.md`
+  - `skills/adversarial-review/modes/defense.md`
+- **notes**: Selector-scoped review-mode methodology files loaded conditionally alongside a skill's shared core (#975). A Code-Critic dispatch loads the core plus exactly the one mode file its selector names. Bare-relative references 'modes/code-prosecution.md' etc. in skill body text map to this family. Missing = the dispatch boots without its mode-specific review checklist.
 
 ### `skills/*/platforms/*.md`
 
