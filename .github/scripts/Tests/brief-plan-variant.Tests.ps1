@@ -660,7 +660,7 @@ Describe 'Brief plan variant — review charter' -Tag 'unit' {
         # bounded-distance regex stayed true after both selection steps were
         # deleted — two unrelated occurrences satisfied it (#947 review, M13).
         $expected = @{
-            'commands/plan.md'                = 'declares `plan-variant: brief` — the chunk-plan shape — uses adapter `design-challenge`'
+            'commands/plan.md'                = 'declares `plan-variant: brief` — the brief shape, whichever of its two authority sources it carries (#957 D4) — uses adapter `design-challenge`'
             'skills/plan-authoring/SKILL.md'  = 'declares `plan-variant: brief` selects `skills/adversarial-review/adapters/design-challenge.md`'
         }
 

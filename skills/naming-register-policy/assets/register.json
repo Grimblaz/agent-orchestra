@@ -322,13 +322,13 @@
     "term": "brief (chunk plan)",
     "register": "stable-code",
     "kind": "atomic",
-    "expansion": "brief (the chunk-plan shape declared by `plan-variant: brief` — six numbered sections stating the contract, with no implementation steps; not the same thing as the context brief upstream-onboarding renders)"
+    "expansion": "brief (the plan shape declared by `plan-variant: brief` — six numbered sections stating the contract, with no implementation steps; authored for a chunk sub-issue of a designed parent or for a standalone issue carrying an affirmed open-for-work framing record, per #957; not the same thing as the context brief upstream-onboarding renders)"
   },
   {
     "term": "A1–A5 (doctrine amendments)",
     "register": "stable-code",
     "kind": "family",
-    "expansion": "A1–A5 (the five chunked-delivery doctrine amendments governing how a chunk plan may specify)",
+    "expansion": "A1–A5 (the five chunked-delivery doctrine amendments governing how a brief may specify, whichever of its two authority sources it carries)",
     "decode": "A1 = discovery-neutral targets; A2 = provenance-marked grounding; A3 = falsifiers as executor guidance, never a graded check; A4 = behavior pins plus a pre-launch floor check; A5 = evidence obligations. See Documents/Design/chunked-delivery.md section 'How a chunk plan specifies'."
   },
   {

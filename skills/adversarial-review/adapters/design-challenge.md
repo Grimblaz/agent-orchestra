@@ -23,7 +23,7 @@ Runs the prosecution-only design challenge variant. The sequence is three specia
 Two, both reviewing a **design-shaped** artifact:
 
 - **Solution-Designer Stage 3** — challenges a proposed design; Solution-Designer incorporates or dismisses findings and updates the issue body.
-- **Issue-Planner, for a `plan-variant: brief` chunk plan** (#936 D5, sites per DA4, added #941) — the brief is a design-shaped artifact rather than a step-bearing one, so `CLAUDE.md`'s chunk-plan panel rule stops applying and this charter applies instead. Issue-Planner reconciles findings onto the plan comment rather than the issue body.
+- **Issue-Planner, for a `plan-variant: brief` plan — whichever of the brief's two authority sources it carries** (a chunk of a designed parent, or a standalone issue with an affirmed open-for-work framing record; #936 D5, sites per DA4, added #941, sources per #957 D4) — the brief is a design-shaped artifact rather than a step-bearing one, so `CLAUDE.md`'s chunk-plan panel rule stops applying and this charter applies instead. Issue-Planner reconciles findings onto the plan comment rather than the issue body.
 
 Both callers run the **convergence filter** (`skills/design-exploration/SKILL.md § Convergence Filter`, #785) over the merged three-lens ledger. That is not a Solution-Designer-only step: `skills/solution-authoring/SKILL.md` keys the classification gate's firing input on convergence-sustained findings, which is the only input this adapter can supply given it produces no judge ruling.
 

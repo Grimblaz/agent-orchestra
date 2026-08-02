@@ -66,12 +66,24 @@ These PowerShell commands silently corrupt files through encoding issues (e.g., 
 
 When authoring new issues under these rules, apply the outsider-first authoring convention in `skills/naming-register-policy/SKILL.md` § Outsider-first authoring default.
 
-### 2a. Improvement-First Decision Rule
+### 2a. Improvement-First Decision Rule — one floor, three moments
 
-When any agent discovers an out-of-scope or non-blocking improvement during its work, classify it against the structural-criteria gate (canonical taxonomy in `skills/review-judgment/scripts/Test-DeferralCriteria.ps1`):
+**The six structural criteria — canonical statement.** A change is **structural** if it would do any of the following (identifiers implemented one-for-one in `skills/review-judgment/scripts/Test-DeferralCriteria.ps1`, the canonical taxonomy):
 
-- **Inline (fix-in-PR) eligibility**: the change is small, single-file or single-system, doesn't introduce a new abstraction, doesn't cross architecture layer boundaries, and doesn't require a separate design decision. Address within the current task (or current PR if one is open).
-- **Follow-up issue creation**: the change matches at least one structural criterion (`S-new-abstraction`, `S-cross-cutting`, `S-design-decision`, `S-schema-or-contract`, `S-different-surface`, `S-maintainer-judgment`). Route the proposed follow-up through the **Filing Approval Gate** (§2e) — as a single-item batch when an interactive parent conversation is available, or via the headless queue when it is not — rather than filing it immediately, then continue with in-scope work. Do not block the current PR on the deferred improvement.
+1. introduce a new abstraction, agent, skill, or public API (`S-new-abstraction`);
+2. cross an architecture layer boundary (`S-cross-cutting`);
+3. require a separate design decision (`S-design-decision`);
+4. change a schema or contract (`S-schema-or-contract`);
+5. touch a different surface than the work at hand (`S-different-surface`);
+6. need a maintainer's judgment call (`S-maintainer-judgment`).
+
+A change that trips **none** of the six is below the structural floor. **The same six criteria decide three distinct moments** (#957 D6, decision `d-one-floor-three-moments`) — stated once, here, so that when the floor is wrong it is wrong in one place. An earlier revision of this rule carried a five-property prose paraphrase of inline eligibility ("small, single-file or single-system, …") alongside the six identifiers; the two lists were not the same set, and the paraphrase is retired — the six identifiers are the statement.
+
+**Moment 1 — the trivial floor at pickup (open-for-work).** Whether a filed issue is below the trivial floor is read from the **filed issue alone**, at the moment someone opens it for work: no pull request, no `$Finding` object, and no script invocation exists yet, so this is a reading of the six criteria by the person or agent picking the issue up, not a `Test-DeferralCriteria.ps1` run. **Risk guard (#957 D6)**: at this moment, a change touching **permission, authentication, or data-integrity behavior is never below the floor, regardless of size** — below the trivial floor there is no brief, no adversarial review, and no plan review, so pull-request review is the only review that will ever see the change, and the six structural criteria alone are not a safe proxy for risk on those three behaviors. Verdict below the floor: **fix it directly** — no brief, no run ceremony (`Documents/Design/open-for-work.md` § The trivial floor).
+
+**Moment 2 — mid-run follow-up disposition (this rule's original moment).** When any agent discovers an out-of-scope or non-blocking improvement during its work: if the change trips none of the six criteria, address it within the current task (or current PR if one is open). If it trips at least one, route the proposed follow-up through the **Filing Approval Gate** (§2e) — as a single-item batch when an interactive parent conversation is available, or via the headless queue when it is not — rather than filing it immediately, then continue with in-scope work. Do not block the current PR on the deferred improvement.
+
+**Moment 3 — review deferral.** `Test-DeferralCriteria.ps1` applies the same six identifiers to review findings, yielding `ACCEPT (fix inline)` when none match and `DEFERRED-SIGNIFICANT (structural)` when at least one does (consumption contract in `agents/Code-Review-Response.agent.md` § Structural Deferral Guidelines).
 
 > Supplementary rationale: as a quick sanity check, deferred (structural) issues typically represent more than a day of work, but structural-criteria match — not the effort estimate — is the load-bearing deferral criterion.
 
@@ -254,6 +266,18 @@ Some follow-up issues need a maintainer's approve/modify/drop decision before th
 **Non-overridability.** The gate is in the same non-overridable class as plan approval and the other engagement-gate methodology checkpoints: a pacing directive such as "work without stopping" or "don't pause to ask" does not suppress it. See `CLAUDE.md` § Engagement-gate non-overridability for the full contract.
 
 **Direct-request exemption.** A maintainer's explicit request — "file an issue for X" — bypasses the gate entirely; the issue is filed immediately with `-FilingProvenance 'direct-request'`.
+
+### 2f. Filing Content Standard (#957 `d-filing-shape`)
+
+Every subsection above governs the mechanics and placement of filing — priority labels, umbrella attachment, dedup, the approval gate. This one states what belongs **in** the issue body, and it is deliberately short. A filed issue carries three things:
+
+1. **The problem** — what is wrong or missing, in plain language.
+2. **The evidence it is real** — what was observed, where, and how someone else could see it too. A hunch is fine to file; say it is a hunch.
+3. **What is known versus unknown** — which claims are established and which are open questions.
+
+**That is the whole obligation.** Nothing else is required to file: no proposed solution, no design, no scope or routing decision, no scenarios, and no estimate. Those are produced later — by the open-for-work conversation (`Documents/Design/open-for-work.md`) or by an explicitly requested phase pipeline — *if* the issue is ever opened for work. A proposed solution may be included when the filer already has one in mind, but its absence never blocks or discounts a filing. The repository's issue templates (`.github/ISSUE_TEMPLATE/`) ask for exactly the three items above and say so.
+
+The known-versus-unknown split is not decoration: it is the direct input to the open-for-work routing beat, which classifies each open unknown by whether it could change what is being built. A filing that is honest about what it does not know is worth more than one that papers over it with a confident solution sketch.
 
 ## Gotchas
 
