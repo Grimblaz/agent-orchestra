@@ -97,6 +97,51 @@ $variant
         return "<!-- phase-containment-ledger-$Id -->`n`n$Extra`n`n$Head`n`n$Rows"
     }
 
+    # Hoisted to the FILE-level BeforeAll (post-review fix, finding P-A).
+    # These lived in the 'Migration guard and render coverage' Describe's own
+    # BeforeAll while the #968 AC3 Describe below also consumes them, so any
+    # name-filtered run of AC3 died with CommandNotFoundException instead of
+    # the assertion result. Whole-file runs hid it because Pester executes
+    # Describes in file order. That matters here beyond ergonomics: this
+    # chunk's evidence procedure is revert-run-observe on a TARGETED run, and
+    # a filtered red is indistinguishable from a mutation's red.
+    #
+    # NOTE: New-ContaminatedForTail is duplicated as script:New-968Contaminated
+    # in migrate-brief-review-corpus.Tests.ps1 -- forced, since Pester files are
+    # not dot-sourceable and Tests/ has no shared helper module. Keep in step.
+    function script:New-ContaminatedForTail {
+        param([int]$Issue, [int]$Rows, [string]$Prefix = 'N', [string]$StageValue = 'plan-stress-test', [string]$Indent = '')
+        # LF-joined, not StringBuilder.AppendLine. AppendLine emits CRLF on
+        # Windows, and Get-PhaseContainmentBlock does not extract blocks
+        # from a CRLF body — so a CRLF fixture makes every block-grain
+        # assertion below vacuous. The bodies this migration actually
+        # handles arrive LF-normalised.
+        $lines = [System.Collections.Generic.List[string]]::new()
+        $lines.Add("<!-- phase-containment-ledger-$Issue -->")
+        $lines.Add('')
+        $lines.Add('<!-- judge-rulings')
+        for ($i = 1; $i -le $Rows; $i++) {
+            $lines.Add("- finding_id: ${Prefix}$i")
+            $lines.Add('  judge_ruling: sustained')
+        }
+        $lines.Add('-->')
+        $lines.Add('')
+        for ($i = 1; $i -le $Rows; $i++) {
+            $lines.Add("<!-- phase-containment-$Issue -->")
+            $lines.Add("${Indent}finding_key: plan-stress-test:${Issue}:${Prefix}$i")
+            $lines.Add("${Indent}introduced_phase: design")
+            $lines.Add("${Indent}catchable_phase: plan")
+            $lines.Add("${Indent}caught_stage: $StageValue")
+            $lines.Add("${Indent}escape_distance: 0")
+            $lines.Add("${Indent}severity: medium")
+            $lines.Add("${Indent}systemic_fix_type: instruction")
+            $lines.Add("${Indent}category: pattern")
+            $lines.Add("<!-- /phase-containment-$Issue -->")
+        }
+        return ($lines -join "`n") + "`n"
+    }
+    function script:New-HistPlan { param([int]$Issue) "<!-- plan-issue-$Issue -->`n`n---`nspine-omitted: plan-too-small`n---`n`n**Plan Stress-Test**: three lenses.`n" }
+
     $script:JudgeHead = @"
 <!-- judge-rulings
 - finding_id: N1
@@ -1247,40 +1292,10 @@ brief_dispositions:
 
 Describe 'Migration guard and render coverage (PR #963 review: O, AB, AF)' {
 
-    BeforeAll {
-        function script:New-ContaminatedForTail {
-            param([int]$Issue, [int]$Rows, [string]$Prefix = 'N', [string]$StageValue = 'plan-stress-test', [string]$Indent = '')
-            # LF-joined, not StringBuilder.AppendLine. AppendLine emits CRLF on
-            # Windows, and Get-PhaseContainmentBlock does not extract blocks
-            # from a CRLF body — so a CRLF fixture makes every block-grain
-            # assertion below vacuous. The bodies this migration actually
-            # handles arrive LF-normalised.
-            $lines = [System.Collections.Generic.List[string]]::new()
-            $lines.Add("<!-- phase-containment-ledger-$Issue -->")
-            $lines.Add('')
-            $lines.Add('<!-- judge-rulings')
-            for ($i = 1; $i -le $Rows; $i++) {
-                $lines.Add("- finding_id: ${Prefix}$i")
-                $lines.Add('  judge_ruling: sustained')
-            }
-            $lines.Add('-->')
-            $lines.Add('')
-            for ($i = 1; $i -le $Rows; $i++) {
-                $lines.Add("<!-- phase-containment-$Issue -->")
-                $lines.Add("${Indent}finding_key: plan-stress-test:${Issue}:${Prefix}$i")
-                $lines.Add("${Indent}introduced_phase: design")
-                $lines.Add("${Indent}catchable_phase: plan")
-                $lines.Add("${Indent}caught_stage: $StageValue")
-                $lines.Add("${Indent}escape_distance: 0")
-                $lines.Add("${Indent}severity: medium")
-                $lines.Add("${Indent}systemic_fix_type: instruction")
-                $lines.Add("${Indent}category: pattern")
-                $lines.Add("<!-- /phase-containment-$Issue -->")
-            }
-            return ($lines -join "`n") + "`n"
-        }
-        function script:New-HistPlan { param([int]$Issue) "<!-- plan-issue-$Issue -->`n`n---`nspine-omitted: plan-too-small`n---`n`n**Plan Stress-Test**: three lenses.`n" }
-    }
+    # Fixtures (New-ContaminatedForTail, New-HistPlan) live in the FILE-level
+    # BeforeAll — they are shared with the #968 AC3 Describe below, and a
+    # Describe-scoped definition made any filtered run of that Describe fail
+    # with CommandNotFoundException rather than an assertion result.
 
     Context 'O: the verdict guard is as discriminating as the parser' {
 
@@ -1489,5 +1504,467 @@ Describe 'Migration guard and render coverage (PR #963 review: O, AB, AF)' {
             $text | Should -Match 'brief-review: n=3 — WITHHELD \(n<5\)'
             $text | Should -Not -Match 'brief-review: n=3\s+escape='
         }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Issue #968 — the four PR #963 fixes no behavioural test could observe.
+#
+# THE BAR HERE IS NOT "a test exists". It is that reverting the fix in
+# isolation turns one of these assertions red. Every Context below records the
+# mutation that was run against it and what that run reported; a test whose
+# guard can be deleted in silence is the exact defect #968 exists to close, so
+# a source-text `Should -Match` on a message string satisfies nothing here.
+# ---------------------------------------------------------------------------
+
+Describe '#968 AC1: the brief-head writer is observed by invocation, across its residual refusals AND both write outcomes' {
+
+    # WHY A SEPARATE CONTEXT FROM M2's. M2's probe installs one shared read
+    # stub returning $null and normalises the result to 'accepted', which is
+    # what lets it prove the content guards passed. It therefore cannot reach
+    # anything AFTER the read — the expected-marker refusal, the write-failure
+    # passthrough, or either success action. Those need the read to SUCCEED,
+    # and changing M2's stub in place would turn every one of its cases red.
+
+    BeforeAll {
+        . (Join-Path $script:RepoRoot '.github/scripts/lib/find-or-upsert-comment.ps1')
+        . (Join-Path $script:RepoRoot '.github/scripts/lib/marker-transport-core.ps1')
+        . (Join-Path $script:RepoRoot 'skills/session-memory-contract/scripts/persist-phase-ledger-core.ps1')
+
+        $script:W968Marker = '<!-- phase-containment-ledger-968 -->'
+        $script:W968ReadBody = $null
+        $script:W968WriteResult = [PSCustomObject]@{ Success = $true; Reason = $null }
+        $script:W968WrittenBodies = [System.Collections.Generic.List[string]]::new()
+
+        # Both seams stubbed, so no test in this file can reach the network.
+        function script:Get-PPLCommentBodyById { param($Owner, $Repo, $CommentId) return $script:W968ReadBody }
+        function script:Set-PPLCommentBodyDirect {
+            param($Owner, $Repo, $CommentId, $NewBody)
+            $script:W968WrittenBodies.Add($NewBody)
+            return $script:W968WriteResult
+        }
+
+        $script:W968Canon = @(
+            'brief_dispositions:'
+            '  convergence_filter_ran: true'
+            '  filtered_count: 8'
+            '  findings:'
+            '    - finding_id: N1'
+            '      disposition: incorporate'
+        ) -join "`n"
+
+        function script:Invoke-W968 {
+            # Returns the REAL result object — not a normalised string — because
+            # this context asserts Action and the written body, not only Reason.
+            param([string]$Head, [string]$Marker = $script:W968Marker)
+            return Set-PPLBriefHeadBlockOnComment -Owner o -Repo r -CommentId 1 `
+                -ExpectedMarker $Marker -BriefHeadContent $Head
+        }
+    }
+
+    BeforeEach {
+        $script:W968ReadBody = $null
+        $script:W968WriteResult = [PSCustomObject]@{ Success = $true; Reason = $null }
+        $script:W968WrittenBodies.Clear()
+    }
+
+    AfterAll {
+        # RESTORE, so this Describe cannot contaminate anything that runs after
+        # it (post-review fix, finding P-P). `function script:` binds to the
+        # whole FILE container, not to this Describe, and the M2 Context above
+        # installs its own `Get-PPLCommentBodyById` returning $null that its
+        # 'accepted' normalisation depends on. Ordering makes that safe today
+        # — M2's Describe precedes this one and no random-order mode is
+        # configured — but leaving a live stub behind means the file's
+        # behaviour depends on declaration order rather than on scoping, and
+        # a reordering would not fail loudly.
+        function script:Get-PPLCommentBodyById { param($Owner, $Repo, $CommentId) return $null }
+        Remove-Item -Path 'function:script:Set-PPLCommentBodyDirect' -ErrorAction SilentlyContinue
+    }
+
+    Context 'residual content refusals — each named by its OWN reason' {
+
+        # Assert the specific reason, never merely Success=$false: several of
+        # these guards have a LATER guard that also refuses the same input, so
+        # a bare falsity assertion stays green when the guard under test is
+        # deleted (falsifier 5).
+
+        It 'refuses the HTML-comment form of the judge vocabulary, distinctly from the judge_ruling FIELD form' {
+            # M2's probe covers the `judge_ruling:` field alternative at
+            # persist-phase-ledger-core.ps1:629. The `<!-- judge-rulings` head
+            # alternative at :628 is a separate regex and was uncovered.
+            # MUTATION RUN: replacing the :628 alternative with a never-
+            # matching pattern makes this input reach the read and return
+            # 'accepted' — no later guard sees it, because the comment line is
+            # indented (so the column-0 check passes) and lies inside the
+            # preamble the finding-field scan does not object to.
+            $head = $script:W968Canon -replace '  findings:', "  <!-- judge-rulings -->`n  findings:"
+            $r = script:Invoke-W968 -Head $head
+            $r.Success | Should -BeFalse
+            $r.Reason | Should -Match 'carries judge vocabulary \(a judge-rulings head or a judge_ruling field\)'
+            $script:W968WrittenBodies.Count | Should -Be 0 -Because 'a refusal must never reach the write'
+        }
+
+        It 'refuses a head carrying NO convergence_filter_ran assertion at all' {
+            $head = @(
+                'brief_dispositions:'
+                '  filtered_count: 8'
+                '  findings:'
+                '    - finding_id: N1'
+                '      disposition: incorporate'
+            ) -join "`n"
+            $r = script:Invoke-W968 -Head $head
+            $r.Success | Should -BeFalse
+            $r.Reason | Should -Match 'carries no machine-readable .convergence_filter_ran: true\|false. assertion as a key of the head itself'
+        }
+
+        It 'refuses a head whose ONLY assertion is nested inside a findings entry' {
+            # Same return as the case above, by design — the two are separated
+            # by the preamble truncation at persist-phase-ledger-core.ps1:642-646,
+            # which has no return of its own. MUTATION RUN: reverting the
+            # truncation ($headPreamble = $BriefHeadContent) makes the nested
+            # assertion visible, so this input falls through to the
+            # filtered_count refusal — a DIFFERENT reason, which is what makes
+            # the scoping separately observable rather than redundant.
+            $head = @(
+                'brief_dispositions:'
+                '  findings:'
+                '    - finding_id: N1'
+                '      disposition: incorporate'
+                '      convergence_filter_ran: true'
+            ) -join "`n"
+            $r = script:Invoke-W968 -Head $head
+            $r.Success | Should -BeFalse
+            $r.Reason | Should -Match 'as a key of the head itself'
+            $r.Reason | Should -Not -Match 'filtered_count' -Because 'the head-scoped read is what refuses here, not the count check'
+        }
+
+        It 'refuses a head declaring the filter ran but carrying no filtered_count' {
+            $head = $script:W968Canon -replace '  filtered_count: 8\r?\n', ''
+            $head | Should -Not -Match 'filtered_count' -Because 'the fixture must actually omit it'
+            $r = script:Invoke-W968 -Head $head
+            $r.Success | Should -BeFalse
+            $r.Reason | Should -Match 'declares the filter ran but carries no .filtered_count. as a key of the head itself'
+        }
+    }
+
+    Context 'post-read refusals — reachable only once the comment read succeeds' {
+
+        It 'refuses to write onto a comment that does not carry the expected marker' {
+            # persist-phase-ledger-core.ps1:713-715. Unreachable while the read
+            # is stubbed to $null, so no test had ever exercised it.
+            $script:W968ReadBody = "<!-- some-other-marker -->`n`nan unrelated comment`n"
+            $r = script:Invoke-W968 -Head $script:W968Canon
+            $r.Success | Should -BeFalse
+            $r.Reason | Should -Match "does not contain expected marker '<!-- phase-containment-ledger-968 -->'"
+            $r.Action | Should -BeNullOrEmpty
+            $script:W968WrittenBodies.Count | Should -Be 0
+        }
+
+        It 'passes a failed write through as its own reason rather than inventing one' {
+            # persist-phase-ledger-core.ps1:729-731. The failure the caller
+            # needs to see is the WRITE helper's, verbatim.
+            $script:W968ReadBody = "$script:W968Marker`n`nno head yet`n"
+            $script:W968WriteResult = [PSCustomObject]@{
+                Success = $false
+                Reason  = 'gh api PATCH failed for comment 1 (exit 22): HTTP 422 Unprocessable Entity'
+            }
+            $r = script:Invoke-W968 -Head $script:W968Canon
+            $r.Success | Should -BeFalse
+            $r.Reason | Should -BeExactly 'gh api PATCH failed for comment 1 (exit 22): HTTP 422 Unprocessable Entity'
+            $r.Action | Should -BeNullOrEmpty
+            $script:W968WrittenBodies.Count | Should -Be 1 -Because 'the write WAS attempted; it is its failure that propagates'
+        }
+    }
+
+    Context 'the two write outcomes, observed on the body handed to the writer' {
+
+        # FALSIFIER 6, in force. `Action` and the body mutation both read
+        # $headMatch.Success but are computed separately at
+        # persist-phase-ledger-core.ps1:720-732, so asserting the LABEL proves
+        # only that the predicate was evaluated. Every assertion that matters
+        # below reads $script:W968WrittenBodies — the actual body.
+        #
+        # MUTATION RUN: swapping the two arms of the $newBody assignment leaves
+        # Action correct on both cases and turns the body assertions red.
+
+        It 'APPENDS onto a comment carrying no brief head' {
+            $script:W968ReadBody = "$script:W968Marker`n`nprose that was already here`n"
+            $r = script:Invoke-W968 -Head $script:W968Canon
+            $r.Success | Should -BeTrue
+            $r.Reason | Should -BeNullOrEmpty
+            $r.Action | Should -BeExactly 'written'
+
+            $script:W968WrittenBodies.Count | Should -Be 1
+            $body = $script:W968WrittenBodies[0]
+            $body | Should -Match 'prose that was already here' -Because 'an append must not destroy what was there'
+            ([regex]::Matches($body, '(?m)^brief_dispositions[ \t]*:[ \t]*\r?$')).Count |
+                Should -Be 1 -Because 'exactly one head — two heads is the ambiguity the reader fails loud on'
+            $body | Should -Match '(?m)^  filtered_count: 8[ \t]*\r?$'
+
+            # POSITION, not merely presence (post-review fix, finding P-C).
+            # Every assertion above is presence-only, so inverting the
+            # append/replace branch left all of them green: on a headless body
+            # $headMatch.Index and .Length are both 0, so the replace arm
+            # degenerates to a PREPEND and the head lands ABOVE the ledger
+            # marker. `Action` stays 'written' either way, which is falsifier
+            # 6's whole point. An append must land the head at the END.
+            $body | Should -Match '(?s)^\s*<!-- phase-containment-ledger-968 -->.*prose that was already here.*brief_dispositions:' `
+                -Because 'the head is appended BELOW the existing body, never prepended above it'
+        }
+
+        It 'REPLACES an existing head in place instead of stacking a second one' {
+            # This is the outcome the flat-head refusal exists to protect: a
+            # span-replace that missed would leave the old head's fields below
+            # the new one and SILENTLY DOUBLE the ledger's counts on re-persist.
+            $script:W968ReadBody = @(
+                $script:W968Marker
+                ''
+                'brief_dispositions:'
+                '  convergence_filter_ran: true'
+                '  filtered_count: 99'
+                '  findings:'
+                '    - finding_id: OLD'
+                '      disposition: dismiss'
+                ''
+                '<!-- phase-containment-968 -->'
+                'finding_key: brief-review:968:N1'
+                '<!-- /phase-containment-968 -->'
+            ) -join "`n"
+
+            $r = script:Invoke-W968 -Head $script:W968Canon
+            $r.Success | Should -BeTrue
+            $r.Action | Should -BeExactly 'replaced'
+
+            $script:W968WrittenBodies.Count | Should -Be 1
+            $body = $script:W968WrittenBodies[0]
+            ([regex]::Matches($body, '(?m)^brief_dispositions[ \t]*:[ \t]*\r?$')).Count |
+                Should -Be 1 -Because 'the old head must be REPLACED, not stacked under a second one'
+            $body | Should -Match '(?m)^  filtered_count: 8[ \t]*\r?$' -Because 'the new head landed'
+            $body | Should -Not -Match 'filtered_count: 99' -Because 'the whole old head must be gone — a surviving field doubles the counts'
+            $body | Should -Not -Match 'finding_id: OLD'
+            $body | Should -Match '(?m)^<!-- phase-containment-968 -->' -Because 'content BELOW the head must survive the span-replace'
+        }
+
+        It 'POSITIVE CONTROL: this context can observe a write at all' {
+            # Without this, every assertion above would read the same against a
+            # writer that never called the write helper. Distinct from M2's
+            # control, which stubs the read to $null and so can only prove the
+            # content guards passed — never that anything was written.
+            $script:W968ReadBody = "$script:W968Marker`n`nbody`n"
+            $null = script:Invoke-W968 -Head $script:W968Canon
+            $script:W968WrittenBodies.Count | Should -Be 1
+            $script:W968WrittenBodies[0] | Should -Match 'brief_dispositions:'
+        }
+    }
+}
+
+Describe '#968 AC3: the indentation-idempotency gate is pinned on a shape that distinguishes it' {
+
+    BeforeAll {
+        # A body the ROUND-TRIP fixture cannot produce: a conformant brief head
+        # ALONGSIDE indented old rows. The existing test at
+        # 'an INDENTED corpus is recognised as already-corrected' feeds
+        # Convert-BRMLedgerBody its own output, and with the item-8 relabel
+        # applied that output has no old rows left — so the widened probes are
+        # never exercised and reverting them to column-0 anchors leaves all
+        # three of its assertions green.
+        function script:New-968MixedBody {
+            param(
+                [int]$Issue = 939,
+                [string]$KeyPrefix = 'brief-review',
+                [string]$StageValue = 'brief-review',
+                [string]$Indent = '  '
+            )
+            $lines = [System.Collections.Generic.List[string]]::new()
+            $lines.Add("<!-- phase-containment-ledger-$Issue -->")
+            $lines.Add('')
+            $lines.Add('brief_dispositions:')
+            $lines.Add('  convergence_filter_ran: true')
+            $lines.Add('  filtered_count: 8')
+            $lines.Add('  findings:')
+            $lines.Add('    - finding_id: N1')
+            $lines.Add('      disposition: incorporate')
+            $lines.Add('')
+            $lines.Add("<!-- phase-containment-$Issue -->")
+            $lines.Add("${Indent}finding_key: ${KeyPrefix}:${Issue}:N1")
+            $lines.Add("${Indent}introduced_phase: design")
+            $lines.Add("${Indent}catchable_phase: plan")
+            $lines.Add("${Indent}caught_stage: $StageValue")
+            $lines.Add("${Indent}escape_distance: 0")
+            $lines.Add("${Indent}severity: medium")
+            $lines.Add("${Indent}systemic_fix_type: instruction")
+            $lines.Add("${Indent}category: pattern")
+            $lines.Add("<!-- /phase-containment-$Issue -->")
+            return ($lines -join "`n") + "`n"
+        }
+    }
+
+    # EACH PROBE MUTATED SEPARATELY. brief-review-migration-core.ps1:230-231
+    # are two INDEPENDENT detectors of the same corpus, so a fixture carrying
+    # both indented field kinds is caught by either one alone and a single
+    # mutation proves nothing about the other. Each case below leaves exactly
+    # one probe with anything to detect.
+
+    It 'an indented OLD finding_key beside a conformant head is not already-corrected (pins $hasOldPrefix alone)' {
+        # caught_stage is already brief-review here, so $hasOldStage is false
+        # and only $hasOldPrefix can open the gate.
+        # MUTATION RUN: narrowing :230 to a column-0 anchor makes this body read
+        # as already-corrected — Changed $false, Reason 'already-corrected'.
+        $body = script:New-968MixedBody -KeyPrefix 'plan-stress-test' -StageValue 'brief-review'
+        $r = Convert-BRMLedgerBody -Body $body -Issue 939
+        $r.Reason | Should -BeExactly 'corrected' -Because 'the gate must not report an uncorrected row as done'
+        $r.Changed | Should -BeTrue
+        $r.Body | Should -Match '(?m)^  finding_key: brief-review:939:N1' -Because 'and the row is actually relabelled, indentation preserved'
+    }
+
+    It 'an indented OLD caught_stage beside a conformant head is not already-corrected (pins $hasOldStage alone)' {
+        # finding_key already carries the new prefix, so $hasOldPrefix is false
+        # and only $hasOldStage can open the gate.
+        # MUTATION RUN: narrowing :231 to a column-0 anchor makes this body read
+        # as already-corrected.
+        $body = script:New-968MixedBody -KeyPrefix 'brief-review' -StageValue 'plan-stress-test'
+        $r = Convert-BRMLedgerBody -Body $body -Issue 939
+        $r.Reason | Should -BeExactly 'corrected'
+        $r.Changed | Should -BeTrue
+        $r.Body | Should -Match '(?m)^  caught_stage: brief-review[ \t]*\r?$'
+    }
+
+    It 'CONTROL: the same body at column 0 is caught either way, widened or not' {
+        # RENAMED AND RE-ARGUED after review (finding P-K). This carries no
+        # discriminating signal on the unmutated tree and never did: the
+        # widened `^[ \t]*` probes match column 0 as well, so this returns
+        # 'corrected' under the widened anchors AND under both narrowings.
+        # The earlier comment claimed the opposite — that these shapes going
+        # green under the narrowed anchors would VOID the two cases above —
+        # which is backwards, since that is exactly what happens and is
+        # exactly what should happen.
+        #
+        # Its real job is as the control DURING a mutation run: when a probe
+        # is narrowed, the indented cases above go red while this stays green.
+        # That contrast separates "the anchor was narrowed" from "the whole
+        # transform is broken", which a red-everywhere run could not.
+        foreach ($shape in @(
+                @{ k = 'plan-stress-test'; s = 'brief-review' }
+                @{ k = 'brief-review'; s = 'plan-stress-test' }
+            )) {
+            $body = script:New-968MixedBody -KeyPrefix $shape.k -StageValue $shape.s -Indent ''
+            (Convert-BRMLedgerBody -Body $body -Issue 939).Reason | Should -BeExactly 'corrected'
+        }
+    }
+
+    Context 'withdraw-path idempotency rests on transform stability, not on the gate' {
+
+        BeforeAll {
+            $script:W968Withdrawn = (Convert-BRMLedgerBody `
+                    -Body (script:New-ContaminatedForTail -Issue 941 -Rows 27 -Prefix 'M') -Issue 941).Body
+        }
+
+        It 'the second pass reports a DIFFERENT mechanism from the relabel path''s' {
+            # THIS PINS A DEFECT ON PURPOSE, and says so, per the brief's §5.
+            # The withdraw archive strips only the HTML-comment delimiters, so
+            # `finding_key: plan-stress-test:` lines survive it inert and
+            # $hasOldPrefix stays true FOREVER. The already-corrected fast path
+            # is therefore unreachable for #941: its second pass falls all the
+            # way through to `Changed = ($new -ne $Body)` and returns
+            # 'corrected' with Changed $false. It is byte-stable, so there is
+            # no data harm — but idempotency here is carried by the TRANSFORM
+            # being stable, not by the gate, and nothing asserted that.
+            #
+            # IF SOMEONE LATER CLOSES THAT GATE PROPERLY, this assertion is the
+            # thing to UPDATE — it is not evidence of a regression.
+            #
+            # MUTATION RUN: making the archive also neutralise the old-prefix
+            # lines flips this to 'already-corrected'.
+            $second = Convert-BRMLedgerBody -Body $script:W968Withdrawn -Issue 941
+            $second.Reason | Should -BeExactly 'corrected' -Because 'the gate never fires on the withdraw path'
+            $second.Changed | Should -BeFalse -Because 'stability of the transform is what makes re-running safe'
+            $second.Body | Should -BeExactly $script:W968Withdrawn
+
+            # And the contrast that makes 'corrected' meaningful rather than a
+            # bare string: the relabel path reaches the gate on ITS second pass.
+            $relabelOnce = (Convert-BRMLedgerBody -Body (script:New-ContaminatedForTail -Issue 939 -Rows 29) -Issue 939).Body
+            (Convert-BRMLedgerBody -Body $relabelOnce -Issue 939).Reason | Should -BeExactly 'already-corrected'
+        }
+
+        It 'the archive is what keeps the gate open — the old-prefix lines are still in the body' {
+            # Names the mechanism directly, so the pin above cannot be read as
+            # an arbitrary string assertion.
+            $script:W968Withdrawn | Should -Match '(?m)^[ \t]*finding_key[ \t]*:[ \t]*plan-stress-test:'
+            (Get-PhaseContainmentBlock -Text $script:W968Withdrawn -Id 941) |
+                Should -BeNullOrEmpty -Because 'they survive INERT — no reader can count them'
+        }
+    }
+}
+
+Describe '#968 AC4: unreadable-vs-absent is distinguished at the grain a maintainer reads' {
+
+    BeforeAll {
+        # The rendered sentence lives in the ORCHESTRATOR, not the core lib.
+        # Dot-sourcing is safe and deliberate: the script gates its top-level
+        # execution on $MyInvocation.InvocationName -eq '.'.
+        . (Join-Path $script:RepoRoot '.github/scripts/phase-containment-emission-check.ps1')
+
+        function script:Get-968FilterGap {
+            param([Parameter(Mandatory)][string]$Head)
+            $ledger = script:New-BriefLedger -Head $Head -Rows (script:New-BriefRows -Count 2)
+            return Get-EmissionGap -Bodies @((script:New-BriefPlanComment), $ledger) -Id $script:Id -Surface 'brief-review'
+        }
+    }
+
+    # WHY THE OUTER GRAIN. The only pre-existing test naming
+    # 'filter-value-unrecognized' asserts Get-DispositionTally — the INNER
+    # tally, which already returned that value before the item-19 fix. What
+    # the fix changed is the outer flag split at
+    # phase-containment-emission-check-core.ps1:3285-3286 and the ladder rung
+    # at :3533, which is the layer that decides which sentence a maintainer is
+    # shown. Reverting it left the whole suite green.
+    #
+    # MUTATION RUN: collapsing 'filter-value-unrecognized' back into
+    # $sawBriefFilterUnasserted at :3286 (the PRE-FIX direction — the other
+    # direction inverts the expectation and proves nothing).
+    #
+    # FALSIFIER 5: none of the four rungs ABOVE this one is tripped by these
+    # fixtures — no judge head, one head, every disposition in the closed set,
+    # and the assertion is never the literal `false`.
+
+    It 'a head whose convergence_filter_ran value is unreadable renders the UNREADABLE outcome' {
+        $gap = script:Get-968FilterGap -Head (script:New-BriefHead -FilterRan 'maybe')
+        $gap.ParseStatus | Should -BeExactly 'could-not-verify'
+        $gap.Reason | Should -BeExactly 'filter-value-unrecognized'
+
+        $line = script:Format-EmissionGapLine -Surface 'brief-review' -Id $script:Id -Gap $gap
+        $line | Should -Match 'present but its value is not the literal'
+        $line | Should -Match 'the assertion is not absent, it is unreadable'
+        $line | Should -Not -Match 'carries no machine-readable' -Because 'that sentence sends the maintainer looking for a line that is right in front of them'
+    }
+
+    It 'a head carrying no assertion at all still renders the ABSENT outcome' {
+        # The half that must stay GREEN under the mutation. Without it, a
+        # mutation that reddened both cases would look like discrimination.
+        $gap = script:Get-968FilterGap -Head (script:New-BriefHead -OmitAssertion)
+        $gap.ParseStatus | Should -BeExactly 'could-not-verify'
+        $gap.Reason | Should -BeExactly 'filter-unasserted'
+
+        $line = script:Format-EmissionGapLine -Surface 'brief-review' -Id $script:Id -Gap $gap
+        $line | Should -Match 'carries no machine-readable'
+        $line | Should -Not -Match 'it is unreadable'
+    }
+
+    It 'the two outcomes are distinguishable from each other in the rendered result' {
+        # Stated as its own assertion because "each renders something" and
+        # "they render DIFFERENT things" are not the same claim, and it is the
+        # second one the item-19 fix is about.
+        $unreadable = script:Format-EmissionGapLine -Surface 'brief-review' -Id $script:Id `
+            -Gap (script:Get-968FilterGap -Head (script:New-BriefHead -FilterRan 'maybe'))
+        $absent = script:Format-EmissionGapLine -Surface 'brief-review' -Id $script:Id `
+            -Gap (script:Get-968FilterGap -Head (script:New-BriefHead -OmitAssertion))
+        $unreadable | Should -Not -BeExactly $absent
+    }
+
+    It 'CONTROL: a canonical head still verifies, so the fixtures are not merely broken' {
+        $gap = script:Get-968FilterGap -Head (script:New-BriefHead)
+        $gap.ParseStatus | Should -BeExactly 'ok'
+        $gap.SustainedCount | Should -Be 2
     }
 }
