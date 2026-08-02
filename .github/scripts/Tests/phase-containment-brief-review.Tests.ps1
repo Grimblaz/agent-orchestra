@@ -97,6 +97,51 @@ $variant
         return "<!-- phase-containment-ledger-$Id -->`n`n$Extra`n`n$Head`n`n$Rows"
     }
 
+    # Hoisted to the FILE-level BeforeAll (post-review fix, finding P-A).
+    # These lived in the 'Migration guard and render coverage' Describe's own
+    # BeforeAll while the #968 AC3 Describe below also consumes them, so any
+    # name-filtered run of AC3 died with CommandNotFoundException instead of
+    # the assertion result. Whole-file runs hid it because Pester executes
+    # Describes in file order. That matters here beyond ergonomics: this
+    # chunk's evidence procedure is revert-run-observe on a TARGETED run, and
+    # a filtered red is indistinguishable from a mutation's red.
+    #
+    # NOTE: New-ContaminatedForTail is duplicated as script:New-968Contaminated
+    # in migrate-brief-review-corpus.Tests.ps1 -- forced, since Pester files are
+    # not dot-sourceable and Tests/ has no shared helper module. Keep in step.
+    function script:New-ContaminatedForTail {
+        param([int]$Issue, [int]$Rows, [string]$Prefix = 'N', [string]$StageValue = 'plan-stress-test', [string]$Indent = '')
+        # LF-joined, not StringBuilder.AppendLine. AppendLine emits CRLF on
+        # Windows, and Get-PhaseContainmentBlock does not extract blocks
+        # from a CRLF body — so a CRLF fixture makes every block-grain
+        # assertion below vacuous. The bodies this migration actually
+        # handles arrive LF-normalised.
+        $lines = [System.Collections.Generic.List[string]]::new()
+        $lines.Add("<!-- phase-containment-ledger-$Issue -->")
+        $lines.Add('')
+        $lines.Add('<!-- judge-rulings')
+        for ($i = 1; $i -le $Rows; $i++) {
+            $lines.Add("- finding_id: ${Prefix}$i")
+            $lines.Add('  judge_ruling: sustained')
+        }
+        $lines.Add('-->')
+        $lines.Add('')
+        for ($i = 1; $i -le $Rows; $i++) {
+            $lines.Add("<!-- phase-containment-$Issue -->")
+            $lines.Add("${Indent}finding_key: plan-stress-test:${Issue}:${Prefix}$i")
+            $lines.Add("${Indent}introduced_phase: design")
+            $lines.Add("${Indent}catchable_phase: plan")
+            $lines.Add("${Indent}caught_stage: $StageValue")
+            $lines.Add("${Indent}escape_distance: 0")
+            $lines.Add("${Indent}severity: medium")
+            $lines.Add("${Indent}systemic_fix_type: instruction")
+            $lines.Add("${Indent}category: pattern")
+            $lines.Add("<!-- /phase-containment-$Issue -->")
+        }
+        return ($lines -join "`n") + "`n"
+    }
+    function script:New-HistPlan { param([int]$Issue) "<!-- plan-issue-$Issue -->`n`n---`nspine-omitted: plan-too-small`n---`n`n**Plan Stress-Test**: three lenses.`n" }
+
     $script:JudgeHead = @"
 <!-- judge-rulings
 - finding_id: N1
@@ -1247,40 +1292,10 @@ brief_dispositions:
 
 Describe 'Migration guard and render coverage (PR #963 review: O, AB, AF)' {
 
-    BeforeAll {
-        function script:New-ContaminatedForTail {
-            param([int]$Issue, [int]$Rows, [string]$Prefix = 'N', [string]$StageValue = 'plan-stress-test', [string]$Indent = '')
-            # LF-joined, not StringBuilder.AppendLine. AppendLine emits CRLF on
-            # Windows, and Get-PhaseContainmentBlock does not extract blocks
-            # from a CRLF body — so a CRLF fixture makes every block-grain
-            # assertion below vacuous. The bodies this migration actually
-            # handles arrive LF-normalised.
-            $lines = [System.Collections.Generic.List[string]]::new()
-            $lines.Add("<!-- phase-containment-ledger-$Issue -->")
-            $lines.Add('')
-            $lines.Add('<!-- judge-rulings')
-            for ($i = 1; $i -le $Rows; $i++) {
-                $lines.Add("- finding_id: ${Prefix}$i")
-                $lines.Add('  judge_ruling: sustained')
-            }
-            $lines.Add('-->')
-            $lines.Add('')
-            for ($i = 1; $i -le $Rows; $i++) {
-                $lines.Add("<!-- phase-containment-$Issue -->")
-                $lines.Add("${Indent}finding_key: plan-stress-test:${Issue}:${Prefix}$i")
-                $lines.Add("${Indent}introduced_phase: design")
-                $lines.Add("${Indent}catchable_phase: plan")
-                $lines.Add("${Indent}caught_stage: $StageValue")
-                $lines.Add("${Indent}escape_distance: 0")
-                $lines.Add("${Indent}severity: medium")
-                $lines.Add("${Indent}systemic_fix_type: instruction")
-                $lines.Add("${Indent}category: pattern")
-                $lines.Add("<!-- /phase-containment-$Issue -->")
-            }
-            return ($lines -join "`n") + "`n"
-        }
-        function script:New-HistPlan { param([int]$Issue) "<!-- plan-issue-$Issue -->`n`n---`nspine-omitted: plan-too-small`n---`n`n**Plan Stress-Test**: three lenses.`n" }
-    }
+    # Fixtures (New-ContaminatedForTail, New-HistPlan) live in the FILE-level
+    # BeforeAll — they are shared with the #968 AC3 Describe below, and a
+    # Describe-scoped definition made any filtered run of that Describe fail
+    # with CommandNotFoundException rather than an assertion result.
 
     Context 'O: the verdict guard is as discriminating as the parser' {
 
@@ -1553,6 +1568,20 @@ Describe '#968 AC1: the brief-head writer is observed by invocation, across its 
         $script:W968WrittenBodies.Clear()
     }
 
+    AfterAll {
+        # RESTORE, so this Describe cannot contaminate anything that runs after
+        # it (post-review fix, finding P-P). `function script:` binds to the
+        # whole FILE container, not to this Describe, and the M2 Context above
+        # installs its own `Get-PPLCommentBodyById` returning $null that its
+        # 'accepted' normalisation depends on. Ordering makes that safe today
+        # — M2's Describe precedes this one and no random-order mode is
+        # configured — but leaving a live stub behind means the file's
+        # behaviour depends on declaration order rather than on scoping, and
+        # a reordering would not fail loudly.
+        function script:Get-PPLCommentBodyById { param($Owner, $Repo, $CommentId) return $null }
+        Remove-Item -Path 'function:script:Set-PPLCommentBodyDirect' -ErrorAction SilentlyContinue
+    }
+
     Context 'residual content refusals — each named by its OWN reason' {
 
         # Assert the specific reason, never merely Success=$false: several of
@@ -1672,6 +1701,16 @@ Describe '#968 AC1: the brief-head writer is observed by invocation, across its 
             ([regex]::Matches($body, '(?m)^brief_dispositions[ \t]*:[ \t]*\r?$')).Count |
                 Should -Be 1 -Because 'exactly one head — two heads is the ambiguity the reader fails loud on'
             $body | Should -Match '(?m)^  filtered_count: 8[ \t]*\r?$'
+
+            # POSITION, not merely presence (post-review fix, finding P-C).
+            # Every assertion above is presence-only, so inverting the
+            # append/replace branch left all of them green: on a headless body
+            # $headMatch.Index and .Length are both 0, so the replace arm
+            # degenerates to a PREPEND and the head lands ABOVE the ledger
+            # marker. `Action` stays 'written' either way, which is falsifier
+            # 6's whole point. An append must land the head at the END.
+            $body | Should -Match '(?s)^\s*<!-- phase-containment-ledger-968 -->.*prose that was already here.*brief_dispositions:' `
+                -Because 'the head is appended BELOW the existing body, never prepended above it'
         }
 
         It 'REPLACES an existing head in place instead of stacking a second one' {
@@ -1791,11 +1830,20 @@ Describe '#968 AC3: the indentation-idempotency gate is pinned on a shape that d
         $r.Body | Should -Match '(?m)^  caught_stage: brief-review[ \t]*\r?$'
     }
 
-    It 'CONTRAST: the same body at column 0 is caught by the pre-widening anchors too' {
-        # The control that makes the two mutations above mean something. If
-        # these column-0 shapes were ALSO green under the narrowed anchors,
-        # the cases above would not be evidence that the widening is what
-        # carries them.
+    It 'CONTROL: the same body at column 0 is caught either way, widened or not' {
+        # RENAMED AND RE-ARGUED after review (finding P-K). This carries no
+        # discriminating signal on the unmutated tree and never did: the
+        # widened `^[ \t]*` probes match column 0 as well, so this returns
+        # 'corrected' under the widened anchors AND under both narrowings.
+        # The earlier comment claimed the opposite — that these shapes going
+        # green under the narrowed anchors would VOID the two cases above —
+        # which is backwards, since that is exactly what happens and is
+        # exactly what should happen.
+        #
+        # Its real job is as the control DURING a mutation run: when a probe
+        # is narrowed, the indented cases above go red while this stays green.
+        # That contrast separates "the anchor was narrowed" from "the whole
+        # transform is broken", which a red-everywhere run could not.
         foreach ($shape in @(
                 @{ k = 'plan-stress-test'; s = 'brief-review' }
                 @{ k = 'brief-review'; s = 'plan-stress-test' }
