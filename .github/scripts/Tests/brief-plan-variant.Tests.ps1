@@ -879,6 +879,27 @@ Describe 'Brief review teeth — required cold-read vacuity question (#973)' -Ta
             -Because 'the brief path needs an explicit exclusion at the point the design token is named'
     }
 
+    It 'both doctrine surfaces key the routing n/a arm on the AUTHORITY SOURCE, not on verdict presence' {
+        # External review (CodeRabbit, PR #981) on the M1 FIX itself: the
+        # replacement wording read "checked ... where a routing verdict rides
+        # the brief, and otherwise recorded as not-applicable", which keys the
+        # n/a arm on whether a verdict happens to be present. A source-(b)
+        # brief with NO verdict then falls into "otherwise" and is recorded
+        # n/a -- precisely the lawfulness failure arm 4 exists to catch, and
+        # the same skip-shaped defect M1 was raised to remove.
+        foreach ($path in @('CLAUDE.md', 'Documents/Design/chunked-delivery.md')) {
+            $content = & $script:ReadRepoFile $path
+            $content.Contains('otherwise recorded as not-applicable') | Should -BeFalse `
+                -Because "$path must not let an absent source-(b) verdict fall through to a not-applicable"
+            $content.Contains('novel') | Should -BeTrue `
+                -Because "$path must name the novel-verdict outcome, which is a failure and not an n/a"
+        }
+
+        $doctrine = & $script:ReadRepoFile 'Documents/Design/chunked-delivery.md'
+        $doctrine.Contains('never by whether a verdict happens to be present') | Should -BeTrue `
+            -Because 'the arm must be selected by authority source; that is the whole distinction'
+    }
+
     It 'both doctrine surfaces name the persisted landing surface for the vacuity answer' {
         # External review (CodeRabbit, PR #981): both doctrine documents
         # required the question and the emitted answer while naming neither the
