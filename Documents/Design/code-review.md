@@ -1160,7 +1160,7 @@ The pipeline shape is unchanged: 3 passes, non-blocking, prosecution-only (`pipe
 
 ### Convergence Filter
 
-Per `skills/design-exploration/SKILL.md` § Convergence Filter, after the 3 finders return and are merged into a pre-filter union, Solution-Designer dispatches the Fable-tier `agents/code-review-response.md` shell **once** — a single `Agent`-tool call carrying a two-part prompt, not two separate dispatches:
+Per `skills/design-exploration/SKILL.md` § Convergence Filter, after the 3 finders return and are merged into a pre-filter union, the dispatching caller — Solution-Designer for a design target, Issue-Planner or the reviewer running the brief charter for a `plan-variant: brief` target (#957 chunk 2) — dispatches the Fable-tier `agents/code-review-response.md` shell **once** — a single `Agent`-tool call carrying a two-part prompt, not two separate dispatches:
 
 - **Part (a) — cold-read**: the shell first cold-reads the design directly and records independent observations, before the prompt reveals the 3 finder ledgers.
 - **Part (b) — synthesis**: within the same dispatch, the shell opens the 3 finder ledgers, dedupes, ranks, and merges them against its own Part (a) observations, then emits a kept/filtered rulings block spanning the full pre-filter union — every finder finding plus every cold-read observation, each marked `kept` or `filtered` with rationale.

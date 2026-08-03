@@ -118,7 +118,6 @@ Whether an issue is below the trivial floor is decided **at pickup, from the fil
 
 A brief produced by this flow takes the same review a chunk brief takes — the **brief charter**: the `#### Brief conformance check` (author before dispatch, reviewer as first act), then the prosecution-only `design-challenge` shape (three lenses, no defense, no judge) plus the convergence filter over the merged ledger. The review runs once, after beat 2's artifact exists and before the worktree opens. The **routing call** — beat 2's routine-versus-novel classification against the still-open list — is a named review target, and the charter aims at it: `skills/plan-authoring/SKILL.md` § The routing call as a review target has the reviewer locate the recorded verdict, re-ask beat 2's question over the brief's own known-unknown entries, and rule one of three ways — consistent, inconsistent (a finding), or **absent**, which under Amendment 10 is a review failure rather than a gap, since a framing record with beat 2 unrun does not authorize a brief at all. The vacuity question lands twice in the same charter (#957 D2): as conformance-check property 5, and as a required question in the convergence cold read whose answer is emitted whichever way it comes out. The alignment beat itself gets no adversarial pass: the person is ground truth for what they want built, and an agent prosecuting that would be prosecuting them (#957 d-review-shape).
 
-
 ### The close-out habit
 
 When the issue closes, the conversation's owner writes the close-out record on the issue:
