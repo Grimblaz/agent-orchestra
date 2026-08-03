@@ -864,6 +864,33 @@ Describe 'Brief review teeth — required cold-read vacuity question (#973)' -Ta
             -Because 'the brief path must be steered away from the design marker''s schema at the point of exposure'
     }
 
+    It 'scopes the pass-4 finding_dispositions tagging to design targets at the instruction itself' {
+        # External review (Codex bot, PR #981): warning a brief-path reader
+        # upstream is not enough — a reader arriving directly at the pass-4
+        # sentence (by search, or by reading the section in order) still met an
+        # unqualified instruction to tag findings into `finding_dispositions:`,
+        # the design-completion token whose reuse on a brief renders a
+        # permanent false design-challenge gap.
+        $section = & $script:ConvergenceSection
+
+        $section.Contains('**On a design target**, cold-read-originated findings') | Should -BeTrue `
+            -Because 'the pass-4 instruction must carry its own scope, not rely on a caveat several paragraphs earlier'
+        $section.Contains('A brief target does not use this tagging.') | Should -BeTrue `
+            -Because 'the brief path needs an explicit exclusion at the point the design token is named'
+    }
+
+    It 'both doctrine surfaces name the persisted landing surface for the vacuity answer' {
+        # External review (CodeRabbit, PR #981): both doctrine documents
+        # required the question and the emitted answer while naming neither the
+        # durable artifact nor the producer — so a reader learning the charter
+        # from doctrine alone would not know that silence is nonconforming.
+        foreach ($path in @('Documents/Design/chunked-delivery.md', 'Documents/Design/open-for-work.md')) {
+            $content = & $script:ReadRepoFile $path
+            $content.Contains('Plan Stress-Test') | Should -BeTrue `
+                -Because "$path states the vacuity requirement, so it must also name where the answer is persisted"
+        }
+    }
+
     It 'the required answer has an instructed producer, not only an asker' {
         # A requirement written only into the dispatcher prose has no producer:
         # the shell that PERFORMS the cold read is instructed by its own body,
