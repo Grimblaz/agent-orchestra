@@ -1044,6 +1044,28 @@ Describe 'Brief plan variant — doctrine migration' -Tag 'unit' {
         $content.Contains('**Panel depth earns its way down.** Chunk plans start with the full adversarial plan review') | Should -BeFalse
     }
 
+    It 'the CLAUDE.md charter mirror enumerates the same charter as chunked-delivery' {
+        # #981 review, M12: CLAUDE.md:123 and chunked-delivery.md:26 are a
+        # maintained mirror pair, but THIS sentence was pinned on neither side,
+        # so #973 updated one and left the other enumerating a two-component
+        # charter. CLAUDE.md is the first document every session loads.
+        # Deliberately assert the CONCEPTS, not a property count — a count here
+        # would mint exactly the drift site falsifier 6 warns about.
+        $claudeMd = & $script:ReadRepoFile 'CLAUDE.md'
+        $doctrine = & $script:ReadRepoFile 'Documents/Design/chunked-delivery.md'
+
+        foreach ($concept in @('vacuity reading', 'routing-call review target')) {
+            $claudeMd.Contains($concept) | Should -BeTrue `
+                -Because "the CLAUDE.md charter mirror must name '$concept'; it is the first document every session loads"
+            $doctrine.Contains($concept) | Should -BeTrue `
+                -Because "the chunked-delivery side of the mirror must name '$concept' too"
+        }
+
+        $claudeMd.Contains('the brief conformance check plus the prosecution-only `design-challenge` shape') |
+            Should -BeFalse `
+            -Because 'the pre-#973 two-component enumeration is stale once the teeth land'
+    }
+
     It 'the migration table still records the rows later chunks own' {
         $content = & $script:ReadRepoFile 'Documents/Design/chunked-delivery.md'
         $content.Contains('#942') | Should -BeTrue
