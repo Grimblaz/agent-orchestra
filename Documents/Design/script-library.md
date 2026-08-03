@@ -156,6 +156,16 @@ It 'exits 0 when gh returns empty list' {
 Scripts with a `gh` CLI dependency accept `-GhCliPath` (default: `'gh'`). Tests pass a path to a
 mock script that returns controlled fixture data:
 
+> **Exception — captures of multi-line output.** This pattern is correct for the common case
+> (single-line scalars, compact JSON) and stays the default. It is **unsafe as a proof** when the
+> script captures *multi-line* stdout, because a `.ps1` stand-in returning one string is captured
+> as a `[String]`, while a real external process is captured as `[System.Object[]]` — one element
+> per line. A test built this way passes against code that is broken for exactly that difference.
+> Measured, and shipped undetected past a 27-test suite: issue #977. Use a native PATH shim there
+> instead, and read
+> [`skills/review-judgment/references/multiline-capture-audit.md`](../../skills/review-judgment/references/multiline-capture-audit.md)
+> before adding the capture site at all.
+
 ```powershell
 # In BeforeAll:
 $script:MockGh = Join-Path $TestDrive 'gh.ps1'

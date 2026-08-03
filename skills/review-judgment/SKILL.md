@@ -241,6 +241,7 @@ Judgment does not implement fixes. It produces the ruling and the evidence packa
 
 - Load `adversarial-review` for prosecution and defense methodology
 - Load `code-review-intake` when GitHub review retrieval and ledger construction are the main problem
+- Read [references/multiline-capture-audit.md](references/multiline-capture-audit.md) before adding or changing any command-capture site in this skill, and before trusting an `ac_cross_check` recorded before plugin `3.9.1` (issue #977)
 
 ## Gotchas
 
@@ -390,13 +391,28 @@ When an engineer selects `Escalate`:
 
 Before writing any entry with `disposition: dismiss` or `disposition: defer` **and** `severity` ≥ medium — whether the entry originates from a code-review finding (`stage: code-review`) or a CE Gate defect deferral (`stage: ce`) — the agent MUST complete an AC cross-check:
 
-1. Call `Get-AcTermsFromIssue -IssueNumber {parent_issue}` to extract behavioral AC terms.
+1. Call `Get-AcRefsFromIssue -IssueNumber {parent_issue}` to extract AC file-path references (`{ac_refs}`, ARM 1) **and** `Get-AcTermsFromIssue -IssueNumber {parent_issue}` to extract behavioral AC terms (`{ac_terms}`, ARM 2). **Both**, not one: the two arms are independently sufficient — a file-path match alone reaches `force-accept` without any term match — so calling only the term helper silently disables half the gate. An earlier revision of this step named only the term helper while step 2 went on to pass an `{ac_refs}` that nothing had produced (issue #977).
 2. Call `Get-StructuralVerdict -Finding {finding} -PrFileSet {pr_files} -AcRefs {ac_refs} -RepoRoot {repo_root} -AcTerms {ac_terms}` to obtain the `ac_cross_check` object.
 3. Write the returned `ac_cross_check` object into the disposition entry.
 
-**This pre-condition is blocking.** The gate MUST NOT commit a `dismiss` or `defer` entry with severity ≥ medium that has a null or absent `ac_cross_check`. If `Get-AcTermsFromIssue` returns an empty array (no AC section found), the cross-check still runs — pass `@()` as `-AcTerms`; the verdict's `ac_cross_check.source` will be `no-ac-section` and `routed` will be `defer`.
+**This pre-condition is blocking.** The gate MUST NOT commit a `dismiss` or `defer` entry with severity ≥ medium that has a null or absent `ac_cross_check`. If either helper returns empty (no AC section, or no parseable tokens), the cross-check still runs — pass `@()` for that arm; when **both** are empty the verdict's `ac_cross_check.source` will be `no-ac-section` and `routed` will be `defer`.
 
 **Low-severity exemption.** Entries with severity `low` are exempt from this pre-condition (the validator also exempts them). Record them without `ac_cross_check`.
+
+> **Any machine-computed `ac_cross_check` recorded before plugin `3.9.1` is untrustworthy — every field, not just `source: no-ac-section`.** Until issue #977 landed, both AC helpers captured the issue body as a per-line array and split it as if it were one string, so they read the body's **second line** rather than the acceptance-criteria section.
+>
+> Do not read that as "the gate was merely blind." It read the **wrong input**, which fails in both directions:
+>
+> - When line 2 carried no backticked token — the usual case, since line 2 of a conventionally formatted issue is blank — both arrays came back empty, `source` resolved to `no-ac-section`, and the finding took the `defer` arm regardless of what the acceptance criteria actually said.
+> - When line 2 *did* carry a backticked token, that token was returned as though it were an acceptance-criteria reference. `source` was then `issue`, not `no-ac-section` (the verdict function only reports `no-ac-section` when **both** arrays are empty), and a fabricated file-arm match could reach `force-accept` — which overrides a structural deferral. This arm was **reachable but never observed** in the 60-issue sweep; it is why the distrust above is scoped to *every* pre-`3.9.1` machine-computed cross-check rather than to one `source` value. Scoping it to `no-ac-section` would have excluded exactly the records that carried override authority.
+>
+> **Anchor on the release, not on a date.** The fix shipped in `3.9.1`; several pull requests merged earlier the same day carry pre-fix cross-checks, so "before 2026-08-02" would wrongly vouch for them.
+>
+> Historical dispositions were deliberately **annotated rather than recomputed** (issue #977, maintainer decision) — a recompute reads issue bodies as amended since, which is a new claim, not a reconstruction.
+>
+> **`no-ac-section` remains imprecise even post-fix**, and this is unchanged by #977: the verdict function emits it whenever both arrays are empty, which includes an issue that *has* a populated acceptance-criteria section whose tokens are all stop-listed or unbackticked. It means "nothing extractable", not "no section".
+>
+> Both helpers now join the captured lines before splitting; do not remove that join, and see [references/multiline-capture-audit.md](references/multiline-capture-audit.md) before adding any new command-capture site.
 
 **`Add-FollowUpIssue` guard.** When the cross-check routes to `defer` and the agent calls `Add-FollowUpIssue` to file a follow-up issue, it MUST pass the `ac_cross_check` outcome as part of the issue body. Include a fenced YAML block in the body:
 
