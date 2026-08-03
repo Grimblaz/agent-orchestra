@@ -98,6 +98,29 @@ function Get-AcTermsFromIssue {
     # cannot reproduce the array capture at all.
     try {
         $bodyLines = gh issue view $IssueNumber --json body --jq '.body' 2>$null
+        # gh EXISTS-and-fails does not throw — it sets $LASTEXITCODE and leaves
+        # stdout empty, which the -not $body check below already collapses to
+        # the same @() return as a genuinely empty issue body (the documented
+        # contract, unchanged here). Checked anyway, matching this repo's
+        # dominant gh-capture convention, so a -Verbose run can tell "gh
+        # failed" from "issue body is empty" instead of guessing from output
+        # alone.
+        #
+        # Read via Get-Variable, not a bare $LASTEXITCODE reference. In an
+        # in-process test harness that mocks `gh` as a PowerShell function
+        # (every existing suite for THIS repo except the real-capture one),
+        # no native process ever runs and $LASTEXITCODE is never set in this
+        # scope. Under Set-StrictMode -Version Latest, a bare reference to an
+        # unset variable THROWS — caught by the surrounding try/catch below,
+        # which silently returns @() even when the mock returned real content.
+        # That is the exact silent-empty-return failure class issue #977 was
+        # about, self-inflicted by this diagnostic. Reproduced: with -Version
+        # Latest and an in-process mock, a bare $LASTEXITCODE check turns a
+        # correct 1-result return into 0.
+        $lastExit = Get-Variable -Name LASTEXITCODE -ValueOnly -ErrorAction SilentlyContinue
+        if ($null -ne $lastExit -and $lastExit -ne 0) {
+            Write-Verbose "Get-AcTermsFromIssue: gh issue view exited $lastExit for issue $IssueNumber; treating as empty body."
+        }
     }
     catch {
         return @()

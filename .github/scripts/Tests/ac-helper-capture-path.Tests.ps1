@@ -516,6 +516,69 @@ Describe 'C6 — the degenerate-input contract survives the join' {
         $result.ac_cross_check.routed | Should -BeExactly 'defer'
     }
 
+    It 'a failing gh is distinguishable from a genuinely empty body via -Verbose' {
+        # The return value is identical either way (@()) by contract — this
+        # asserts the diagnostic that lets a maintainer tell them apart without
+        # changing that contract.
+        $vRefsFail = script:Invoke-WithGhShim -ShimDir $script:Shims['gh-failure'] -Body {
+            Get-AcRefsFromIssue -IssueNumber '977' -Verbose 4>&1 | Where-Object { $_ -is [System.Management.Automation.VerboseRecord] }
+        }
+        $vRefsEmpty = script:Invoke-WithGhShim -ShimDir $script:Shims['empty'] -Body {
+            Get-AcRefsFromIssue -IssueNumber '977' -Verbose 4>&1 | Where-Object { $_ -is [System.Management.Automation.VerboseRecord] }
+        }
+
+        (@($vRefsFail) -join ' ') | Should -Match 'exited' -Because 'a failing gh sets $LASTEXITCODE and should say so'
+        @($vRefsEmpty).Count | Should -Be 0 -Because 'gh succeeding with a genuinely empty body is not a failure and should not claim to be one'
+
+        # Get-AcTermsFromIssue carries the identical branch — pinned separately
+        # since the two helpers' preambles are known-duplicated (issue #977's
+        # own audit records this) and could drift independently.
+        $vTermsFail = script:Invoke-WithGhShim -ShimDir $script:Shims['gh-failure'] -Body {
+            Get-AcTermsFromIssue -IssueNumber '977' -Verbose 4>&1 | Where-Object { $_ -is [System.Management.Automation.VerboseRecord] }
+        }
+        (@($vTermsFail) -join ' ') | Should -Match 'exited'
+    }
+
+    It 'the $LASTEXITCODE diagnostic tolerates an unset variable under StrictMode (in-process mock, no native process ran)' {
+        # Every pre-existing test for these helpers substitutes gh as an
+        # in-process PowerShell function — no native process runs, so
+        # $LASTEXITCODE is never set. A bare reference to it under
+        # Set-StrictMode -Version Latest throws, which the surrounding
+        # try/catch silently converts to an empty return — turning a CORRECT
+        # result into a false negative. That is the exact defect class #977
+        # exists to close, self-inflicted by the diagnostic added in review.
+        #
+        # This MUST run in a genuinely fresh child process. Every earlier It
+        # in THIS file has already run a native gh/chmod command, which sets
+        # $LASTEXITCODE at process scope and leaves it set for the rest of
+        # the process — so a bare reference here would read that STALE
+        # leftover value instead of throwing, and the test would pass
+        # whether or not the bug is present. That is not a hypothetical: it
+        # is exactly what happened when this test was first written in-process
+        # here — 33/33 green with the unguarded bare-reference version
+        # restored, because $LASTEXITCODE already existed from an earlier
+        # shim call. A fresh process is what actually reproduces the
+        # never-set condition.
+        $repoRoot = $script:RepoRoot
+        $script = @'
+Set-StrictMode -Version Latest
+function global:gh {
+    return "## Acceptance Criteria`n- must use ``skills/foo/bar.md``"
+}
+. (Join-Path $args[0] 'skills/review-judgment/scripts/Get-AcRefsFromIssue.ps1')
+$result = @(Get-AcRefsFromIssue -IssueNumber '1')
+$result.Count
+$result -join ','
+'@
+        $scriptPath = Join-Path $TestDrive 'strictmode-child.ps1'
+        Set-Content -LiteralPath $scriptPath -Value $script -Encoding utf8NoBOM
+
+        $output = & pwsh -NoProfile -NonInteractive -File $scriptPath $repoRoot
+        $LASTEXITCODE | Should -Be 0 -Because 'the child process itself must not throw or exit non-zero'
+        $output[0] | Should -Be '1' -Because 'StrictMode + an in-process mock, with no prior native command in this process, must not silently swallow a real result'
+        $output[1] | Should -BeExactly 'skills/foo/bar.md'
+    }
+
     Context 'gh genuinely UNAVAILABLE — a different mechanism from a failing gh' {
 
         # `2>$null` redirects the NATIVE PROCESS stderr. It cannot suppress
