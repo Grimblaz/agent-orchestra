@@ -693,10 +693,57 @@ Describe 'U5: the rollup partitions the plan arm by adjudication standard (issue
         $armVetoed.N | Should -Be $armClean.N
 
         # Same for high severity, so the fix is not pinned on one enum value.
+        # Issue #969: this leg previously captured Stages['brief-review'] into
+        # $armHigh and then never read it, while re-running the rollup twice to
+        # assert through — so the high side asserted the verdict and the count
+        # but NOT the rate-and-population invariance its critical sibling
+        # asserts six lines up. Asymmetric coverage of a two-value property is
+        # coverage of one value.
         $withHigh = @($judgeOnly + @(script:New-Entry -Stage 'brief-review' -Distance 0 -Severity 'high'))
-        $armHigh = (Get-PhaseContainmentRollup -Entries $withHigh).Stages['brief-review']
-        (Get-PhaseContainmentRollup -Entries $withHigh).Stages['plan-stress-test'].RelaxationEligible | Should -BeFalse
-        (Get-PhaseContainmentRollup -Entries $withHigh).Stages['plan-stress-test'].HighFindingCount | Should -Be 1
+        $armHigh = (Get-PhaseContainmentRollup -Entries $withHigh).Stages['plan-stress-test']
+        $armHigh.RelaxationEligible | Should -BeFalse
+        $armHigh.HighFindingCount | Should -Be 1
+        $armHigh.CriticalFindingCount | Should -Be 0
+        $armHigh.EscapeRate | Should -Be $armClean.EscapeRate -Because 'the veto spans standards but the RATE still must not'
+        $armHigh.N | Should -Be $armClean.N
+    }
+
+    It 'THE VETO SPANS EVERY STANDARD IN THE RENDER TOO — not only in the rollup object (issue #969)' {
+        # C5. The documented near-miss for this exact property was a
+        # RENDER-LAYER flip: reverting one loop variable left the whole suite
+        # green while the rendered verdict went from NOT ELIGIBLE to ELIGIBLE.
+        # The test written in response asserted rollup-object properties and
+        # never called Format-PhaseContainmentReport, and every rendered pin on
+        # the veto line was built on a single-standard fixture — so until now
+        # no test rendered a MIXED-standard corpus and asserted these counts,
+        # which is the shape the failure actually took.
+        $judgeOnly = @(1..5 | ForEach-Object { script:New-Entry -Stage 'plan-stress-test' -Distance 0 -Severity 'medium' })
+        $withCritical = @($judgeOnly + @(script:New-Entry -Stage 'brief-review' -Distance 0 -Severity 'critical'))
+
+        $render = {
+            param($Entries)
+            (Format-PhaseContainmentReport -Context @{
+                    Rollup            = (Get-PhaseContainmentRollup -Entries $Entries -WindowLabel '90d')
+                    Source            = 'rest'
+                    Truncated         = $false
+                    WindowDays        = 90
+                    FetchedAt         = ([datetime]'2026-08-01T00:00:00Z')
+                    InvalidEntryCount = 0
+                }) -join "`n"
+        }
+
+        $cleanText = & $render $judgeOnly
+        $vetoText  = & $render $withCritical
+
+        # The baseline this perturbs really does render eligible, so the
+        # assertion below is a flip and not a constant.
+        $cleanText | Should -Match 'Relaxation signal:  ELIGIBLE \(escape_rate ~0, no critical/high findings\)'
+
+        $vetoText | Should -Match 'Relaxation signal:  NOT ELIGIBLE \(1 critical, 0 high severity finding\(s\) in window\)'
+        $vetoText.Contains('ELIGIBLE (escape_rate ~0, no critical/high findings)') | Should -BeFalse -Because "a critical finding under ANY standard must block the RENDERED verdict. Actual report:`n$vetoText"
+        # And the headline population is still the judge-adjudicated one, so
+        # this is the veto firing rather than the brief row leaking into it.
+        $vetoText | Should -Match 'Denominator \(catchable=plan\): 5'
     }
 
     It 'the exclusion is disclosed in the render, not silent' {
@@ -1966,5 +2013,708 @@ Describe '#968 AC4: unreadable-vs-absent is distinguished at the grain a maintai
         $gap = script:Get-968FilterGap -Head (script:New-BriefHead)
         $gap.ParseStatus | Should -BeExactly 'ok'
         $gap.SustainedCount | Should -Be 2
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Issue #969 — the reason vocabulary's PROSE against the CODE it describes.
+#
+# Two comments in this instrument were true when written and were not
+# re-checked when the code beneath them changed; one of them went stale twice
+# inside a single pull request's own fix loop. Correcting the sentences leaves
+# that class intact. These are the checks that make the drift fail.
+#
+# The mutation discipline mirrors U4 above: one induced mutation per CLASS of
+# drift, each fed to the helper as source text rather than written to the tree,
+# plus positive controls proving the searches can fire at all.
+# ---------------------------------------------------------------------------
+
+Describe 'C3: the documented reason contract is pinned against the code (issue #969)' {
+
+    BeforeAll {
+        $script:EmissionCorePath = Join-Path $script:RepoRoot '.github/scripts/lib/phase-containment-emission-check-core.ps1'
+        $script:LiveEmissionSrc = Get-Content -Raw -LiteralPath $script:EmissionCorePath
+        $script:EntryPointPath = Join-Path $script:RepoRoot '.github/scripts/phase-containment-emission-check.ps1'
+        $script:LiveEntrySrc = Get-Content -Raw -LiteralPath $script:EntryPointPath
+    }
+
+    It 'the LIVE tree has no drift between the documented enum, the returned set, the ladder count and the dispatch arms' {
+        $r = Get-PhaseContainmentReasonContractDriftStatus -Source $script:LiveEmissionSrc -EntryPointSource $script:LiveEntrySrc
+        $r.DriftDetails -join ' | ' | Should -BeExactly ''
+        $r.HasDrift | Should -BeFalse
+    }
+
+    It 'the check actually READ both sides (a parse that found nothing would pass the guard above vacuously)' {
+        # U4's lesson applied here: "no drift" and "nothing enumerated" are the
+        # same observation unless the populations are asserted.
+        $r = Get-PhaseContainmentReasonContractDriftStatus -Source $script:LiveEmissionSrc -EntryPointSource $script:LiveEntrySrc
+        $r.DocumentedReasons.Count | Should -BeGreaterThan 5 -Because 'the enum that shipped with the defect had five values'
+        $r.ReturnedReasons.Count   | Should -Be $r.DocumentedReasons.Count
+        $r.LadderBriefOnlyCount    | Should -BeGreaterThan 0
+        $r.LadderStatedCount       | Should -Be $r.LadderBriefOnlyCount
+        $r.SwitchArms.Count        | Should -BeGreaterThan 0
+    }
+
+    It 'BOTH return shapes are enumerated — the closure form carries the three values #969 found undocumented' {
+        # Falsifier 2. An enumerator keyed only on the obvious `Reason = '...'`
+        # literal finds two of eight values and none of the wrong ones, so it
+        # reports a clean SUBSET of what is already documented and its green
+        # result establishes nothing.
+        $r = Get-PhaseContainmentReasonContractDriftStatus -Source $script:LiveEmissionSrc -EntryPointSource $script:LiveEntrySrc
+        foreach ($closureOnly in @('duplicate-head', 'filter-value-unrecognized', 'unknown-disposition-value')) {
+            $r.ReturnedReasons   | Should -Contain $closureOnly
+            $r.DocumentedReasons | Should -Contain $closureOnly
+        }
+    }
+
+    # --- one induced mutation per CLASS of drift ----------------------------
+
+    It 'INDUCED (closure-return class): a new closure-shaped reason with no docstring entry is caught and NAMED' {
+        # Induced in the shape the code actually uses most, not the shape most
+        # convenient to detect.
+        $anchor = "if ([string]::IsNullOrWhiteSpace(`$Body)) { return (& `$none 'head-missing') }"
+        $script:LiveEmissionSrc.Contains($anchor) | Should -BeTrue -Because 'the mutation anchor must still exist, or this test mutates nothing'
+        $mutated = $script:LiveEmissionSrc.Replace($anchor, "$anchor`n    if (`$false) { return (& `$none 'zz-closure-reason') }")
+        $mutated | Should -Not -BeExactly $script:LiveEmissionSrc
+
+        $r = Get-PhaseContainmentReasonContractDriftStatus -Source $mutated -EntryPointSource $script:LiveEntrySrc
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'zz-closure-reason'
+        ($r.DriftDetails -join ' ') | Should -Match 'does not document'
+    }
+
+    It 'INDUCED (direct-assignment class): a new assignment-shaped reason with no docstring entry is caught and NAMED' {
+        $anchor = "    `$none = {"
+        $script:LiveEmissionSrc.Contains($anchor) | Should -BeTrue
+        $mutated = $script:LiveEmissionSrc.Replace(
+            $anchor,
+            "    if (`$false) { return [PSCustomObject]@{ Reason = 'zz-direct-reason' } }`n$anchor")
+        $mutated | Should -Not -BeExactly $script:LiveEmissionSrc
+        $r = Get-PhaseContainmentReasonContractDriftStatus -Source $mutated -EntryPointSource $script:LiveEntrySrc
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'zz-direct-reason'
+    }
+
+    It 'INDUCED (opposite-direction class): a documented value the code can no longer return is caught' {
+        # Falsifier 3. The defect direction is documented-missing-a-returned-
+        # value, and a check written only the other way round would have passed
+        # on #969's own tree. Both directions are taken, and each names itself.
+        $anchor = "'filter-value-unrecognized' | 'filter-unasserted')"
+        $script:LiveEmissionSrc.Contains($anchor) | Should -BeTrue
+        $mutated = $script:LiveEmissionSrc.Replace($anchor, "'filter-value-unrecognized' | 'filter-unasserted' | 'zz-never-returned')")
+        $r = Get-PhaseContainmentReasonContractDriftStatus -Source $mutated -EntryPointSource $script:LiveEntrySrc
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'zz-never-returned'
+        ($r.DriftDetails -join ' ') | Should -Match 'can no longer return'
+    }
+
+    It 'INDUCED (unreadable-prose class): a docstring the parser cannot read FAILS, it does not go quietly green' {
+        # Falsifier 4, and this issue's own defect one level up: a rewrap or a
+        # field rename must never turn "could not check" into "nothing to
+        # check". The file's own precedent is the helper that reports drift
+        # when the set it needs cannot be read at all.
+        $mutated = $script:LiveEmissionSrc.Replace("and Reason ('ok'", "and Reason: 'ok'")
+        $mutated | Should -Not -BeExactly $script:LiveEmissionSrc
+        $r = Get-PhaseContainmentReasonContractDriftStatus -Source $mutated -EntryPointSource $script:LiveEntrySrc
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'could not be read'
+        $r.DocumentedReasons.Count | Should -Be 0
+    }
+
+    It 'INDUCED (ladder-branch class): a seventh brief-only branch with the comment left at six is caught' {
+        # Falsifier 5: one side is COUNTED from the ladder, never asserted
+        # against a constant this test authored.
+        $anchor = "    elseif (`$sawBriefFilterUnasserted) {"
+        $script:LiveEmissionSrc.Contains($anchor) | Should -BeTrue
+        $mutated = $script:LiveEmissionSrc.Replace(
+            $anchor,
+            "    elseif (`$sawBriefZzNewBranch) {`n        'zz-ladder-reason'`n    }`n$anchor")
+        $r = Get-PhaseContainmentReasonContractDriftStatus -Source $mutated -EntryPointSource $script:LiveEntrySrc
+        $r.HasDrift | Should -BeTrue
+        $r.LadderBriefOnlyCount | Should -Be ($r.LadderStatedCount + 1)
+        ($r.DriftDetails -join ' ') | Should -Match 'maintenance comment states'
+    }
+
+    It 'INDUCED (unreadable-count class): dropping the quantity from the maintenance comment FAILS' {
+        # C2 permits replacing the quantity with guidance carrying no driftable
+        # number — but not silently, and not while this check is what enforces
+        # it. Shedding the count must never read as compliance.
+        $mutated = $script:LiveEmissionSrc.Replace('six brief-review-only reasons', 'brief-review-only reasons')
+        $mutated | Should -Not -BeExactly $script:LiveEmissionSrc
+        $r = Get-PhaseContainmentReasonContractDriftStatus -Source $mutated -EntryPointSource $script:LiveEntrySrc
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'found 0'
+    }
+
+    It 'INDUCED (duplicated-claim class): a second count claim anywhere in the file is caught' {
+        $mutated = $script:LiveEmissionSrc + "`n# Note: there are four brief-review-only reasons.`n"
+        $r = Get-PhaseContainmentReasonContractDriftStatus -Source $mutated -EntryPointSource $script:LiveEntrySrc
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'found 2'
+    }
+
+    It 'INDUCED (absorbing-default class): a reason with no dispatch arm is caught, because the default reports it as a CORRUPT HEAD' {
+        # Falsifier 11. Prose-versus-code checks are structurally blind to
+        # this: a ninth reason added without a switch arm is documented,
+        # ladder-counted, and still misdirects the maintainer to diagnose
+        # corruption that is not there.
+        $mutated = $script:LiveEmissionSrc -replace '(?m)^\s*''duplicate-head''\s*\{[^}]*\}\s*\r?$', ''
+        $mutated | Should -Not -BeExactly $script:LiveEmissionSrc
+        $r = Get-PhaseContainmentReasonContractDriftStatus -Source $mutated -EntryPointSource $script:LiveEntrySrc
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'no explicit dispatch arm'
+        ($r.DriftDetails -join ' ') | Should -Match 'duplicate-head'
+    }
+
+    It 'INDUCED (missing-function class): a renamed parser FAILS rather than reporting a clean empty check' {
+        $mutated = $script:LiveEmissionSrc.Replace('function script:Get-BriefReviewSustainedCountInternal', 'function script:Get-BriefReviewSustainedCountRenamed')
+        $mutated | Should -Not -BeExactly $script:LiveEmissionSrc
+        $r = Get-PhaseContainmentReasonContractDriftStatus -Source $mutated -EntryPointSource $script:LiveEntrySrc
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'could not be located'
+    }
+
+    It 'POSITIVE CONTROL: an empty source fails every leg rather than passing all of them' {
+        # The single observation separating "this helper checks things" from
+        # "this helper returns clean for anything it does not understand".
+        $r = Get-PhaseContainmentReasonContractDriftStatus -Source '' -EntryPointSource ''
+        $r.HasDrift | Should -BeTrue
+        $r.DriftDetails.Count | Should -BeGreaterThan 2
+    }
+}
+
+# ---------------------------------------------------------------------------
+# C4 — the vetoed verdict itself says which adjudication standards produced
+# its critical/high counts, and no verdict changes.
+# ---------------------------------------------------------------------------
+
+Describe 'C4: the veto''s counts are attributable from the verdict line (issue #969)' {
+
+    BeforeAll {
+        function script:New-969Row {
+            param([string]$Stage, [string]$Severity = 'medium', [int]$Distance = 0, [string]$Key = 'x')
+            return @{
+                finding_key       = "${Stage}:969:$Key"
+                introduced_phase  = 'design'
+                catchable_phase   = 'plan'
+                caught_stage      = $Stage
+                escape_distance   = $Distance
+                severity          = $Severity
+                systemic_fix_type = 'instruction'
+                category          = 'pattern'
+                apparatus_meta    = $false
+            }
+        }
+        function script:Get-969Render {
+            param($Entries)
+            $rollup = Get-PhaseContainmentRollup -Entries $Entries -WindowLabel '90d'
+            return (Format-PhaseContainmentReport -Context @{
+                    Rollup            = $rollup
+                    Source            = 'rest'
+                    Truncated         = $false
+                    WindowDays        = 90
+                    FetchedAt         = ([datetime]'2026-08-01T00:00:00Z')
+                    InvalidEntryCount = 0
+                }) -join "`n"
+        }
+        function script:Get-969VetoLine {
+            param([string]$Text)
+            return (@($Text -split "`n" | Where-Object { $_ -match 'Relaxation signal:\s+NOT ELIGIBLE \(\d+ critical' }) -join ' || ')
+        }
+
+        # THE DISCRIMINATOR. Both corpora hold identical per-standard
+        # populations (plan-stress-test n=5, brief-review n=1), identical
+        # escape distances, and the same totals (1 critical, 0 high). They
+        # differ in ONE variable: which standard the critical sits under.
+        #
+        # This construction is the point. A pair differing in anything else —
+        # a row moved between standards, say — changes the headline
+        # denominator, the exclusion note and the partition block at baseline,
+        # so "the renders differ" could not have come out negative and a run
+        # that changed nothing would produce it.
+        $script:CorpusHeadline = @(
+            (script:New-969Row -Stage 'plan-stress-test' -Severity 'critical' -Key 'A1'),
+            (script:New-969Row -Stage 'plan-stress-test' -Key 'A2'),
+            (script:New-969Row -Stage 'plan-stress-test' -Key 'A3'),
+            (script:New-969Row -Stage 'plan-stress-test' -Key 'A4'),
+            (script:New-969Row -Stage 'plan-stress-test' -Key 'A5'),
+            (script:New-969Row -Stage 'brief-review'     -Key 'A6')
+        )
+        $script:CorpusExcluded = @(
+            (script:New-969Row -Stage 'plan-stress-test' -Key 'B1'),
+            (script:New-969Row -Stage 'plan-stress-test' -Key 'B2'),
+            (script:New-969Row -Stage 'plan-stress-test' -Key 'B3'),
+            (script:New-969Row -Stage 'plan-stress-test' -Key 'B4'),
+            (script:New-969Row -Stage 'plan-stress-test' -Key 'B5'),
+            (script:New-969Row -Stage 'brief-review' -Severity 'critical' -Key 'B6')
+        )
+        $script:RenderHeadline = script:Get-969Render $script:CorpusHeadline
+        $script:RenderExcluded = script:Get-969Render $script:CorpusExcluded
+    }
+
+    It 'the two corpora really do hold identical per-standard populations and totals (or the comparison below proves nothing)' {
+        $armH = (Get-PhaseContainmentRollup -Entries $script:CorpusHeadline).Stages['plan-stress-test']
+        $armE = (Get-PhaseContainmentRollup -Entries $script:CorpusExcluded).Stages['plan-stress-test']
+        $armH.N                    | Should -Be $armE.N
+        $armH.NAllStandards        | Should -Be $armE.NAllStandards
+        $armH.CriticalFindingCount | Should -Be $armE.CriticalFindingCount
+        $armH.HighFindingCount     | Should -Be $armE.HighFindingCount
+        $armH.AdjudicationPartition['brief-review'].N     | Should -Be $armE.AdjudicationPartition['brief-review'].N
+        $armH.AdjudicationPartition['plan-stress-test'].N | Should -Be $armE.AdjudicationPartition['plan-stress-test'].N
+        $armH.RelaxationEligible   | Should -Be $armE.RelaxationEligible
+    }
+
+    It 'THE COUNT-REPORTING TEXT DIFFERS when only the critical row''s standard differs' {
+        script:Get-969VetoLine $script:RenderHeadline | Should -Not -BeExactly (script:Get-969VetoLine $script:RenderExcluded)
+        script:Get-969VetoLine $script:RenderHeadline | Should -Match 'of which: plan-stress-test 1 critical'
+        script:Get-969VetoLine $script:RenderExcluded | Should -Match 'of which: brief-review 1 critical'
+    }
+
+    It 'the attribution survives on a sub-arm whose RATES are withheld (falsifier 9 — a count is not a rate)' {
+        # brief-review n=1 is below the sufficiency floor, so its rates are
+        # withheld. Extending that suppression to severity would make
+        # attribution silent on precisely the single-row shape that produced
+        # this issue.
+        $script:RenderExcluded | Should -Match 'brief-review: n=1 — WITHHELD'
+        script:Get-969VetoLine $script:RenderExcluded | Should -Match 'brief-review 1 critical'
+    }
+
+    It 'EVERY contributing standard is named, not just one (falsifier 8)' {
+        $mixed = @(
+            (script:New-969Row -Stage 'plan-stress-test' -Severity 'critical' -Key 'M1'),
+            (script:New-969Row -Stage 'plan-stress-test' -Key 'M2'),
+            (script:New-969Row -Stage 'plan-stress-test' -Key 'M3'),
+            (script:New-969Row -Stage 'plan-stress-test' -Key 'M4'),
+            (script:New-969Row -Stage 'plan-stress-test' -Key 'M5'),
+            (script:New-969Row -Stage 'brief-review' -Severity 'high' -Key 'M6')
+        )
+        $line = script:Get-969VetoLine (script:Get-969Render $mixed)
+        $line | Should -Match 'NOT ELIGIBLE \(1 critical, 1 high severity finding\(s\) in window\)'
+        $line | Should -Match 'plan-stress-test 1 critical'
+        $line | Should -Match 'brief-review 1 high'
+    }
+
+    It 'the PINNED span of the veto line is byte-identical — the attribution is appended after the closing parenthesis' {
+        # Falsifier 12. The lawful way to add information to a pinned line is
+        # to leave the pinned span untouched, not to widen the line and then
+        # relax the assertions until they pass — which retires the check while
+        # the suite reports green.
+        $script:RenderExcluded | Should -BeLike '*Relaxation signal:  NOT ELIGIBLE (1 critical, 0 high severity finding(s) in window)*'
+        # And the phrasing the negative pin forbids is not reintroduced.
+        $script:RenderExcluded.Contains('critical severity finding in window') | Should -BeFalse
+    }
+
+    It 'an ELIGIBLE window is untouched: no attribution clause, and the verdict does not flip' {
+        $clean = @(1..5 | ForEach-Object { script:New-969Row -Stage 'plan-stress-test' -Key "E$_" })
+        $text = script:Get-969Render $clean
+        $text | Should -Match 'Relaxation signal:  ELIGIBLE \(escape_rate ~0, no critical/high findings\)'
+        $text | Should -Not -Match 'of which:'
+    }
+
+    It 'FAIL LOUD: a stage carrying counts but no partition says so instead of rendering an unattributed count as though it were attributed' {
+        $orphan = [PSCustomObject]@{
+            CriticalFindingCount  = 2
+            HighFindingCount      = 0
+            AdjudicationPartition = $null
+        }
+        Get-PhaseContainmentSeverityAttributionText -Stage $orphan | Should -Match 'not attributable'
+    }
+
+    It 'FAIL LOUD: sub-counts that do not sum to the counts they annotate are reported, not silently rendered' {
+        # The two numbers are computed over the same population, so a mismatch
+        # means one of them was re-scoped — the exact class of change this
+        # issue exists to make visible.
+        $skewed = [PSCustomObject]@{
+            CriticalFindingCount  = 3
+            HighFindingCount      = 0
+            AdjudicationPartition = @{
+                'brief-review' = [PSCustomObject]@{ CriticalFindingCount = 1; HighFindingCount = 0 }
+            }
+        }
+        Get-PhaseContainmentSeverityAttributionText -Stage $skewed | Should -Match 'ATTRIBUTION INCOMPLETE'
+    }
+
+    It 'nothing to attribute yields no clause at all' {
+        $none = [PSCustomObject]@{
+            CriticalFindingCount  = 0
+            HighFindingCount      = 0
+            AdjudicationPartition = @{}
+        }
+        Get-PhaseContainmentSeverityAttributionText -Stage $none | Should -BeExactly ''
+    }
+}
+
+# ---------------------------------------------------------------------------
+# PR #988 review response — the hardening the adversarial panel earned.
+#
+# Nineteen findings were judge-sustained against the first revision of #969's
+# work. The pattern in the load-bearing ones was singular and worth stating,
+# because it is the same pattern #969 itself indicts: the CHECK's advertised
+# coverage exceeded its actual coverage, and one comment claimed a pin that
+# did not exist. Every mutation below is one of those findings, turned into a
+# property that keeps executing.
+# ---------------------------------------------------------------------------
+
+Describe 'PR #988 response: the reason-contract check covers what it says it covers' {
+
+    BeforeAll {
+        $script:Emission988 = Get-Content -Raw -LiteralPath (Join-Path $script:RepoRoot '.github/scripts/lib/phase-containment-emission-check-core.ps1')
+        $script:Entry988 = Get-Content -Raw -LiteralPath (Join-Path $script:RepoRoot '.github/scripts/phase-containment-emission-check.ps1')
+        function script:Get-988Drift {
+            param([string]$Source = $script:Emission988, [string]$Entry = $script:Entry988)
+            return Get-PhaseContainmentReasonContractDriftStatus -Source $Source -EntryPointSource $Entry
+        }
+        # Planted into the parser body, in the shape named by each finding.
+        function script:New-988ParserMutation {
+            param([Parameter(Mandatory)][string]$Statement)
+            $anchor = "    `$none = {"
+            if (-not $script:Emission988.Contains($anchor)) { throw 'parser mutation anchor missing' }
+            return $script:Emission988.Replace($anchor, "    if (`$false) { $Statement }`n$anchor")
+        }
+    }
+
+    It 'the LIVE tree is clean on all five legs, and every leg actually read something' {
+        $r = script:Get-988Drift
+        $r.DriftDetails -join ' | ' | Should -BeExactly ''
+        $r.HasDrift | Should -BeFalse
+        # Leg-by-leg vacuity guard: a leg that parsed nothing reports no drift.
+        $r.ReturnedReasons.Count             | Should -BeGreaterThan 0
+        $r.LadderEmittedReasons.Count        | Should -BeGreaterThan 0
+        $r.LadderStatedReasons.Count         | Should -Be $r.LadderBriefOnlyCount
+        $r.AggregatorDocumentedReasons.Count | Should -BeGreaterThan 0
+        $r.AggregatorPriorityOrder.Count     | Should -BeGreaterThan 0
+        $r.EntryPointReasons.Count           | Should -BeGreaterThan 0
+    }
+
+    # --- M2: return SHAPES, not literal spellings ---------------------------
+
+    It 'INDUCED (M2, double-quoted literal): a new reason spelled with double quotes is caught' {
+        # The original enumerator required single quotes, so every mutation
+        # below reported CLEAN — and such a value is invisible to the docstring
+        # check AND the dispatch-arm check at once, so it ships undocumented
+        # and absorbed by the switch default as a "corrupt head".
+        $r = script:Get-988Drift -Source (script:New-988ParserMutation -Statement 'return (& $none "zz-dq-reason")')
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'zz-dq-reason'
+    }
+
+    It 'INDUCED (M2, non-kebab literal): a reason with a digit or underscore is caught' {
+        $r = script:Get-988Drift -Source (script:New-988ParserMutation -Statement "return (& `$none 'zz2_reason')")
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'zz2_reason'
+    }
+
+    It 'INDUCED (M2, non-literal argument): a reason this parser CANNOT read is drift, not a skipped return' {
+        # The honest handling of "I cannot resolve this" is to say so. Skipping
+        # it is what made the silent window silent.
+        $r = script:Get-988Drift -Source (script:New-988ParserMutation -Statement "`$zzr = 'zz'; return (& `$none `$zzr)")
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'non-literal argument'
+    }
+
+    It 'INDUCED (M2, aliased closure): returns made through an alias of the closure are caught' {
+        $r = script:Get-988Drift -Source (script:New-988ParserMutation -Statement "`$zzAlias = `$none; return (& `$zzAlias 'zz-alias-reason')")
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'zzAlias'
+    }
+
+    It 'the closure''s own `Reason = $reason` parameter is still exempt (or every clean tree reports drift)' {
+        # The one documented non-literal. Exempted by EXACT match, so a
+        # different variable still reports — proved by the alias test above.
+        (script:Get-988Drift).HasDrift | Should -BeFalse
+    }
+
+    # --- M1: guard SHAPE ----------------------------------------------------
+
+    It 'INDUCED (M1, compound guard): a brief-only branch behind `-and` is counted, not skipped' {
+        $anchor = "    elseif (`$sawBriefFilterUnasserted) {"
+        $script:Emission988.Contains($anchor) | Should -BeTrue
+        $mutated = $script:Emission988.Replace(
+            $anchor,
+            "    elseif (`$sawBriefZzB -and -not `$sawBriefFilterNotRun) {`n        'zz-compound'`n    }`n$anchor")
+        $r = script:Get-988Drift -Source $mutated
+        $r.HasDrift | Should -BeTrue
+        $r.LadderBriefOnlyCount | Should -Be 7
+        ($r.DriftDetails -join ' ') | Should -Match 'maintenance comment states'
+    }
+
+    # --- M7: the comment's ordered NAME LIST, not only its integer ----------
+
+    It 'INDUCED (M7, renamed entry): a name changed in the ordered list is caught even though the count still matches' {
+        $mutated = $script:Emission988.Replace(
+            'this order: judge-head-contradiction, duplicate-head,',
+            'this order: judge-head-contradiction, triplicate-head,')
+        $mutated | Should -Not -BeExactly $script:Emission988
+        $r = script:Get-988Drift -Source $mutated
+        $r.HasDrift | Should -BeTrue
+        $r.LadderStatedCount | Should -Be $r.LadderBriefOnlyCount -Because 'the integer still agrees; only the names drifted'
+        ($r.DriftDetails -join ' ') | Should -Match 'ordered brief-only reason list does not match'
+    }
+
+    # --- M6 / leg 4: the aggregator's enum and its priority ordering --------
+
+    It 'INDUCED (M6, aggregator enum): a value dropped from the aggregator''s documented enum is caught' {
+        # The finding this leg exists for: the PR's first revision added a
+        # comment asserting this enum was pinned while nothing pinned it.
+        $mutated = $script:Emission988 -replace "(?s)(Reason\s+\[string\] — one of:.*?)'unknown-disposition-value',\s*", '$1'
+        $mutated | Should -Not -BeExactly $script:Emission988
+        $r = script:Get-988Drift -Source $mutated
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'unknown-disposition-value'
+        ($r.DriftDetails -join ' ') | Should -Match 'omits reason value'
+    }
+
+    It 'INDUCED (M6, priority ordering): a reordered cross-body priority sentence is caught' {
+        $mutated = $script:Emission988.Replace(
+            'judge-head-contradiction > duplicate-head >',
+            'duplicate-head > judge-head-contradiction >')
+        $mutated | Should -Not -BeExactly $script:Emission988
+        $r = script:Get-988Drift -Source $mutated
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'does not match the ladder''s own order'
+    }
+
+    It 'INDUCED (M6, unreadable aggregator enum): a rephrased enum FAILS rather than going quiet' {
+        $mutated = $script:Emission988.Replace('Reason         [string] — one of:', 'Reason         [string] — any of;')
+        $mutated | Should -Not -BeExactly $script:Emission988
+        $r = script:Get-988Drift -Source $mutated
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'aggregator''s documented Reason enum could not be read'
+    }
+
+    It 'INDUCED (ladder-output class, N1): a renamed ladder RESULT literal is caught' {
+        # Defense's own finding: no leg read the ladder's outputs, so renaming
+        # an emitted reason silently downgraded the entry point's maintainer
+        # message to the generic "partial, do not trust" line.
+        $mutated = $script:Emission988.Replace("        'filter-not-run'`n", "        'filter-halted'`n")
+        $mutated | Should -Not -BeExactly $script:Emission988
+        $r = script:Get-988Drift -Source $mutated
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'filter-halted'
+    }
+
+    # --- M5 / leg 5: the entry point's per-reason maintainer message --------
+
+    It 'INDUCED (M5, entry point): a brief-only reason with no per-reason message is caught' {
+        $mutated = $script:Entry988.Replace("(`$reason -eq 'duplicate-head')", "(`$reason -eq 'zz-not-a-reason')")
+        $mutated | Should -Not -BeExactly $script:Entry988
+        $r = script:Get-988Drift -Entry $mutated
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'no per-reason message for brief-only reason'
+        ($r.DriftDetails -join ' ') | Should -Match 'duplicate-head'
+    }
+
+    It 'INDUCED (M5, absent entry point): an unchecked leg is drift, not a leg that passed' {
+        $r = script:Get-988Drift -Entry ''
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'no entry-point source was supplied'
+    }
+
+    # --- M8 / M22: the count claim ------------------------------------------
+
+    It 'INDUCED (M8, unreadable quantity): an out-of-range count reports drift instead of THROWING' {
+        # A guard that throws has neither passed nor reported. The same
+        # instrument already learned this with [int]::TryParse on filtered_count.
+        $mutated = $script:Emission988.Replace('six brief-review-only reasons', '99999999999999999999 brief-review-only reasons')
+        $mutated | Should -Not -BeExactly $script:Emission988
+        # Assigned OUTSIDE a `Should -Not -Throw` scriptblock deliberately: an
+        # assignment made inside one does not escape it, so the assertions
+        # below would read $null and the throw this test exists to forbid
+        # would look like a pass.
+        $r = $null
+        $thrown = $null
+        try { $r = script:Get-988Drift -Source $mutated } catch { $thrown = $_ }
+        $thrown | Should -BeNullOrEmpty -Because 'an unreadable count must report drift, never throw'
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'not a readable number'
+    }
+
+    It 'INDUCED (M22, near-miss phrasing): a second count claim worded "reason branches" is caught' {
+        $mutated = $script:Emission988 + "`n# Note: there are three brief-review-only reason branches.`n"
+        $r = script:Get-988Drift -Source $mutated
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'found 2'
+    }
+
+
+    # --- external-review convergence (Qodo, PR #988): brace-scan fragility ---
+
+    It 'a brace inside a STRING LITERAL does not desync the switch span (external review, PR #988)' {
+        # Ruled defense-sustained internally on the ground that the failure
+        # direction is a loud false positive rather than a silent miss. An
+        # external reviewer raised the same fragility independently and named
+        # the cost the internal ruling did not price: a guard that fails on a
+        # benign reformat is a guard the next maintainer learns to ignore.
+        $anchor = "'head-missing'              { `$sawFallbackFired         = `$true }"
+        $script:Emission988.Contains($anchor) | Should -BeTrue
+        $mutated = $script:Emission988.Replace($anchor, "'head-missing'              { `$zzBrace = '{'; `$sawFallbackFired = `$true }")
+        $mutated | Should -Not -BeExactly $script:Emission988
+        $r = script:Get-988Drift -Source $mutated
+        $r.DriftDetails -join ' | ' | Should -BeExactly ''
+        $r.SwitchArms.Count | Should -Be 6 -Because 'the span must still close where the switch closes'
+    }
+
+    It 'POSITIVE CONTROL: with the same planted brace, a genuinely removed arm is STILL caught' {
+        # Without this the test above only proves the check went quiet.
+        $anchor = "'head-missing'              { `$sawFallbackFired         = `$true }"
+        $mutated = $script:Emission988.Replace($anchor, "'head-missing'              { `$zzBrace = '{'; `$sawFallbackFired = `$true }")
+        $mutated = $mutated -replace "(?m)^\s*'duplicate-head'\s*\{[^}]*\}\s*?$", ''
+        $r = script:Get-988Drift -Source $mutated
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'no explicit dispatch arm'
+        ($r.DriftDetails -join ' ') | Should -Match 'duplicate-head'
+    }
+
+    # --- reflow tolerance, with its own negative control --------------------
+
+    It 'a REWRAPPED prose claim is still read (and the same anchor still fails on a CHANGED claim)' {
+        # Both halves matter. Tolerating a reflow without still failing on a
+        # changed claim would be laxness; failing on a reflow would train the
+        # reader to ignore the check. The reorder test above is the paired
+        # negative control — same sentence, changed content, caught.
+        $rewrapped = $script:Emission988.Replace(
+            "judge-head-contradiction > duplicate-head >`n                          unknown-disposition-value > filter-not-run >",
+            "judge-head-contradiction >`n                          duplicate-head > unknown-disposition-value >`n                          filter-not-run >")
+        $rewrapped | Should -Not -BeExactly $script:Emission988
+        $r = script:Get-988Drift -Source $rewrapped
+        $r.DriftDetails -join ' | ' | Should -BeExactly ''
+        $r.AggregatorPriorityOrder.Count | Should -BeGreaterThan 0 -Because 'the rewrapped sentence must still PARSE, not merely fail to disagree'
+    }
+}
+
+Describe 'PR #988 response: the attribution clause''s remaining edges' {
+
+    BeforeAll {
+        function script:New-988Row {
+            param([string]$Stage, [string]$Severity = 'medium', [int]$Distance = 0, [string]$Key = 'x')
+            return @{
+                finding_key       = "${Stage}:988:$Key"
+                introduced_phase  = 'design'
+                catchable_phase   = 'plan'
+                caught_stage      = $Stage
+                escape_distance   = $Distance
+                severity          = $Severity
+                systemic_fix_type = 'instruction'
+                category          = 'pattern'
+                apparatus_meta    = $false
+            }
+        }
+        function script:Get-988Render {
+            param($Entries)
+            return (Format-PhaseContainmentReport -Context @{
+                    Rollup            = (Get-PhaseContainmentRollup -Entries $Entries -WindowLabel '90d')
+                    Source            = 'rest'
+                    Truncated         = $false
+                    WindowDays        = 90
+                    FetchedAt         = ([datetime]'2026-08-01T00:00:00Z')
+                    InvalidEntryCount = 0
+                }) -join "`n"
+        }
+    }
+
+    It 'M16: the worst contributor is named FIRST, not whichever standard sorts first alphabetically' {
+        # "brief-review" sorts before "plan-stress-test", so alphabetical order
+        # put the high-severity arm ahead of the critical one.
+        $entries = @(
+            (script:New-988Row -Stage 'plan-stress-test' -Severity 'critical' -Key 'S1'),
+            (script:New-988Row -Stage 'plan-stress-test' -Key 'S2'),
+            (script:New-988Row -Stage 'plan-stress-test' -Key 'S3'),
+            (script:New-988Row -Stage 'plan-stress-test' -Key 'S4'),
+            (script:New-988Row -Stage 'plan-stress-test' -Key 'S5'),
+            (script:New-988Row -Stage 'brief-review' -Severity 'high' -Key 'S6')
+        )
+        # Parenthesized deliberately (external review, PR #988). Without it
+        # PowerShell parses `-split` and its operand as extra ARGUMENTS to the
+        # command, they land in $args and are discarded, and $line holds the
+        # whole multi-line report — so the assertion below would match the
+        # ordering anywhere in the report instead of within one rendered line.
+        $line = @((script:Get-988Render $entries) -split "`n" | Where-Object { $_ -match 'of which:' })[0]
+        $line | Should -Not -Match "`n" -Because 'the match must be scoped to ONE rendered line, which is the thing the parenthesis buys'
+        $line | Should -Match 'of which: plan-stress-test 1 critical; brief-review 1 high'
+    }
+
+    It 'M12: a SINGLE-standard arm still renders the clause — the absence of it never carries meaning' {
+        # Deliberate, and pinned so a future author does not "tidy" it away:
+        # suppressing the clause here would make its absence significant, and a
+        # reader would have to know the rule to interpret the silence.
+        $entries = @(1..5 | ForEach-Object {
+                script:New-988Row -Stage 'plan-stress-test' -Severity $(if ($_ -eq 1) { 'critical' } else { 'medium' }) -Key "T$_"
+            })
+        script:Get-988Render $entries | Should -Match 'of which: plan-stress-test 1 critical'
+    }
+
+    It 'M10: the UNDER-reporting direction is loud too — a veto narrower than its partition says so' {
+        # The first revision returned '' here, because the nothing-to-attribute
+        # early return fired before the reconciliation. Silence is exactly what
+        # a re-scoped veto would produce, so it had to become the loud case.
+        $narrowed = [PSCustomObject]@{
+            CriticalFindingCount  = 0
+            HighFindingCount      = 0
+            AdjudicationPartition = @{
+                'brief-review' = [PSCustomObject]@{ CriticalFindingCount = 3; HighFindingCount = 2 }
+            }
+        }
+        Get-PhaseContainmentSeverityAttributionText -Stage $narrowed | Should -Match 'ATTRIBUTION INCOMPLETE'
+    }
+
+    It 'M10: a genuinely empty window still yields no clause (the loud case must not swallow the quiet one)' {
+        $empty = [PSCustomObject]@{
+            CriticalFindingCount  = 0
+            HighFindingCount      = 0
+            AdjudicationPartition = @{
+                'brief-review' = [PSCustomObject]@{ CriticalFindingCount = 0; HighFindingCount = 0 }
+            }
+        }
+        Get-PhaseContainmentSeverityAttributionText -Stage $empty | Should -BeExactly ''
+    }
+
+    It 'M9: a hashtable-shaped sub-arm attributes correctly instead of announcing a WRONG re-scoping' {
+        # The failure this replaces was a confident diagnosis blaming
+        # re-scoping for what was a shape mismatch — the same misdirect harm
+        # this issue indicts the dispatch switch's absorbing default for.
+        $hashShaped = [PSCustomObject]@{
+            CriticalFindingCount  = 1
+            HighFindingCount      = 0
+            AdjudicationPartition = @{
+                'brief-review' = @{ CriticalFindingCount = 1; HighFindingCount = 0 }
+            }
+        }
+        $text = Get-PhaseContainmentSeverityAttributionText -Stage $hashShaped
+        $text | Should -BeExactly 'of which: brief-review 1 critical'
+        $text | Should -Not -Match 'ATTRIBUTION INCOMPLETE'
+    }
+
+    It 'M9: a partition with no readable key set fails loud rather than killing the whole report' {
+        $unreadable = [PSCustomObject]@{
+            CriticalFindingCount  = 2
+            HighFindingCount      = 0
+            AdjudicationPartition = 'not-a-dictionary'
+        }
+        $text = $null
+        $thrown = $null
+        try { $text = Get-PhaseContainmentSeverityAttributionText -Stage $unreadable } catch { $thrown = $_ }
+        $thrown | Should -BeNullOrEmpty -Because 'a throw here reaches the renderer''s top-level catch and the whole report never prints'
+        $text | Should -Match 'no readable adjudication partition'
+    }
+
+    It 'M15: both severity tallies come from one predicate, so a corpus-wide count and its partition agree' {
+        $entries = @(
+            (script:New-988Row -Stage 'plan-stress-test' -Severity 'critical' -Key 'U1'),
+            (script:New-988Row -Stage 'plan-stress-test' -Severity 'high' -Key 'U2'),
+            (script:New-988Row -Stage 'plan-stress-test' -Key 'U3'),
+            (script:New-988Row -Stage 'plan-stress-test' -Key 'U4'),
+            (script:New-988Row -Stage 'plan-stress-test' -Key 'U5'),
+            (script:New-988Row -Stage 'brief-review' -Severity 'critical' -Key 'U6')
+        )
+        $arm = (Get-PhaseContainmentRollup -Entries $entries -WindowLabel '90d').Stages['plan-stress-test']
+        $sumC = 0; $sumH = 0
+        foreach ($k in $arm.AdjudicationPartition.Keys) {
+            $sumC += $arm.AdjudicationPartition[$k].CriticalFindingCount
+            $sumH += $arm.AdjudicationPartition[$k].HighFindingCount
+        }
+        $sumC | Should -Be $arm.CriticalFindingCount
+        $sumH | Should -Be $arm.HighFindingCount
+        $arm.CriticalFindingCount | Should -Be 2
+        $arm.HighFindingCount | Should -Be 1
     }
 }
