@@ -548,35 +548,50 @@ Describe 'C6 — the degenerate-input contract survives the join' {
         # result into a false negative. That is the exact defect class #977
         # exists to close, self-inflicted by the diagnostic added in review.
         #
-        # This MUST run in a genuinely fresh child process. Every earlier It
-        # in THIS file has already run a native gh/chmod command, which sets
-        # $LASTEXITCODE at process scope and leaves it set for the rest of
-        # the process — so a bare reference here would read that STALE
-        # leftover value instead of throwing, and the test would pass
-        # whether or not the bug is present. That is not a hypothetical: it
-        # is exactly what happened when this test was first written in-process
-        # here — 33/33 green with the unguarded bare-reference version
-        # restored, because $LASTEXITCODE already existed from an earlier
-        # shim call. A fresh process is what actually reproduces the
-        # never-set condition.
-        $repoRoot = $script:RepoRoot
-        $script = @'
-Set-StrictMode -Version Latest
-function global:gh {
-    return "## Acceptance Criteria`n- must use ``skills/foo/bar.md``"
-}
-. (Join-Path $args[0] 'skills/review-judgment/scripts/Get-AcRefsFromIssue.ps1')
-$result = @(Get-AcRefsFromIssue -IssueNumber '1')
-$result.Count
-$result -join ','
-'@
-        $scriptPath = Join-Path $TestDrive 'strictmode-child.ps1'
-        Set-Content -LiteralPath $scriptPath -Value $script -Encoding utf8NoBOM
+        # $LASTEXITCODE is process-global: once ANY native command runs
+        # anywhere in this process, it stays set for the rest of the run —
+        # every earlier It in this file has already run a native gh/chmod
+        # shim, so a bare reference here would read that STALE leftover
+        # value instead of throwing, and this test would pass whether or not
+        # the bug is present. Reproduced live: 33/33 green with the
+        # unguarded bare-reference version restored, in-process, before this
+        # fix.
+        #
+        # Do NOT reach for a child `pwsh -File` process to dodge that —
+        # script-safety-contract.Tests.ps1 forbids spawning child pwsh
+        # processes in test files (issue #257: dot-source + in-process call
+        # pattern only). `Remove-Variable -Scope Global` instead forces
+        # $LASTEXITCODE back to a genuinely unset state in THIS process,
+        # which reproduces the same condition without violating that
+        # contract or paying its overhead.
+        Remove-Variable -Name LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
+        (Test-Path variable:global:LASTEXITCODE) | Should -BeFalse `
+            -Because 'the removal must actually succeed, or this test silently reverts to probing a set variable and proves nothing'
 
-        $output = & pwsh -NoProfile -NonInteractive -File $scriptPath $repoRoot
-        $LASTEXITCODE | Should -Be 0 -Because 'the child process itself must not throw or exit non-zero'
-        $output[0] | Should -Be '1' -Because 'StrictMode + an in-process mock, with no prior native command in this process, must not silently swallow a real result'
-        $output[1] | Should -BeExactly 'skills/foo/bar.md'
+        function global:gh {
+            return "## Acceptance Criteria`n- must use ``skills/foo/bar.md``"
+        }
+        $result = $null
+        $caught = $null
+        try {
+            try {
+                Set-StrictMode -Version Latest
+                $result = @(Get-AcRefsFromIssue -IssueNumber '1')
+            }
+            catch {
+                $caught = $_
+            }
+            finally {
+                Set-StrictMode -Off
+            }
+        }
+        finally {
+            Remove-Item Function:\gh -Force -ErrorAction SilentlyContinue
+        }
+
+        $caught | Should -BeNullOrEmpty -Because 'StrictMode + an in-process mock, with no prior native command in this process, must not throw'
+        $result.Count | Should -Be 1 -Because 'and must not silently swallow a real result either'
+        $result | Should -Contain 'skills/foo/bar.md'
     }
 
     Context 'gh genuinely UNAVAILABLE — a different mechanism from a failing gh' {
