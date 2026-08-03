@@ -2106,6 +2106,38 @@ function Get-PhaseContainmentHistory {
     }
 }
 
+function script:Get-PCSeverityTally {
+    <#
+    .SYNOPSIS
+        Counts critical- and high-severity entries in a collection.
+    .DESCRIPTION
+        The single definition of "what counts as a veto-triggering severity",
+        used by BOTH the arm-level veto tally and the per-sub-arm attribution
+        tally added by issue #969. Two independent copies of this predicate
+        each produce internally-consistent output, so a half-done change to one
+        of them is invisible to every count-grain assertion — which is why this
+        is a helper rather than a repeated four-line loop (finding M15, PR #988).
+
+        Reads both entry shapes: a hashtable from a JSON-deserialized cache, or
+        a PSCustomObject from a live parse.
+    .PARAMETER Entries
+        Entries to tally. An empty collection returns zero for both.
+    .OUTPUTS
+        [PSCustomObject] Critical [int], High [int].
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Entries
+    )
+    $critical = 0
+    $high     = 0
+    foreach ($e in $Entries) {
+        $sev = if ($e -is [System.Collections.IDictionary]) { [string]$e['severity'] } else { [string]$e.severity }
+        if ($sev -eq 'critical') { $critical++ }
+        elseif ($sev -eq 'high') { $high++ }
+    }
+    return [PSCustomObject]@{ Critical = $critical; High = $high }
+}
+
 # -------------------------------------------------------------------------
 # Public function: Get-PhaseContainmentRollup
 # -------------------------------------------------------------------------
@@ -2514,15 +2546,15 @@ function Get-PhaseContainmentRollup {
             # via the rate fix. Tally over $allNonApparatusEntries — every
             # adjudication standard — so severity evidence from a brief-review
             # row still blocks relaxation exactly like a judge-adjudicated one.
-            foreach ($e in $allNonApparatusEntries) {
-                $sev = if ($e -is [hashtable]) { [string]$e['severity'] } else { [string]$e.severity }
-                if ($sev -eq 'critical') {
-                    $criticalFindingCount++
-                }
-                elseif ($sev -eq 'high') {
-                    $highFindingCount++
-                }
-            }
+            # Issue #969: the same predicate is applied per sub-arm below, for
+            # the attribution clause. Both go through one helper so a future
+            # severity tier cannot be added to one and missed by the other —
+            # each loop would otherwise keep producing internally-consistent
+            # output, which no test can distinguish from a correct update
+            # (finding M15, PR #988).
+            $vetoTally = script:Get-PCSeverityTally -Entries $allNonApparatusEntries
+            $criticalFindingCount = $vetoTally.Critical
+            $highFindingCount     = $vetoTally.High
 
             $hasSeverityVeto = ($criticalFindingCount -gt 0) -or ($highFindingCount -gt 0)
 
@@ -2825,13 +2857,9 @@ function Get-PhaseContainmentRollup {
             # criticals does not get less true at n=1. Suppressing it there
             # would make attribution silent on exactly the single-row sub-arm
             # shape that produced this issue.
-            $subCritical    = 0
-            $subHigh        = 0
-            foreach ($e in $subEntries) {
-                $sev = if ($e -is [hashtable]) { [string]$e['severity'] } else { [string]$e.severity }
-                if ($sev -eq 'critical') { $subCritical++ }
-                elseif ($sev -eq 'high') { $subHigh++ }
-            }
+            $subTally    = script:Get-PCSeverityTally -Entries $subEntries
+            $subCritical = $subTally.Critical
+            $subHigh     = $subTally.High
 
             $subEscapeRate      = $null
             $subIrreducibleRate = $null
@@ -2934,76 +2962,134 @@ function Get-PhaseContainmentSeverityAttributionText {
         there is exactly one", and never the headline standard by default: an
         attribution that names one standard only when one is present, or that
         always names the same one, passes a naive check while telling the
-        maintainer nothing they did not already have.
+        maintainer nothing they did not already have. The corollary is
+        deliberate and is pinned by a test: on a single-standard arm the clause
+        still renders and echoes the stage heading above it. Suppressing it
+        there would make the clause's ABSENCE meaningful, and a reader would
+        have to know the rule to interpret the silence (finding M12, PR #988).
 
         SCOPED TO THE COUNT IT ANNOTATES. The clause opens "of which", which
         binds it to the counts immediately preceding it. That wording is load
-        bearing: on the render paths where the veto's counts are never computed
-        at all (denominator-zero, below the sufficiency floor, data
-        untrustworthy) no count line prints, and a reader must not be able to
-        read the resulting silence as a positive claim that no cross-standard
-        critical exists. Those paths are issue #987, not this function.
+        bearing, because the render withholds attribution on more paths than it
+        shows it on, in TWO distinct ways:
+          - counts never computed — denominator-zero, below the sufficiency
+            floor, data untrustworthy. No count line prints. Issue #987.
+          - counts computed but no count line rendered — the escape-rate branch
+            (`NOT ELIGIBLE (escape_rate > 0)`) and the two `WITHHELD (...)`
+            branches. Here the instrument KNOWS a cross-standard critical
+            exists and does not say so, which is a wider gap than #987's.
+        An earlier revision of this note named only the first kind and called
+        the list closed; sustained as finding M4 on PR #988. Neither kind is
+        this function's to fix — but a reader must not read either silence as
+        a positive claim that no cross-standard critical exists.
 
         FAIL LOUD, NOT SILENT. A missing partition, or sub-counts that do not
         sum to the counts being annotated, produce an explicit clause saying
-        so. Omitting the clause instead would present an unattributed count as
-        though it had been attributed, which is the defect this closes.
+        so — IN BOTH DIRECTIONS. The sum reconciliation runs before the
+        nothing-to-attribute early return, so a veto tallied over a NARROWER
+        population than its partition reports the mismatch rather than
+        returning silence; pinning only the over-reporting direction is the
+        asymmetry this file's own C5 comment warns about (finding M10).
+        Honest limit: the reconciliation compares TOTALS, so a partition that
+        mis-assigns a critical BETWEEN sub-arms while summing correctly renders
+        a confident wrong attribution. Detecting that needs a second
+        independent source of truth, which does not exist here.
     .PARAMETER Stage
         A stage rollup object carrying CriticalFindingCount, HighFindingCount
-        and AdjudicationPartition.
+        and AdjudicationPartition. AdjudicationPartition must be a dictionary
+        whose values expose the two count properties; the rollup builds exactly
+        that shape and is the only production caller.
     .OUTPUTS
         [string] The clause to append after the count-reporting text, without a
         leading separator. Empty string when there is nothing to attribute
-        (both counts zero) — callers append only a non-empty result.
+        (both counts zero, and the partition agrees) — callers append only a
+        non-empty result.
     #>
     param(
         [Parameter(Mandatory)]$Stage
     )
 
-    # Presence-guarded rather than accessed bare: this file is dot-sourced
-    # alongside a library that sets StrictMode, where a missing property is a
-    # terminating error — and the renderer's top-level catch turns that into a
-    # report that never prints at all. A named clause is louder than a dead
-    # report and far louder than an empty string.
+    # Presence-guarded rather than accessed bare: this file sets StrictMode at
+    # its own head, where a missing property is a terminating error — and the
+    # renderer's top-level catch turns that into a report that never prints at
+    # all. A named clause is louder than a dead report and far louder than an
+    # empty string.
     if ($Stage.PSObject.Properties.Match('CriticalFindingCount').Count -eq 0 -or
         $Stage.PSObject.Properties.Match('HighFindingCount').Count -eq 0) {
         return 'of which: not attributable (this arm carries no severity counts)'
     }
     $critical = [int]$Stage.CriticalFindingCount
     $high     = [int]$Stage.HighFindingCount
-    if ($critical -eq 0 -and $high -eq 0) { return '' }
 
     if ($Stage.PSObject.Properties.Match('AdjudicationPartition').Count -eq 0 -or
-        $null -eq $Stage.AdjudicationPartition) {
-        return 'of which: not attributable (this arm carries no adjudication partition)'
+        $null -eq $Stage.AdjudicationPartition -or
+        $Stage.AdjudicationPartition.PSObject.Properties.Match('Keys').Count -eq 0) {
+        if ($critical -eq 0 -and $high -eq 0) { return '' }
+        return 'of which: not attributable (this arm carries no readable adjudication partition)'
     }
 
-    $parts        = [System.Collections.Generic.List[string]]::new()
+    $parts        = [System.Collections.Generic.List[object]]::new()
     $sumCritical  = 0
     $sumHigh      = 0
     foreach ($subName in (@($Stage.AdjudicationPartition.Keys) | Sort-Object)) {
         $sub = $Stage.AdjudicationPartition[$subName]
-        $c = if ($sub.PSObject.Properties.Match('CriticalFindingCount').Count -gt 0) { [int]$sub.CriticalFindingCount } else { 0 }
-        $h = if ($sub.PSObject.Properties.Match('HighFindingCount').Count -gt 0) { [int]$sub.HighFindingCount } else { 0 }
+        $c = [int](Get-PCSubArmSeverityCount -SubArm $sub -Property 'CriticalFindingCount')
+        $h = [int](Get-PCSubArmSeverityCount -SubArm $sub -Property 'HighFindingCount')
         $sumCritical += $c
         $sumHigh     += $h
         if ($c -eq 0 -and $h -eq 0) { continue }
         $bits = [System.Collections.Generic.List[string]]::new()
         if ($c -gt 0) { $bits.Add("$c critical") }
         if ($h -gt 0) { $bits.Add("$h high") }
-        $parts.Add("${subName} $($bits -join ', ')")
+        # Sorted critical-first, then by count, then by name: a maintainer
+        # reading a veto line is looking for the worst contributor, and
+        # alphabetical order buried it behind whichever standard sorts first.
+        $parts.Add([PSCustomObject]@{
+                Critical = $c
+                High     = $h
+                Name     = $subName
+                Text     = "${subName} $($bits -join ', ')"
+            })
     }
 
+    # BEFORE the nothing-to-attribute return, deliberately. Zero counts against
+    # a partition holding criticals is the under-reporting direction, and it is
+    # exactly the re-scoping this reconciliation exists to surface.
     if ($sumCritical -ne $critical -or $sumHigh -ne $high) {
-        # The partition and the veto are computed over the same population, so
-        # this cannot happen without one of them having been re-scoped — the
-        # exact class of change this issue exists to make visible.
         return ("of which: ATTRIBUTION INCOMPLETE — the per-standard tally sums to " +
             "$sumCritical critical, $sumHigh high, which does not match the counts above")
     }
-    if ($parts.Count -eq 0) { return 'of which: not attributable (no standard reports a critical or high finding)' }
+    if ($critical -eq 0 -and $high -eq 0) { return '' }
 
-    return "of which: $($parts -join '; ')"
+    $ordered = @($parts | Sort-Object -Property @{ Expression = 'Critical'; Descending = $true }, @{ Expression = 'High'; Descending = $true }, 'Name')
+    return "of which: $(($ordered | ForEach-Object { $_.Text }) -join '; ')"
+}
+
+function script:Get-PCSubArmSeverityCount {
+    <#
+    .SYNOPSIS
+        Reads one severity count off a partition sub-arm, tolerating both the
+        PSCustomObject shape the rollup builds and a plain hashtable.
+    .DESCRIPTION
+        `PSObject.Properties.Match` returns nothing for a hashtable KEY, so a
+        hashtable-shaped sub-arm silently read as zero — and zero sums then
+        tripped the reconciliation above into announcing ATTRIBUTION INCOMPLETE,
+        a confident diagnosis blaming re-scoping for what was a shape mismatch.
+        Not reachable from the rollup (finding M9 on PR #988 was ruled
+        defense-sustained on exactly that ground), but this function is public
+        and a wrong loud diagnosis is the same misdirect harm this issue
+        indicts the dispatch switch's absorbing default for.
+    #>
+    param(
+        [Parameter(Mandatory)]$SubArm,
+        [Parameter(Mandatory)][string]$Property
+    )
+    if ($SubArm -is [System.Collections.IDictionary]) {
+        if ($SubArm.Contains($Property)) { return [int]$SubArm[$Property] }
+        return 0
+    }
+    if ($SubArm.PSObject.Properties.Match($Property).Count -gt 0) { return [int]$SubArm.$Property }
+    return 0
 }
 
 # -------------------------------------------------------------------------

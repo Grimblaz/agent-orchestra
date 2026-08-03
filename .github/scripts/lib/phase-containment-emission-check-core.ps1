@@ -3078,13 +3078,13 @@ function Get-EmissionGap {
           BlockCount     [int]
           Gap            [int]
           ParseStatus    [string] — 'ok' or 'could-not-verify'
-          Reason         [string] — 'ok', 'head-missing', 'head-corrupt',
-                          'decoy-ambiguous', or, on the brief-review surface
-                          only, 'judge-head-contradiction', 'duplicate-head',
+          Reason         [string] — one of: 'ok', 'head-missing',
+                          'head-corrupt', 'decoy-ambiguous',
+                          'judge-head-contradiction', 'duplicate-head',
                           'unknown-disposition-value', 'filter-not-run',
-                          'filter-unasserted' or 'filter-value-unrecognized'
-                          (issue #951; see the reason ladder for cross-body
-                          priority). (811-D1 + issue #817,
+                          'filter-unasserted', 'filter-value-unrecognized'.
+                          The last six are reachable on the brief-review
+                          surface only (issue #951). (811-D1 + issue #817,
                           plan-stress-test-relevant detail consumed by the s2
                           wrapper render; see below). Per-body derivation:
                           a could-not-verify body with no real marker head at
@@ -3101,12 +3101,24 @@ function Get-EmissionGap {
                           unknown-disposition-value > filter-not-run >
                           filter-value-unrecognized > filter-unasserted >
                           head-corrupt > decoy-ambiguous > head-missing > ok.
-                          (Issue #969: this sentence previously started at
+
+                          BOTH THE ENUM AND THIS ORDER ARE PINNED against the
+                          reason ladder below, by leg 4 of
+                          Get-PhaseContainmentReasonContractDriftStatus. Adding
+                          a ladder branch without updating both fails that
+                          check, which names the value and the direction.
+
+                          (Issue #969: this order previously started at
                           head-corrupt, having been written before the six
-                          brief-only reasons that all outrank it were added —
-                          correct on the enum directly above, stale on the
-                          ordering. The enum and the ordering drift
-                          independently; only the enum is pinned.)
+                          brief-only reasons that all outrank it were added.
+                          The first revision of that correction asserted "only
+                          the enum is pinned" — which was false, since NOTHING
+                          pinned either at the time. Sustained as review
+                          finding M6 on PR #988: a comment claiming a pin that
+                          does not exist is worse than one claiming nothing,
+                          because it tells the next maintainer that
+                          hand-verification is unnecessary. Leg 4 was added to
+                          make the claim true rather than to soften it.)
     #>
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Bodies,
@@ -3292,6 +3304,17 @@ function Get-EmissionGap {
                 $briefTally = Get-DispositionTally -Surface 'brief-review' -Body $body
                 if ($briefTally.ParseStatus -eq 'could-not-verify') {
                     $anyCouldNotVerify = $true
+                    # EVERY REASON NEEDS AN ARM HERE (issue #969). The `default`
+                    # below sets the head-corrupt flag, so a reason with no arm
+                    # is not dropped — it is reported to the maintainer as a
+                    # CORRUPT HEAD, which misdirects rather than merely
+                    # misinforms. Leg 3 of
+                    # Get-PhaseContainmentReasonContractDriftStatus pins these
+                    # arms against the parser's returned set; 'ok' and
+                    # 'head-corrupt' are its two exemptions. This pointer sits
+                    # here because the check lives in another file and an
+                    # author editing this switch would otherwise get a failure
+                    # from a file they were not touching (finding M14, PR #988).
                     switch ($briefTally.Reason) {
                         # Kept as two DISTINCT flags (#963 review, item 19).
                         # Collapsing them here re-erased the exact distinction
@@ -3526,13 +3549,23 @@ function Get-EmissionGap {
     # unknown-disposition-value, filter-not-run, filter-value-unrecognized,
     # filter-unasserted.
     #
-    # READ THE COUNT AS PINNED, NOT AS FOLKLORE (issue #969). This is the
-    # comment a future author consults BEFORE inserting a branch here — which
-    # is exactly what happened twice inside PR #963's own fix loop, leaving it
-    # wrong at the one moment it gets read. It says three no longer because
-    # Get-PhaseContainmentReasonContractDriftStatus now counts the ladder's
-    # brief-guarded branches and fails when this number disagrees with them.
-    # Insert a branch and update this number in the same change.
+    # THE COUNT AND THE ORDERED LIST ABOVE ARE BOTH PINNED (issue #969). This
+    # is the comment a future author consults BEFORE inserting a branch here —
+    # which is exactly what happened twice inside PR #963's own fix loop,
+    # leaving it wrong at the one moment it gets read. Leg 2 of
+    # Get-PhaseContainmentReasonContractDriftStatus walks the ladder below and
+    # fails when either the number or the names-in-order disagree with it.
+    # Insert a branch and update both in the same change. (An earlier revision
+    # pinned only the integer; sustained as review finding M7 on PR #988,
+    # because the fifteen lines of ordering rationale that follow are the part
+    # a maintainer actually acts on.)
+    #
+    # PRECONDITION FOR A NEW BRANCH, and the one thing leg 2 cannot infer: its
+    # guard condition must name a flag whose variable name contains "brief".
+    # That is how the check tells a brief-only branch from a shared one. A
+    # lawful brief-only branch flagged some other way is counted as SHARED and
+    # this count stays right while being wrong — the residual recorded as
+    # finding M1 on PR #988. Follow the convention, or extend the check.
     #
     # 'judge-head-contradiction' first because D6 is an unconditional refusal
     # rather than a parse diagnosis: whatever else is wrong with the comment, a
