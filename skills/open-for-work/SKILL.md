@@ -1,6 +1,6 @@
 ---
 name: open-for-work
-description: The operating methodology for opening a filed standalone issue for work — the trivial floor, the worth-it doors, beat 1 alignment with its affirmation gate and durable affirmation record, beat 2 routing, and the two outputs (a brief on the routine arm, a continuation into design on the novel arm). Use when a person asks to open an issue for work, when `/open` is invoked, or when resuming an issue that already carries an affirmation record. DO NOT USE FOR: chunk sub-issues of a designed parent (they inherit authority source (a) — author the brief directly per plan-authoring § Brief plan variant), post-merge close-out mechanics (use post-pr-review), or the adversarial review of the artifact this flow produces (use adversarial-review with the `design-challenge` adapter).
+description: The operating methodology for opening a filed standalone issue for work — the trivial floor, the worth-it doors, beat 1 alignment with its affirmation gate and durable affirmation record, beat 2 routing, and the two outputs (a brief on the routine arm, a continuation into design on the novel arm). Use when a person asks to open an issue for work, when `/open` is invoked, or when resuming an issue that already carries an affirmation record. DO NOT USE FOR: chunk sub-issues of a designed parent (they inherit authority source (a) — author the brief directly per plan-authoring § Brief plan variant), issue close-out mechanics, with or without a PR (use post-pr-review), or the adversarial review of the artifact this flow produces (use adversarial-review with the `design-challenge` adapter).
 ---
 
 # Open for work
@@ -111,19 +111,27 @@ The record is what makes authority source (b) checkable rather than asserted. Fi
 Write it through the repository's marker-write primitive, which is the **only** documented write path for this family:
 
 ```powershell
+# Compose the marker as a runtime value; never write the delimited literal
+# into a file the raw-text scanners read. {ID} is the issue number, substituted.
+$marker = '<' + "!-- open-for-work-affirmed-{ID} -->"
+
 pwsh skills/session-memory-contract/scripts/persist-marker.ps1 `
   -Owner {owner} -Repo {repo} -Family open-for-work-affirmed `
   -Number {ID} -TargetSurface issue `
-  -Marker '{the delimited open-for-work-affirmed-{ID} marker}' `
+  -Marker $marker `
   -BodyFile .tmp/issue-{ID}/affirmation.md
 ```
 
-**The marker must be the body file's very first line** — a resume, `commands/plan.md`'s pre-flight, and the close-time reader all test the first line, while the primitive's read-back accepts the marker at the start of *any* line. A body whose heading precedes the marker writes successfully and is then invisible to every reader. Put the human-readable heading *after* the marker, then the affirmed what-statement quoted in full. Keep the heading ASCII-only (a plain hyphen, no em dash) — this repository has a documented console-encoding corruption history on non-ASCII round-trips.
+**Substitute `{ID}` before you call this.** The primitive does **not** check `-Marker` against the family's registered template: preflight holds both the registry row and `-Number` but never compares them, and payload hygiene keys entirely on the string you passed. So a marker left as the literal template, spelled with the wrong token, or written as a prose placeholder all pass preflight and **write successfully** — producing a comment no marker-keyed reader will ever find. The write reports success; the brief you later author under authority source (b) is then unlawful, and the only symptom is a later resume reporting the issue was never opened for work. Read back the posted comment and confirm its first line is the marker you intended, with a real issue number in it.
+
+**The marker must be the body file's very first line**, then the human-readable heading, then the affirmed what-statement quoted in full. This one the primitive *does* enforce: `Test-MarkerPayloadHygiene` refuses a body whose own-family marker is not on line 1, before any network call (`candidate's own family marker is missing from line 1 -- found instead at line N`). That refusal is the primitive working correctly — fix the body order rather than looking for a way around it. Keep the heading ASCII-only (a plain hyphen, no em dash) — this repository has a documented console-encoding corruption history on non-ASCII round-trips.
 
 **Read the result; do not assume it.** Two branches of the write path return `Success = $true` without producing the record this flow needs, and neither is detectable from the exit code:
 
 - **`Action = 'no-op'`** — `post-new` compares the candidate against the latest existing match under whitespace normalization and, on equality, **posts nothing**. A re-affirmation whose what-statement is unchanged therefore appends no second record. When the escape hatch fires with an unchanged what-statement, the count of records is no longer the count of re-routes: record the re-route in the close-out record from the conversation's own history rather than from the comment count, and say the write was a no-op.
-- **A confirmation containing `after a read-back-failure repair-PATCH`** — the create path repaired a read-back mismatch by PATCHing the comment it had just posted. That PATCH sets `updated_at` later than `created_at`, so property 3 **voids the record it just created**. Treat it as no record: post a fresh one and verify the new comment's `updated_at` equals its `created_at`.
+- **A confirmation containing `after a read-back-failure repair-PATCH`** — the create path repaired a read-back mismatch by PATCHing the comment it had just posted. That PATCH sets `updated_at` later than `created_at`, so property 3 **voids the record it just created**. Note that the repair fires on a transient read failure as readily as on real corruption, so a network blip alone can void an otherwise perfect record.
+
+  **Re-posting the identical body will not fix it.** After a successful repair the stored body matches the intended body, so the re-post hits the `no-op` branch above and writes nothing — the two branches compose into a dead end. Recover by making the new record *materially different from the voided one, and honest about why*: post a fresh affirmation whose what-statement is unchanged but which carries an explicit supersession line naming the voided comment id (for example, `Supersedes voided record {id} — repair-PATCH voided it as an ordering witness; the affirmed statement is unchanged.`). That differs under normalization, so it appends; it is truthful; and it leaves the void auditable instead of hidden. Verify the new comment's `updated_at` equals its `created_at` before continuing.
 
 Because the payload quotes issue prose verbatim, it re-fires every `@mention` and `#issue` cross-reference the quoted text contains, and an unbalanced code fence in it breaks the composed comment's rendering. Neither affects lawfulness; both are worth a glance before writing.
 
@@ -222,7 +230,7 @@ Then, in order:
 
 | State | Evidence | What the resume does |
 | --- | --- | --- |
-| **affirmed-not-routed** | A lawful record; no routing artifact | Resume at **beat 2**. Do not re-run the worth-it check or beat 1, and do not ask to run `/design` first — the record plus a routine verdict are the lawful authority. |
+| **affirmed-not-routed** | A lawful record; no routing artifact | Resume at **beat 2**. Do not re-run the worth-it check or beat 1. The lawful record authorizes resuming beat 2; **beat 2 produces the verdict** — do not assume it is routine. A routine verdict authors the brief here, with no need to run `/design` first; a **novel** verdict continues into design, which is the correct destination and is not what this row forbids. |
 | **re-affirmed-not-re-routed** | The latest lawful record **postdates** the latest routing artifact, issue open | The escape hatch fired and stopped mid-cycle. Re-run **beat 2** against the updated still-open list and produce a fresh arm output. Do **not** continue under the existing artifact — it was authored against a what-statement that has since been superseded. Count this re-route. |
 | **routed** | A lawful record predating a routing artifact that is itself the latest of the two, issue open | The routing decision is current. Continue the run under that artifact; do not re-affirm unless the escape hatch fires. |
 | **complete** | The issue is closed **and** it carries a lawful record | Nothing to resume. If the close-out record was not written before the close, write it now and say it is late — see `skills/post-pr-review/SKILL.md` § 9. Close-Out Record (Issues Opened For Work). A closed issue carrying **no** record is not this flow's business at all. |
@@ -250,6 +258,8 @@ Every checkpoint this conversation runs emits a **gate-decision token** — the 
 **Every load-bearing `asked` token must have a correspondingly recorded decision**, or the reconciler warns on every subsequent run. Record each as a `load_bearing_decisions` entry with the **same `decision_id`** in the issue's `engagement-record-experience-{ID}` marker (`skills/engagement-record-emission/SKILL.md`; `capture_session: "normal-experience-v2"`).
 
 **Write that marker cumulatively, and write it once, at the end.** The `engagement-record` family is `post-new` and its reader resolves **latest-comment-wins per phase**, returning only the newest marker's decisions — so a second marker carrying only the brief-approval decision *orphans* the affirmation decision recorded in the first, and the reconciler then warns about it forever. Either write one marker at conversation exit carrying every decision, or, if an earlier write is unavoidable, make each later write carry the **full** decision set accumulated so far.
+
+**"Accumulated so far" spans writers, not just this conversation.** This flow is the *second* writer of `engagement-record-experience-{ID}`; Experience-Owner is the first, and nothing stops an issue from running `/experience` and later being opened for work — `commands/plan.md`'s pre-flight actively recommends `/open` for an issue that ran `/experience` but not `/design`. Under latest-comment-wins, a cumulative marker carrying only *this* conversation's decisions silently orphans every Experience-Owner decision on that issue. So before writing: **read the existing experience-phase decisions** (the Resume-Read Protocol in `skills/engagement-record-emission/SKILL.md`, which this flow already runs) and carry them forward in the new marker alongside your own, unchanged. If a prior decision cannot be read — the marker is unparseable, or the read fails — do **not** write a marker that would supersede it: say so and stop, rather than silently dropping decisions the reconciler will then warn about forever.
 
 Check the result rather than assuming it:
 

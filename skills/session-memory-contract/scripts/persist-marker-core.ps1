@@ -260,8 +260,10 @@ function Get-MarkerFamilyRegistry {
         post-new, grounded in Documents/Design/open-for-work.md's
         affirmation-record contract: an edited record is void as an
         ordering witness, the escape hatch posts a new record rather than
-        editing the old one, and the re-route count is derived by counting
-        records -- three properties an upsert shape would destroy at once.
+        editing the old one -- properties an upsert shape would destroy at
+        once. (The beat-2 re-route count is what the conversation observed,
+        never an arithmetic over these records; record counts are only a
+        diagnostic cross-check.)
     .OUTPUTS
         [PSCustomObject[]] one row per family: Family [string], MarkerTemplate
         [string] (placeholder tokens such as '{ID}'/'{PR}'/'{phase}'/'{port}'
@@ -414,10 +416,13 @@ function Get-MarkerFamilyRegistry {
             # record rests on append-only in three places: an edited record
             # is void as an ordering witness (property 3), the escape hatch
             # posts a NEW record rather than editing the old one
-            # (Supersession), and the beat-2 re-route count is derived by
-            # counting records. upsert PATCHes in place, which would destroy
-            # all three at once. See the design-phase-complete row above for
-            # this registry's own realized instance of exactly that drift.
+            # (Supersession), and every record stands as a durable ordering
+            # witness. upsert PATCHes in place, which would destroy all of
+            # that at once. See the design-phase-complete row above for this
+            # registry's own realized instance of exactly that drift. The
+            # beat-2 re-route count itself is what the conversation observed
+            # -- record counts are a diagnostic cross-check, never the
+            # definition.
             WriteShape        = 'post-new'
             # Free-form prose payload (the marker on the FIRST line, then a
             # heading line, then the affirmed what-statement quoted in
@@ -435,11 +440,19 @@ function Get-MarkerFamilyRegistry {
             # later reader does not mistake the null adapter for a claim
             # that the payload was checked for them.
             #
-            # First-line placement is a WRITER convention, not something
-            # this row enforces: the read-back accepts the marker at the
-            # start of any line, while every documented reader tests the
-            # first line. skills/open-for-work/SKILL.md states the
-            # convention at the write site.
+            # First-line placement IS enforced -- just not by this row.
+            # ValidatorAdapter is $null (no family-specific adapter), but
+            # the universal Test-MarkerPayloadHygiene rule 1 refuses any
+            # candidate whose own-family marker is not on line 1, before
+            # any network call. Do not read the null adapter as permissive:
+            # skills/open-for-work/SKILL.md states the convention at the
+            # write site and names that refusal as the primitive working.
+            #
+            # What hygiene does NOT check is that -Marker matches this
+            # row's MarkerTemplate with {ID} substituted -- preflight holds
+            # both the row and -Number but never compares them, so a
+            # wrong-token or unsubstituted marker writes successfully and
+            # is then invisible to every marker-keyed reader.
             ValidatorAdapter  = $null
             PostStep          = $null
         }

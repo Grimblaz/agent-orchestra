@@ -65,7 +65,7 @@ The plugin payload includes all 17 shared agent definitions and the shared skill
 
 ### Upstream Agents In Claude Code
 
-For standalone work the entrance is `/open`; the three upstream agents are reached by explicitly requesting them:
+For standalone work the entrance is `/open`. The three upstream agents — `/experience`, `/design`, `/plan` — are reached by explicitly requesting them:
 
 - `/open {issue}` — open a filed issue for work: one conversation to a lawful brief (routine) or a continuation into design (novel), per [skills/open-for-work/SKILL.md](skills/open-for-work/SKILL.md)
 - `/experience` — invoke Experience-Owner for customer framing or CE Gate evidence capture

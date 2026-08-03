@@ -227,6 +227,8 @@ if ((Test-Path 'Documents/Planning/sequence.yaml') -and (Test-Path '.github/scri
 **Action**: write one close-out comment on the issue, carrying three things:
 
 1. **One line per sustained finding** — where it was introduced, where it was catchable, where it was caught. This is the phase-containment ledger's own grain, and this step **does not emit ledger blocks**: the emission mechanics belong to `Documents/Design/phase-containment-ledger.md` and the plan-surface ledger those blocks already live on. Point at that ledger and summarise from it; do not re-emit it here.
+
+   **When no ledger exists** — reachable on a PR-less close, and on a novel-arm parent closed after its chunks carried their own reviews — say exactly that: *"No phase-containment ledger was produced for this issue; no sustained findings to summarise."* Do not invent a ledger reference, and do not silently omit the item. An absent ledger is a fact about the issue, not a gap in the record.
 2. **A dead-premises note** — which filed premises beat 1's grounding falsified and amended in place, so the next reader does not resurrect them.
 3. **The beat-2 re-route count** — how many times the escape hatch re-ran the routing. Zero is the common case and is reportable. **The count is what the run observed, not an arithmetic on comment counts.** Records-minus-one is a cross-check that legitimately disagrees in three directions: a record voided by a later edit still evidences a re-route that happened, a re-affirmation with an unchanged what-statement can append nothing at all, and a retried write can append twice for one re-route. Report the observed count, note how many affirmation records the issue carries and how many are lawful, and when those disagree say so and why.
 

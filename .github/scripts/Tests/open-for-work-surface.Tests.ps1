@@ -141,8 +141,21 @@ Describe 'open-for-work surface (issue #974)' {
         }
 
         It 'the live routing table is non-empty, so the negative result is not vacuous' {
-            @($script:LiveRoutingConfig.nl_intent_routing.entries).Count |
-                Should -BeGreaterThan 0 -Because 'an empty table would make the absence assertion above trivially true'
+            # PowerShell's @($null).Count is 1, not 0, and a PSCustomObject
+            # returns $null for an absent property — so a bare .Count check
+            # PASSES when the property has been renamed away. The probe fails
+            # open the same way (it returns @() when $nl.entries is $null), so
+            # a routing-schema rename would make criterion 10 vacuously green
+            # in both directions at once. Assert the schema, then the content.
+            $nl = $script:LiveRoutingConfig.nl_intent_routing
+            $nl | Should -Not -BeNullOrEmpty `
+                -Because 'a renamed nl_intent_routing key would make the probe return zero hits for the wrong reason'
+            $nl.PSObject.Properties.Name | Should -Contain 'entries' `
+                -Because 'the probe reads nl_intent_routing.entries; a renamed key must turn this red, not silently empty the probe'
+
+            $realEntries = @($nl.entries | Where-Object { $null -ne $_ })
+            $realEntries.Count | Should -BeGreaterThan 0 `
+                -Because 'an empty table would make the absence assertion above trivially true'
         }
     }
 
@@ -160,7 +173,7 @@ Describe 'open-for-work surface (issue #974)' {
             $row = @($script:Registry | Where-Object { $_.Family -eq 'open-for-work-affirmed' })
             $row.Count | Should -Be 1 -Because 'the affirmation record has exactly one registry row'
             $row[0].TargetSurface | Should -Be 'issue'
-            $row[0].WriteShape | Should -Be 'post-new' -Because 'upsert PATCHes in place, which voids the record as an ordering witness, breaks the escape hatch''s new-record rule, and destroys the re-route count derived by counting records'
+            $row[0].WriteShape | Should -Be 'post-new' -Because 'upsert PATCHes in place, which voids the record as an ordering witness, breaks the escape hatch''s new-record rule, and destroys the record sequence the re-route count is cross-checked against'
             $row[0].MarkerTemplate | Should -Be ('<' + '!-- open-for-work-affirmed-{ID} -->') -Because 'the catalog drift guard recognizes only -{ID}/-{PR} and silently skips any other placeholder token'
         }
 
@@ -231,12 +244,16 @@ Describe 'open-for-work surface (issue #974)' {
             # ("...is never below the floor, unless the change is confined to
             # a single file"). Pin the clause AND the absence of a trailing
             # exemption, so the invertible edit turns this red.
+            # The tail runs to the end of the PARAGRAPH (first blank line), not
+            # the end of the line: markdown prose wraps, so a trailing "unless…"
+            # lands on the next physical line as a matter of ordinary reflow and
+            # would escape a single-line window entirely.
             $guard = [regex]::Match(
                 $script:SkillText,
-                'permission, authentication, or data-integrity behavior is never below the floor(?<tail>[^\n]*)')
+                'permission, authentication, or data-integrity behavior is never below the floor(?<tail>[^\n]*(?:\n(?!\s*\n)[^\n]*)*)')
             $guard.Success | Should -BeTrue -Because 'the risk guard must be stated verbatim in the skill'
-            $guard.Groups['tail'].Value | Should -Not -Match '(?i)\b(unless|except|other than|save (for|where)|provided that)\b' `
-                -Because 'the risk guard admits no exemption; a trailing qualifier inverts it while leaving the clause present'
+            $guard.Groups['tail'].Value | Should -Not -Match '(?i)\b(unless|except|other than|save (for|where)|provided that|does not apply|only when)\b' `
+                -Because 'the risk guard admits no exemption; a trailing qualifier anywhere in the same paragraph inverts it while leaving the clause present'
         }
 
         It 'the skill fixes every gate-decision token field, including classification and outcome' {
@@ -320,22 +337,41 @@ Describe 'open-for-work surface (issue #974)' {
 
         BeforeAll {
             $script:PostPrText = & $script:ReadRepoFile 'skills/post-pr-review/SKILL.md'
+
+            # Extract Step 9's own body so the assertions below cannot be
+            # satisfied by a phrase that migrated to another section. Without
+            # this, deleting a Step 9 item leaves the suite green whenever the
+            # same words appear anywhere else in the file — the exact
+            # document-scope defect this Context is meant to catch.
+            $step9 = [regex]::Match(
+                $script:PostPrText,
+                '(?ms)^### 9\.\s*Close-Out Record[^\n]*\n(?<body>.*?)(?=^#{2,3}\s|\z)')
+            $script:Step9Text = $step9.Groups['body'].Value
         }
 
         It 'the close-time checklist carries the close-out record step' {
             $script:PostPrText | Should -Match '(?m)^### 9\. Close-Out Record'
-            $script:PostPrText | Should -Match '(?i)dead-premises note'
-            $script:PostPrText | Should -Match '(?i)re-route count'
+            $script:Step9Text | Should -Not -BeNullOrEmpty -Because 'Step 9 must have a body to assert against'
+            $script:Step9Text | Should -Match '(?i)dead-premises note'
+            $script:Step9Text | Should -Match '(?i)re-route count'
         }
 
         It 'the step is scoped to issues that ran the flow' {
-            $script:PostPrText | Should -Match '(?i)affirmation record'
-            $script:PostPrText | Should -Match '(?i)does not apply otherwise' `
+            $script:Step9Text | Should -Match '(?i)affirmation record'
+            $script:Step9Text | Should -Match '(?i)does not apply otherwise' `
                 -Because 'an unconditional instruction turns every unrelated close into a demand for a beat-2 re-route count'
         }
 
         It 'the step points at the existing ledger rather than emitting one' {
-            $script:PostPrText | Should -Match '(?i)does not emit ledger blocks'
+            $script:Step9Text | Should -Match '(?i)does not emit ledger blocks'
+        }
+
+        It 'the step defines a zero-findings form for a close with no ledger' {
+            # Reachable on a PR-less close and on a novel-arm parent closed
+            # after its chunks carried their own reviews; without a stated
+            # form, an agent invents a ledger reference or omits the item.
+            $script:Step9Text | Should -Match '(?i)no phase-containment ledger was produced' `
+                -Because 'the no-ledger case needs an explicit sentence, not silence'
         }
 
         It 'the completion section routes to the step, so the walk does not terminate before it' {
