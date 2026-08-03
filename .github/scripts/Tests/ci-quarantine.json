@@ -1,0 +1,1158 @@
+{
+  "_note": [
+    "CI runs every .github/scripts/Tests/*.Tests.ps1 EXCEPT the files listed here.",
+    "Adding an entry is how a suite gets skipped; there is no allowlist to forget to update.",
+    "class: unclassified = never measured on Linux, a BACKLOG that should shrink to zero.",
+    "class: linux-red    = measured failing on the CI platform. Temporary, so an issue number is REQUIRED.",
+    "class: never-ci     = structurally cannot run in CI (live gh, network, interactive terminal). Permanent and legitimate.",
+    "Enforced by .github/scripts/Tests/ci-suite-registration.Tests.ps1, which fails if any suite on disk is neither run nor listed here."
+  ],
+  "quarantine": [
+    {
+      "file": "Add-FCLCreditRow.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "adversarial-review-panel.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "aggregate-review-scores.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "atomic-adversarial-pipeline.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "auto-mode-boundary.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "backfill-calibration.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "bootstrap-antigravity.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "branch-authority-gate-contract.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "branch-authority-gate.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "brief-plan-variant.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "build-deferred-port-credit-row.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "build-process-review-credit-row.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "bump-version.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "ce-evidence-grant-pin.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "ce-gate-credit-emission.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "ce-gate-multi-path-coverage-contract.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "check-port.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "claude-body-resolution-contract.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "claude-shell-parity.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "claudemd-diet.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "code-conductor-inline-commands.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "code-conductor-responsibility-map.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "code-conductor-spine-dispatch.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "composite-skill-structure.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "conductor-body-size.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "conductor-engagement-record.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "conductor-hub-mode-planning-regression.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "conductor-marker-parity.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "conductor-review-routing-regression.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "conductor-shell-parity.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "continuation-contract.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "copilot-ce-gate-regression.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "copilot-sunset-runtime-warning.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "copilot-sunset-skip-discipline.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "cost-baseline-harvest.Tests.ps1",
+      "class": "linux-red",
+      "reason": "Pre-existing Linux-CI failures predating #905; out of scope for the Opus 5 rate-row PR. Carried over verbatim from the allowlist this registry replaces.",
+      "issue": 909
+    },
+    {
+      "file": "cost-completeness.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "cost-fcl-helpers-relocation.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "cost-integration.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "cost-pattern-presence-check.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "cost-regime-checkpoint.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "cost-summary-body-writer.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "cost-telemetry-budgets.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "cost-walker-copilot.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "cost-walker-coverage-doc.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "cost-walker.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered, and its Linux-cleanliness has never been measured: 13 conditional skips gate on git-remote availability rather than platform, so a local run cannot stand in for a Linux one. The old workflow was explicit that registering it would be an unmeasured bet. An earlier note claiming it was Linux-RED was measured as unsubstantiated and withdrawn (#932).",
+      "issue": null
+    },
+    {
+      "file": "coverage-first-prosecution.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "create-improvement-issue.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "credit-input-marker-parse.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "credit-input-marker-roundtrip.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "credit-row-schema-conformance.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "design-disposition-audit.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "dispatch-attribution.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "doc-keeper-fat-skill-extraction.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "downstream-ownership-boundary-contract.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "emit-pipeline-metrics-v4.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "engagement-gate-non-overridability.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "escape-fcl-scalar.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "execution-mode-absorption.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "filing-call-site-gate-coverage.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "find-or-upsert-comment.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "followup-gate-core.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "followup-gate-flow.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "frame-architecture-anchors.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "frame-audit-report.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "frame-back-derive.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "frame-credit-ledger-core.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "frame-credit-ledger-degraded-telemetry.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "frame-credit-ledger-fail-open.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "frame-credit-ledger-orchestrated-origin-fallback.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "frame-credit-ledger-orchestrator.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "frame-credit-ledger-suppress-failed-posts.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "frame-credit-ledger-unified-table.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "frame-no-enforcement.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "frame-port-files.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "frame-predicate-area-has-debt.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "frame-predicate-behavior-docs-extended.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "frame-predicate-ce-gate-defects-found.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "frame-predicate-evaluator-uniqueness.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "frame-predicate-never-identifier.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "frame-predicate-pipeline-entry-trivial.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "frame-predicate-resolver.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "frame-predicate-testable-or-tests.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "frame-predicate.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "frame-spine-core.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "frame-spine-lookup-skill.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "frame-spine-parse.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "frame-tripwire-deferred-port.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "frame-validate-plan-mode.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "frame-validate.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "Generate-ReferencesIndex.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "Get-AcTermsFromIssue.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "Get-FCLOriginContext.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "get-issue-drift.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "goal-contract-core.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "goal-contract-schema.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "goal-contract-validate-core.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "goal-run-resume-integration.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "guidance-complexity-contract.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "handoff-persistence-contract.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "implement-credit-emission.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "Init-References.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "Initialize-CopilotCostCollection.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "inline-dispatch-contract.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "intent-routing-collisions.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "intent-routing-scope.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "Invoke-ReferenceLoader.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "Issue-Planner-spine-emission.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "manifest-agents-array.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "marker-reader-anchoring.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "marker-transport-core.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "measure-guidance-complexity.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "migrate-brief-review-corpus.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "migration-scan-enforcement.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "mode-scoped-loading.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "NamingRegisterLivingSurface.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "newcomer-audit-wrapper.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "newcomer-audit.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "nl-intent-routing.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "normalize-whitespace.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "orchestra-review-commands.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "orchestra-review-handshake.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "orchestra-review-ledger-schema.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "orchestra-review-marker-emission.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "orchestra-review-mode-trigger.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "orchestra-review-shell-parity.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "orchestra-spine-command.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "orphan-issue-regex-contract.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "path-normalize.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "per-agent-model-routing.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "persist-marker-core.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "persist-marker-wrapper.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "persist-marker.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "persist-phase-ledger.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "pester6-baseline-core.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "phase-containment-brief-review.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "phase-containment-core.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "phase-containment-cost-core.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "phase-containment-disposition-landing-gap.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "phase-containment-doc-examples.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "phase-containment-emission-check-core.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "phase-containment-emission-check.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "phase-containment-format-report.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "phase-containment-report.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "phase-containment-rolling-history-core.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "pipeline-entry-agent-wiring.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "pipeline-entry-credit-emission.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "plan-approval-prompt-contract.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "plan-authoring-grounding-pass.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "plan-authoring-tree-state-contract.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "plan-entry-and-amendment-absorption.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "plan-tree-state-verification-fail-open.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "plugin-hooks-config-contract.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "plugin-release-hygiene.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "post-merge-cleanup.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "post-pr-credit-emission.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "prevention-analysis-gate-contract.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "quick-validate.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "reference-preflight-hook.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "release-hygiene-symmetric-bump.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "Resolve-PersistDecision.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "review-completion-gate.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "review-credit-emission.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "review-disposition-audit.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "rollout-phase-label-contract.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "routing-tables.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "run-pester-sharded.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "safe-operations-2b-bis-contract.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "script-wording-contract.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "senior-engineer-skill-adapter.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "sentinel-not-persisted.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "session-cleanup-detector.Tests.ps1",
+      "class": "linux-red",
+      "reason": "20 pre-existing Linux-CI failures: the #889 detector emits no output for several worktree/branch scenarios on Linux. Predates #874 and was out of scope for it. Carried over verbatim from the allowlist this registry replaces.",
+      "issue": 904
+    },
+    {
+      "file": "session-memory-contract.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "session-startup-git-helpers.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "session-startup-wording-contract.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "set-issue-parent-doc-contract.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "Set-IssueParent.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "solution-authoring.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "specialist-agent-wiring.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "specialist-shell-parity.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "spine-runner.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "subagent-env-handshake.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "terminal-hygiene-guardrails.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "test-orphan-branch-auto-resolve-eligible.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "test-orphan-branch-commits-absorbed.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "test-orphan-branch-github-signals.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "test-source-mutation-contract.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "upstream-onboarding-resume-variant.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "validate-plugin-preflight.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "Validate-ReferencesIndex.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "value-reflex.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    },
+    {
+      "file": "write-calibration-entry.Tests.ps1",
+      "class": "unclassified",
+      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
+      "issue": null
+    }
+  ]
+}

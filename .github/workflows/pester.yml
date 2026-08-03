@@ -25,160 +25,47 @@ jobs:
           Install-Module -Name Pester -Force -SkipPublisherCheck -MinimumVersion 6.0.0 -MaximumVersion 6.999.999
           Import-Module Pester -MinimumVersion 6.0.0 -MaximumVersion 6.999.999
           Install-Module -Name powershell-yaml -Force -SkipPublisherCheck
-      - name: Run Pester tests (issue #243 audit-paths drift gate + grammar + safety)
+      - name: Run Pester tests (glob minus explicit quarantine)
         shell: pwsh
         run: |
-          # Scope: per AC8 for #243, this workflow validates the hub artifact-paths audit
-          # (drift gate + grammar) and the script-safety contract that gates it. The wider
-          # .github/scripts/Tests/ suite contains pre-existing failures in unrelated
-          # subsystems (OTel install, frame-credit ledger, SKILL.md size lints, etc.)
-          # which are out of scope for #243 and tracked separately in issue #566.
-          # Issue #610: structural deferral gate tests added to the allowlist.
+          # SELECTION IS A GLOB MINUS A QUARANTINE, not an allowlist.
+          #
+          # This step used to carry a hand-maintained list of ~52 test files.
+          # An allowlist makes exclusion the DEFAULT and makes it SILENT: a new
+          # suite is unprotected the moment it is written and nothing notices.
+          # Measured when this changed: 52 files listed, 191 not — 4,136 of
+          # 5,475 test blocks never ran here, including suites written that
+          # same week.
+          #
+          # The list was not really an allowlist either. Most of its exclusions
+          # were quarantines ("20 pre-existing Linux-CI failures ... tracked in
+          # issue #904") written in a form that could not distinguish
+          # "temporarily broken" from "never registered".
+          #
+          # So: run everything, and require an explicit, classified, reasoned
+          # entry in .github/scripts/Tests/ci-quarantine.json to skip a file.
+          # ci-suite-registration.Tests.ps1 fails this job if any suite on disk
+          # is neither run nor listed there, and that guard is itself selected
+          # by the glob, so it cannot be dropped without dropping its reporter.
+          #
+          # The migration was conservative on purpose: exactly the files this
+          # job already ran still run. What changed is what happens to the next
+          # file someone adds.
+          . .github/scripts/lib/ci-suite-selection-core.ps1
+          $selection = Get-CISuiteSelection `
+            -TestsRoot '.github/scripts/Tests' `
+            -QuarantinePath '.github/scripts/Tests/ci-quarantine.json'
+          if ($selection.HasDrift) {
+            # Reported before the run, not only through the guard suite: a
+            # malformed registry must not be diagnosed by a job that failed to
+            # start for some other reason.
+            Write-Host "::error::CI suite selection drift:"
+            $selection.DriftDetails | ForEach-Object { Write-Host "::error::  $_" }
+            exit 1
+          }
+          Write-Host "Selected $($selection.Selected.Count) suite(s); quarantined $($selection.Quarantined.Count) (unclassified backlog: $($selection.UnclassifiedCount))."
           $config = New-PesterConfiguration
-          $config.Run.Path = @(
-            '.github/scripts/Tests/audit-hub-artifact-paths.Tests.ps1',
-            '.github/scripts/Tests/hub-artifact-paths-coverage.Tests.ps1',
-            '.github/scripts/Tests/script-safety-contract.Tests.ps1',
-            '.github/scripts/Tests/named-decisions-write-discipline.Tests.ps1',
-            '.github/scripts/Tests/engagement-record-marker-roundtrip.Tests.ps1',
-            '.github/scripts/Tests/Test-DeferralCriteria.Tests.ps1',
-            '.github/scripts/Tests/Add-FollowUpIssue.Tests.ps1',
-            '.github/scripts/Tests/code-review-deferral-integration.Tests.ps1',
-            # AC-helper capture path — registered per d-ci-gate-registration (#977).
-            # This suite is the ONLY coverage that drives the two AC helpers
-            # through a real external process. Every other test for them
-            # substitutes gh in-process, which yields a single string and passes
-            # against the broken code — that is how #977 shipped and survived a
-            # 27-test suite. An unregistered proof would protect nothing.
-            '.github/scripts/Tests/ac-helper-capture-path.Tests.ps1',
-            '.github/scripts/Tests/gate-reconciliation.Tests.ps1',
-            '.github/scripts/Tests/gate-hook-contract.Tests.ps1',
-            '.github/scripts/Tests/path-migration-sweep-gate.Tests.ps1',
-            '.github/scripts/Tests/Ensure-ScratchGitignore.Tests.ps1',
-            '.github/scripts/Tests/audit-docs-mechanical.Tests.ps1',
-            # render-portfolio tests — registered per d-ci-gate-registration (#692 s3)
-            '.github/scripts/Tests/render-portfolio.Tests.ps1',
-            # release-gate tests — registered per d-ci-gate-registration (#703 s2)
-            '.github/scripts/Tests/release-gate.Tests.ps1',
-            # entry-point-scope-parity test — registered per s4 (#703)
-            '.github/scripts/Tests/entry-point-scope-parity.Tests.ps1',
-            # wall-clock fixture guard — issue #723
-            '.github/scripts/Tests/wall-clock-fixture-guard.Tests.ps1',
-            # naming-register-policy gate — issue #732 s1
-            '.github/scripts/Tests/naming-register-policy.Tests.ps1',
-            # reporting-economy directive gate — registered per d-ci-gate-registration (#471)
-            '.github/scripts/Tests/reporting-economy.Tests.ps1',
-            '.github/scripts/Tests/reporting-economy-spotcheck.Tests.ps1',
-            # Pester mock fall-through guard — issue #818 s6 (d-dead-filter-tripwire-v2)
-            '.github/scripts/Tests/pester-mock-fallthrough-guard.Tests.ps1',
-            # Post-port acceptance delta-gate core — issue #818 s7
-            '.github/scripts/Tests/pester6-baseline-delta-core.Tests.ps1',
-            # AGENTS.md BDD-heading guard — registered per issue #835
-            '.github/scripts/Tests/bdd-scenario-contract.Tests.ps1',
-            # session-cost-discipline contract gate — registered per d-ci-gate-registration (#474 s1)
-            '.github/scripts/Tests/session-cost-discipline-contract.Tests.ps1',
-            # design-grounding-discipline contract gate — registered per d-ci-gate-registration (#866)
-            '.github/scripts/Tests/design-grounding-discipline.Tests.ps1',
-            # grounding-evidence-corpus-check classifier gate — registered per d-ci-gate-registration (#866)
-            '.github/scripts/Tests/grounding-evidence-corpus-check.Tests.ps1',
-            # goal-run harness capability-probe instruments — issue #874 plan step 1
-            '.github/scripts/Tests/goal-probe-streamjson.Tests.ps1',
-            '.github/scripts/Tests/goal-probe-usage-reader.Tests.ps1',
-            '.github/scripts/Tests/goal-probe-forcehalt-rig.Tests.ps1',
-            # goal-run harness durable-state layer (halt schema/emitter, run-log
-            # schema, goal_status reader) — issue #874 plan step 1
-            '.github/scripts/Tests/goal-run-schemas.Tests.ps1',
-            '.github/scripts/Tests/goal-run-log-schema.Tests.ps1',
-            '.github/scripts/Tests/goal-run-transcript-core.Tests.ps1',
-            '.github/scripts/Tests/goal-run-status-core.Tests.ps1',
-            '.github/scripts/Tests/goal-run-halt-core.Tests.ps1',
-            # goal-run harness worktree lifecycle (provision, state file,
-            # teardown, deferred-teardown retry) — issue #874 plan steps 2-3
-            '.github/scripts/Tests/goal-run-worktree-core.Tests.ps1',
-            # NOTE: the base session-cleanup-detector.Tests.ps1 suite is
-            # deliberately NOT listed here. It has 20 pre-existing Linux-CI
-            # failures (the #889 detector emits no output for several worktree/
-            # branch scenarios on Linux) that predate #874 and are out of scope
-            # for the goal-run harness PR. Tracked in issue #904 — re-add this
-            # file to the allowlist once that issue makes the suite Linux-clean.
-            # The goal-run integration coverage below runs and passes on Linux.
-            # goal-run/* detector protection + reporting + aging escalation +
-            # deferred-teardown retry — issue #874 plan step 3
-            '.github/scripts/Tests/session-cleanup-detector-goal-run.Tests.ps1',
-            # Issue #922 (decision D2 / AC11 / AC12 / AC16): the squash-merge
-            # detection proofs. D2 requires BOTH tiers to be CI-enforced, in NEW
-            # files so they do not inherit #904's Linux baggage — a proof placed
-            # in an unenforced suite passes locally forever and protects nothing,
-            # which is the shape that let this defect survive #513.
-            #   * -squash-merge: real-git integration through the DETECTOR's own
-            #     candidate-surfacing path (AC1, AC2, AC3, AC11, AC13, AC14).
-            #   * -honesty: the unit tier (AC4, AC5, AC6, AC7, AC8, AC9, AC15).
-            # Both deliberately avoid the base suite's mock-git PATH harness and
-            # use real disposable repositories, matching the goal-run detector
-            # suite above — the one detector suite that already passes on Linux.
-            '.github/scripts/Tests/session-cleanup-detector-squash-merge.Tests.ps1',
-            '.github/scripts/Tests/session-cleanup-detector-honesty.Tests.ps1',
-            # Issue #922 AC16 (Amendment A2.6): the executor's merged check is
-            # reached by Amendment A1's demotion of patch history, and this was
-            # its only covering suite — absent from CI, so a regression on the
-            # deletion path would have been invisible. D2's enforcement
-            # obligation extends to the executor path.
-            '.github/scripts/Tests/post-merge-cleanup-squash-merge.Tests.ps1',
-            # goal-run harness stage machine, mutex, crash-atomicity,
-            # control-return-then-read, and loop->chain seam — issue #874
-            # plan step 4
-            '.github/scripts/Tests/goal-run-stage-core.Tests.ps1',
-            # goal-run harness prompt assembly + launch-pinned loop
-            # predicate — issue #874 plan step 5
-            '.github/scripts/Tests/goal-run-prompt-core.Tests.ps1',
-            # goal-run harness post-loop chain: re-validation reuse, the
-            # five-halt-producer total precedence, PR classing, and
-            # verified-emission + repair — issue #874 plan step 6
-            '.github/scripts/Tests/goal-run-chain-core.Tests.ps1',
-            # goal-run harness vendor loop predicate wrapper: wires the
-            # launch-pinned contract-hash check into the live predicate
-            # command and self-emits a halt report on a halt disposition
-            # — issue #874 fix M1
-            '.github/scripts/Tests/goal-run-predicate-core.Tests.ps1',
-            # goal-run harness advisory wall-clock budget arm, session-
-            # identity arming, and end-of-run token accounting — issue #874
-            # plan step 7
-            '.github/scripts/Tests/goal-run-budget-core.Tests.ps1',
-            # goal-run harness typed run-log writer/reader (location, schema-
-            # validated writer, checkpoint reader) — issue #874 fix M9
-            '.github/scripts/Tests/goal-run-log-core.Tests.ps1',
-            # cost suites — registered per d-ci-gate-registration (#905 s5, AC12)
-            # NOTE: cost-baseline-harvest.Tests.ps1 is deliberately NOT listed
-            # here. It has 3 pre-existing Linux-CI failures (the #825 s3
-            # corroborated-fallback block passes hard-coded 'C:\fake\...' path
-            # literals, which PowerShell resolves as a PSDrive on Linux, so cost
-            # pattern composition throws before the assertions are reached) that
-            # predate #905 and are out of scope for the Opus 5 rate-row PR.
-            # Tracked in issue #909 — re-add this file to the allowlist once that
-            # issue makes the suite Linux-clean. The five suites below run and
-            # pass on Linux.
-            # NOTE: cost-walker.Tests.ps1 is likewise deliberately NOT listed —
-            # but for a weaker reason than the #909 entry above, and the
-            # difference matters. That suite has never been registered and this
-            # repo has no way to measure whether it is Linux-clean (no Linux
-            # runner available; its 13 conditional skips gate on git-remote
-            # availability, not platform, so a local run cannot stand in for
-            # one). Registering it would be an unmeasured bet, so issue #908
-            # split the pure-string Get-CostTranscriptSlug coverage into the
-            # suite below, which is Linux-clean by construction: a pure string
-            # function, string/integer assertions only, and Windows-shaped paths
-            # that are never anything but function arguments.
-            # An earlier revision of this note claimed the parent suite was
-            # Linux-RED on #909's 'C:\fake\path' shape. Review measured that as
-            # unsubstantiated (4 such literals, none reaching path composition,
-            # vs 61 in the #909 comparator) and it is withdrawn — see #932.
-            '.github/scripts/Tests/cost-walker-slug.Tests.ps1',
-            '.github/scripts/Tests/cost-attribution.Tests.ps1',
-            '.github/scripts/Tests/cost-rate-table.Tests.ps1',
-            '.github/scripts/Tests/cost-pattern-renderer.Tests.ps1',
-            '.github/scripts/Tests/cost-anomaly.Tests.ps1',
-            '.github/scripts/Tests/cost-rolling-history.Tests.ps1'
-          )
+          $config.Run.Path = $selection.Selected
           $config.Run.Exit = $true
           $config.Output.Verbosity = 'Detailed'
           Invoke-Pester -Configuration $config
