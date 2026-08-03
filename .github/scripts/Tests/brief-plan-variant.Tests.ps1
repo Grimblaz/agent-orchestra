@@ -688,10 +688,21 @@ Describe 'Brief plan variant — conformance check' -Tag 'unit' {
         # both named 'is reachable from every point that dispatches a brief
         # review'. run-pester-sharded reports failures as `[-] {It name}` with
         # no Describe path, so a red run could not tell the two apart.
+        # External review (CodeRabbit, PR #981): this test carried the SAME
+        # vacuity M19 fixed in its sibling — for the owning file,
+        # `Contains('Brief conformance check')` matches the section's own
+        # heading, so deleting both dispatch-point pointers left it green.
+        # Every pointer is backticked and the heading is not.
         foreach ($path in @('commands/plan.md', 'skills/plan-authoring/SKILL.md', 'agents/Issue-Planner.agent.md')) {
             $content = & $script:ReadRepoFile $path
-            $content.Contains('Brief conformance check') | Should -BeTrue -Because "$path must let a reviewer reach the conformance check from where they work"
+            $content.Contains('`#### Brief conformance check`') | Should -BeTrue `
+                -Because "$path must POINT AT the conformance check, not merely contain its heading"
         }
+
+        $planAuthoring = & $script:ReadRepoFile 'skills/plan-authoring/SKILL.md'
+        ([regex]::Matches($planAuthoring, [regex]::Escape('`#### Brief conformance check`')).Count) |
+            Should -BeGreaterOrEqual 2 `
+            -Because 'both dispatch points in the owning skill must reach the section, not just one'
     }
 }
 
@@ -877,6 +888,31 @@ Describe 'Brief review teeth — required cold-read vacuity question (#973)' -Ta
             -Because 'the pass-4 instruction must carry its own scope, not rely on a caveat several paragraphs earlier'
         $section.Contains('A brief target does not use this tagging.') | Should -BeTrue `
             -Because 'the brief path needs an explicit exclusion at the point the design token is named'
+    }
+
+    It 'open-for-work scopes the routing review target to the routine arm and records the novel-arm asymmetry' {
+        # Owner disposition 2026-08-03 on the #973 chunk-2 escalation. Before
+        # this, the doctrine asserted twice and unqualified that the routing
+        # call "is a named review target" while chunk 2 made that true for
+        # BRIEFS only — so the novel arm's marker-borne verdict was reviewed by
+        # nobody and the doctrine said otherwise. The asymmetry is kept because
+        # a wrongly-novel call costs ceremony, not correctness; that reasoning
+        # has to survive in the text or the next reader reads an omission.
+        $content = & $script:ReadRepoFile 'Documents/Design/open-for-work.md'
+
+        $content.Contains('is a named review target **on the routine arm**') | Should -BeTrue `
+            -Because 'the unqualified claim was false for the novel arm once chunk 2 landed'
+        $content.Contains('has no separate reviewer, and that is a decision rather than an omission') | Should -BeTrue `
+            -Because 'a deliberate gap must be readable as deliberate, or it reads as an oversight'
+        $content.Contains('The unreviewed direction is the safe one.') | Should -BeTrue `
+            -Because 'the asymmetry argument is the whole justification; without it the scoping looks arbitrary'
+
+        # The arm enumeration must not go stale the way it already did once:
+        # "rule one of three ways" survived the fourth (novel) arm landing.
+        $content.Contains('rule one of three ways') | Should -BeFalse `
+            -Because 'the novel arm made this a four-way rule; a stale count here is the same defect #973 swept for elsewhere'
+        $content.Contains('rule one of four ways') | Should -BeTrue `
+            -Because 'the doctrine summary must enumerate the same arms the charter defines'
     }
 
     It 'both doctrine surfaces key the routing n/a arm on the AUTHORITY SOURCE, not on verdict presence' {
