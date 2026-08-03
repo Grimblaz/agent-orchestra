@@ -241,6 +241,7 @@ Judgment does not implement fixes. It produces the ruling and the evidence packa
 
 - Load `adversarial-review` for prosecution and defense methodology
 - Load `code-review-intake` when GitHub review retrieval and ledger construction are the main problem
+- Read [references/multiline-capture-audit.md](references/multiline-capture-audit.md) before adding or changing any command-capture site in this skill, and before trusting an `ac_cross_check` recorded before plugin `3.9.1` (issue #977)
 
 ## Gotchas
 
@@ -398,7 +399,20 @@ Before writing any entry with `disposition: dismiss` or `disposition: defer` **a
 
 **Low-severity exemption.** Entries with severity `low` are exempt from this pre-condition (the validator also exempts them). Record them without `ac_cross_check`.
 
-> **A `source: no-ac-section` result recorded before 2026-08-02 is not trustworthy.** Until issue #977 landed, both AC helpers captured the issue body as a per-line array and split it as if it were one string, so they read the body's **second line** rather than the acceptance-criteria section. Every cross-check therefore reported `no-ac-section` regardless of what the issue actually said, and neither `force-accept` nor `disposition-gate` was reachable. Historical dispositions were deliberately **annotated rather than recomputed** (issue #977, maintainer decision) — a recompute reads issue bodies as amended since, which is a new claim, not a reconstruction. Both helpers now join the captured lines before splitting; do not remove that join, and see [references/multiline-capture-audit.md](references/multiline-capture-audit.md) before adding any new command-capture site.
+> **Any machine-computed `ac_cross_check` recorded before plugin `3.9.1` is untrustworthy — every field, not just `source: no-ac-section`.** Until issue #977 landed, both AC helpers captured the issue body as a per-line array and split it as if it were one string, so they read the body's **second line** rather than the acceptance-criteria section.
+>
+> Do not read that as "the gate was merely blind." It read the **wrong input**, which fails in both directions:
+>
+> - When line 2 carried no backticked token — the usual case, since line 2 of a conventionally formatted issue is blank — both arrays came back empty, `source` resolved to `no-ac-section`, and the finding took the `defer` arm regardless of what the acceptance criteria actually said.
+> - When line 2 *did* carry a backticked token, that token was returned as though it were an acceptance-criteria reference. `source` was then `issue`, not `no-ac-section` (the verdict function only reports `no-ac-section` when **both** arrays are empty), and a fabricated file-arm match could reach `force-accept` — which overrides a structural deferral. This arm was **reachable but never observed** in the 60-issue sweep; it is why the distrust above is scoped to *every* pre-`3.9.1` machine-computed cross-check rather than to one `source` value. Scoping it to `no-ac-section` would have excluded exactly the records that carried override authority.
+>
+> **Anchor on the release, not on a date.** The fix shipped in `3.9.1`; several pull requests merged earlier the same day carry pre-fix cross-checks, so "before 2026-08-02" would wrongly vouch for them.
+>
+> Historical dispositions were deliberately **annotated rather than recomputed** (issue #977, maintainer decision) — a recompute reads issue bodies as amended since, which is a new claim, not a reconstruction.
+>
+> **`no-ac-section` remains imprecise even post-fix**, and this is unchanged by #977: the verdict function emits it whenever both arrays are empty, which includes an issue that *has* a populated acceptance-criteria section whose tokens are all stop-listed or unbackticked. It means "nothing extractable", not "no section".
+>
+> Both helpers now join the captured lines before splitting; do not remove that join, and see [references/multiline-capture-audit.md](references/multiline-capture-audit.md) before adding any new command-capture site.
 
 **`Add-FollowUpIssue` guard.** When the cross-check routes to `defer` and the agent calls `Add-FollowUpIssue` to file a follow-up issue, it MUST pass the `ac_cross_check` outcome as part of the issue body. Include a fenced YAML block in the body:
 

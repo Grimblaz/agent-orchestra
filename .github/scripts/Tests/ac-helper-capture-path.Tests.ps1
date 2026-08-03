@@ -22,23 +22,31 @@
     PowerShell function. A function returns exactly one string object, so the
     captured body is a [String] with count 1 — which is what a CORRECTLY captured
     body looks like. Those tests therefore pass against the broken code and are
-    structurally blind to this entire defect class. Measured at 18a28ba and again
-    on this branch, against the same body:
+    structurally blind to this entire defect class. Measured at 18a28ba against a
+    10-line probe body, and re-measured on this branch against $script:BodyPopulated
+    below, which is 15 lines:
 
-        in-process function mock      -> System.String   count=1   (false green)
-        script-file stand-in, one str -> System.String   count=1   (false green)
-        native PATH shim (this file)  -> System.Object[] count=10  (reproduces)
+        harness                        18a28ba probe        BodyPopulated (this file)
+        in-process function mock       String   count=1     String    count=1   (false green)
+        script-file stand-in, one str  String   count=1     String    count=1   (false green)
+        native PATH shim (this file)   Object[] count=10    Object[]  count=15  (reproduces)
 
-    The second row matters: the established -GhCliPath injection pattern used
+    The counts differ because the bodies differ; the TYPE is the invariant. The
+    second row matters: the established -GhCliPath injection pattern used
     elsewhere in this suite is a script file returning one string, so COPYING THE
     GOOD PATTERN is the second way to get a false green here.
 
     The discriminating property is that the body must reach the helper AS MULTIPLE
     OBJECTS — the shape every real external process produces. This file gets that
     with a native shim on PATH (gh.cmd on Windows, an executable gh script
-    elsewhere). Test-HarnessShape below ASSERTS that property rather than assuming
-    it, so a shim that silently stops being resolved fails loudly instead of
-    reporting green.
+    elsewhere).
+
+    Test-HarnessShape asserts BOTH halves — the multi-object shape AND a
+    fixture-only sentinel string. The sentinel is load-bearing: the fixtures use a
+    real issue number in this repository, and a real authenticated `gh` answering
+    instead of the shim also returns Object[] with count > 1, so a shape-only check
+    would report green on an unresolved shim (measured: real #977 -> Object[],
+    count=145). Shape alone cannot tell "my shim ran" from "the real gh ran".
 
     Do not rewrite these tests to use Mock gh or a local function named gh. That
     substitution is exactly how the defect shipped and survived a 27-test suite.
@@ -54,12 +62,18 @@ BeforeAll {
     # -----------------------------------------------------------------------
     # Fixtures. Line 2 of each body deliberately carries a backtick-quoted
     # identifier: that is the line the broken code read.
+    #
+    # Line 1 of every fixture carries $script:Sentinel. No real issue body
+    # contains it, so its presence in a capture proves the SHIM answered rather
+    # than a real `gh` — see Test-HarnessShape.
     # -----------------------------------------------------------------------
+
+    $script:Sentinel = 'AC-HELPER-FIXTURE-SENTINEL-977'
 
     # Populated: an identifier BEFORE the AC section (line 2), one INSIDE it,
     # and one AFTER it. Only the inside one may ever be returned.
     $script:BodyPopulated = @'
-Parent: #709
+Parent: #709 AC-HELPER-FIXTURE-SENTINEL-977
 Line two names `skills/portfolio-tracker/SKILL.md`, outside every section.
 
 ## Problem
@@ -80,7 +94,7 @@ Found while reading `docs/provenance-only.md`.
     # A helper still reading line 2 returns that path here; a fixed helper returns
     # nothing. This is the case that discriminates.
     $script:BodyNoAcSection = @'
-Parent: #709
+Parent: #709 AC-HELPER-FIXTURE-SENTINEL-977
 Line two names `skills/portfolio-tracker/SKILL.md` and nothing declares criteria.
 
 ## Problem
@@ -88,7 +102,19 @@ Line two names `skills/portfolio-tracker/SKILL.md` and nothing declares criteria
 Nothing here declares `docs/other.md` as a criterion.
 '@
 
-    $script:BodySingleLine = 'Parent: #709 with `docs/single.md` and no sections.'
+    $script:BodySingleLine = 'Parent: #709 AC-HELPER-FIXTURE-SENTINEL-977 with `docs/single.md` and no sections.'
+
+    # Exactly ONE backticked path inside the acceptance-criteria section. This is
+    # the newly COMMON shape after the fix (most issues declare one identifier),
+    # and it is the shape where a one-element array unrolls to a bare scalar.
+    $script:BodyOneResult = @'
+Parent: #709 AC-HELPER-FIXTURE-SENTINEL-977
+Line two names `skills/portfolio-tracker/SKILL.md`, outside every section.
+
+## Acceptance criteria
+
+- [ ] the loader must read `skills/review-judgment/SKILL.md`
+'@
 
     # -----------------------------------------------------------------------
     # Native gh shim. Emits the fixture body from a real external process, so
@@ -128,7 +154,16 @@ Nothing here declares `docs/other.md` as a criterion.
         $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
         [System.IO.File]::WriteAllText($cmdPath, $cmdText, $utf8NoBom)
         [System.IO.File]::WriteAllText($shPath, $shText, $utf8NoBom)
-        if (-not $IsWindows) { & chmod +x $shPath 2>&1 | Out-Null }
+        if (-not $IsWindows) {
+            & chmod +x $shPath 2>&1 | Out-Null
+            # A silent chmod failure leaves the POSIX shim unexecutable, `gh`
+            # falls through to whatever is next on PATH, and the fixture quietly
+            # means something else. CI (ubuntu-latest) is the branch that runs
+            # this, so fail here rather than three assertions later.
+            if ($LASTEXITCODE -ne 0) {
+                throw "New-GhShim: chmod +x failed (exit $LASTEXITCODE) on $shPath — the POSIX shim would not be executable and the real gh would answer instead."
+            }
+        }
 
         return $Dir
     }
@@ -143,21 +178,41 @@ Nothing here declares `docs/other.md` as a criterion.
         finally { $env:PATH = $saved }
     }
 
-    # C2 self-check: report what the harness actually hands the helper.
+    # Run a scriptblock with NO gh resolvable anywhere on PATH. This is the
+    # genuinely-UNAVAILABLE case, which is NOT the same as a gh that exists and
+    # exits non-zero: an unresolvable command throws CommandNotFoundException
+    # from PowerShell's own lookup, before any process starts, and `2>$null`
+    # cannot suppress it.
+    function script:Invoke-WithNoGh {
+        param([scriptblock]$Body)
+
+        $emptyDir = Join-Path $TestDrive 'no-gh-here'
+        New-Item -ItemType Directory -Path $emptyDir -Force | Out-Null
+
+        $saved = $env:PATH
+        $env:PATH = $emptyDir
+        try { & $Body }
+        finally { $env:PATH = $saved }
+    }
+
+    # C2 self-check: report what the harness actually hands the helper, AND
+    # whether the answer came from the shim rather than a real gh.
     function script:Test-HarnessShape {
         param([string]$ShimDir)
 
         return script:Invoke-WithGhShim -ShimDir $ShimDir -Body {
             $captured = gh issue view 977 --json body --jq '.body' 2>$null
             [PSCustomObject]@{
-                TypeName = if ($null -eq $captured) { '<null>' } else { $captured.GetType().FullName }
-                Count    = @($captured).Count
+                TypeName    = if ($null -eq $captured) { '<null>' } else { $captured.GetType().FullName }
+                Count       = @($captured).Count
+                HasSentinel = (@($captured) -join "`n").Contains($script:Sentinel)
             }
         }
     }
 
     $script:ShimPopulated = script:New-GhShim -Body $script:BodyPopulated -Dir (Join-Path $TestDrive 'shim-populated')
     $script:ShimNoAc = script:New-GhShim -Body $script:BodyNoAcSection -Dir (Join-Path $TestDrive 'shim-noac')
+    $script:ShimOneResult = script:New-GhShim -Body $script:BodyOneResult -Dir (Join-Path $TestDrive 'shim-oneresult')
 
     # Keyed so the degenerate-input cases below can select one by name.
     $script:Shims = @{
@@ -181,10 +236,22 @@ Describe 'C2 — the harness reproduces the input shape of the defect' {
             -Because 'the vectorized -split that is this defect only happens on a multi-element capture'
     }
 
-    It 'hands the no-AC-section body to the helper as multiple objects too' {
+    It 'proves the SHIM answered, not a real gh, via a fixture-only sentinel' {
+        $shape = script:Test-HarnessShape -ShimDir $script:ShimPopulated
+
+        # Shape alone cannot discriminate. The fixtures use issue number 977,
+        # which exists in this repository: a real authenticated gh returns
+        # Object[] with count=145 for it, passing both assertions above on a
+        # shim that never resolved. Only the sentinel distinguishes them.
+        $shape.HasSentinel | Should -BeTrue `
+            -Because 'no real issue body contains this string, so its absence means the PATH shim was bypassed and the assertions in this file are measuring the wrong thing'
+    }
+
+    It 'hands the no-AC-section body to the helper as multiple objects too, and from the shim' {
         $shape = script:Test-HarnessShape -ShimDir $script:ShimNoAc
         $shape.TypeName | Should -BeExactly 'System.Object[]'
         $shape.Count | Should -BeGreaterThan 1
+        $shape.HasSentinel | Should -BeTrue
     }
 }
 
@@ -249,6 +316,19 @@ Describe 'C1 — Get-AcTermsFromIssue is scoped to the acceptance-criteria secti
         }
         ($terms | Where-Object { $_.term -ceq 'triage' }).is_behavioral | Should -BeTrue
         ($terms | Where-Object { $_.term -ceq 'cost-walker' }).is_behavioral | Should -BeFalse
+
+        # The third term on the SAME line as `triage`. `is_behavioral` is decided
+        # ONCE PER LINE and applied to every token on it, so this path-shaped
+        # term inherits high confidence purely because the word "must" appears
+        # elsewhere on its line — and high confidence alone reaches force-accept.
+        # Pinning it here so the escalation is visible rather than incidental:
+        # an earlier revision of this suite asserted two of the three terms and
+        # left the over-escalated one unasserted. Whether per-line escalation is
+        # the RIGHT semantics is out of scope for issue #977 and is carried by
+        # the AC-term precision follow-up; this assertion only makes a change to
+        # it break loudly here.
+        ($terms | Where-Object { $_.term -ceq 'skills/review-judgment/SKILL.md' }).is_behavioral |
+            Should -BeTrue -Because 'per-line escalation marks every token on a behavioral line, including this one'
     }
 
     It 'NEGATIVE: returns empty for a body with no AC section whose line 2 carries a backticked path' {
@@ -363,14 +443,24 @@ Describe 'C6 — the degenerate-input contract survives the join' {
 
     # Callers pass these results straight into Get-StructuralVerdict without null
     # checks. Joining changed what reaches the empty-guard, so each degenerate
-    # input is exercised for TYPE as well as value: a bare string and a
-    # one-element array read alike in most assertions and behave differently at
-    # the call site.
+    # input is exercised for both value and type.
+    #
+    # Read the type assertion honestly. `Should -Not -BeOfType [string]` FAILS on
+    # a bare string, a one-element array, AND a two-element array, and PASSES only
+    # on the AutomationNull that an empty `return @()` produces — measured, all
+    # four shapes. So it does not distinguish "bare string" from "one-element
+    # array" the way an earlier revision of this comment claimed. What it does is
+    # pin that these three inputs produce the empty shape and nothing else, which
+    # is the property C6 needs. The one-result shape, where a scalar genuinely
+    # can come back, is covered separately below.
 
     $degenerate = @(
         @{ Name = 'a genuinely empty body'; Shim = 'empty' }
         @{ Name = 'a single-line body'; Shim = 'single' }
-        @{ Name = 'a failed or unavailable gh'; Shim = 'gh-failure' }
+        # A gh that EXISTS and exits non-zero. Deliberately not called
+        # "unavailable" — that is a different failure mode with a different
+        # mechanism, and it gets its own tests below.
+        @{ Name = 'a failing gh (exists, exits 1)'; Shim = 'gh-failure' }
     )
 
     It 'Get-AcRefsFromIssue yields an empty array and does not throw for <Name>' -ForEach $degenerate {
@@ -424,5 +514,107 @@ Describe 'C6 — the degenerate-input contract survives the join' {
 
         $result.ac_cross_check.source | Should -BeExactly 'no-ac-section'
         $result.ac_cross_check.routed | Should -BeExactly 'defer'
+    }
+
+    Context 'gh genuinely UNAVAILABLE — a different mechanism from a failing gh' {
+
+        # `2>$null` redirects the NATIVE PROCESS stderr. It cannot suppress
+        # CommandNotFoundException, which PowerShell raises from its own command
+        # lookup before any process starts. Both helpers document "empty on any
+        # failure, so callers can pass the result straight to -AcRefs without
+        # null checks", and no caller wraps them in try/catch — so an
+        # unresolvable gh must not escape as a throw.
+        #
+        # The shim fixture above cannot cover this: it writes a gh that EXISTS
+        # and exits 1. This context removes gh from PATH entirely.
+
+        It 'the harness really does make gh unresolvable' {
+            $found = script:Invoke-WithNoGh -Body {
+                [bool](Get-Command gh -ErrorAction SilentlyContinue)
+            }
+            $found | Should -BeFalse `
+                -Because 'if gh is still resolvable, the two tests below prove nothing'
+        }
+
+        It 'Get-AcRefsFromIssue returns empty instead of throwing when gh is unresolvable' {
+            $raw = $null
+            $caught = $null
+            try {
+                $raw = script:Invoke-WithNoGh -Body { Get-AcRefsFromIssue -IssueNumber '977' }
+            }
+            catch { $caught = $_ }
+
+            $caught | Should -BeNullOrEmpty -Because 'the documented contract is empty-on-any-failure, and callers have no try/catch'
+            @($raw).Count | Should -Be 0
+        }
+
+        It 'Get-AcTermsFromIssue returns empty instead of throwing when gh is unresolvable' {
+            $raw = $null
+            $caught = $null
+            try {
+                $raw = script:Invoke-WithNoGh -Body { Get-AcTermsFromIssue -IssueNumber '977' -WarningAction SilentlyContinue }
+            }
+            catch { $caught = $_ }
+
+            $caught | Should -BeNullOrEmpty
+            @($raw).Count | Should -Be 0
+        }
+
+        It 'the statement AFTER the helper call still executes' {
+            # The observable that actually matters to a caller. Before the fix
+            # this never ran: the throw took out the whole statement sequence.
+            $reached = script:Invoke-WithNoGh -Body {
+                $null = Get-AcRefsFromIssue -IssueNumber '977'
+                'reached'
+            }
+            $reached | Should -BeExactly 'reached'
+        }
+    }
+
+    Context 'the ONE-RESULT shape — newly the common case after the fix' {
+
+        # An AC section declaring exactly one backticked identifier returns a
+        # BARE SCALAR, not a one-element array, because PowerShell unrolls
+        # `return @($x)`. Pre-fix this shape was unreachable (every real issue
+        # returned empty); post-fix it is what most issues produce. The
+        # degenerate-input assertions above cannot see it — they only ever run
+        # against the empty shape.
+
+        It 'Get-AcRefsFromIssue returns a bare string for a single result' {
+            $raw = script:Invoke-WithGhShim -ShimDir $script:ShimOneResult -Body {
+                Get-AcRefsFromIssue -IssueNumber '977'
+            }
+            $raw | Should -BeOfType [string] `
+                -Because 'the docstring records this exactly: one result unrolls to a scalar, so callers that index or type-check must wrap in @()'
+            @($raw).Count | Should -Be 1
+            @($raw)[0] | Should -BeExactly 'skills/review-judgment/SKILL.md'
+        }
+
+        It 'the single-result shape still binds correctly through Get-StructuralVerdict' {
+            # The property that makes the scalar harmless: the consumer declares
+            # [string[]] and coerces. Asserted through the consumer, not by
+            # inspecting the helper, because the consumer is where it matters.
+            $refs = script:Invoke-WithGhShim -ShimDir $script:ShimOneResult -Body {
+                Get-AcRefsFromIssue -IssueNumber '977'
+            }
+
+            $result = Get-StructuralVerdict `
+                -Finding @{ id = 'F7'; text = 'Loader change.'; files = @('skills/review-judgment/SKILL.md') } `
+                -PrFileSet @() `
+                -AcRefs $refs `
+                -AcTerms @() `
+                -RepoRoot $script:RepoRoot
+
+            $result.ac_cross_check.file_arm | Should -BeTrue
+            $result.ac_cross_check.routed | Should -BeExactly 'force-accept'
+        }
+
+        It 'a single result does NOT include the line-2 token' {
+            $raw = script:Invoke-WithGhShim -ShimDir $script:ShimOneResult -Body {
+                @(Get-AcRefsFromIssue -IssueNumber '977')
+            }
+            $raw | Should -Not -Contain 'skills/portfolio-tracker/SKILL.md'
+            @($raw).Count | Should -Be 1
+        }
     }
 }

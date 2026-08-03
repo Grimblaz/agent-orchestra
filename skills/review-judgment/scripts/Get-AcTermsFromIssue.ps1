@@ -18,9 +18,21 @@
             is_behavioral  = <bool>     # true if AC line contains a behavioral keyword
         }
 
-    Returns @() (never $null) on any failure path (missing gh, missing section, gh error).
+    Returns empty on any failure path (unresolvable gh, gh error, missing section).
     Emits Write-Warning when the ## Acceptance Criteria section is absent entirely.
     Does NOT emit a warning when the section exists but has no backtick tokens.
+
+    RETURN SHAPE — exact, because two of these are easy to assert wrongly:
+      * no results   -> `@()`, which PowerShell collapses on assignment, so a
+                        caller's `$x = Get-AcTermsFromIssue ...` sees $null, not
+                        an empty array. `@($x).Count` is 0 either way. An earlier
+                        revision of this line claimed "never $null" — that was
+                        false at direct assignment (issue #977).
+      * ONE result   -> unrolls to a bare [PSCustomObject], NOT a one-element array.
+      * two or more  -> [System.Object[]] of [PSCustomObject].
+    All three bind correctly to `Get-StructuralVerdict -AcTerms`, which declares
+    [PSCustomObject[]] and coerces. Callers that do their own indexing or type
+    checks must wrap in @(). Verified by test, not assumed.
 
 .NOTES
     H3-resilience: sub-headers inside the AC section (### ...) are NOT treated as section
@@ -64,7 +76,17 @@ function Get-AcTermsFromIssue {
         [string]$IssueNumber
     )
 
-    # Step 1 — fetch issue body via gh; collapse any gh error to empty body.
+    # Step 1 — fetch issue body via gh; collapse any gh failure to empty body.
+    #
+    # Two distinct failure modes, and `2>$null` only covers one of them:
+    #   * gh EXISTS and fails (bad issue, no auth, network) -> stderr is
+    #     redirected, stdout is empty, execution continues.
+    #   * gh is UNRESOLVABLE (not installed, not on PATH) -> PowerShell's own
+    #     command lookup throws CommandNotFoundException BEFORE any process
+    #     starts. `2>$null` cannot suppress that; without the catch below the
+    #     helper throws and the caller's next statement never runs, which
+    #     contradicts the empty-on-any-failure contract above. Callers pass
+    #     this result straight into Get-StructuralVerdict with no try/catch.
     #
     # `--jq '.body'` emits RAW MULTI-LINE TEXT, and PowerShell captures
     # multi-line external-process stdout as [System.Object[]] — one element per
@@ -74,7 +96,12 @@ function Get-AcTermsFromIssue {
     # (issue #977). Do not remove the join, and do not prove this path with an
     # in-process `gh` function: a function mock returns a single string and
     # cannot reproduce the array capture at all.
-    $bodyLines = gh issue view $IssueNumber --json body --jq '.body' 2>$null
+    try {
+        $bodyLines = gh issue view $IssueNumber --json body --jq '.body' 2>$null
+    }
+    catch {
+        return @()
+    }
     $body = @($bodyLines) -join "`n"
     if (-not $body) { return @() }
 

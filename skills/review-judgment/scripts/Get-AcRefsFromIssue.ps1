@@ -10,11 +10,21 @@
 
     The function reads the issue body via `gh issue view`, isolates the
     `## Acceptance Criteria` H2 section, and extracts backtick-quoted
-    file-path-like tokens. Returns a unique, sorted string array.
+    file-path-like tokens. Returns a unique, sorted collection of strings.
 
-    Returns an empty array on any failure (missing gh, missing section,
-    no matches) so callers can pass the result directly to -AcRefs
-    without null checks.
+    Returns empty on any failure (unresolvable gh, gh error, missing section,
+    no matches) so callers can pass the result directly to -AcRefs without
+    null checks.
+
+    RETURN SHAPE — exact, because two of these are easy to assert wrongly:
+      * no results   -> `@()`, which PowerShell collapses on assignment, so a
+                        caller's `$x = Get-AcRefsFromIssue ...` sees $null, not
+                        an empty array. `@($x).Count` is 0 either way.
+      * ONE result   -> unrolls to a bare [string], NOT a one-element array.
+      * two or more  -> [System.Object[]] of [string].
+    All three bind correctly to `Get-StructuralVerdict -AcRefs`, which declares
+    [string[]] and coerces. Callers that do their own indexing or type checks
+    must wrap in @(). Verified by test, not assumed (issue #977).
 #>
 
 function Get-AcRefsFromIssue {
@@ -23,8 +33,17 @@ function Get-AcRefsFromIssue {
         [string]$IssueNumber
     )
 
-    # Read issue body via gh; suppress stderr so missing gh / missing issue
-    # collapse to an empty body rather than a hard failure.
+    # Read issue body via gh.
+    #
+    # Two distinct failure modes, and `2>$null` only covers one of them:
+    #   * gh EXISTS and fails (bad issue, no auth, network) -> stderr is
+    #     redirected, stdout is empty, execution continues.
+    #   * gh is UNRESOLVABLE (not installed, not on PATH) -> PowerShell's own
+    #     command lookup throws CommandNotFoundException BEFORE any process
+    #     starts. `2>$null` cannot suppress that; without the catch below the
+    #     helper throws and the caller's next statement never runs, which
+    #     contradicts the empty-on-any-failure contract above. Callers pass
+    #     this result straight into Get-StructuralVerdict with no try/catch.
     #
     # `--jq '.body'` emits RAW MULTI-LINE TEXT, and PowerShell captures
     # multi-line external-process stdout as [System.Object[]] — one element per
@@ -33,7 +52,12 @@ function Get-AcRefsFromIssue {
     # SECOND LINE. Join first (issue #977). Do not remove the join, and do not
     # prove this path with an in-process `gh` function: a function mock returns
     # a single string and cannot reproduce the array capture at all.
-    $bodyLines = gh issue view $IssueNumber --json body --jq '.body' 2>$null
+    try {
+        $bodyLines = gh issue view $IssueNumber --json body --jq '.body' 2>$null
+    }
+    catch {
+        return @()
+    }
     $body = @($bodyLines) -join "`n"
     if (-not $body) { return @() }
 
