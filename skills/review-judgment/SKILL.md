@@ -391,11 +391,11 @@ When an engineer selects `Escalate`:
 
 Before writing any entry with `disposition: dismiss` or `disposition: defer` **and** `severity` ≥ medium — whether the entry originates from a code-review finding (`stage: code-review`) or a CE Gate defect deferral (`stage: ce`) — the agent MUST complete an AC cross-check:
 
-1. Call `Get-AcTermsFromIssue -IssueNumber {parent_issue}` to extract behavioral AC terms.
+1. Call `Get-AcRefsFromIssue -IssueNumber {parent_issue}` to extract AC file-path references (`{ac_refs}`, ARM 1) **and** `Get-AcTermsFromIssue -IssueNumber {parent_issue}` to extract behavioral AC terms (`{ac_terms}`, ARM 2). **Both**, not one: the two arms are independently sufficient — a file-path match alone reaches `force-accept` without any term match — so calling only the term helper silently disables half the gate. An earlier revision of this step named only the term helper while step 2 went on to pass an `{ac_refs}` that nothing had produced (issue #977).
 2. Call `Get-StructuralVerdict -Finding {finding} -PrFileSet {pr_files} -AcRefs {ac_refs} -RepoRoot {repo_root} -AcTerms {ac_terms}` to obtain the `ac_cross_check` object.
 3. Write the returned `ac_cross_check` object into the disposition entry.
 
-**This pre-condition is blocking.** The gate MUST NOT commit a `dismiss` or `defer` entry with severity ≥ medium that has a null or absent `ac_cross_check`. If `Get-AcTermsFromIssue` returns an empty array (no AC section found), the cross-check still runs — pass `@()` as `-AcTerms`; the verdict's `ac_cross_check.source` will be `no-ac-section` and `routed` will be `defer`.
+**This pre-condition is blocking.** The gate MUST NOT commit a `dismiss` or `defer` entry with severity ≥ medium that has a null or absent `ac_cross_check`. If either helper returns empty (no AC section, or no parseable tokens), the cross-check still runs — pass `@()` for that arm; when **both** are empty the verdict's `ac_cross_check.source` will be `no-ac-section` and `routed` will be `defer`.
 
 **Low-severity exemption.** Entries with severity `low` are exempt from this pre-condition (the validator also exempts them). Record them without `ac_cross_check`.
 
