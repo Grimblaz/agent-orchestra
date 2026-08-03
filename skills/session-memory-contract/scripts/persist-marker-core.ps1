@@ -256,7 +256,12 @@ function Get-MarkerFamilyRegistry {
         documents review-judge-produced as "written as a separate PR
         comment"; skills/frame-credit-emission/SKILL.md documents
         credit-input as posted "immediately after the agent's completion
-        marker comment").
+        marker comment"). open-for-work-affirmed (issue #974) is likewise
+        post-new, grounded in Documents/Design/open-for-work.md's
+        affirmation-record contract: an edited record is void as an
+        ordering witness, the escape hatch posts a new record rather than
+        editing the old one, and the re-route count is derived by counting
+        records -- three properties an upsert shape would destroy at once.
     .OUTPUTS
         [PSCustomObject[]] one row per family: Family [string], MarkerTemplate
         [string] (placeholder tokens such as '{ID}'/'{PR}'/'{phase}'/'{port}'
@@ -382,6 +387,45 @@ function Get-MarkerFamilyRegistry {
             # comment id back onto the plan comment's frame-spine block as
             # slice_comment_id -- see script:Invoke-FrameSlicesSpineSplice.
             PostStep          = 'frame-slices-spine-splice'
+        }
+        [PSCustomObject]@{
+            # Issue #974 (chunk 3 of #957): the open-for-work affirmation
+            # record. APPENDED, never inserted: persist-marker-core.Tests.ps1
+            # binds $script:PostNewFamily to the FIRST post-new/issue row
+            # positionally (:250) and $issueOnlyFamily to the FIRST
+            # issue-surface row (:527). This row is post-new/issue with a
+            # null adapter and null post-step -- exactly the shape those
+            # fixtures select -- so placing it ahead of design-phase-complete
+            # would silently re-point roughly two dozen generic write-path
+            # assertions at this family while every one of them still passed.
+            Family            = 'open-for-work-affirmed'
+            # Placeholder token is '{ID}', not the '{N}' the doctrine prose
+            # used before this row existed: persist-marker-wrapper.Tests.ps1's
+            # catalog/registry drift guard only recognizes '-{ID}'/'-{PR}'
+            # and SKIPS any other token rather than checking it, so '{N}'
+            # would have opted this family out of the very guard that caught
+            # the design-phase-complete write-shape drift. Same runtime
+            # behavior either way (ConvertTo-MarkerFamilyLineStartPattern
+            # wildcards any '{Word}' token generically).
+            MarkerTemplate    = '<!-- open-for-work-affirmed-{ID} -->'
+            TargetSurface     = 'issue'
+            # post-new, NOT upsert -- and this is load-bearing rather than
+            # stylistic. Documents/Design/open-for-work.md's affirmation
+            # record rests on append-only in three places: an edited record
+            # is void as an ordering witness (property 3), the escape hatch
+            # posts a NEW record rather than editing the old one
+            # (Supersession), and the beat-2 re-route count is derived by
+            # counting records. upsert PATCHes in place, which would destroy
+            # all three at once. See the design-phase-complete row above for
+            # this registry's own realized instance of exactly that drift.
+            WriteShape        = 'post-new'
+            # Free-form prose payload (a heading line plus the affirmed
+            # what-statement quoted in full); the universal
+            # Test-MarkerPayloadHygiene checks already cover the
+            # identity-marker concern, so no named adapter -- mirroring
+            # experience-owner-complete.
+            ValidatorAdapter  = $null
+            PostStep          = $null
         }
     )
 }

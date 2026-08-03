@@ -248,6 +248,8 @@ At each gate decision point, the agent MUST emit a classification-decision token
 
 **Parity:** Token emission applies identically on Claude and Copilot. No platform-specific divergence in the token contract.
 
+**The `phase` enum is closed on purpose, and open-for-work maps onto it rather than extending it.** Every checkpoint the open-for-work conversation runs — the worth-it doors, the affirmation gate, and brief approval on the routine arm — emits `phase: experience` (#957 D5). That conversation *is* the experience-replacement for standalone work, so the mapping is the honest one, and it keeps every existing consumer working: a token carrying a sixth enum value fails schema validation before it ever reaches `gate-reconciliation-core.ps1`, and that script filters on the five values above. Do not "fix" the mapping by adding an open-for-work phase; the per-checkpoint field table is in `skills/open-for-work/SKILL.md` § Gate-decision tokens.
+
 ### Token emit example (load-bearing, asked)
 
 ```json

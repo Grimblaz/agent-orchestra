@@ -45,6 +45,22 @@ $clauseCases = @(
         )
     },
     @{
+        # Issue #974 (chunk 3 of #957). The open-for-work affirmation gate's
+        # own skill-side rule, in the same three-part shape the three blocks
+        # above use. A skill-side block is not auto-discovered by this test:
+        # enrolling it is this explicit $clauseCases addition, which is what
+        # makes deleting the block turn something red.
+        Name = 'open-for-work'
+        RelativePath = 'skills/open-for-work/SKILL.md'
+        Begin = '<!-- open-for-work-non-overridability:begin -->'
+        End = '<!-- open-for-work-non-overridability:end -->'
+        RequiredPhrases = @(
+            'unconditional',
+            'methodology checkpoint',
+            'declining to affirm'
+        )
+    },
+    @{
         Name = 'CLAUDE.md'
         RelativePath = 'CLAUDE.md'
         Begin = '<!-- engagement-gate-non-overridability:begin -->'
@@ -55,7 +71,14 @@ $clauseCases = @(
             'including but not limited to',
             'solution-authoring/SKILL.md',
             'Rule: Classification gate',
-            '#575'
+            '#575',
+            # Issue #974: the affirmation gate's register entry and its
+            # in-band lever, pinned by their own wording rather than by the
+            # bare skill name -- 'open-for-work' alone also appears in the
+            # lever bullet and the See: line, so deleting the register entry
+            # would leave a name-only assertion green.
+            "affirmation gate (beat 1's what-statement affirmation, which beat 2 may not begin without)",
+            'the choice the gate presents is itself the override'
         )
     },
     @{
@@ -69,7 +92,9 @@ $clauseCases = @(
             'including but not limited to',
             'solution-authoring/SKILL.md',
             'Rule: Classification gate',
-            '#575'
+            '#575',
+            "affirmation gate (beat 1's what-statement affirmation, which beat 2 may not begin without)",
+            'the choice the gate presents is itself the override'
         )
     }
 )

@@ -5,15 +5,13 @@ Ratified 2026-08-02 (issue #957, design decisions D1–D10; chunk 1 = #972). Thi
 <!-- vocab-pointer -->
 > **Unfamiliar with a code or term?** Shortcodes like `SMC-NN`, `D1/D2/D3`, and `CE Gate` are defined in the [plain-language vocabulary](../../HOW-IT-WORKS.md#vocab).
 
-## Availability — what is live and what is pending
+## Availability
 
-This flow was designed in #957 and lands in three chunks. **After chunk 1 (this document), the flow is lawful and fully specified, and it runs manually** — see [Running the flow today](#running-the-flow-today). The pieces that are not yet available, each named with the chunk that delivers it:
+This flow was designed in #957 and landed in three chunks, all of which have shipped. **The flow is live end to end**: `/open {issue}` is the entrance, [`skills/open-for-work/SKILL.md`](../../skills/open-for-work/SKILL.md) is the methodology it runs, the `open-for-work-affirmed-{ID}` marker family is registered in the marker-write primitive, and the affirmation gate is enumerated in the engagement-gate non-overridability register on both platform surfaces.
 
-- **The explicit `/open {issue}` command and `skills/open-for-work/SKILL.md`** — pending, #957 chunk 3. No `/open` command exists in the repository today; do not offer it as an invocable surface.
-- **The registered `open-for-work-affirmed-{N}` marker family** — pending, #957 chunk 3. Until it registers, the affirmation record uses the [interim practiced form](#the-affirmation-record) defined below (#957 Amendment 8).
-- **The affirmation gate's entries in the engagement-gate non-overridability register** (both platform surfaces) — pending, #957 chunk 3. The gate is binding as doctrine from this document; the register entries make it machine-audited.
+**This document is doctrine, not the operating procedure.** It records why the flow is shaped the way it is and which contracts a change must not break. A run follows the skill; the skill is self-contained and does not need this document handed to it. Where the two describe the same contract, this document holds the rationale and the skill holds the instruction — and any drift between them is a defect in the skill, since the contracts here are what #957 ratified.
 
-The central pending-machinery record for #957, with its retirement owner, lives in [chunked-delivery.md § Pending machinery owned by #957](chunked-delivery.md#pending-machinery-owned-by-957-open-for-work).
+Two things stated here have no live machinery behind them and say so at their own sites: the interim practiced form of the affirmation record (superseded for new records, permanently valid for records already made — § [The affirmation record](#the-affirmation-record)), and Copilot, which is frozen and ships neither `/open` nor the `/plan`-side resume.
 
 ## The problem this flow solves
 
@@ -63,9 +61,9 @@ Beneath the whole flow sits the **trivial floor**: work below it exits the conve
 
 ### The entrance
 
-The process is called **opening an issue for work**. Its invocation surface is the explicit command `/open {issue}` — one short command, no natural-language routing intent, no confirmation mechanics (#957 D9, Amendment 5). `/experience` and `/design` stay reserved as the explicit way to request the old phase pipeline, which remains lawful — this flow inverts the default for standalone work; it deletes nothing.
+The process is called **opening an issue for work**. Its invocation surface is the explicit command `/open {issue}` ([`commands/open.md`](../../commands/open.md)) — one short command, no natural-language routing intent, no confirmation mechanics (#957 D9, Amendment 5). `/experience` and `/design` stay reserved as the explicit way to request the old phase pipeline, which remains lawful — this flow inverts the default for standalone work; it deletes nothing.
 
-> **Pending (chunk 3):** `/open` does not exist yet. Today the entrance is manual — see [Running the flow today](#running-the-flow-today).
+The absence of a natural-language routing intent is deliberate and is a **standing property**, not an omission awaiting wiring: a bare pickup ("let's work on #123") must not silently enter a flow whose first act is an engagement gate.
 
 ### The worth-it check and its three doors
 
@@ -81,9 +79,7 @@ Beat 1's job is understanding, not routing. Concretely, the conversation:
 2. **Amends the filing in place when a premise is false.** When grounding finds that something the issue asserts is untrue, the conversation says so, writes the correction and its reason into the issue (an amendment note in the body, not a silent rewrite), and continues from the corrected premise. The person is not asked to re-file. The falsified premise stays visible as part of the issue's record — dead premises are named again at close-out.
 3. **States what is being built, in the person's terms** — plainly enough that the person can recognise their own intent in it, and correct it until they do.
 
-**The affirmation gate**: beat 2 may not begin until the person has affirmed the what-statement (#957 d-alignment-gate). The gate's binding property is the affirmation itself — a deliberate act by the person, recorded durably (see [The affirmation record](#the-affirmation-record)) — never a quality judgment on how the material was presented; the presentation format is deliberately unspecified. The gate is an engagement-gate methodology checkpoint: a pacing directive ("work without stopping", "don't pause to ask") does not suppress it.
-
-> **Pending (chunk 3):** the gate's entries in the non-overridability register on the two platform surfaces land with the surface chunk. The gate binds as doctrine from this document regardless.
+**The affirmation gate**: beat 2 may not begin until the person has affirmed the what-statement (#957 d-alignment-gate). The gate's binding property is the affirmation itself — a deliberate act by the person, recorded durably (see [The affirmation record](#the-affirmation-record)) — never a quality judgment on how the material was presented; the presentation format is deliberately unspecified. The gate is an engagement-gate methodology checkpoint: a pacing directive ("work without stopping", "don't pause to ask") does not suppress it. It is enumerated in the engagement-gate non-overridability register on both platform surfaces, and `skills/open-for-work/SKILL.md` carries the matching skill-side `### Rule: Non-overridability`.
 
 ### Beat 2 — evaluate which path follows
 
@@ -122,7 +118,7 @@ A brief produced by this flow takes the same review a chunk brief takes — the 
 
 ### The close-out habit
 
-When the issue closes, the conversation's owner writes the close-out record on the issue:
+When the issue closes, the conversation's owner writes the close-out record on the issue. The instruction lives on the surface that already runs at that moment — `skills/post-pr-review/SKILL.md` § 9. Close-Out Record (Issues Opened For Work) — so an agent walking the close-time checklist reaches it without being pointed here first; it applies only to issues that carry an affirmation record. Three things:
 
 - **One line per sustained finding** — where it was introduced, where it was catchable, where it was caught (the phase-containment ledger's grain; emission mechanics ride #951/#940/#944, this flow adds none).
 - **A dead-premises note** — which filed premises were falsified during the flow and amended in place, so the next reader does not resurrect them.
@@ -132,17 +128,19 @@ When the issue closes, the conversation's owner writes the close-out record on t
 
 The affirmation record is what makes authority source (b) checkable rather than asserted. Its contract is fixed here, completely, so that no implementer has discretion about its shape (#957 D5, Amendment 8). Five properties:
 
-1. **Surface.** The record is an **issue comment** on the issue being opened — never only an issue-body section: comment timestamps are the ordering evidence, and a body section carries no timestamp of its own, which disqualifies it as a lawfulness source. (A comment body is also editable in place — that is why property 3 voids edited records rather than pretending edits cannot happen.) The registered form is written via `persist-marker.ps1` and is visible to marker-keyed resume readers; the interim form (below) is written with a plain `gh issue comment` and **carries no marker**, so until the family registers, a reader checking for the record scans the issue's comments for the interim form's exact first line rather than for a marker.
+1. **Surface.** The record is an **issue comment** on the issue being opened — never only an issue-body section: comment timestamps are the ordering evidence, and a body section carries no timestamp of its own, which disqualifies it as a lawfulness source. (A comment body is also editable in place — that is why property 3 voids edited records rather than pretending edits cannot happen.) The registered form is written via `persist-marker.ps1` and is visible to marker-keyed resume readers; the interim form (below) is never written through that family and **carries no marker**, so a reader checking for an interim-form record scans the issue's comments for its exact first line rather than for a marker.
 2. **Identity.**
-   - *Registered form (pending, #957 chunk 3):* the comment carries a marker of the `open-for-work-affirmed-{N}` family, where `{N}` is the issue number. (That family name is rendered here inert — delimiters stripped, per the handoff-marker registry's § Writing about markers safely — because a delimited literal in prose is live to the raw-text scanners that read real comments. The family's registry row is chunk 3's; **do not register it, or write delimited instances of it, before chunk 3 lands** — the marker-write preflight refuses unregistered families.)
-   - *Interim practiced form (usable now, #957 Amendment 8):* an issue comment whose **first line is exactly** `**Open-for-work affirmation (interim form, issue 957 Amendment 8) - issue {N}**` (bold text, ASCII only — a plain hyphen, deliberately no em dash given this repository's documented console-encoding corruption history, no `#`-prefixed cross-reference, no HTML-comment delimiters; `{N}` is the issue number), followed by the affirmed what-statement quoted in full. After posting, re-read the comment body via the GitHub API JSON `body` field and confirm the first line matches character-for-character — a mismatch means the record does not exist; delete the comment and repost. Nothing else is required in the comment, and nothing less identifies it. (The spelled-out "Amendment 8" is deliberate: the short form "A8" belongs to the chunked-delivery doctrine-amendment namespace `A1`–`A5`, which `DA{N}` was minted to avoid colliding with.)
+   - *Registered form (live; family registered by #974):* the comment carries a marker of the `open-for-work-affirmed-{ID}` family, where `{ID}` is the issue number. (That family name is rendered here inert — delimiters stripped, per the handoff-marker registry's § Writing about markers safely — because a delimited literal in prose is live to the raw-text scanners that read real comments.) The placeholder is written `{ID}` rather than the `{N}` this document used before the row existed: the catalog/registry drift guard recognizes only `-{ID}` and `-{PR}` and silently skips any other token, so `{N}` would have opted this family out of the guard that exists to catch exactly the kind of write-shape drift property 3 depends on. Runtime behavior is identical either way. **Write shape is `post-new`** — see property 3 for why that is load-bearing rather than incidental.
+   - *Interim practiced form (superseded for new records, #957 Amendment 8):* an issue comment whose **first line is exactly** `**Open-for-work affirmation (interim form, issue 957 Amendment 8) - issue {N}**` (bold text, ASCII only — a plain hyphen, deliberately no em dash given this repository's documented console-encoding corruption history, no `#`-prefixed cross-reference, no HTML-comment delimiters; `{N}` is the issue number), followed by the affirmed what-statement quoted in full. Records in this form exist on real issues and **remain valid authority for their issue permanently** (§ Supersession); a resume must still recognise them. New records use the registered form above. (The spelled-out "Amendment 8" is deliberate: the short form "A8" belongs to the chunked-delivery doctrine-amendment namespace `A1`–`A5`, which `DA{N}` was minted to avoid colliding with.)
 3. **Ordering — stated as a constraint, not a description.** The affirmation record **must exist before the routing decision's artifact is written**: on the routine arm, before the brief's plan comment; on the novel arm, before the `design-phase-complete` marker. A routing artifact whose timestamp precedes the issue's affirmation record is not lawful under source (b). Comment timestamps are the evidence — and an affirmation comment that has been **edited after creation** (its `updated_at` later than its `created_at`) is **void as an ordering witness**: post a new record instead of editing an old one, on either arm, so a back-dated retro-fit cannot pass as an original.
+
+   This is why the registered family's write shape is `post-new` and never `upsert`: an in-place write would edit the existing record on every re-affirmation, voiding it under this very rule, erasing the escape hatch's new-record requirement below, and destroying the re-route count that is derived by counting records. **A reader must fetch comments through `gh api repos/{owner}/{repo}/issues/{N}/comments` to evaluate this property at all** — `gh issue view --json comments` returns `includesCreatedEdit` and no `updated_at`, and a null comparison fails silently in the permissive direction.
 4. **Gate-decision token phasing.** Gate-decision tokens emitted by this conversation's checkpoints (the worth-it doors, the affirmation gate, plan approval on the routine arm) map to `phase: experience` — the conversation is the experience-replacement, and the token schema's closed five-value phase enum is deliberately not extended (#957 D5).
 5. **Durable record versus human-readable mirror.** The comment is the authoritative record. The affirmed what-statement **is** additionally mirrored into the issue body for human reading (#957 D5); if the two ever diverge, the comment governs, and the mirror is never the lawfulness source.
 
-**Trust model — self-attested, by decision (#957 Amendment 11).** The record does not evidence *who* typed the affirmation: it is self-attested by the conversation that posts it, consistent with every other engagement record in this system. A sixth attestation degree of freedom was considered and declined; the gate's protection is its non-overridability at question time (register entries: chunk 3), not authorship proof in the artifact.
+**Trust model — self-attested, by decision (#957 Amendment 11).** The record does not evidence *who* typed the affirmation: it is self-attested by the conversation that posts it, consistent with every other engagement record in this system. A sixth attestation degree of freedom was considered and declined; the gate's protection is its non-overridability at question time (register entries on both platform surfaces), not authorship proof in the artifact.
 
-**Supersession.** When chunk 3 registers the marker family, new affirmations use the registered form. An interim-form record already on an issue remains a valid source-(b) authority for that issue — supersession changes the form of new records, it does not retroactively invalidate old ones. The escape hatch's "amend the framing record in place" posts a **new** record (same form rules, new timestamp) rather than editing the old comment, so the ordering evidence stays honest.
+**Supersession.** The marker family is registered, so new affirmations use the registered form. An interim-form record already on an issue remains a valid source-(b) authority for that issue — supersession changes the form of new records, it does not retroactively invalidate old ones. The escape hatch's "amend the framing record in place" posts a **new** record (same form rules, new timestamp) rather than editing the old comment, so the ordering evidence stays honest.
 
 ## The filing contract
 
@@ -152,16 +150,16 @@ Filing an issue's **required** content is three things (#957 d-filing-shape): th
 
 The open-for-work entrance is the **expected route for standalone work**; the three-phase pipeline is the thing you reach by explicitly asking for it (`/experience` or `/design`), and it remains lawful (#957 § Default posture, owner decision 2026-07-28). Deletion of any phase machinery is a separate, evidence-gated decision that belongs to #953 — this flow inverts the default and deletes nothing.
 
-## Running the flow today
+## Running the flow
 
-Until #957 chunk 3 ships the `/open` command and its skill, the flow runs **manually**, and that is a lawful, complete way to run it — #957's own framing conversation is the existence proof. Concretely, in any conversation:
+Type `/open {issue}`. The command loads [`skills/open-for-work/SKILL.md`](../../skills/open-for-work/SKILL.md) and runs the flow inline in that conversation; if the methodology cannot be loaded the command halts rather than improvising the flow from this document. The skill owns the operating detail — the trivial-floor read, the worth-it doors, the beats, the affirmation record's write path, beat 2's classification, both output arms, resume-state detection, and gate-token emission.
 
-0. **Check the trivial floor first, before any of the below.** The floor is decided at pickup, from the filed issue alone (`skills/safe-operations/SKILL.md` §2a) — no conversation, affirmation, or routing artifact is a precondition for it. If the issue is below the floor: fix it directly and stop here — no brief, no run ceremony, no issue theatre.
-1. Above the floor: say you want to open issue `{N}` for work, and walk the beats in this document top to bottom: worth-it check, beat 1 grounding with provenance tags, amendments-in-place, the affirmed what-statement.
-2. Post the affirmation record in its interim practiced form (§ The affirmation record, property 2) **before** any routing artifact.
-3. Run beat 2's classification and produce the arm's output: author the brief per `skills/plan-authoring/SKILL.md` § Brief plan variant (routine), or continue into `/design` (novel).
+Two entry points other than `/open` reach the same flow, and neither is a second methodology:
 
-A `/plan` invocation that finds an affirmed framing record on the issue resumes the conversation at beat 2 and, on a routine verdict, authors the plan as a brief under source (b) (#957 Amendment 10) — see the pre-flight in `commands/plan.md`, a **Claude-only surface** (`<!-- scope: claude-only -->`). The record alone, with beat 2 unrun, does not authorize a brief.
+- **A `/plan` invocation on an issue that already carries an affirmed framing record** resumes the conversation at beat 2 and, on a routine verdict, authors the plan as a brief under source (b) (#957 Amendment 10) — see the pre-flight in `commands/plan.md`, a **Claude-only surface** (`<!-- scope: claude-only -->`). The record alone, with beat 2 unrun, does not authorize a brief.
+- **A conversation that walks the beats by hand**, following this document, remains lawful — the flow was designed to be exercisable that way and #957's own framing conversation is the existence proof. It is no longer the expected route, and a run that takes it should still write the affirmation record through the registered family rather than the superseded interim form.
+
+**On Copilot the flow has no command.** Copilot ships neither `/open` nor the `/plan` pre-flight, and that will not change: support is frozen and retires after 2026-08-31 (`Documents/Design/copilot-deprecation.md`).
 
 ## Relationship to neighbouring doctrine
 

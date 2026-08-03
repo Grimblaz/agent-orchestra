@@ -3,7 +3,7 @@
 > ⚠️ **GitHub Copilot / VS Code support is frozen and retiring after 2026-08-31.**
 > Claude Code is the actively supported path. See [COPILOT-DEPRECATION.md](Documents/Design/copilot-deprecation.md) for details and the reach-out channel if you depend on Copilot support.
 
-[![Version](https://img.shields.io/badge/version-v3.10.0-blue.svg)](../../releases)
+[![Version](https://img.shields.io/badge/version-v3.11.0-blue.svg)](../../releases)
 [![Ready for Production](https://img.shields.io/badge/status-production%20ready-green.svg)](../../releases)
 
 A multi-agent workflow system that orchestrates AI-assisted software development through specialized Claude Code agents. *(GitHub Copilot/VS Code: frozen and retiring after 2026-08-31 — see [COPILOT-DEPRECATION.md](Documents/Design/copilot-deprecation.md))*
@@ -30,7 +30,7 @@ A multi-agent workflow system that orchestrates AI-assisted software development
 2. **Install** — In the Extensions view (`Ctrl+Shift+X`), search `@agentPlugins agent-orchestra` and install.
 3. **Use** — The 17-agent payload and shared skill library are immediately available in VS Code Chat.
 
-**What's included in the repo plugin payload**: 17 agents, the shared skill library, and 18 command files under `commands/` (`/code-conductor`, `/design`, `/experience`, `/goal-run`, `/orchestrate`, `/spine-run`, `/orchestra:spine`, `/plan`, `/polish`, `/raw`, `/review-github`, `/setup-references`, `/audit-docs`, `/orchestra:review`, `/orchestra:review-lite`, `/orchestra:review-prosecute`, `/orchestra:review-defend`, `/orchestra:review-judge`). VS Code currently ignores the plugin `commands` field; Claude Code and CLI consumers use it.
+**What's included in the repo plugin payload**: 17 agents, the shared skill library, and 19 command files under `commands/` (`/open`, `/code-conductor`, `/design`, `/experience`, `/goal-run`, `/orchestrate`, `/spine-run`, `/orchestra:spine`, `/plan`, `/polish`, `/raw`, `/review-github`, `/setup-references`, `/audit-docs`, `/orchestra:review`, `/orchestra:review-lite`, `/orchestra:review-prosecute`, `/orchestra:review-defend`, `/orchestra:review-judge`). VS Code currently ignores the plugin `commands` field; Claude Code and CLI consumers use it.
 
 **What requires clone/fork**: Instruction files (`.github/instructions/`) and project templates are not distributed via the plugin — they are auto-discovered by VS Code when you clone or fork the repo. Plugin-distributed hooks are also not active when you only point VS Code at a clone via `chat.agentFilesLocations`; deterministic `SessionStart` cleanup and Claude `PostToolUse` release-hygiene prompts require an actual plugin install.
 
@@ -65,8 +65,9 @@ The plugin payload includes all 17 shared agent definitions and the shared skill
 
 ### Upstream Agents In Claude Code
 
-The three upstream agents are first-class Claude Code citizens:
+For standalone work the entrance is `/open`; the three upstream agents are reached by explicitly requesting them:
 
+- `/open {issue}` — open a filed issue for work: one conversation to a lawful brief (routine) or a continuation into design (novel), per [skills/open-for-work/SKILL.md](skills/open-for-work/SKILL.md)
 - `/experience` — invoke Experience-Owner for customer framing or CE Gate evidence capture
 - `/design` — invoke Solution-Designer for technical design exploration with the 3-pass non-blocking challenge
 - `/plan` — invoke Issue-Planner for implementation planning with the full adversarial review pipeline
@@ -195,7 +196,7 @@ That's it. You're ready to use agents.
 @Experience-Owner → @Solution-Designer → @Issue-Planner → @Code-Conductor → PR
 ```
 
-> **Default posture for standalone work (#957):** the expected route is the open-for-work entrance — one conversation from the filed issue to a lawful brief or a continuation into design ([Documents/Design/open-for-work.md](Documents/Design/open-for-work.md)) — with the pipeline above reached by explicitly requesting it (`/experience` or `/design`). The `/open` command ships with #957 chunk 3; until then the conversation runs manually per that document. The pipeline remains fully lawful on explicit request.
+> **Default posture for standalone work (#957):** the expected route is the open-for-work entrance — one conversation from the filed issue to a lawful brief or a continuation into design ([Documents/Design/open-for-work.md](Documents/Design/open-for-work.md)) — with the pipeline above reached by explicitly requesting it (`/experience` or `/design`). The entrance is the explicit command `/open {issue}`. The pipeline remains fully lawful on explicit request.
 
 1. **@Experience-Owner** — frames the customer problem, defines user journeys and CE Gate scenarios (optional upstream step)
 2. **@Solution-Designer** — picks up the issue, explores the design space, updates the issue body with a design
