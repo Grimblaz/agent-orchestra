@@ -2623,7 +2623,13 @@ Describe 'PR #988 response: the attribution clause''s remaining edges' {
             (script:New-988Row -Stage 'plan-stress-test' -Key 'S5'),
             (script:New-988Row -Stage 'brief-review' -Severity 'high' -Key 'S6')
         )
-        $line = @(script:Get-988Render $entries -split "`n" | Where-Object { $_ -match 'of which:' })[0]
+        # Parenthesized deliberately (external review, PR #988). Without it
+        # PowerShell parses `-split` and its operand as extra ARGUMENTS to the
+        # command, they land in $args and are discarded, and $line holds the
+        # whole multi-line report — so the assertion below would match the
+        # ordering anywhere in the report instead of within one rendered line.
+        $line = @((script:Get-988Render $entries) -split "`n" | Where-Object { $_ -match 'of which:' })[0]
+        $line | Should -Not -Match "`n" -Because 'the match must be scoped to ONE rendered line, which is the thing the parenthesis buys'
         $line | Should -Match 'of which: plan-stress-test 1 critical; brief-review 1 high'
     }
 

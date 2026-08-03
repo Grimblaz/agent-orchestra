@@ -756,6 +756,18 @@ function script:Get-PCBraceSafeMask {
         Length and newline positions are preserved so offsets computed against
         the mask index the original text exactly.
 
+        THE BETTER SHAPE, NOT TAKEN HERE. The external reviewer that raised the
+        fragility also named the right long-term fix: parse the source with
+        [System.Management.Automation.Language.Parser]::ParseInput and read the
+        FunctionDefinitionAst / SwitchStatementAst extents directly. That is
+        exact, and it would also retire the column-0 closing-brace convention
+        the function-span bound still assumes. It was not taken in PR #988
+        because it re-architects a guard that had just been adversarially
+        reviewed and carries a green suite around its current shape — a
+        deliberate deferral, not an oversight. Both remaining approximations
+        fail LOUD (an unlocatable span reports drift), so the direction is
+        safe; take the AST route when this file is next opened for real work.
+
         Handles: block comments (angle-bracket-hash open, hash-angle-bracket
         close — spelled out rather than written literally, because a literal
         close sequence inside comment-based help terminates the help block and
