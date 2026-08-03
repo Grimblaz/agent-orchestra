@@ -51,8 +51,6 @@ All three upstream agents share a common opening behavior — implemented in `sk
 
 ## Orchestration
 
-Code-Conductor orchestration is available in Claude Code.
-
 - `/orchestrate` runs Code-Conductor inline in the parent conversation for the full pipeline from smart resume and plan handoff through implementation, validation, CE Gate, and PR readiness.
 - `/spine-run` runs Spine-Runner as the minimal frame-walking conductor once a v2 plan exists.
 - `/goal-run {issue}` launches or resumes the unattended vendor-goal-loop harness (Arm I) for a single issue carrying an approved goal-contract plan — one command is both launcher and resumer, and any non-happy path produces a typed halt report instead of an in-conversation question. See [HOW-IT-WORKS.md § Goal-run: the unattended pipeline](HOW-IT-WORKS.md#3-goal-run-the-unattended-pipeline) and [skills/goal-run/SKILL.md](skills/goal-run/SKILL.md).
@@ -138,7 +136,8 @@ Methodology checkpoints fire unconditionally per D3. The user's only in-band lev
 
 - `solution-authoring`: the `Decline engagement — proceed without classification` option (or `decline:` free-text)
 - `upstream-onboarding`: selecting an alternative option in the structured question
-- `plan-authoring`: the documented `Reject` or equivalent plan-approval option; `safe-operations` §2e has no separate decline — the maintainer's per-item approve/modify/drop choice on each batched proposal is itself the override; `open-for-work` has none either — declining to affirm the what-statement is the gate's own negative outcome, which returns the conversation to beat 1 rather than bypassing the gate, so the choice the gate presents is itself the override
+- `plan-authoring`: the documented `Reject` or equivalent plan-approval option; `safe-operations` §2e has no separate decline — the maintainer's per-item approve/modify/drop choice on each batched proposal is itself the override
+- `open-for-work`: no separate decline either — declining to affirm the what-statement is the gate's own negative outcome, which returns the conversation to beat 1 rather than bypassing the gate, so the choice the gate presents is itself the override
 
 **The gate vs. the question (#786):** for Code-Conductor's `scope-classification` touchpoint, the *gate* — rubric evaluation plus the L0 gate-decision token — fires unconditionally on every run. The *question* (the `AskUserQuestion` call) is conditional: it fires only when the scope-classification outcome is genuinely indeterminate (every evidenced criterion holds so far, and at least one criterion still lacks an evidence-backed verdict that could flip the tier). When the outcome is determined by evidence-backed criteria, the gate announces the tier — naming the deciding criteria and carrying a standing pre-dispatch override — and records a lawful `{outcome: gate-fails, classification: routine}` token instead of asking. A `gate-fails` token is a documented, non-silent skip of the *question*, not a skip of the *gate*: the evaluation and token emission still happened. Pacing directives still cannot suppress a live (indeterminate-outcome) question — non-overridability governs the question whenever it actually fires.
 

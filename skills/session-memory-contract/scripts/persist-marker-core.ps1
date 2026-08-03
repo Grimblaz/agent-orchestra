@@ -242,16 +242,16 @@ function Get-MarkerFamilyRegistry {
 
         Rows are grounded in already-documented marker families (this
         repo's own CLAUDE.md, skills/session-memory-contract/references/handoff-markers.md,
-        and 893-D3's family table) rather than invented: plan-issue,
-        design-phase-complete, and frame-slices (s5) are upsert (all three
-        are found-or-created once, then repeatedly patched -- plan-issue
-        and design-phase-complete as persist-phase-ledger-core.ps1's own
-        plan/design modes already do today; frame-slices per
+        and 893-D3's family table) rather than invented: plan-issue and
+        frame-slices (s5) are upsert (both are found-or-created once, then
+        repeatedly patched -- plan-issue as persist-phase-ledger-core.ps1's
+        own plan mode already does today; frame-slices per
         handoff-markers.md's frame-slices-{ID} row: "re-persist reuses the
         existing sibling ... rather than creating a second one", which
         post-new's superseded-match-still-posts semantics would violate);
-        experience-owner-complete, review-judge-produced, engagement-record,
-        review-dispositions, and credit-input are post-new (freshly posted
+        design-phase-complete, experience-owner-complete,
+        review-judge-produced, engagement-record, review-dispositions, and
+        credit-input are post-new (freshly posted
         completion/sentinel/deferred-emission comments -- CLAUDE.md
         documents review-judge-produced as "written as a separate PR
         comment"; skills/frame-credit-emission/SKILL.md documents
@@ -419,11 +419,27 @@ function Get-MarkerFamilyRegistry {
             # all three at once. See the design-phase-complete row above for
             # this registry's own realized instance of exactly that drift.
             WriteShape        = 'post-new'
-            # Free-form prose payload (a heading line plus the affirmed
-            # what-statement quoted in full); the universal
-            # Test-MarkerPayloadHygiene checks already cover the
-            # identity-marker concern, so no named adapter -- mirroring
-            # experience-owner-complete.
+            # Free-form prose payload (the marker on the FIRST line, then a
+            # heading line, then the affirmed what-statement quoted in
+            # full); the universal Test-MarkerPayloadHygiene checks already
+            # cover the identity-marker concern, so no named adapter --
+            # mirroring experience-owner-complete.
+            #
+            # #974 review note: unlike experience-owner-complete, whose
+            # payload is agent-composed, this one quotes issue prose
+            # VERBATIM. Hygiene covers HTML-comment markers only, so the
+            # quoted span still re-fires any '@mention' and '#issue'
+            # cross-reference it contains and can break the composed
+            # comment's rendering with an unbalanced code fence. Both are
+            # noise rather than integrity failures -- recorded here so a
+            # later reader does not mistake the null adapter for a claim
+            # that the payload was checked for them.
+            #
+            # First-line placement is a WRITER convention, not something
+            # this row enforces: the read-back accepts the marker at the
+            # start of any line, while every documented reader tests the
+            # first line. skills/open-for-work/SKILL.md states the
+            # convention at the write site.
             ValidatorAdapter  = $null
             PostStep          = $null
         }

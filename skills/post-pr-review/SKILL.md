@@ -20,6 +20,8 @@ Or use the strategic assessment section only (Step 6) **before merging** to eval
 
 **Step 9 (Close-Out Record) is not gated on a merged PR.** It fires whenever an issue that was opened for work is about to be closed, including an issue closed without a pull request. Do not read the merged-PR trigger above as a reason to skip it.
 
+Be clear about who reaches it on that path, because no dispatcher does: the post-merge checklist is invoked by Code-Conductor's cleanup path, which presupposes a PR. For a PR-less close the reader is the **conversation closing the issue**, routed here by `skills/open-for-work/SKILL.md` § Resuming an issue already opened for work (`complete` state). That is a documented reader, not an automated one — nothing fires Step 9 on its own, so an issue closed by hand outside any conversation will not get a close-out record unless someone runs this step deliberately.
+
 > **Note for plugin-only users**: Step 6 (Strategic Assessment) is available without cloning — it's pure analysis using GitHub tools.
 
 ## Purpose
@@ -220,13 +222,13 @@ if ((Test-Path 'Documents/Planning/sequence.yaml') -and (Test-Path '.github/scri
 
 **Applies to**: an issue that was **opened for work** through the open-for-work entrance — one carrying an affirmation record. **Does not apply otherwise.** An ordinary pull-request close on an issue that never ran that flow has no close-out record to write and no re-route count to report; check for the affirmation record first, and when there is none, skip this step and say so rather than manufacturing an empty record.
 
-**How to check** — run the lookup in `skills/open-for-work/SKILL.md` § Resuming an issue already opened for work. That section is the only place both recognised record forms are defined, and it is the instruction here, not an inference: read the issue's comments through `gh api repos/{owner}/{repo}/issues/{N}/comments --paginate` (never `gh issue view --json comments`, which carries no `updated_at`), accept either the registered marker form or the interim practiced form's exact first line, and discard any record edited after creation. **Zero lawful records → skip this step.**
+**How to check** — run the lookup in `skills/open-for-work/SKILL.md` § Resuming an issue already opened for work. That section is the only place both recognised record forms are defined, and it is the instruction here, not an inference: read the issue's comments through `gh api repos/{owner}/{repo}/issues/{ID}/comments --paginate` (never `gh issue view --json comments`, which carries no `updated_at`), accept either the registered marker form or the interim practiced form's exact first line, and discard any record edited after creation. **Zero lawful records → skip this step.**
 
 **Action**: write one close-out comment on the issue, carrying three things:
 
 1. **One line per sustained finding** — where it was introduced, where it was catchable, where it was caught. This is the phase-containment ledger's own grain, and this step **does not emit ledger blocks**: the emission mechanics belong to `Documents/Design/phase-containment-ledger.md` and the plan-surface ledger those blocks already live on. Point at that ledger and summarise from it; do not re-emit it here.
 2. **A dead-premises note** — which filed premises beat 1's grounding falsified and amended in place, so the next reader does not resurrect them.
-3. **The beat-2 re-route count** — how many times the escape hatch re-ran the routing. Zero is the common case and is reportable; it is derivable by counting the issue's affirmation records and subtracting one, which is why that family appends rather than overwrites.
+3. **The beat-2 re-route count** — how many times the escape hatch re-ran the routing. Zero is the common case and is reportable. **The count is what the run observed, not an arithmetic on comment counts.** Records-minus-one is a cross-check that legitimately disagrees in three directions: a record voided by a later edit still evidences a re-route that happened, a re-affirmation with an unchanged what-statement can append nothing at all, and a retried write can append twice for one re-route. Report the observed count, note how many affirmation records the issue carries and how many are lawful, and when those disagree say so and why.
 
 Write it **before** marking the issue closed (`## Completion` below), so the record lands on an issue a reader can still find it on.
 

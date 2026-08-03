@@ -68,7 +68,7 @@ Present **three doors** — *proceed*, *shrink the bet*, or *don't* — and map 
 
 The `Proceed-full` / `Proceed-lite` distinction collapses **in presentation only**. The enum, the labels, and same-decision-resume are untouched.
 
-**Recording**: only `Park` and `Decline` record, as a `worth-it-{ISSUE_NUMBER}` entry inside the issue's `engagement-record-experience-{ISSUE_NUMBER}` marker, with `status: parked` / `status: declined`, per `skills/customer-experience/references/value-reflex.md`. That entry is what suppresses re-prompting on a later pickup and distinguishes a declined issue from a fresh one. A proceed outcome records nothing here.
+**Recording**: only `Park` and `Decline` record, and the contract is `skills/customer-experience/references/value-reflex.md` — read it there rather than from this summary. It has **two** parts, and dropping either breaks a different reader: append a `worth-it-{ISSUE_NUMBER}` entry to the issue's `engagement-record-experience-{ISSUE_NUMBER}` marker, **and** apply `status: parked` or `status: declined` **to the issue itself**. The entry is what suppresses re-prompting on a later pickup; the issue-level status is what tells anyone looking at the board that this issue was considered and set down. A proceed outcome records nothing here.
 
 ## Step 2 — beat 1: align on what is being built
 
@@ -92,45 +92,60 @@ The gate's binding property is the **affirmation itself** — a deliberate act b
 
 The affirmation gate is an engagement-gate methodology checkpoint, and it is unconditional with respect to user pacing or auto-mode directives. "Work without stopping," "don't pause to ask," "make the reasonable call," and semantically equivalent productivity directives apply to preference-clarifying pauses, not to methodology checkpoints, and they do not suppress this gate. The user's in-band lever is the gate's own negative outcome: declining to affirm — saying the what-statement is wrong, or simply not affirming it — stops beat 2 and returns the conversation to beat 1, which is the gate working rather than a bypass of it. There is no separate decline option, for the same reason `safe-operations` §2e has none: the choice the gate presents is itself the override.
 
+Unconditional here also covers the generic resume rule, not only pacing directives: **`same-decision-resume` never suppresses this gate.** An existing engagement record carrying the affirmation decision is evidence that a *previous* what-statement was affirmed; when the escape hatch fires, the person is being asked about a different one. Reusing the earlier answer would let a run inherit an affirmation nobody gave for the statement actually on the table.
+
 <!-- open-for-work-non-overridability:end -->
 
 This gate is registered in the engagement-gate non-overridability register on both platform surfaces — `CLAUDE.md` § Engagement-gate non-overridability and `.github/copilot-instructions.md` § Engagement-gate non-overridability.
 
 ### Writing the affirmation record
 
-The record is what makes authority source (b) checkable rather than asserted. Five properties fix its shape; none of them is an implementer's choice.
+The record is what makes authority source (b) checkable rather than asserted. Five properties fix its shape; none of them is an implementer's choice. **The numbering below is doctrine's** (`Documents/Design/open-for-work.md` § The affirmation record) — cite a property by its number and both surfaces agree.
 
 **1. Surface.** The record is an **issue comment** on the issue being opened — never only an issue-body section. Comment timestamps are the ordering evidence; a body section carries no timestamp of its own.
 
-**2. Identity — the registered form.** The comment carries a marker of the `open-for-work-affirmed-{ID}` family, where `{ID}` is the issue number. *(Rendered inert here — delimiters stripped, per `skills/session-memory-contract/references/handoff-markers.md` § Writing about markers safely — because a delimited literal in prose is live to the raw-text scanners that read real comments.)*
+**2. Identity.** Two forms are recognised; only the first is written.
+
+***2a — the registered form (what new records use).*** The comment carries a marker of the `open-for-work-affirmed-{ID}` family, where `{ID}` is the issue number. *(Rendered inert here — delimiters stripped, per `skills/session-memory-contract/references/handoff-markers.md` § Writing about markers safely — because a delimited literal in prose is live to the raw-text scanners that read real comments.)* The placeholder is `{ID}`, not `{N}`, everywhere the family is named: the catalog drift guard recognises only `-{ID}` and `-{PR}` and silently skips any other token.
 
 Write it through the repository's marker-write primitive, which is the **only** documented write path for this family:
 
 ```powershell
-pwsh ./skills/session-memory-contract/scripts/persist-marker.ps1 `
+pwsh skills/session-memory-contract/scripts/persist-marker.ps1 `
   -Owner {owner} -Repo {repo} -Family open-for-work-affirmed `
-  -Number {N} -TargetSurface issue `
-  -Marker '{the delimited open-for-work-affirmed-{N} marker}' `
-  -BodyFile .tmp/issue-{N}/affirmation.md
+  -Number {ID} -TargetSurface issue `
+  -Marker '{the delimited open-for-work-affirmed-{ID} marker}' `
+  -BodyFile .tmp/issue-{ID}/affirmation.md
 ```
 
-The body file's first line is the marker; the rest is the affirmed what-statement quoted in full, plus a human-readable heading line. Keep the heading ASCII-only (a plain hyphen, no em dash) — this repository has a documented console-encoding corruption history on non-ASCII round-trips.
+**The marker must be the body file's very first line** — a resume, `commands/plan.md`'s pre-flight, and the close-time reader all test the first line, while the primitive's read-back accepts the marker at the start of *any* line. A body whose heading precedes the marker writes successfully and is then invisible to every reader. Put the human-readable heading *after* the marker, then the affirmed what-statement quoted in full. Keep the heading ASCII-only (a plain hyphen, no em dash) — this repository has a documented console-encoding corruption history on non-ASCII round-trips.
 
-The family is registered `post-new`: **every affirmation appends a new comment, and no affirmation ever edits or overwrites an earlier one.** This is not a stylistic preference. Property 3 below voids an edited record as an ordering witness, the escape hatch posts a new record rather than editing the old one, and the beat-2 re-route count is derived by counting records. An in-place write shape would silently destroy all three.
+**Read the result; do not assume it.** Two branches of the write path return `Success = $true` without producing the record this flow needs, and neither is detectable from the exit code:
 
-**3. Identity — the interim practiced form, still recognised.** Before the family was registered, the record was written as a plain issue comment whose **first line is exactly**:
+- **`Action = 'no-op'`** — `post-new` compares the candidate against the latest existing match under whitespace normalization and, on equality, **posts nothing**. A re-affirmation whose what-statement is unchanged therefore appends no second record. When the escape hatch fires with an unchanged what-statement, the count of records is no longer the count of re-routes: record the re-route in the close-out record from the conversation's own history rather than from the comment count, and say the write was a no-op.
+- **A confirmation containing `after a read-back-failure repair-PATCH`** — the create path repaired a read-back mismatch by PATCHing the comment it had just posted. That PATCH sets `updated_at` later than `created_at`, so property 3 **voids the record it just created**. Treat it as no record: post a fresh one and verify the new comment's `updated_at` equals its `created_at`.
+
+Because the payload quotes issue prose verbatim, it re-fires every `@mention` and `#issue` cross-reference the quoted text contains, and an unbalanced code fence in it breaks the composed comment's rendering. Neither affects lawfulness; both are worth a glance before writing.
+
+***2b — the interim practiced form (recognised, never written).*** Before the family was registered, the record was written as a plain issue comment whose **first line is exactly**:
 
 ```text
-**Open-for-work affirmation (interim form, issue 957 Amendment 8) - issue {N}**
+**Open-for-work affirmation (interim form, issue 957 Amendment 8) - issue {ID}**
 ```
 
-Records in that form already exist on real issues. **They remain valid source-(b) authority for their issue, permanently.** Supersession changed the form of *new* records; it did not retroactively invalidate old ones. A resume must recognise both forms — see [Resuming](#resuming-an-issue-already-opened-for-work). Do not write new records in the interim form: new affirmations use the registered form above.
+Records in that form already exist on real issues. **They remain valid source-(b) authority for their issue, permanently.** Supersession changed the form of *new* records; it did not retroactively invalidate old ones. A resume must recognise both forms — see [Resuming](#resuming-an-issue-already-opened-for-work). Do not write new records in the interim form.
 
-**4. Ordering — a constraint, not a description.** The affirmation record **must exist before the routing decision's artifact is written**: before the brief's plan comment on the routine arm, before the design-completion marker on the novel arm. A routing artifact whose timestamp precedes the issue's affirmation record is **not lawful** under source (b).
+**3. Ordering — a constraint, not a description.** The affirmation record **must exist before the routing decision's artifact is written**: before the brief's plan comment on the routine arm, before the design-completion marker on the novel arm. A routing artifact whose timestamp precedes the issue's **earliest lawful** affirmation record is **not lawful** under source (b). *Earliest*, not latest, is load-bearing: the escape hatch deliberately posts a new record after the artifact exists, so a latest-record reading would declare every lawful escape-hatch run unlawful.
 
-An affirmation comment **edited after creation** (its `updated_at` later than its `created_at`) is **void as an ordering witness** — a back-dated retro-fit must not be able to pass as an original. Post a new record instead of editing an old one, on either arm.
+An affirmation comment **edited after creation** (its `updated_at` later than its `created_at`) is **void as an ordering witness** — a back-dated retro-fit must not be able to pass as an original. Post a new record instead of editing an old one, on either arm. Being void as an *ordering witness* is not the same as never having happened: a voided record still evidences that an affirmation occurred, which is why the re-route count is not derived from the lawful-record count alone (see [the escape hatch](#the-standalone-escape-hatch)).
+
+The family's registered write shape is `post-new` for exactly these reasons — an in-place shape would edit the existing record on every re-affirmation, voiding it under this property, and erase the escape hatch's new-record requirement.
+
+**4. Gate-decision token phasing.** Tokens emitted by this conversation's checkpoints map to `phase: experience`; the per-checkpoint field table and its rationale are in [§ Gate-decision tokens](#gate-decision-tokens).
 
 **5. Durable record versus human-readable mirror.** The comment is the authoritative record. Additionally mirror the affirmed what-statement into the **issue body** so a human reading the issue sees what was agreed without opening the comment thread. If the two ever diverge, **the comment governs**; the mirror is never the lawfulness source. Say so at the mirror site.
+
+An issue-body write replaces the **whole** body, so compose it under `skills/terminal-hygiene/SKILL.md` § 2: re-read the live body immediately before writing, reconcile rather than clobber if it changed since your last read, and write once from a file. That section also carries the non-ASCII round-trip warning that applies here with force — the affirmed what-statement is the person's own wording, which is exactly the text most likely to carry characters the round-trip mangles. The same discipline governs beat 1's amendment notes.
 
 **Trust model.** The record is **self-attested** by the conversation that posts it — it does not evidence *who* typed the affirmation, consistently with every other engagement record in this system. The gate's protection is its non-overridability at question time, not authorship proof in the artifact.
 
@@ -176,32 +191,41 @@ When a **routine**-arm run later hits a target-voiding unknown mid-run — the s
 3. Re-run beat 2 against the updated still-open list.
 4. **Record the re-route.** The count is a named close-out datum; zero is the common and reportable case.
 
-The count is derivable by counting the issue's affirmation records and subtracting one, which is exactly why the family appends rather than overwrites.
+**Counting re-routes.** The count is the number of times beat 2 was re-run, and the conversation that re-ran it is the authority for that number. Comment counting is a **cross-check, not the definition**, because three things break the identity between records and re-routes: a record voided by a later edit still evidences a re-route that happened; a re-affirmation whose what-statement is unchanged can no-op and append nothing; and a retried write after an ambiguous failure can append twice for one re-route. So: report the count the conversation observed, then say how many affirmation records the issue carries and how many of those are lawful. When the two disagree, say so and say why — a divergence is information, not an error to paper over.
 
 ## Resuming an issue already opened for work
 
 A resume reads the issue's comments and answers two questions: *is there a lawful affirmation record*, and *what state is this issue in*.
 
-**Read the comments through `gh api`, not `gh issue view`.** This is not interchangeable: `gh issue view --json comments` returns `includesCreatedEdit` and carries **no `updated_at` field at all**, so property 4's void-if-edited rule cannot be evaluated from it — and a null comparison fails silently in the permissive direction, accepting an edited record as an ordering witness.
+**Read the comments through `gh api`, not `gh issue view`.** This is not interchangeable: `gh issue view --json comments` returns `includesCreatedEdit` and carries **no `updated_at` field at all**, so property 3's void-if-edited rule cannot be evaluated from it — and a null comparison fails silently in the permissive direction, accepting an edited record as an ordering witness.
 
 ```bash
-gh api repos/{owner}/{repo}/issues/{N}/comments --paginate
+gh api repos/{owner}/{repo}/issues/{ID}/comments --paginate
 ```
 
 **Finding the record** — accept either form:
 
-- **Registered form**: the body's first line is the delimited `open-for-work-affirmed-{N}` marker.
-- **Interim practiced form**: the body's first line is exactly `**Open-for-work affirmation (interim form, issue 957 Amendment 8) - issue {N}**`. Scan for that literal first line, not for a marker — interim records carry none.
+- **Registered form**: the body's first line is the delimited `open-for-work-affirmed-{ID}` marker.
+- **Interim practiced form**: the body's first line is exactly `**Open-for-work affirmation (interim form, issue 957 Amendment 8) - issue {ID}**`. Scan for that literal first line, not for a marker — interim records carry none.
 
-**Edit state**: for each candidate, compare `updated_at` against `created_at`. Later means the record is **void as an ordering witness** — skip it and use an unedited one. If no unedited record survives, the issue has no lawful source-(b) authority; say so rather than proceeding.
+**Edit state**: for each candidate, compare `updated_at` against `created_at`. Later means the record is **void as an ordering witness** — skip it for every ordering purpose. If no unedited record survives, the issue has no lawful source-(b) authority; say so rather than proceeding.
 
-**The three states**, decided from the record plus the issue's routing artifacts:
+### Deciding the state
+
+**Order matters, not just presence.** Every question below is about *sequence*; a state read from which artifacts exist, ignoring when they were written, cannot see the two failures this section exists to catch. Collect, in one pass: every affirmation record with its `created_at` and lawfulness, and every routing artifact (a `plan-variant: brief` plan comment, or the design-completion marker) with its `created_at`.
+
+Then, in order:
+
+1. **No lawful record** → the issue was not opened for work through this flow. Say so; do not infer authority.
+2. **Ordering check (property 3).** Compare the **earliest lawful** record against the **earliest** routing artifact. If a routing artifact predates it, the artifact is **not lawful under source (b)** — stop and report that, rather than resuming under it. This is the only moment a later reader can catch a back-fitted authority, and nothing else in the repository performs this check.
+3. **Supersession check.** If the **latest** lawful record postdates the latest routing artifact, the escape hatch fired and beat 2 has not yet been re-run against the newer what-statement. This is the **re-affirmed-not-re-routed** state below — not `routed`, even though both a record and an artifact exist.
 
 | State | Evidence | What the resume does |
 | --- | --- | --- |
-| **affirmed-not-routed** | A lawful affirmation record; no brief plan comment and no design-completion marker | Resume at **beat 2**. Do not re-run the worth-it check or beat 1, and do not ask to run `/design` first — the record plus a routine verdict are the lawful authority. |
-| **routed** | A lawful affirmation record **and** a routing artifact (a `plan-variant: brief` plan comment, or the design-completion marker), issue open | The routing decision is made. Continue the run under that artifact; do not re-affirm unless the escape hatch fires. |
-| **complete** | The issue is closed | Nothing to resume. The outstanding obligation is the close-out record — see `skills/post-pr-review/SKILL.md` § Close-out record. |
+| **affirmed-not-routed** | A lawful record; no routing artifact | Resume at **beat 2**. Do not re-run the worth-it check or beat 1, and do not ask to run `/design` first — the record plus a routine verdict are the lawful authority. |
+| **re-affirmed-not-re-routed** | The latest lawful record **postdates** the latest routing artifact, issue open | The escape hatch fired and stopped mid-cycle. Re-run **beat 2** against the updated still-open list and produce a fresh arm output. Do **not** continue under the existing artifact — it was authored against a what-statement that has since been superseded. Count this re-route. |
+| **routed** | A lawful record predating a routing artifact that is itself the latest of the two, issue open | The routing decision is current. Continue the run under that artifact; do not re-affirm unless the escape hatch fires. |
+| **complete** | The issue is closed **and** it carries a lawful record | Nothing to resume. If the close-out record was not written before the close, write it now and say it is late — see `skills/post-pr-review/SKILL.md` § 9. Close-Out Record (Issues Opened For Work). A closed issue carrying **no** record is not this flow's business at all. |
 
 **A record alone, with beat 2 unrun, does not authorize a brief.** That is the affirmed-not-routed state, and its answer is to run beat 2 — not to author.
 
@@ -213,21 +237,27 @@ Every checkpoint this conversation runs emits a **gate-decision token** — the 
 
 | Checkpoint | `decision_id` | `window_position` | `classification` | `outcome` |
 | --- | --- | --- | --- | --- |
-| Worth-it doors | `worth-it-{N}` | `pre-ask` | `load-bearing` on Park/Decline; `routine` otherwise | `asked`, or `same-decision-resume` when a prior `worth-it-{N}` entry suppresses the prompt, or `declined` on `frame it` |
-| Affirmation gate | `open-for-work-affirmation` | `pre-ask` | `load-bearing` | `asked` |
-| Brief approval (routine arm) | `open-for-work-brief-approval` | `pre-ask` | `load-bearing` | `asked` |
+| Worth-it doors | `worth-it-{ID}` | `pre-ask` | `load-bearing` (see below) | `asked`, or `same-decision-resume` when a prior `worth-it-{ID}` entry suppresses the prompt, or `declined` on `frame it` |
+| Affirmation gate | `open-for-work-affirmation-{ID}` | `pre-ask` | `load-bearing` | `asked` |
+| Brief approval (routine arm) | `open-for-work-brief-approval-{ID}` | `pre-ask` | `load-bearing` | `asked` |
 
 `window_position` is `pre-ask` for all three: that value is the classification gate's pre-dispatch firing position, which is where each of these fires. `unknown` would validate and reconcile against nothing — do not use it.
 
-**Every load-bearing `asked` token must have a correspondingly recorded decision**, or the reconciler warns on every subsequent run. Record each one as a `load_bearing_decisions` entry with the **same `decision_id`** in the issue's `engagement-record-experience-{ISSUE_NUMBER}` marker (`skills/engagement-record-emission/SKILL.md`; `capture_session: "normal-experience-v2"`). That marker is this conversation's single engagement record; the `worth-it-{N}` entry lives in it too.
+**All three `decision_id` values are issue-scoped**, which matters for more than uniqueness. A returned record for a `decision_id` activates `same-decision-resume` (`skills/engagement-record-emission/SKILL.md` § Resume-Read Protocol), which suppresses re-firing the question it belongs to. That is correct for a resume of the *same* decision and **wrong for the affirmation gate's second firing**: when the escape hatch fires, the person is affirming a *different*, superseded-and-replaced what-statement, and the gate fires again unconditionally. **`same-decision-resume` never suppresses the affirmation gate** — the gate's non-overridability covers the generic resume rule as much as it covers a pacing directive.
+
+**The worth-it token's classification is decided after the doors, not before them.** The emit contract says to emit before asking, but this checkpoint's classification depends on which door the person picks — Park and Decline are load-bearing and record a decision; a proceed outcome does not. Guessing `routine` up front is the destructive error: the reconciler skips `routine` unread, so a Park or Decline, the only worth-it outcome that records anything, becomes invisible to it. Emit the token at the pre-ask position with `classification: load-bearing`, and if the answer turns out to be a proceed outcome, **emit a superseding token** for the same `decision_id` carrying `classification: routine`. Two tokens for one checkpoint is the honest record; a guessed one is not.
+
+**Every load-bearing `asked` token must have a correspondingly recorded decision**, or the reconciler warns on every subsequent run. Record each as a `load_bearing_decisions` entry with the **same `decision_id`** in the issue's `engagement-record-experience-{ID}` marker (`skills/engagement-record-emission/SKILL.md`; `capture_session: "normal-experience-v2"`).
+
+**Write that marker cumulatively, and write it once, at the end.** The `engagement-record` family is `post-new` and its reader resolves **latest-comment-wins per phase**, returning only the newest marker's decisions — so a second marker carrying only the brief-approval decision *orphans* the affirmation decision recorded in the first, and the reconciler then warns about it forever. Either write one marker at conversation exit carrying every decision, or, if an earlier write is unavoidable, make each later write carry the **full** decision set accumulated so far.
 
 Check the result rather than assuming it:
 
 ```powershell
-pwsh -NoProfile -Command ". .github/scripts/lib/gate-reconciliation-core.ps1 -Phase experience -IssueNumber {N}"
+pwsh -NoProfile -Command ". .github/scripts/lib/gate-reconciliation-core.ps1 -Phase experience -IssueNumber {ID}"
 ```
 
-A `status: clean` result discharges this. A `findings` result must be explained, not ignored.
+**`status: clean` alone does not discharge this — check `token_count` too.** The reconciler reports `clean` whenever it finds no findings, and a run that emitted *no tokens at all* finds none: `token_count: 0` with `status: clean` is the shape of a run that skipped this obligation entirely, not one that met it. The result discharges the obligation only when `status` is `clean` **and** `token_count` is at least the number of checkpoints this run actually reached. A `findings` result must be explained, not ignored.
 
 ## Review
 
@@ -244,7 +274,7 @@ The review runs **once**, after beat 2's artifact exists and before the worktree
 
 ## Close-out
 
-When the issue closes, the conversation's owner writes the close-out record on the issue: one line per sustained finding, a dead-premises note, and the beat-2 re-route count. The obligation and its exact shape live at the close-time surface that already runs at that moment — `skills/post-pr-review/SKILL.md` § Close-out record. This flow adds no ledger-emission machinery of its own.
+When the issue closes, the conversation's owner writes the close-out record on the issue: one line per sustained finding, a dead-premises note, and the beat-2 re-route count. The obligation and its exact shape live at the close-time surface that already runs at that moment — `skills/post-pr-review/SKILL.md` § 9. Close-Out Record (Issues Opened For Work). This flow adds no ledger-emission machinery of its own.
 
 ## Related Guidance
 
@@ -255,4 +285,4 @@ When the issue closes, the conversation's owner writes the close-out record on t
 - [`skills/solution-authoring/SKILL.md`](../solution-authoring/SKILL.md) — § L0 Gate Token: the token contract these checkpoints emit against.
 - [`skills/engagement-record-emission/SKILL.md`](../engagement-record-emission/SKILL.md) — the engagement-record marker this flow's decisions are recorded in.
 - [`skills/session-memory-contract/references/handoff-markers.md`](../session-memory-contract/references/handoff-markers.md) — the marker catalog, including this flow's affirmation-record family.
-- [`skills/post-pr-review/SKILL.md`](../post-pr-review/SKILL.md) — § Close-out record.
+- [`skills/post-pr-review/SKILL.md`](../post-pr-review/SKILL.md) — § 9. Close-Out Record (Issues Opened For Work).

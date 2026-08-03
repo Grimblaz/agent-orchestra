@@ -49,6 +49,14 @@ Describe 'open-for-work surface (issue #974)' {
         # that would route a request to the open-for-work entrance. Written
         # to take the table as an argument precisely so it can be aimed at a
         # synthetic table that DOES contain such an entry.
+        #
+        # Matching is deliberately WIDER than an equality test on 'open'
+        # (#974 review, M20): criterion 10's property is "no bare-pickup
+        # intent FOR THE ENTRANCE", not "no intent literally named /open".
+        # An alias spelled /orchestra:open or /open-for-work would satisfy
+        # an equality test while routing to the same entrance, so the probe
+        # keys on the command's last path segment containing the token
+        # 'open', and also on an intent_key naming the entrance.
         $script:FindEntranceIntents = {
             param([object]$RoutingTable)
 
@@ -58,10 +66,19 @@ Describe 'open-for-work surface (issue #974)' {
             if ($null -eq $nl -or $null -eq $nl.entries) { return $entries }
 
             foreach ($entry in @($nl.entries)) {
+                $matched = $false
+
                 $commands = @($entry.claude_command, $entry.copilot_command) | Where-Object { $_ }
                 foreach ($command in $commands) {
-                    if ($command.TrimStart('/') -eq 'open') { $entries += $entry; break }
+                    $leaf = ($command.TrimStart('/') -split ':')[-1]
+                    if ($leaf -match '(^|-)open(-|$)') { $matched = $true; break }
                 }
+
+                if (-not $matched -and $entry.intent_key -and $entry.intent_key -match '(^|-)open(-|$)') {
+                    $matched = $true
+                }
+
+                if ($matched) { $entries += $entry }
             }
             return $entries
         }
@@ -72,10 +89,11 @@ Describe 'open-for-work surface (issue #974)' {
 
     Context 'no natural-language routing intent for the entrance (criterion 10)' {
 
-        It 'the probe finds a deliberately planted /open intent (positive control)' {
-            # Same shape as the live table, plus one entry that must be
-            # caught. If this fails, the negative assertion below proves
-            # nothing.
+        It 'the probe finds planted entrance intents, including aliases it is weakest at (positive control)' {
+            # Controls are planted in the shapes the probe is WEAKEST at, not
+            # the one it cannot miss (#974 review, M20). A control spelled
+            # exactly '/open' would pass under an equality test too and would
+            # therefore prove nothing about alias coverage.
             $planted = @{
                 nl_intent_routing = @{
                     source  = 'synthetic-positive-control'
@@ -91,14 +109,29 @@ Describe 'open-for-work surface (issue #974)' {
                             patterns        = @("let's work on #?\d+", 'pick up #?\d+')
                             claude_command  = '/open'
                             copilot_command = $null
+                        },
+                        [pscustomobject]@{
+                            intent_key      = 'pickup-namespaced-alias'
+                            patterns        = @('pick up #?\d+')
+                            claude_command  = '/orchestra:open'
+                            copilot_command = $null
+                        },
+                        [pscustomobject]@{
+                            intent_key      = 'pickup-suffixed-alias'
+                            patterns        = @('start work on #?\d+')
+                            claude_command  = '/open-for-work'
+                            copilot_command = $null
                         }
                     )
                 }
             } | ConvertTo-Json -Depth 6 | ConvertFrom-Json
 
             $hits = @(& $script:FindEntranceIntents $planted)
-            $hits.Count | Should -Be 1 -Because 'the probe must be able to detect an entrance routing intent at all'
-            $hits[0].intent_key | Should -Be 'open-for-work'
+            $hitKeys = @($hits | ForEach-Object { $_.intent_key })
+            $hitKeys | Should -Contain 'open-for-work' -Because 'the bare /open spelling must be caught'
+            $hitKeys | Should -Contain 'pickup-namespaced-alias' -Because 'a namespaced alias routes to the same entrance and must be caught'
+            $hitKeys | Should -Contain 'pickup-suffixed-alias' -Because 'a suffixed alias routes to the same entrance and must be caught'
+            $hitKeys | Should -Not -Contain 'review-local' -Because 'the probe must not flag unrelated intents'
         }
 
         It 'the live routing table declares no intent that routes to the entrance' {
@@ -155,7 +188,7 @@ Describe 'open-for-work surface (issue #974)' {
             $catalog = & $script:ReadRepoFile 'skills/session-memory-contract/references/handoff-markers.md'
             $catalog | Should -Match ([regex]::Escape('(family `open-for-work-affirmed`, `post-new`)')) `
                 -Because 'the catalog is the surface CLAUDE.md points readers at, and the runtime never reads it'
-            $catalog | Should -Match ([regex]::Escape('Open-for-work affirmation (interim form, issue 957 Amendment 8) - issue {N}')) `
+            $catalog | Should -Match ([regex]::Escape('Open-for-work affirmation (interim form, issue 957 Amendment 8) - issue {ID}')) `
                 -Because 'a resume must be able to recognise interim-form records from the catalog alone'
         }
     }
@@ -185,7 +218,6 @@ Describe 'open-for-work surface (issue #974)' {
             # draft's criteria while shipping a flow that could not route,
             # floor, or produce either output.
             $script:SkillText | Should -Match '(?i)trivial floor'
-            $script:SkillText | Should -Match '(?i)permission, authentication, or data-integrity behavior is never below the floor'
             $script:SkillText | Should -Match '(?i)fails closed'
             $script:SkillText | Should -Match '(?i)beat 2'
             $script:SkillText | Should -Match '(?i)escape hatch'
@@ -193,17 +225,94 @@ Describe 'open-for-work surface (issue #974)' {
             $script:SkillText | Should -Match '(?i)novel arm'
         }
 
-        It 'the skill fixes each gate-decision token field rather than only instructing emission' {
+        It 'the floor risk-guard clause is unqualified, not merely present' {
+            # #974 review, M27: a bare presence assertion stays green when a
+            # meaning-inverting qualifier is APPENDED to the pinned clause
+            # ("...is never below the floor, unless the change is confined to
+            # a single file"). Pin the clause AND the absence of a trailing
+            # exemption, so the invertible edit turns this red.
+            $guard = [regex]::Match(
+                $script:SkillText,
+                'permission, authentication, or data-integrity behavior is never below the floor(?<tail>[^\n]*)')
+            $guard.Success | Should -BeTrue -Because 'the risk guard must be stated verbatim in the skill'
+            $guard.Groups['tail'].Value | Should -Not -Match '(?i)\b(unless|except|other than|save (for|where)|provided that)\b' `
+                -Because 'the risk guard admits no exemption; a trailing qualifier inverts it while leaving the clause present'
+        }
+
+        It 'the skill fixes every gate-decision token field, including classification and outcome' {
+            # #974 review, M10: the earlier version of this test asserted
+            # only phase, two decision ids, and window_position — so the
+            # classification and outcome COLUMNS, which are what
+            # gate-reconciliation-core.ps1 actually branches on, could be
+            # deleted wholesale and it stayed green.
             $script:SkillText | Should -Match ([regex]::Escape('phase: experience'))
-            $script:SkillText | Should -Match ([regex]::Escape('open-for-work-affirmation'))
-            $script:SkillText | Should -Match ([regex]::Escape('open-for-work-brief-approval'))
-            $script:SkillText | Should -Match ([regex]::Escape('pre-ask'))
+            $script:SkillText | Should -Match ([regex]::Escape('open-for-work-affirmation-{ID}'))
+            $script:SkillText | Should -Match ([regex]::Escape('open-for-work-brief-approval-{ID}'))
+
+            # Assert the table itself carries all five columns, and that each
+            # checkpoint row states a classification and an outcome — read
+            # from the table rows, not from surrounding prose (which is where
+            # a bare 'pre-ask' substring assertion silently passed off).
+            $header = [regex]::Match(
+                $script:SkillText,
+                '(?m)^\|\s*Checkpoint\s*\|\s*`decision_id`\s*\|\s*`window_position`\s*\|\s*`classification`\s*\|\s*`outcome`\s*\|')
+            $header.Success | Should -BeTrue -Because 'the token table must declare all five fields as columns'
+
+            $rows = @([regex]::Matches(
+                    $script:SkillText,
+                    '(?m)^\|\s*(?<checkpoint>Worth-it doors|Affirmation gate|Brief approval[^|]*?)\s*\|(?<rest>.*)$'))
+            $rows.Count | Should -Be 3 -Because 'all three checkpoints the flow runs must have a row'
+            foreach ($row in $rows) {
+                $cells = @($row.Groups['rest'].Value -split '\|' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+                $cells.Count | Should -BeGreaterOrEqual 4 -Because "row '$($row.Groups['checkpoint'].Value.Trim())' must fill decision_id, window_position, classification and outcome"
+                $cells[1] | Should -Match 'pre-ask' -Because 'window_position must be the pre-dispatch firing position'
+                $cells[2] | Should -Match '(?i)load-bearing|routine' -Because 'classification must be stated per checkpoint'
+                $cells[3] | Should -Match '(?i)asked|declined|same-decision-resume|gate-fails|greenfield-defer' -Because 'outcome must be stated per checkpoint'
+            }
+        }
+
+        It 'the skill states that a clean reconciliation over zero tokens does not discharge the obligation' {
+            # #974 review, M11: gate-reconciliation-core.ps1 returns
+            # status=clean whenever findings is empty, which includes the
+            # zero-token case — so "clean discharges this" let a run that
+            # emitted nothing pass its own check.
+            $script:SkillText | Should -Match ([regex]::Escape('token_count')) `
+                -Because 'the check must read token_count, not status alone'
+            $script:SkillText | Should -Match '(?i)does not discharge this' `
+                -Because 'the skill must say plainly that a clean status alone is insufficient'
         }
 
         It 'the skill tells a resume to read comments from a source carrying updated_at' {
-            $script:SkillText | Should -Match ([regex]::Escape('gh api repos/{owner}/{repo}/issues/{N}/comments')) `
+            $script:SkillText | Should -Match ([regex]::Escape('gh api repos/{owner}/{repo}/issues/{ID}/comments')) `
                 -Because 'gh issue view --json comments carries includesCreatedEdit and no updated_at, so the void-if-edited rule cannot be evaluated from it'
             $script:SkillText | Should -Match '(?i)affirmed-not-routed'
+        }
+
+        It 'the resume decides state from sequence, not merely from which artifacts exist' {
+            # #974 review, M2/M3/M6 collapsed to one root cause: a
+            # presence-based state table cannot see a routing artifact that
+            # predates the affirmation record (property 3's whole point), nor
+            # the window after the escape hatch re-affirms but before beat 2
+            # is re-run.
+            $script:SkillText | Should -Match '(?i)earliest lawful' `
+                -Because 'the ordering comparison must name WHICH record it uses; a latest-record reading declares every lawful escape-hatch run unlawful'
+            $script:SkillText | Should -Match '(?i)re-affirmed-not-re-routed' `
+                -Because 'the window between re-affirmation and beat-2 re-run needs its own state, or it reads as routed'
+            $script:SkillText | Should -Match '(?i)not lawful under source \(b\)' `
+                -Because 'the ordering check must state the outcome when it fails'
+        }
+
+        It 'the re-route count is not defined as arithmetic over comment counts' {
+            # #974 review, M6: records-minus-one disagrees with the observed
+            # count in three directions (voided records, no-op writes,
+            # retried writes), so neither surface may state it as the
+            # definition.
+            foreach ($text in @($script:SkillText, (& $script:ReadRepoFile 'skills/post-pr-review/SKILL.md'))) {
+                $text | Should -Not -Match '(?i)derivable by counting the issue''s affirmation records and subtracting one' `
+                    -Because 'that phrasing is the arithmetic definition the review found wrong in three directions'
+            }
+            $script:SkillText | Should -Match '(?i)cross-check, not the definition' `
+                -Because 'the skill must say what comment counting is for'
         }
     }
 
