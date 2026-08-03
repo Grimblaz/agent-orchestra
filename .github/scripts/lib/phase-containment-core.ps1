@@ -735,3 +735,236 @@ function Get-PhaseContainmentEnumDriftStatus {
 }
 
 #endregion
+
+#region Get-PhaseContainmentReasonContractDriftStatus (issue #969)
+
+function Get-PhaseContainmentReasonContractDriftStatus {
+    <#
+    .SYNOPSIS
+        Reports whether the brief-review reason vocabulary's PROSE still agrees
+        with the CODE it describes, across the three sites that must move
+        together: the parser's documented output enum, the reason ladder's
+        maintenance count, and the dispatch switch's explicit arms.
+    .DESCRIPTION
+        WHY THIS EXISTS. Issue #969 opened on two sentences that were true when
+        written and were not re-checked when the code beneath them changed —
+        one of them invalidated TWICE inside a single pull request's own fix
+        loop. Correcting the sentences leaves that class fully intact; the
+        class only closes when the drift fails a check.
+
+        BOTH SIDES ARE READ FROM SOURCE. Nothing here compares source against a
+        list this function authored. The documented enum is parsed out of the
+        docstring; the returned set is enumerated from the function body; the
+        ladder's count is parsed out of the maintenance comment and counted
+        from the ladder's own branches. A check holding one side constant
+        cannot fail for the reason it exists and goes stale exactly as the
+        docstring did.
+
+        BOTH RETURN SHAPES ARE ENUMERATED. Most of the parser's returns leave
+        through a shared `& $none '...'` closure rather than a direct
+        `Reason = '...'` assignment — and ALL THREE values #969 found
+        undocumented are closure-shaped. An enumerator keyed only on the
+        obvious assignment form finds two of eight values, none of them the
+        wrong ones, and reports a clean subset forever.
+
+        UNREADABLE IS DRIFT, NEVER SILENCE. Every parse below reports drift
+        when its input cannot be read. A rewrap, a bullet-list conversion or a
+        rename can make the prose side unparseable, and a check that treats
+        "could not read it" as "nothing to check" goes green permanently —
+        which is this issue's own defect one level up.
+
+        SET EQUALITY, NOT CONTAINMENT. The defect direction is
+        documented ⊉ returned (a returned value missing from the docs). The
+        opposite direction — a documented value the code can no longer return —
+        is also drift, and is reported separately so the message names which
+        way the two sets parted.
+    .PARAMETER Source
+        Full text of `.github/scripts/lib/phase-containment-emission-check-core.ps1`.
+        Supplied as text rather than read from a fixed path so the suite can
+        feed deliberately drifted copies and prove this function fails on them.
+        A guard only ever checked against a passing input is a guard nobody has
+        seen fail.
+    .OUTPUTS
+        [PSCustomObject] HasDrift [bool], DriftDetails [string[]],
+        DocumentedReasons [string[]], ReturnedReasons [string[]],
+        SwitchArms [string[]], LadderBriefOnlyCount [int] (-1 when unreadable),
+        LadderStatedCount [int] (-1 when unreadable).
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Source
+    )
+
+    # Every regex literal below is a SINGLE-quoted PowerShell string, so no
+    # PowerShell interpolation runs over it and a `\$` reaches the engine as an
+    # escaped dollar rather than an end-of-line anchor. Embedded single quotes
+    # are doubled.
+    $driftDetails = [System.Collections.Generic.List[string]]::new()
+    $documented   = @()
+    $returned     = @()
+    $switchArms   = @()
+    $branchVars   = @()
+    $ladderCount  = -1
+    $statedCount  = -1
+
+    $emit = {
+        param([string]$Detail)
+        $driftDetails.Add($Detail)
+    }
+
+    # -- Leg 1: the parser's documented enum vs. the reasons it returns -------
+
+    $fnAnchor = 'function script:Get-BriefReviewSustainedCountInternal'
+    $fnStart = $Source.IndexOf($fnAnchor, [System.StringComparison]::Ordinal)
+    if ($fnStart -lt 0) {
+        & $emit "reason-contract: the parser '$fnAnchor' could not be located in the supplied source, so neither its documented enum nor its returned set could be read."
+    }
+    else {
+        # The function's own closing brace is the first `}` in column 0 after
+        # its declaration; every nested brace in this file is indented.
+        $tail = $Source.Substring($fnStart)
+        $fnEnd = [regex]::Match($tail, '(?m)^\}')
+        $fnSpan = if ($fnEnd.Success) { $tail.Substring(0, $fnEnd.Index + $fnEnd.Length) } else { $tail }
+        if (-not $fnEnd.Success) {
+            & $emit 'reason-contract: the parser''s closing brace could not be located, so the enumerated span is unbounded and its result is not trustworthy.'
+        }
+
+        $docMatch = [regex]::Match($fnSpan, '(?s)\.OUTPUTS\b.*?\bReason\s*\(([^)]*)\)')
+        if (-not $docMatch.Success) {
+            & $emit 'reason-contract: the documented Reason enum could not be read from the parser''s .OUTPUTS block. Unreadable prose is drift, not a clean check — the contract this compares against no longer exists in a form any reader can parse.'
+        }
+        else {
+            $documented = @(
+                @([regex]::Matches($docMatch.Groups[1].Value, '''([a-z][a-z-]*)''') |
+                        ForEach-Object { $_.Groups[1].Value }) | Sort-Object -Unique
+            )
+        }
+
+        # Both return shapes. The closure form carries six of the eight values.
+        $returned = @(
+            @(@([regex]::Matches($fnSpan, 'Reason\s*=\s*''([a-z][a-z-]*)''')) +
+                @([regex]::Matches($fnSpan, '\$none\s+''([a-z][a-z-]*)''')) |
+                    ForEach-Object { $_.Groups[1].Value }) | Sort-Object -Unique
+        )
+
+        if ($returned.Count -eq 0) {
+            & $emit 'reason-contract: no returned Reason value could be enumerated from the parser body. Either both return shapes have changed or the span is wrong; a zero-value enumeration must never read as agreement.'
+        }
+
+        if ($docMatch.Success -and $returned.Count -gt 0) {
+            $undocumented = @($returned | Where-Object { $documented -notcontains $_ })
+            if ($undocumented.Count -gt 0) {
+                & $emit ("reason-contract: the parser returns Reason value(s) its .OUTPUTS block does not document: $($undocumented -join ', '). " +
+                    "Documented=[$($documented -join ', ')] Returned=[$($returned -join ', ')].")
+            }
+            $unreturnable = @($documented | Where-Object { $returned -notcontains $_ })
+            if ($unreturnable.Count -gt 0) {
+                & $emit ("reason-contract: the parser's .OUTPUTS block documents Reason value(s) the function can no longer return: $($unreturnable -join ', '). " +
+                    "Documented=[$($documented -join ', ')] Returned=[$($returned -join ', ')].")
+            }
+        }
+    }
+
+    # -- Leg 2: the ladder's maintenance count vs. the branches it governs ----
+
+    $ladderAnchor = '$reason = if (-not $anyCouldNotVerify)'
+    $ladderStart = $Source.IndexOf($ladderAnchor, [System.StringComparison]::Ordinal)
+    $ladderEnd = if ($ladderStart -ge 0) { $Source.IndexOf('return [PSCustomObject]@{', $ladderStart, [System.StringComparison]::Ordinal) } else { -1 }
+    if ($ladderStart -lt 0 -or $ladderEnd -lt 0) {
+        & $emit 'reason-contract: the reason ladder could not be located, so the count its maintenance comment states could not be checked against anything.'
+    }
+    else {
+        $ladderSpan = $Source.Substring($ladderStart, $ladderEnd - $ladderStart)
+        # A brief-only branch is one whose guard flag is named for the brief
+        # surface — the ladder's own naming, not a list kept here.
+        $branchVars = @(
+            [regex]::Matches($ladderSpan, 'elseif\s*\(\s*\$(\w+)\s*\)') |
+                ForEach-Object { $_.Groups[1].Value }
+        )
+        $ladderCount = @($branchVars | Where-Object { $_ -match 'brief' }).Count
+        if ($branchVars.Count -eq 0) {
+            & $emit 'reason-contract: no ladder branch could be enumerated. A zero-branch ladder is a parse failure, not a ladder with no brief-only branches.'
+        }
+    }
+
+    # The stated count is searched over the WHOLE file, not the region above
+    # the ladder: a claim that drifted into another block is still a claim a
+    # maintainer reads, and a windowed search would report its absence.
+    $statedMatches = @([regex]::Matches($Source, '(?i)\b(one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+brief-review-only reasons\b'))
+    if ($statedMatches.Count -ne 1) {
+        & $emit "reason-contract: expected exactly one 'N brief-review-only reasons' claim in the file; found $($statedMatches.Count). Zero means the maintenance count is unreadable (the guidance a future author consults before inserting a branch is gone); more than one means two claims can drift apart."
+    }
+    else {
+        $words = @{ one = 1; two = 2; three = 3; four = 4; five = 5; six = 6; seven = 7; eight = 8; nine = 9; ten = 10 }
+        $raw = $statedMatches[0].Groups[1].Value.ToLowerInvariant()
+        $statedCount = if ($words.ContainsKey($raw)) { $words[$raw] } else { [int]$raw }
+        if ($ladderCount -ge 0 -and $statedCount -ne $ladderCount) {
+            & $emit "reason-contract: the ladder's maintenance comment states $statedCount brief-review-only reason(s); the ladder itself has $ladderCount ($(@($branchVars | Where-Object { $_ -match 'brief' }) -join ', ')). This is the comment a future author consults BEFORE inserting a branch, so a wrong count is consulted at exactly the moment it misleads."
+        }
+    }
+
+    # -- Leg 3: the dispatch switch has an explicit arm per returned reason ---
+    #
+    # The switch's `default` arm sets the head-corrupt flag, so a reason with
+    # no arm is not dropped — it is REPORTED AS A CORRUPT HEAD, sending the
+    # maintainer to diagnose corruption that is not there. That is the same
+    # "true when written, not re-checked" class in executable form, and prose
+    # checks are structurally blind to it.
+    #
+    # Two values are exempt by construction, not by convenience:
+    #   'ok'          — returned only with ParseStatus 'ok', and the switch is
+    #                   entered only on 'could-not-verify', so it cannot arrive.
+    #   'head-corrupt' — the absorbing default's intended destination.
+    # Both exemptions are properties of the surrounding code, and a NEW reason
+    # is covered by neither.
+    $switchStart = $Source.IndexOf('switch ($briefTally.Reason)', [System.StringComparison]::Ordinal)
+    if ($switchStart -lt 0) {
+        & $emit 'reason-contract: the brief-review reason dispatch switch could not be located, so per-reason arm coverage could not be checked.'
+    }
+    else {
+        $braceIdx = $Source.IndexOf('{', $switchStart)
+        $depth = 0
+        $close = -1
+        for ($i = $braceIdx; $i -lt $Source.Length -and $braceIdx -ge 0; $i++) {
+            if ($Source[$i] -eq '{') { $depth++ }
+            elseif ($Source[$i] -eq '}') {
+                $depth--
+                if ($depth -eq 0) { $close = $i; break }
+            }
+        }
+        if ($close -lt 0) {
+            & $emit 'reason-contract: the dispatch switch''s closing brace could not be located, so its arms could not be enumerated.'
+        }
+        else {
+            $switchSpan = $Source.Substring($braceIdx, $close - $braceIdx + 1)
+            $switchArms = @(
+                @([regex]::Matches($switchSpan, '(?m)^\s*''([a-z][a-z-]*)''\s*\{') |
+                        ForEach-Object { $_.Groups[1].Value }) | Sort-Object -Unique
+            )
+            if ($returned.Count -gt 0) {
+                $exempt = @('ok', 'head-corrupt')
+                $needArm = @($returned | Where-Object { $exempt -notcontains $_ })
+                $missingArm = @($needArm | Where-Object { $switchArms -notcontains $_ })
+                if ($missingArm.Count -gt 0) {
+                    & $emit ("reason-contract: reason value(s) with no explicit dispatch arm: $($missingArm -join ', '). " +
+                        'The switch''s default arm sets the head-corrupt flag, so each of these is currently reported to the maintainer as a corrupt head.')
+                }
+                $deadArm = @($switchArms | Where-Object { $returned -notcontains $_ })
+                if ($deadArm.Count -gt 0) {
+                    & $emit "reason-contract: dispatch arm(s) for reason value(s) the parser can no longer return: $($deadArm -join ', ')."
+                }
+            }
+        }
+    }
+
+    return [PSCustomObject]@{
+        HasDrift             = ($driftDetails.Count -gt 0)
+        DriftDetails         = $driftDetails.ToArray()
+        DocumentedReasons    = @($documented)
+        ReturnedReasons      = @($returned)
+        SwitchArms           = @($switchArms)
+        LadderBriefOnlyCount = $ladderCount
+        LadderStatedCount    = $statedCount
+    }
+}
+
+#endregion

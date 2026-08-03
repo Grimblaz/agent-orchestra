@@ -2801,6 +2801,38 @@ function Get-PhaseContainmentRollup {
             $subDenomZero    = ($subN -eq 0)
             $subInsufficient = $subDenomZero -or ($subN -lt 5)
 
+            # Issue #969 — SEVERITY ATTRIBUTION FOR THE VETO'S COUNTS.
+            #
+            # The veto tallies critical/high over every adjudication standard
+            # (see the item-26 comment above); the headline rate beside it is
+            # computed over one. Both are correct, and the split is deliberate
+            # — but the vetoed verdict then reports "1 critical" while every
+            # row the report displays is medium, and a maintainer has no path
+            # from that count to the standard that produced it.
+            #
+            # Tallied HERE rather than carried on the entry, and rolled up from
+            # already-parsed fields rather than added as a new per-entry key:
+            # the block parser seeds a fixed key set and its elseif chain has
+            # no else, so an unrecognised key is dropped in silence.
+            #
+            # Computed over $subEntries, which partitions the SAME
+            # $allNonApparatusEntries population the veto tallies over — so
+            # these sub-counts sum to the veto's counts by construction, and
+            # deriving them cannot disturb the population either number uses.
+            #
+            # NOT gated on $subInsufficient. The rates below are withheld for a
+            # small sub-arm because a rate from two rows misleads; a COUNT of
+            # criticals does not get less true at n=1. Suppressing it there
+            # would make attribution silent on exactly the single-row sub-arm
+            # shape that produced this issue.
+            $subCritical    = 0
+            $subHigh        = 0
+            foreach ($e in $subEntries) {
+                $sev = if ($e -is [hashtable]) { [string]$e['severity'] } else { [string]$e.severity }
+                if ($sev -eq 'critical') { $subCritical++ }
+                elseif ($sev -eq 'high') { $subHigh++ }
+            }
+
             $subEscapeRate      = $null
             $subIrreducibleRate = $null
             if (-not $subInsufficient) {
@@ -2825,6 +2857,9 @@ function Get-PhaseContainmentRollup {
                 Withheld         = $subInsufficient
                 EscapeRate       = $subEscapeRate
                 IrreducibleRate  = $subIrreducibleRate
+                # Present even when Withheld is $true — see the tally comment.
+                CriticalFindingCount = $subCritical
+                HighFindingCount     = $subHigh
             }
         }
 
@@ -2873,6 +2908,102 @@ function Get-PhaseContainmentRollup {
         ApparatusMetaCount      = $apparatusMetaTotal
         WindowEntryCount        = $windowEntryCount
     }
+}
+
+# -------------------------------------------------------------------------
+# Public function: Get-PhaseContainmentSeverityAttributionText (issue #969)
+# -------------------------------------------------------------------------
+
+function Get-PhaseContainmentSeverityAttributionText {
+    <#
+    .SYNOPSIS
+        Builds the clause that tells a maintainer which adjudication standards
+        produced the critical/high counts the relaxation-signal line just
+        reported.
+    .DESCRIPTION
+        THE GAP THIS CLOSES. The severity veto spans every adjudication
+        standard while the rate beside it spans one, so a window can render
+        "NOT ELIGIBLE (1 critical, ...)" with every displayed row medium. Two
+        disclosures already narrow that — the exclusion parenthetical and the
+        partition's own n — so a determined reader can infer the attribution
+        from neighbouring rows. What they could not do is read it off the
+        verdict itself, and this file sets the opposing standard sixty lines
+        up: both exclusions are disclosed, never silent.
+
+        EVERY CONTRIBUTING STANDARD IS NAMED, ALWAYS. Not "the standard when
+        there is exactly one", and never the headline standard by default: an
+        attribution that names one standard only when one is present, or that
+        always names the same one, passes a naive check while telling the
+        maintainer nothing they did not already have.
+
+        SCOPED TO THE COUNT IT ANNOTATES. The clause opens "of which", which
+        binds it to the counts immediately preceding it. That wording is load
+        bearing: on the render paths where the veto's counts are never computed
+        at all (denominator-zero, below the sufficiency floor, data
+        untrustworthy) no count line prints, and a reader must not be able to
+        read the resulting silence as a positive claim that no cross-standard
+        critical exists. Those paths are issue #987, not this function.
+
+        FAIL LOUD, NOT SILENT. A missing partition, or sub-counts that do not
+        sum to the counts being annotated, produce an explicit clause saying
+        so. Omitting the clause instead would present an unattributed count as
+        though it had been attributed, which is the defect this closes.
+    .PARAMETER Stage
+        A stage rollup object carrying CriticalFindingCount, HighFindingCount
+        and AdjudicationPartition.
+    .OUTPUTS
+        [string] The clause to append after the count-reporting text, without a
+        leading separator. Empty string when there is nothing to attribute
+        (both counts zero) — callers append only a non-empty result.
+    #>
+    param(
+        [Parameter(Mandatory)]$Stage
+    )
+
+    # Presence-guarded rather than accessed bare: this file is dot-sourced
+    # alongside a library that sets StrictMode, where a missing property is a
+    # terminating error — and the renderer's top-level catch turns that into a
+    # report that never prints at all. A named clause is louder than a dead
+    # report and far louder than an empty string.
+    if ($Stage.PSObject.Properties.Match('CriticalFindingCount').Count -eq 0 -or
+        $Stage.PSObject.Properties.Match('HighFindingCount').Count -eq 0) {
+        return 'of which: not attributable (this arm carries no severity counts)'
+    }
+    $critical = [int]$Stage.CriticalFindingCount
+    $high     = [int]$Stage.HighFindingCount
+    if ($critical -eq 0 -and $high -eq 0) { return '' }
+
+    if ($Stage.PSObject.Properties.Match('AdjudicationPartition').Count -eq 0 -or
+        $null -eq $Stage.AdjudicationPartition) {
+        return 'of which: not attributable (this arm carries no adjudication partition)'
+    }
+
+    $parts        = [System.Collections.Generic.List[string]]::new()
+    $sumCritical  = 0
+    $sumHigh      = 0
+    foreach ($subName in (@($Stage.AdjudicationPartition.Keys) | Sort-Object)) {
+        $sub = $Stage.AdjudicationPartition[$subName]
+        $c = if ($sub.PSObject.Properties.Match('CriticalFindingCount').Count -gt 0) { [int]$sub.CriticalFindingCount } else { 0 }
+        $h = if ($sub.PSObject.Properties.Match('HighFindingCount').Count -gt 0) { [int]$sub.HighFindingCount } else { 0 }
+        $sumCritical += $c
+        $sumHigh     += $h
+        if ($c -eq 0 -and $h -eq 0) { continue }
+        $bits = [System.Collections.Generic.List[string]]::new()
+        if ($c -gt 0) { $bits.Add("$c critical") }
+        if ($h -gt 0) { $bits.Add("$h high") }
+        $parts.Add("${subName} $($bits -join ', ')")
+    }
+
+    if ($sumCritical -ne $critical -or $sumHigh -ne $high) {
+        # The partition and the veto are computed over the same population, so
+        # this cannot happen without one of them having been re-scoped — the
+        # exact class of change this issue exists to make visible.
+        return ("of which: ATTRIBUTION INCOMPLETE — the per-standard tally sums to " +
+            "$sumCritical critical, $sumHigh high, which does not match the counts above")
+    }
+    if ($parts.Count -eq 0) { return 'of which: not attributable (no standard reports a critical or high finding)' }
+
+    return "of which: $($parts -join '; ')"
 }
 
 # -------------------------------------------------------------------------
@@ -3177,7 +3308,23 @@ function Format-PhaseContainmentReport {
                     # 'critical' (AC4), so the render must name both counts
                     # and the severities that triggered the block instead of
                     # a bare "critical severity finding in window" guess.
-                    $lines.Add("  Relaxation signal:  NOT ELIGIBLE ($($stage.CriticalFindingCount) critical, $($stage.HighFindingCount) high severity finding(s) in window)")
+                    #
+                    # Issue #969: the attribution is APPENDED AFTER the closing
+                    # parenthesis, deliberately. The counts inside those
+                    # parentheses are what three positive pins and one negative
+                    # pin assert, and the honest way to add information to a
+                    # pinned line is to leave the pinned span byte-identical —
+                    # not to widen the line and then relax the pins until they
+                    # pass again, which retires the check while the suite stays
+                    # green. The clause carries no severity word of its own
+                    # ordering, so the phrasing the negative pin forbids is not
+                    # reintroduced either.
+                    $vetoLine = "  Relaxation signal:  NOT ELIGIBLE ($($stage.CriticalFindingCount) critical, $($stage.HighFindingCount) high severity finding(s) in window)"
+                    $attribution = Get-PhaseContainmentSeverityAttributionText -Stage $stage
+                    if (-not [string]::IsNullOrWhiteSpace($attribution)) {
+                        $vetoLine = "$vetoLine — $attribution"
+                    }
+                    $lines.Add($vetoLine)
                 }
             }
         }

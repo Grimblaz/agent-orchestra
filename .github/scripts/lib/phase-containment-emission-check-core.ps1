@@ -2464,8 +2464,18 @@ function script:Get-BriefReviewSustainedCountInternal {
     .OUTPUTS
         [PSCustomObject] with SustainedCount, DismissedCount, FilteredCount,
         ConvergenceFilterRan ([bool] or $null when unasserted), ParseStatus,
-        and Reason ('ok' | 'head-missing' | 'head-corrupt' |
-        'filter-unasserted' | 'filter-not-run').
+        and Reason ('ok' | 'head-missing' | 'head-corrupt' | 'duplicate-head' |
+        'unknown-disposition-value' | 'filter-not-run' |
+        'filter-value-unrecognized' | 'filter-unasserted').
+
+        THIS ENUM IS PINNED AGAINST THE BODY BELOW, NOT TRUSTED (issue #969).
+        Get-PhaseContainmentReasonContractDriftStatus enumerates both return
+        shapes this function uses -- the direct `Reason = '...'` assignment AND
+        the shared `& $none '...'` closure, which carries most of them -- and
+        fails when the two sets part in either direction. Three values were
+        missing from this list when #969 opened, all three closure-shaped. If
+        that check fails, the drift IS the finding: add the value here, and to
+        the dispatch switch, rather than widening the check.
     #>
     param(
         [Parameter(Mandatory)][AllowEmptyString()][string]$Body
@@ -3086,8 +3096,17 @@ function Get-EmissionGap {
                           diagnosis calls 'window-bleed' contributes
                           'decoy-ambiguous' instead of 'head-corrupt' for
                           THAT body (never both for the same body). Cross-body
-                          priority: head-corrupt > decoy-ambiguous >
-                          head-missing > ok.
+                          priority, highest first:
+                          judge-head-contradiction > duplicate-head >
+                          unknown-disposition-value > filter-not-run >
+                          filter-value-unrecognized > filter-unasserted >
+                          head-corrupt > decoy-ambiguous > head-missing > ok.
+                          (Issue #969: this sentence previously started at
+                          head-corrupt, having been written before the six
+                          brief-only reasons that all outrank it were added —
+                          correct on the enum directly above, stale on the
+                          ordering. The enum and the ordering drift
+                          independently; only the enum is pinned.)
     #>
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Bodies,
@@ -3502,16 +3521,34 @@ function Get-EmissionGap {
     # more than one; the ladder below only ever has to break ties BETWEEN
     # different bodies in the same aggregation, not within one body.
     #
-    # Issue #951 adds three brief-review-only reasons at the TOP of the
-    # ladder. 'judge-head-contradiction' first because D6 is an unconditional
-    # refusal rather than a parse diagnosis: whatever else is wrong with the
-    # comment, a maintainer's first action is removing the judge head that
-    # should never have been written under a declared brief. Then
+    # There are six brief-review-only reasons at the TOP of the ladder, in
+    # this order: judge-head-contradiction, duplicate-head,
+    # unknown-disposition-value, filter-not-run, filter-value-unrecognized,
+    # filter-unasserted.
+    #
+    # READ THE COUNT AS PINNED, NOT AS FOLKLORE (issue #969). This is the
+    # comment a future author consults BEFORE inserting a branch here — which
+    # is exactly what happened twice inside PR #963's own fix loop, leaving it
+    # wrong at the one moment it gets read. It says three no longer because
+    # Get-PhaseContainmentReasonContractDriftStatus now counts the ladder's
+    # brief-guarded branches and fails when this number disagrees with them.
+    # Insert a branch and update this number in the same change.
+    #
+    # 'judge-head-contradiction' first because D6 is an unconditional refusal
+    # rather than a parse diagnosis: whatever else is wrong with the comment, a
+    # maintainer's first action is removing the judge head that should never
+    # have been written under a declared brief. Then the two head-shape
+    # reasons, which invalidate anything the filter fields claim. Then
     # 'filter-not-run' ahead of 'filter-unasserted', because a head that
     # honestly declares the skip is a more specific and more actionable
-    # finding than one that omits the field. All three are unreachable on
+    # finding than one that omits the field. All six are unreachable on
     # every other surface — they are only ever set inside the brief-review
     # branch or by the brief-only contradiction seam.
+    #
+    # That reachability half is CONTINGENT, not structural, and no
+    # quantity-shaped check can see it go stale: #964 proposes a duplicate-head
+    # guard for the design-challenge surface, and if it lands reusing this
+    # reason string, the sentence above goes false while the count stays right.
     $reason = if (-not $anyCouldNotVerify) {
         'ok'
     }
