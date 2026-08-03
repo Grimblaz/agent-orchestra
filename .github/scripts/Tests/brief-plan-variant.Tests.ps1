@@ -927,9 +927,22 @@ Describe 'Brief review teeth — required cold-read vacuity question (#973)' -Ta
             $content = & $script:ReadRepoFile $path
             $content.Contains('otherwise recorded as not-applicable') | Should -BeFalse `
                 -Because "$path must not let an absent source-(b) verdict fall through to a not-applicable"
-            $content.Contains('novel') | Should -BeTrue `
-                -Because "$path must name the novel-verdict outcome, which is a failure and not an n/a"
         }
+
+        # External review (CodeRabbit, PR #981) on THIS pin: a bare
+        # `Contains('novel')` passed on both files from unrelated prose
+        # ("routine-versus-novel", the novel-arm asymmetry paragraph), so it
+        # could stay green while the n/a rule lost its novel outcome. Assert the
+        # outcome MAPPING instead, per file, in each file's own wording.
+        $claudeMd = & $script:ReadRepoFile 'CLAUDE.md'
+        $claudeMd.Contains('an absent or novel one is a review failure, never an n/a') | Should -BeTrue `
+            -Because 'CLAUDE.md must map the novel and absent states to a review failure, not merely mention "novel"'
+
+        $doctrine = & $script:ReadRepoFile 'Documents/Design/chunked-delivery.md'
+        $doctrine.Contains('**novel** and **absent** are each a **review failure**') | Should -BeTrue `
+            -Because 'the doctrine must close the outcome mapping so two reviewers cannot classify the same brief differently'
+        $doctrine.Contains('none of the three is ever a not-applicable') | Should -BeTrue `
+            -Because 'the n/a exclusion is the load-bearing half of the mapping'
 
         $doctrine = & $script:ReadRepoFile 'Documents/Design/chunked-delivery.md'
         $doctrine.Contains('never by whether a verdict happens to be present') | Should -BeTrue `

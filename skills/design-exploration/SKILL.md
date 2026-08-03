@@ -203,7 +203,7 @@ After the 3 finders return and are merged into the pre-filter union, the dispatc
 
 This is **one** `Agent`-tool dispatch carrying a two-part prompt, not two separate dispatches:
 
-- **Part (a) — cold-read**: the prompt instructs the Fable shell to first cold-read the design directly and record its own independent observations, before the prompt reveals the 3 finder ledgers.
+- **Part (a) — cold-read**: the prompt instructs the Fable shell to first cold-read **the selected review target** directly — the proposed design for a design target, the brief itself for a `plan-variant: brief` target — and record its own independent observations, before the prompt reveals the 3 finder ledgers.
 - **Part (b) — synthesis**: within that same dispatch and response, the shell then proceeds to open the 3 finder ledgers, dedupe, rank, and merge them against its own Part (a) cold-read observations, then emit a kept/filtered rulings block spanning the **full pre-filter union** — every finder finding plus every cold-read observation, each marked `kept` or `filtered` with rationale.
 
 **Brief-target addendum — the required vacuity question (#957 D2).** When the artifact under convergence is a `plan-variant: brief` plan, part (a)'s prompt must carry this question **verbatim** — *"Is there a reading of the criteria under which every one passes and no work happens?"* — and must instruct the shell to answer it in the cold read, before the finder ledgers are revealed. The scoping condition is one the dispatcher provably knows: it selected the brief charter to arrive here. Three things are required of the answer:
