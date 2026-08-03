@@ -738,6 +738,86 @@ function Get-PhaseContainmentEnumDriftStatus {
 
 #region Get-PhaseContainmentReasonContractDriftStatus (issue #969)
 
+function script:Get-PCBraceSafeMask {
+    <#
+    .SYNOPSIS
+        Returns a same-length copy of PowerShell source with the CONTENTS of
+        string literals and comments blanked out, so a brace scan sees only
+        structural braces.
+    .DESCRIPTION
+        A depth counter walking raw characters desynchronises on any `{` or `}`
+        inside a string literal, a regex literal or a comment. PR #988's
+        defense established the failure direction is a loud false positive
+        rather than a silent miss — but a guard that cries wolf on a benign
+        reformat is a guard the next maintainer learns to ignore, and an
+        external reviewer flagged the same fragility independently. Masking
+        removes the class instead of arguing about its direction.
+
+        Length and newline positions are preserved so offsets computed against
+        the mask index the original text exactly.
+
+        Handles: block comments (angle-bracket-hash open, hash-angle-bracket
+        close — spelled out rather than written literally, because a literal
+        close sequence inside comment-based help terminates the help block and
+        turns the rest of this docstring into code), `# ...` line comments,
+        single-quoted strings (with doubled-quote escapes) and double-quoted
+        strings (with backtick escapes). Here-strings are NOT handled — they
+        are absent from the spans this is used on, and a here-string containing
+        an unbalanced brace would fail loud, as before.
+    .PARAMETER Text
+        PowerShell source text.
+    .OUTPUTS
+        [string] the masked copy, same length as the input.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Text
+    )
+    if ([string]::IsNullOrEmpty($Text)) { return $Text }
+    $sb = [System.Text.StringBuilder]::new($Text)
+    $blank = {
+        param([int]$At)
+        if ($Text[$At] -ne "`n" -and $Text[$At] -ne "`r") { $sb[$At] = ' ' }
+    }
+    $i = 0
+    $n = $Text.Length
+    while ($i -lt $n) {
+        $ch = $Text[$i]
+        if ($ch -eq '<' -and $i + 1 -lt $n -and $Text[$i + 1] -eq '#') {
+            while ($i -lt $n) {
+                & $blank $i
+                if ($Text[$i] -eq '>' -and $i -gt 0 -and $Text[$i - 1] -eq '#') { $i++; break }
+                $i++
+            }
+            continue
+        }
+        if ($ch -eq '#') {
+            while ($i -lt $n -and $Text[$i] -ne "`n") { & $blank $i; $i++ }
+            continue
+        }
+        if ($ch -eq "'" -or $ch -eq '"') {
+            $quote = $ch
+            & $blank $i
+            $i++
+            while ($i -lt $n) {
+                if ($quote -eq '"' -and $Text[$i] -eq '`' -and $i + 1 -lt $n) {
+                    & $blank $i; & $blank ($i + 1); $i += 2; continue
+                }
+                if ($Text[$i] -eq $quote) {
+                    if ($i + 1 -lt $n -and $Text[$i + 1] -eq $quote) {
+                        & $blank $i; & $blank ($i + 1); $i += 2; continue
+                    }
+                    & $blank $i; $i++; break
+                }
+                & $blank $i
+                $i++
+            }
+            continue
+        }
+        $i++
+    }
+    return $sb.ToString()
+}
+
 function Get-PhaseContainmentReasonContractDriftStatus {
     <#
     .SYNOPSIS
@@ -1066,12 +1146,15 @@ function Get-PhaseContainmentReasonContractDriftStatus {
         & $emit 'reason-contract: the brief-review reason dispatch switch could not be located, so per-reason arm coverage could not be checked.'
     }
     else {
-        $braceIdx = $Source.IndexOf('{', $switchStart)
+        # Scanned over the MASKED copy, indexed back into the original: a brace
+        # inside a string literal or a comment must not move the depth counter.
+        $sourceMask = script:Get-PCBraceSafeMask -Text $Source
+        $braceIdx = $sourceMask.IndexOf('{', $switchStart)
         $depth = 0
         $close = -1
-        for ($i = $braceIdx; $i -lt $Source.Length -and $braceIdx -ge 0; $i++) {
-            if ($Source[$i] -eq '{') { $depth++ }
-            elseif ($Source[$i] -eq '}') {
+        for ($i = $braceIdx; $i -lt $sourceMask.Length -and $braceIdx -ge 0; $i++) {
+            if ($sourceMask[$i] -eq '{') { $depth++ }
+            elseif ($sourceMask[$i] -eq '}') {
                 $depth--
                 if ($depth -eq 0) { $close = $i; break }
             }
@@ -1170,12 +1253,15 @@ function Get-PhaseContainmentReasonContractDriftStatus {
             & $emit 'reason-contract: the entry point''s brief-review per-reason message block could not be located.'
         }
         else {
-            $entryBrace = $EntryPointSource.IndexOf('{', $entryStart)
+            # Masked, for the reason above — and it matters more here: this
+            # block's arms are long message strings full of backticked markdown.
+            $entryMask = script:Get-PCBraceSafeMask -Text $EntryPointSource
+            $entryBrace = $entryMask.IndexOf('{', $entryStart)
             $depth = 0
             $entryClose = -1
-            for ($i = $entryBrace; $i -lt $EntryPointSource.Length -and $entryBrace -ge 0; $i++) {
-                if ($EntryPointSource[$i] -eq '{') { $depth++ }
-                elseif ($EntryPointSource[$i] -eq '}') {
+            for ($i = $entryBrace; $i -lt $entryMask.Length -and $entryBrace -ge 0; $i++) {
+                if ($entryMask[$i] -eq '{') { $depth++ }
+                elseif ($entryMask[$i] -eq '}') {
                     $depth--
                     if ($depth -eq 0) { $entryClose = $i; break }
                 }

@@ -2536,6 +2536,35 @@ Describe 'PR #988 response: the reason-contract check covers what it says it cov
         ($r.DriftDetails -join ' ') | Should -Match 'found 2'
     }
 
+
+    # --- external-review convergence (Qodo, PR #988): brace-scan fragility ---
+
+    It 'a brace inside a STRING LITERAL does not desync the switch span (external review, PR #988)' {
+        # Ruled defense-sustained internally on the ground that the failure
+        # direction is a loud false positive rather than a silent miss. An
+        # external reviewer raised the same fragility independently and named
+        # the cost the internal ruling did not price: a guard that fails on a
+        # benign reformat is a guard the next maintainer learns to ignore.
+        $anchor = "'head-missing'              { `$sawFallbackFired         = `$true }"
+        $script:Emission988.Contains($anchor) | Should -BeTrue
+        $mutated = $script:Emission988.Replace($anchor, "'head-missing'              { `$zzBrace = '{'; `$sawFallbackFired = `$true }")
+        $mutated | Should -Not -BeExactly $script:Emission988
+        $r = script:Get-988Drift -Source $mutated
+        $r.DriftDetails -join ' | ' | Should -BeExactly ''
+        $r.SwitchArms.Count | Should -Be 6 -Because 'the span must still close where the switch closes'
+    }
+
+    It 'POSITIVE CONTROL: with the same planted brace, a genuinely removed arm is STILL caught' {
+        # Without this the test above only proves the check went quiet.
+        $anchor = "'head-missing'              { `$sawFallbackFired         = `$true }"
+        $mutated = $script:Emission988.Replace($anchor, "'head-missing'              { `$zzBrace = '{'; `$sawFallbackFired = `$true }")
+        $mutated = $mutated -replace "(?m)^\s*'duplicate-head'\s*\{[^}]*\}\s*?$", ''
+        $r = script:Get-988Drift -Source $mutated
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'no explicit dispatch arm'
+        ($r.DriftDetails -join ' ') | Should -Match 'duplicate-head'
+    }
+
     # --- reflow tolerance, with its own negative control --------------------
 
     It 'a REWRAPPED prose claim is still read (and the same anchor still fails on a CHANGED claim)' {
