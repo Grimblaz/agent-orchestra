@@ -2,6 +2,12 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.10.0] — 2026-08-02
+
+### Added
+
+- #973 (chunk 2 of #957): brief-review teeth. The `#### Brief conformance check` gains the **vacuity reading-property** — "Is there a reading of the criteria under which every one passes and no work happens?" — whose answer is an act of *construction*: name the candidate all-pass-no-work reading and the criterion that blocks it, or fail the brief; a bare "no" does not discharge it. A **brief-target** convergence cold read must now ask the same question and emit its answer in both polarities — a surviving reading as a cold-read finding, a clean result as the stated sentence "asked, no surviving reading" — carried by the persisted `**Plan Stress-Test**` summary, so a record's silence is no longer ambiguous between examined-and-clean and never-examined. The requirement has an instructed producer (`agents/code-review-response.md`), not only an asker; a **design-target** cold read is behaviourally unchanged. The **routing call** — beat 2's routine-versus-novel classification — becomes a named review target the charter aims at, with every source-(b) arm defined — including a recorded **novel** verdict, which authorizes no brief at all and is the same lawfulness failure as an absent one (verdict absent is a review *failure* under #957 Amendment 10, not a gap to note) — and a source-(a) not-applicable arm whose stated basis is "carries no routing verdict of its own", never the family-false "no beat 2 ran". What a review failure requires is stated, along with the honest limit that nothing mechanical enforces it. Retires both chunk-2 pending caveats in `Documents/Design/open-for-work.md` and strikes the chunk-2 row from the #957 pending-machinery record. `chunked-delivery.md`'s enforcement paragraph moves its reach-claim: the check now performs the catch A3 names, and what it still does not reach is A1 and A3's own delivery-form rule. (#973)
+
 ## [3.9.1] — 2026-08-02
 
 ### Fixed

@@ -18,7 +18,14 @@
          shape, while code review's `standard` adapter is untouched. (#941 AC4)
 
       3. The brief conformance check is reachable from where a reviewer works,
-         and covers the four mechanical properties #936 D5 named. (#941 AC6)
+         and covers the five properties the doctrine names -- the four
+         near-mechanical ones #936 D5 named, plus the vacuity reading-property
+         #957 D2 added. (#941 AC6; extended by #973)
+
+      4. The brief-review teeth #957 chunk 2 delivered are held, not merely
+         described: the vacuity question is a required part of a brief-target
+         convergence cold read AND has an instructed producer, and the routing
+         call is a named review target with every outcome arm defined. (#973)
 #>
 
 BeforeAll {
@@ -628,7 +635,7 @@ Describe 'Brief plan variant — authoring rule' -Tag 'unit' {
 
 Describe 'Brief plan variant — conformance check' -Tag 'unit' {
 
-    It 'declares the four mechanical properties #936 D5 named' {
+    It 'declares the five properties: four mechanical (#936 D5) plus the vacuity reading (#957 D2)' {
         $content = & $script:ReadRepoFile 'skills/plan-authoring/SKILL.md'
 
         $content | Should -Match '(?m)^####\s+Brief conformance check\s*$'
@@ -643,13 +650,328 @@ Describe 'Brief plan variant — conformance check' -Tag 'unit' {
         ($section.Contains('source-read') -and $section.Contains('sample-inferred')) | Should -BeTrue -Because 'property 2: provenance marking'
         $section.Contains('proof standard') | Should -BeTrue -Because 'property 3: evidence obligations present'
         $section.Contains('floor') | Should -BeTrue -Because 'property 4: suite floor satisfiable against the launch baseline'
+        $section.Contains('Is there a reading of the criteria under which every one passes and no work happens?') | Should -BeTrue `
+            -Because 'property 5: the vacuity question, verbatim as #957 D2 fixed it'
     }
 
-    It 'is reachable from every point that dispatches a brief review' {
+    It 'makes property 5 an act of construction, so a bare "no" cannot discharge it' {
+        # The whole tooth is the READING. A property-5 phrased as a bare
+        # question is satisfied by "no reading exists" written without looking
+        # -- which is exactly what a reviewer who never looked would also
+        # write, so the emission would carry no information (#973 AC1).
+        $content = & $script:ReadRepoFile 'skills/plan-authoring/SKILL.md'
+        $section = ($content -split '(?m)^####\s+Brief conformance check\s*$')[1]
+        $section = ($section -split '(?m)^##')[0]
+
+        $section.Contains('Answering is an act of construction, not of assertion.') | Should -BeTrue `
+            -Because 'the expected act must be constructing the candidate reading, not answering the question'
+        $section.Contains('does **not** discharge this property') | Should -BeTrue `
+            -Because 'the bare-no answer must be named nonconforming, or the property lands vacuously'
+    }
+
+    It 'no longer frames the check as covering only near-mechanical text properties' {
+        # Property 5 appended while the framing sentence one paragraph above
+        # still said "the four near-mechanical properties" would leave the
+        # check disagreeing with itself about what it is (#973 falsifier 2).
+        $content = & $script:ReadRepoFile 'skills/plan-authoring/SKILL.md'
+        $section = ($content -split '(?m)^####\s+Brief conformance check\s*$')[1]
+        $section = ($section -split '(?m)^##')[0]
+
+        $section.Contains('It covers the four near-mechanical properties #936 D5 named') | Should -BeFalse `
+            -Because 'the framing sentence must admit the reading-property alongside the four'
+        $section.Contains('property 5 needs a reading of what the criteria mean *together*') | Should -BeTrue `
+            -Because 'the closing reading-enumeration goes stale on landing unless it grows with the new property'
+    }
+
+    It 'the conformance check is reachable from every point that dispatches a brief review' {
+        # #981 review, M22: this It and the routing-call reachability It were
+        # both named 'is reachable from every point that dispatches a brief
+        # review'. run-pester-sharded reports failures as `[-] {It name}` with
+        # no Describe path, so a red run could not tell the two apart.
+        # External review (CodeRabbit, PR #981): this test carried the SAME
+        # vacuity M19 fixed in its sibling — for the owning file,
+        # `Contains('Brief conformance check')` matches the section's own
+        # heading, so deleting both dispatch-point pointers left it green.
+        # Every pointer is backticked and the heading is not.
         foreach ($path in @('commands/plan.md', 'skills/plan-authoring/SKILL.md', 'agents/Issue-Planner.agent.md')) {
             $content = & $script:ReadRepoFile $path
-            $content.Contains('Brief conformance check') | Should -BeTrue -Because "$path must let a reviewer reach the conformance check from where they work"
+            $content.Contains('`#### Brief conformance check`') | Should -BeTrue `
+                -Because "$path must POINT AT the conformance check, not merely contain its heading"
         }
+
+        $planAuthoring = & $script:ReadRepoFile 'skills/plan-authoring/SKILL.md'
+        ([regex]::Matches($planAuthoring, [regex]::Escape('`#### Brief conformance check`')).Count) |
+            Should -BeGreaterOrEqual 2 `
+            -Because 'both dispatch points in the owning skill must reach the section, not just one'
+    }
+}
+
+Describe 'Brief review teeth — the routing call as a review target (#973)' -Tag 'unit' {
+
+    It 'the routing-call target is pointed at from every point that dispatches a brief review' {
+        # #981 review, M19: the first version of this test asserted the bare
+        # section NAME over all three files. In `plan-authoring` that literal IS
+        # the section's own `####` heading, so the assertion could not fail while
+        # the section existed — deleting BOTH dispatch-point pointers left it
+        # green (verified by mutation). Every pointer is backticked and the
+        # heading is not, so asserting the backticked form separates the two.
+        foreach ($path in @('commands/plan.md', 'skills/plan-authoring/SKILL.md', 'agents/Issue-Planner.agent.md')) {
+            $content = & $script:ReadRepoFile $path
+            $content.Contains('`#### The routing call as a review target`') | Should -BeTrue `
+                -Because "$path dispatches a brief review, so it must POINT AT the routing-call target, not merely contain its heading"
+        }
+
+        # `plan-authoring` owns the section, so it must carry the heading AND at
+        # least one pointer to it from a dispatch point (§ Keep the Review
+        # Pipeline Explicit and § Stress-Test Preparation both point).
+        $planAuthoring = & $script:ReadRepoFile 'skills/plan-authoring/SKILL.md'
+        ([regex]::Matches($planAuthoring, [regex]::Escape('`#### The routing call as a review target`')).Count) |
+            Should -BeGreaterOrEqual 2 `
+            -Because 'both dispatch points in the owning skill must reach the section, not just one'
+    }
+
+    It 'defines all four source-(b) outcome arms, including novel-verdict and verdict-absent as failures' {
+        $content = & $script:ReadRepoFile 'skills/plan-authoring/SKILL.md'
+        $section = ($content -split '(?m)^####\s+The routing call as a review target\s*$')[1]
+        $section | Should -Not -BeNullOrEmpty
+        $section = ($section -split '(?m)^##')[0]
+
+        $section.Contains('Present, routine, and consistent with the map') | Should -BeTrue -Because 'arm 1'
+        $section.Contains('Present, routine, but inconsistent with the map') | Should -BeTrue -Because 'arm 2'
+        $section.Contains('Present but novel') | Should -BeTrue `
+            -Because 'arm 3 (#981 review, M3): a recorded NOVEL verdict is the same lawfulness failure as an absent one; without this arm it passes as "checked and consistent"'
+        $section.Contains('not lawful under source (b)') | Should -BeTrue `
+            -Because 'arm 4: Amendment 10 makes a missing verdict a review failure, not a gap to note'
+    }
+
+    It 'states what a routing-call review failure means instead of leaving it to inference' {
+        # #981 review, M4: "review failure" was the strongest word in the
+        # section and the only one with no defined effect — three surfaces
+        # declare this pipeline non-blocking, so an undefined failure verdict is
+        # dismissible under the ordinary triad. The fix states the required
+        # action AND states honestly that nothing mechanical enforces it.
+        $content = & $script:ReadRepoFile 'skills/plan-authoring/SKILL.md'
+        $section = ($content -split '(?m)^####\s+The routing call as a review target\s*$')[1]
+        $section = ($section -split '(?m)^##')[0]
+
+        $section.Contains('corrected before the brief is dispatched or run') | Should -BeTrue `
+            -Because 'the failure verdict must name its required action, the way the conformance check does'
+        $section.Contains('nothing mechanical enforces that') | Should -BeTrue `
+            -Because 'claiming an unenforced consequence is the overclaim class this chunk exists to remove'
+    }
+
+    It 'says naming the classification evidence is not verifying it' {
+        # #981 review, M5: the section claimed a misclassified source "cannot
+        # produce a lawful-looking result", which naming alone does not buy.
+        $content = & $script:ReadRepoFile 'skills/plan-authoring/SKILL.md'
+        $section = ($content -split '(?m)^####\s+The routing call as a review target\s*$')[1]
+        $section = ($section -split '(?m)^##')[0]
+
+        $section.Contains('cannot produce a lawful-looking result') | Should -BeFalse `
+            -Because 'naming the evidence does not re-derive the parent link, so the absolute claim was false'
+        $section.Contains('naming is not verifying') | Should -BeTrue `
+            -Because 'the limit must be stated at the site rather than implied'
+    }
+
+    It 'pins the source-(a) n/a rationale and forbids the family-false one' {
+        # "no beat 2 ran" is FALSE for a chunk of a novel-arm parent, where
+        # beat 2 did run and its verdict rides the parent design marker
+        # (open-for-work.md, § The two outputs). Instructing that rationale
+        # would make every such n/a a false statement (#973 AC4).
+        $content = & $script:ReadRepoFile 'skills/plan-authoring/SKILL.md'
+        $section = ($content -split '(?m)^####\s+The routing call as a review target\s*$')[1]
+        $section = ($section -split '(?m)^##')[0]
+
+        $section.Contains('carries no routing verdict of its own') | Should -BeTrue `
+            -Because 'the n/a basis must be the one true across both source-(a) families'
+        $section.Contains('Do not write "no beat 2 ran"') | Should -BeTrue `
+            -Because 'the family-false rationale must be named and forbidden, not merely not-recommended'
+        $section.Contains('emission, not a skip') | Should -BeTrue `
+            -Because 'a skippable n/a is today behaviour with extra words'
+    }
+}
+
+Describe 'Brief review teeth — required cold-read vacuity question (#973)' -Tag 'unit' {
+
+    BeforeAll {
+        # #981 review, M11: these assertions originally ran against the WHOLE
+        # 900-line skill, unlike their section-bounded siblings, so the text
+        # could migrate out of § Convergence Filter and still satisfy them.
+        $script:ConvergenceSection = {
+            $content = & $script:ReadRepoFile 'skills/design-exploration/SKILL.md'
+            $section = ($content -split '(?m)^###\s+Convergence Filter\s*$')[1]
+            if ([string]::IsNullOrWhiteSpace($section)) { throw 'section "### Convergence Filter" not found' }
+            return ($section -split '(?m)^###\s')[0]
+        }
+    }
+
+    It 'the convergence cold read requires the vacuity question on a brief target, verbatim' {
+        $section = & $script:ConvergenceSection
+
+        $section.Contains('Is there a reading of the criteria under which every one passes and no work happens?') | Should -BeTrue `
+            -Because 'the cold read is the vacuity question''s load-bearing adversarial instance (#957 D2)'
+        $section.Contains('asked, no surviving reading') | Should -BeTrue `
+            -Because 'a clean result needs a stated sentence, or silence stays ambiguous between examined and never-examined'
+        $section.Contains('nonconforming run, not a clean one') | Should -BeTrue `
+            -Because 'a record with no vacuity sentence must be identifiable as nonconforming'
+    }
+
+    It 'conditions the requirement on the target being a brief, not merely claiming the design path is unchanged' {
+        # #981 review, M11 (mutation-verified by defense and judge): asserting
+        # only the "design-target ... unchanged" sentence left the suite green
+        # when the CONDITIONING clause was deleted — which would make the
+        # vacuity question unconditional and change every Solution-Designer
+        # design review, the exact scope creep #957 P1-F12 declined. Pin the
+        # condition itself, not the reassurance about its consequence.
+        $section = & $script:ConvergenceSection
+
+        $section.Contains('When the artifact under convergence is a `plan-variant: brief` plan') | Should -BeTrue `
+            -Because 'the addendum must be CONDITIONED on the target shape; without this clause it applies to every design review'
+        $section.Contains('A design-target convergence pass is behaviourally unchanged') | Should -BeTrue `
+            -Because 'the unchanged-design-path promise must be stated as well as structurally true'
+    }
+
+    It 'names the carrying surface for the vacuity answer in both polarities' {
+        # #981 review, D1 (defense-found, mutation-verified): the
+        # carrying-surface sentence was deletable with the suite still green,
+        # and it is the sub-property the whole "silence is not clean" claim
+        # turns on — a clean answer produces no rulings row, so if it does not
+        # land in the summary it lands nowhere.
+        $section = & $script:ConvergenceSection
+        $section.Contains('summary is the carrying surface') | Should -BeTrue `
+            -Because 'without a named landing surface a clean vacuity answer is recorded nowhere'
+
+        $planAuthoring = & $script:ReadRepoFile 'skills/plan-authoring/SKILL.md'
+        $planAuthoring.Contains('record the outcome in the persisted `**Plan Stress-Test**` summary') | Should -BeTrue `
+            -Because 'the routing-call outcome needs the same named landing surface'
+    }
+
+    It 'tells the summary WRITER to carry both emissions, not only the reviewer to produce them' {
+        # #981 review, M2: both emissions named the persisted stress-test
+        # summary as their carrying surface while the reconciliation step that
+        # composes that summary still asked only for judge ruling + maintainer
+        # disposition — so the doctrine declared the default output of its own
+        # unamended writer step nonconforming.
+        $content = & $script:ReadRepoFile 'skills/plan-authoring/SKILL.md'
+        $section = ($content -split '(?m)^###\s+Post-Judge Reconciliation\s*$')[1]
+        $section | Should -Not -BeNullOrEmpty
+        $section = ($section -split '(?m)^###\s')[0]
+
+        $section.Contains('vacuity answer') | Should -BeTrue `
+            -Because 'the writer step must ask for the vacuity sentence, or no one composes it'
+        $section.Contains('routing-call outcome') | Should -BeTrue `
+            -Because 'the writer step must ask for the routing-call outcome for the same reason'
+    }
+
+    It 'does not tell a brief-path reader that nothing else in the section is shape-conditioned' {
+        # #981 review, M8: the sentence was falsified by a line the same commit
+        # wrote, and invited a brief-path reader onward into the design-only
+        # `finding_dispositions:` tagging the repo excluded on purpose.
+        $section = & $script:ConvergenceSection
+
+        $section.Contains('nothing else in this section is conditioned on the target''s shape') | Should -BeFalse `
+            -Because 'the caller-identity sentence and the pass-4 tagging are both shape-conditioned'
+        $section.Contains('A brief emits `brief_dispositions:`') | Should -BeTrue `
+            -Because 'the brief path must be steered away from the design marker''s schema at the point of exposure'
+    }
+
+    It 'scopes the pass-4 finding_dispositions tagging to design targets at the instruction itself' {
+        # External review (Codex bot, PR #981): warning a brief-path reader
+        # upstream is not enough — a reader arriving directly at the pass-4
+        # sentence (by search, or by reading the section in order) still met an
+        # unqualified instruction to tag findings into `finding_dispositions:`,
+        # the design-completion token whose reuse on a brief renders a
+        # permanent false design-challenge gap.
+        $section = & $script:ConvergenceSection
+
+        $section.Contains('**On a design target**, cold-read-originated findings') | Should -BeTrue `
+            -Because 'the pass-4 instruction must carry its own scope, not rely on a caveat several paragraphs earlier'
+        $section.Contains('A brief target does not use this tagging.') | Should -BeTrue `
+            -Because 'the brief path needs an explicit exclusion at the point the design token is named'
+    }
+
+    It 'open-for-work scopes the routing review target to the routine arm and records the novel-arm asymmetry' {
+        # Owner disposition 2026-08-03 on the #973 chunk-2 escalation. Before
+        # this, the doctrine asserted twice and unqualified that the routing
+        # call "is a named review target" while chunk 2 made that true for
+        # BRIEFS only — so the novel arm's marker-borne verdict was reviewed by
+        # nobody and the doctrine said otherwise. The asymmetry is kept because
+        # a wrongly-novel call costs ceremony, not correctness; that reasoning
+        # has to survive in the text or the next reader reads an omission.
+        $content = & $script:ReadRepoFile 'Documents/Design/open-for-work.md'
+
+        $content.Contains('is a named review target **on the routine arm**') | Should -BeTrue `
+            -Because 'the unqualified claim was false for the novel arm once chunk 2 landed'
+        $content.Contains('has no separate reviewer, and that is a decision rather than an omission') | Should -BeTrue `
+            -Because 'a deliberate gap must be readable as deliberate, or it reads as an oversight'
+        $content.Contains('The unreviewed direction is the safe one.') | Should -BeTrue `
+            -Because 'the asymmetry argument is the whole justification; without it the scoping looks arbitrary'
+
+        # The arm enumeration must not go stale the way it already did once:
+        # "rule one of three ways" survived the fourth (novel) arm landing.
+        $content.Contains('rule one of three ways') | Should -BeFalse `
+            -Because 'the novel arm made this a four-way rule; a stale count here is the same defect #973 swept for elsewhere'
+        $content.Contains('rule one of four ways') | Should -BeTrue `
+            -Because 'the doctrine summary must enumerate the same arms the charter defines'
+    }
+
+    It 'both doctrine surfaces key the routing n/a arm on the AUTHORITY SOURCE, not on verdict presence' {
+        # External review (CodeRabbit, PR #981) on the M1 FIX itself: the
+        # replacement wording read "checked ... where a routing verdict rides
+        # the brief, and otherwise recorded as not-applicable", which keys the
+        # n/a arm on whether a verdict happens to be present. A source-(b)
+        # brief with NO verdict then falls into "otherwise" and is recorded
+        # n/a -- precisely the lawfulness failure arm 4 exists to catch, and
+        # the same skip-shaped defect M1 was raised to remove.
+        foreach ($path in @('CLAUDE.md', 'Documents/Design/chunked-delivery.md')) {
+            $content = & $script:ReadRepoFile $path
+            $content.Contains('otherwise recorded as not-applicable') | Should -BeFalse `
+                -Because "$path must not let an absent source-(b) verdict fall through to a not-applicable"
+        }
+
+        # External review (CodeRabbit, PR #981) on THIS pin: a bare
+        # `Contains('novel')` passed on both files from unrelated prose
+        # ("routine-versus-novel", the novel-arm asymmetry paragraph), so it
+        # could stay green while the n/a rule lost its novel outcome. Assert the
+        # outcome MAPPING instead, per file, in each file's own wording.
+        $claudeMd = & $script:ReadRepoFile 'CLAUDE.md'
+        $claudeMd.Contains('an absent or novel one is a review failure, never an n/a') | Should -BeTrue `
+            -Because 'CLAUDE.md must map the novel and absent states to a review failure, not merely mention "novel"'
+
+        $doctrine = & $script:ReadRepoFile 'Documents/Design/chunked-delivery.md'
+        $doctrine.Contains('**novel** and **absent** are each a **review failure**') | Should -BeTrue `
+            -Because 'the doctrine must close the outcome mapping so two reviewers cannot classify the same brief differently'
+        $doctrine.Contains('none of the three is ever a not-applicable') | Should -BeTrue `
+            -Because 'the n/a exclusion is the load-bearing half of the mapping'
+
+        $doctrine = & $script:ReadRepoFile 'Documents/Design/chunked-delivery.md'
+        $doctrine.Contains('never by whether a verdict happens to be present') | Should -BeTrue `
+            -Because 'the arm must be selected by authority source; that is the whole distinction'
+    }
+
+    It 'both doctrine surfaces name the persisted landing surface for the vacuity answer' {
+        # External review (CodeRabbit, PR #981): both doctrine documents
+        # required the question and the emitted answer while naming neither the
+        # durable artifact nor the producer — so a reader learning the charter
+        # from doctrine alone would not know that silence is nonconforming.
+        foreach ($path in @('Documents/Design/chunked-delivery.md', 'Documents/Design/open-for-work.md')) {
+            $content = & $script:ReadRepoFile $path
+            $content.Contains('Plan Stress-Test') | Should -BeTrue `
+                -Because "$path states the vacuity requirement, so it must also name where the answer is persisted"
+        }
+    }
+
+    It 'the required answer has an instructed producer, not only an asker' {
+        # A requirement written only into the dispatcher prose has no producer:
+        # the shell that PERFORMS the cold read is instructed by its own body,
+        # which scoped this dispatch shape to Solution-Designer and was
+        # therefore false by omission on the brief path (#973 AC3).
+        $content = & $script:ReadRepoFile 'agents/code-review-response.md'
+
+        $content.Contains('When dispatched by Solution-Designer for design-challenge convergence') | Should -BeFalse `
+            -Because 'the producer surface must not scope this dispatch shape to the wrong dispatcher'
+        $content.Contains('answering that section''s required vacuity question in part (a) is part of the contract') | Should -BeTrue `
+            -Because 'the shell performing the cold read must be told to answer, not only the dispatcher told to ask'
     }
 }
 
@@ -801,7 +1123,15 @@ Describe 'Brief plan variant — doctrine migration' -Tag 'unit' {
         $body = & $script:StripInterimNote $content
         $body.Contains('a plan can violate any of A1–A5 and still validate') | Should -BeFalse `
             -Because 'the sentence claims nothing enforces A1-A5 at authoring time, which the conformance check falsifies'
-        $body.Contains('Neither reaches A1 or A3') | Should -BeTrue `
+        # The reach-claim MOVED with #973, and the pin moved in the same change.
+        # Property 5 performs the catch A3 names (targets satisfiable without
+        # the fix), so "Neither reaches A1 or A3" became false on landing --
+        # the noun-swapped-predicate-left-false class. What replaces it still
+        # states a limit (A1, and A3's own delivery-form rule), which is what
+        # this pin has always been defending.
+        $body.Contains('Neither reaches A1 or A3') | Should -BeFalse `
+            -Because 'the reading-property reaches the catch A3 names, so the old reach-claim is now false'
+        $body.Contains('What none of it reaches: A1, and the rule A3 itself states.') | Should -BeTrue `
             -Because 'the replacement must state what the new enforcement does NOT reach, or it overclaims in the other direction'
     }
 
@@ -809,6 +1139,28 @@ Describe 'Brief plan variant — doctrine migration' -Tag 'unit' {
         $content = & $script:ReadRepoFile 'Documents/Design/chunked-delivery.md'
         $content.Contains("the chunk's goal-contract cites the parent decisions it implements") | Should -BeFalse
         $content.Contains('**Panel depth earns its way down.** Chunk plans start with the full adversarial plan review') | Should -BeFalse
+    }
+
+    It 'the CLAUDE.md charter mirror enumerates the same charter as chunked-delivery' {
+        # #981 review, M12: CLAUDE.md:123 and chunked-delivery.md:26 are a
+        # maintained mirror pair, but THIS sentence was pinned on neither side,
+        # so #973 updated one and left the other enumerating a two-component
+        # charter. CLAUDE.md is the first document every session loads.
+        # Deliberately assert the CONCEPTS, not a property count — a count here
+        # would mint exactly the drift site falsifier 6 warns about.
+        $claudeMd = & $script:ReadRepoFile 'CLAUDE.md'
+        $doctrine = & $script:ReadRepoFile 'Documents/Design/chunked-delivery.md'
+
+        foreach ($concept in @('vacuity reading', 'routing-call review target')) {
+            $claudeMd.Contains($concept) | Should -BeTrue `
+                -Because "the CLAUDE.md charter mirror must name '$concept'; it is the first document every session loads"
+            $doctrine.Contains($concept) | Should -BeTrue `
+                -Because "the chunked-delivery side of the mirror must name '$concept' too"
+        }
+
+        $claudeMd.Contains('the brief conformance check plus the prosecution-only `design-challenge` shape') |
+            Should -BeFalse `
+            -Because 'the pre-#973 two-component enumeration is stale once the teeth land'
     }
 
     It 'the migration table still records the rows later chunks own' {

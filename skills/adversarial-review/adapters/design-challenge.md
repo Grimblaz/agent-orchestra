@@ -27,6 +27,8 @@ Two, both reviewing a **design-shaped** artifact:
 
 Both callers run the **convergence filter** (`skills/design-exploration/SKILL.md § Convergence Filter`, #785) over the merged three-lens ledger. That is not a Solution-Designer-only step: `skills/solution-authoring/SKILL.md` keys the classification gate's firing input on convergence-sustained findings, which is the only input this adapter can supply given it produces no judge ruling.
 
+The two callers' convergence passes differ in exactly one respect: on the **brief-target** path the cold read carries a **required vacuity question** whose answer is emitted in both polarities (that section's brief-target addendum, #957 D2). The design-target pass is unchanged. This is prose pointing at the filter's own contract, not an addition to this adapter's declaration — `pipeline-stages`, `atomic`, and the pass count are untouched.
+
 ## Prosecution-only by design
 
 Defense and judge stages are intentionally absent to preserve the non-blocking inform-but-don't-veto semantic both consumers rely on. Adding either stage is a contract change requiring design review.

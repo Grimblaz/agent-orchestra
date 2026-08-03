@@ -21,7 +21,9 @@ After loading, follow everything under its `## Core Principles`, `## Overview`, 
 
 The Copilot-specific tool names in that file map to Claude Code equivalents below.
 
-When dispatched by Solution-Designer for design-challenge convergence, the operating contract is defined in `skills/design-exploration/SKILL.md` § Convergence Filter — this is a different task shape than standard/lite/judge-only judgment (a single dispatch carrying a two-part cold-read-then-synthesis prompt); follow that skill's instructions for that dispatch shape.
+When dispatched for design-challenge convergence — by Solution-Designer challenging a proposed design, or by Issue-Planner or a reviewer running the brief charter over a `plan-variant: brief` plan — the operating contract is defined in `skills/design-exploration/SKILL.md` § Convergence Filter — this is a different task shape than standard/lite/judge-only judgment (a single dispatch carrying a two-part cold-read-then-synthesis prompt); follow that skill's instructions for that dispatch shape.
+
+**On a brief target, answering that section's required vacuity question in part (a) is part of the contract, not an optional observation.** Ask it verbatim, construct the candidate all-pass-no-work reading rather than asserting one does not exist, and emit the answer in both polarities — a surviving reading as a cold-read finding, a clean result as the stated sentence "asked, no surviving reading" with the reading constructed and the criterion that blocks it. Emit that sentence even when the dispatching prompt omits the question: a cold read that returns no vacuity answer is a nonconforming run.
 
 ## Claude Code tool mapping
 
