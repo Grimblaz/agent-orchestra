@@ -224,16 +224,40 @@ Describe 'open-for-work surface (issue #974)' {
             }
 
             # Tighter still: just the disclosure block, from its bolded
-            # lead-in to the '### Deciding the state' heading. Needed because
-            # the resume section ALREADY says 'earliest lawful' in step 2's
-            # ordering check, so a section-scoped assertion on that phrase is
-            # satisfied by text that predates #995 -- verified by mutation:
-            # deleting the phrase from the disclosure block left the
-            # section-scoped assertion green.
+            # lead-in to the next '### ' heading. Needed because the resume
+            # section ALREADY says 'earliest lawful' in step 2's ordering
+            # check, so a section-scoped assertion on that phrase is satisfied
+            # by text that predates #995 -- verified by mutation: deleting the
+            # phrase from the disclosure block left the section-scoped
+            # assertion green.
+            #
+            # Two scoping details, each closing a false green that a later
+            # #995 review pass demonstrated against a mirror of the tree (the
+            # first shape of this scoper stayed green through both mutations):
+            #
+            #   * It slices out of (& $script:ResumeSection), not out of
+            #     $script:SkillText. Matching the whole document meant that
+            #     relocating this entire block into a '##' section of its own
+            #     left the suite green while the resume section the test is
+            #     NAMED for carried no disclosure at all.
+            #   * Its terminator is any '### ' heading, not the literal
+            #     '### Deciding the state'. An end-of-document fallback
+            #     anchored on one heading title widens the block to \z the
+            #     moment that heading is renamed, and step 2's ordering check
+            #     -- which also says 'earliest lawful' -- then satisfies the
+            #     assertion from pre-#995 text.
+            #
+            # Residual, stated rather than left implied: DELETING every '###'
+            # heading below the block still widens it to the end of the resume
+            # section. Closing that needs a positive end anchor, which would
+            # pin prose this guard has no business pinning.
+            #
+            # The two scopers did not land together: ResumeSection came in
+            # f28b4aa, DisclosureBlock in 6193826.
             $script:DisclosureBlock = {
                 [regex]::Match(
-                    $script:SkillText,
-                    '(?ms)^\*\*Who posted it.*?(?=^###\s+Deciding the state|\z)'
+                    (& $script:ResumeSection),
+                    '(?ms)^\*\*Who posted it.*?(?=^###\s|\z)'
                 ).Value
             }
         }
@@ -373,7 +397,8 @@ Describe 'open-for-work surface (issue #974)' {
             # Asserted against the DISCLOSURE BLOCK, not the whole section:
             # step 2 already said 'earliest lawful' before #995, so a
             # section-scoped assertion here passes on pre-existing text.
-            # Mutation-verified -- see the commit that added this.
+            # Mutation-verified in 6193826, and again after the block scoper
+            # was rederived from the resume section (see BeforeAll).
             $disclosure | Should -Match '(?i)earliest lawful' `
                 -Because 'the output obligation must itself name the record the ordering check reads, because that is the one a single-record disclosure hides'
             $disclosure | Should -Match '(?i)name both' `
@@ -391,6 +416,36 @@ Describe 'open-for-work surface (issue #974)' {
             $doctrine = & $script:ReadRepoFile 'Documents/Design/open-for-work.md'
             $doctrine | Should -Not -BeNullOrEmpty
 
+            # Scoped to each file's trust model, not to the whole file. A
+            # whole-file probe cannot see the drift it is named for: dropping
+            # the author-blind claim from the SKILL's trust model left the
+            # pair green, because the alternative 'is conditioned on who
+            # posted it' is answered in § Resuming -- a different section,
+            # about a different obligation. That mutation IS the drift.
+            # No `|\z` fallback here, deliberately, and this is the one
+            # asymmetry with $script:DisclosureBlock above. An end-of-document
+            # fallback would let the block widen to swallow § Resuming the
+            # moment no '##' heading follows the trust model -- and § Resuming
+            # carries 'is conditioned on who posted it', which is probe 5's
+            # third alternative. That is exactly the false green this scoper
+            # was written to close, restored through the back door.
+            # Reproduced before removing it: demote every '##' heading below
+            # the trust model and strip author-blind from the SKILL's copy,
+            # and the parity assertion passed. Without the fallback that shape
+            # yields an empty match instead, which the non-empty guards below
+            # turn into a loud red. Failing to find the block is the correct
+            # outcome when the block cannot be delimited; over-capturing is not.
+            $trustModel = {
+                param([string]$Text)
+                [regex]::Match($Text, '(?ms)^\*\*Trust model.*?(?=^#{2,}\s)').Value
+            }
+            $skillTrust    = & $trustModel $script:SkillText
+            $doctrineTrust = & $trustModel $doctrine
+            $skillTrust | Should -Not -BeNullOrEmpty `
+                -Because 'the skill''s trust model must be findable before anything can be scoped to it'
+            $doctrineTrust | Should -Not -BeNullOrEmpty `
+                -Because 'the doctrine''s trust model must be findable before anything can be scoped to it'
+
             $probes = [ordered]@{
                 'anyone who can comment can post an accepted record' = '(?i)anyone (with a GitHub account )?who can comment'
                 'nothing gates it'                                   = '(?i)no author check, no permission check'
@@ -399,9 +454,9 @@ Describe 'open-for-work surface (issue #974)' {
                 'no authorship condition was added'                  = '(?i)author-blind|stay author-blind|is conditioned on who posted it'
             }
             foreach ($probe in $probes.GetEnumerator()) {
-                $script:SkillText | Should -Match $probe.Value `
+                $skillTrust | Should -Match $probe.Value `
                     -Because "the skill's trust model must answer: $($probe.Key)"
-                $doctrine | Should -Match $probe.Value `
+                $doctrineTrust | Should -Match $probe.Value `
                     -Because "the doctrine's trust model must answer: $($probe.Key) -- a statement landing at one site and not the other is the drift this repository's parity discipline exists against"
             }
         }

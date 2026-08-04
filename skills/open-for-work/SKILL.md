@@ -239,7 +239,7 @@ gh api repos/{owner}/{repo}/issues/{ID}/comments --paginate
 
 **Edit state**: for each candidate, compare `updated_at` against `created_at`. Later means the record is **void as an ordering witness** — skip it for every ordering purpose. If no unedited record survives, the issue has no lawful source-(b) authority; say so rather than proceeding.
 
-**Who posted it — disclose it, never condition on it.** The same response carries `user.login` and `author_association` for every comment; no extra fetch is needed. **Collect** the author of every candidate record alongside its timestamps — all of them, including ones you go on to treat as void.
+**Who posted it — disclose it; nothing the flow computes is conditioned on it.** (What a *person*, once shown the author, may decide to do is a separate matter — the paragraph below and § Writing the affirmation record's **Trust model** cover it.) The same response carries `user.login` and `author_association` for every comment; no extra fetch is needed. **Collect** the author of every candidate record alongside its timestamps — all of them, including ones you go on to treat as void.
 
 **What must reach the output**, in every outcome below: **every record the state decision relied on, and never only the one you are resuming under.** That is the floor, not the ceiling — naming more is always fine, and the last shape below names voided records too. This is the part that is easy to get wrong, and getting it wrong is what makes the disclosure decorative. The author is not a field a reader could *merely* have looked up had they thought to; it is part of the summary they are handed. The two checks below read *different* records: step 2's ordering check reads the **earliest lawful** record, and step 3's supersession check reads the **latest lawful** one. When those are the same record, one line covers it. **When they differ, name both** — otherwise the record that supplied lawfulness can be invisible while the output names another. That is not hypothetical: an earlier record is exactly what lets a routing artifact pass step 2, and step 2 is described below as the only moment a later reader can catch a back-fitted authority.
 
@@ -274,7 +274,7 @@ Two rendering notes. Render the login **plain, without a leading `@`** — a ren
 | --- | --- | --- |
 | This section (§ Resuming) | The recognition chokepoint — finds the record, decides the state | Carries the obligation |
 | `commands/plan.md` pre-flight | Restates the form test and routes on the outcome | Carries the obligation |
-| `commands/open.md` | Delegates wholly to this section rather than restating it | Inherits it |
+| `commands/open.md` | Delegates the state decision to this section; restates only the predates-stop outcome, and no recognition mechanics or disclosure shape | Inherits it |
 | `skills/post-pr-review/SKILL.md` § 9 | Restates the lookup to decide whether a close-out is owed — neither resumes nor routes | Out of scope by role |
 
 Everything else that mentions an affirmation record — `skills/plan-authoring/SKILL.md`, `agents/Issue-Planner.agent.md`, `agents/Code-Critic.agent.md`, `skills/adversarial-review/adapters/design-challenge.md` — cites it as a brief's *authority source* and performs no form test, so none is a recognition surface. **If you add a surface that recognises a record, it takes this obligation with it**; nothing detects that automatically.
