@@ -222,6 +222,20 @@ Describe 'open-for-work surface (issue #974)' {
                     '(?ms)^##\s+Resuming an issue already opened for work\b.*?(?=^##\s|\z)'
                 ).Value
             }
+
+            # Tighter still: just the disclosure block, from its bolded
+            # lead-in to the '### Deciding the state' heading. Needed because
+            # the resume section ALREADY says 'earliest lawful' in step 2's
+            # ordering check, so a section-scoped assertion on that phrase is
+            # satisfied by text that predates #995 -- verified by mutation:
+            # deleting the phrase from the disclosure block left the
+            # section-scoped assertion green.
+            $script:DisclosureBlock = {
+                [regex]::Match(
+                    $script:SkillText,
+                    '(?ms)^\*\*Who posted it.*?(?=^###\s+Deciding the state|\z)'
+                ).Value
+            }
         }
 
         It 'the command exists and loads the methodology skill' {
@@ -341,7 +355,11 @@ Describe 'open-for-work surface (issue #974)' {
             $resuming | Should -Not -BeNullOrEmpty `
                 -Because 'the section heading must be findable before anything can be scoped to it'
 
-            $resuming | Should -Match ([regex]::Escape('user.login')) `
+            $disclosure = & $script:DisclosureBlock
+            $disclosure | Should -Not -BeNullOrEmpty `
+                -Because 'the disclosure block must be findable; if its lead-in is gone the obligation is gone'
+
+            $disclosure | Should -Match ([regex]::Escape('user.login')) `
                 -Because 'the field the disclosure is built on has to be named where the resume reads comments, or the instruction has no referent'
 
             # The load-bearing half. Round-1 finding M2 (the only sustained
@@ -349,11 +367,16 @@ Describe 'open-for-work surface (issue #974)' {
             # earliest lawful record unnamed -- and the earliest is what step
             # 2 derives lawfulness from, so a planted record can supply the
             # authority and never appear in the output. Disclosure that runs
-            # and shows nothing is the failure mode this whole change exists
-            # to avoid, so it gets the assertion.
-            $resuming | Should -Match '(?i)earliest lawful' `
-                -Because 'the record the ordering check reads must be named, because it is the one a single-record disclosure hides'
-            $resuming | Should -Match '(?i)name both' `
+            # and shows nothing is the failure mode this change exists to
+            # avoid, so it gets the assertion.
+            #
+            # Asserted against the DISCLOSURE BLOCK, not the whole section:
+            # step 2 already said 'earliest lawful' before #995, so a
+            # section-scoped assertion here passes on pre-existing text.
+            # Mutation-verified -- see the commit that added this.
+            $disclosure | Should -Match '(?i)earliest lawful' `
+                -Because 'the output obligation must itself name the record the ordering check reads, because that is the one a single-record disclosure hides'
+            $disclosure | Should -Match '(?i)name both' `
                 -Because 'M2: the output obligation must reach both records when they differ, not only the resumed-under one'
         }
 
