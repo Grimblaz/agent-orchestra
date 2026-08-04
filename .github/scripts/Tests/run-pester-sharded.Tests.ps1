@@ -205,6 +205,17 @@ Describe 'run-pester-sharded — run attribution (issue #958)' {
         # git taken here, never against the runner's own lookup, so no assertion
         # can pass by a function agreeing with itself.
         $script:AttrHead = ([string](& git -C $script:RepoRoot rev-parse HEAD)).Trim()
+        # Asserted explicitly rather than left to an incidental failure mode: a
+        # bare `.Trim()` on git's captured output happens to throw when the
+        # environment is broken (no repo, git missing), and that accidental
+        # throw is what currently makes this file loudly. If a future refactor
+        # ever removed the throw (`2>&1`, `?? ''`), $AttrHead could silently
+        # become '' -- and A1's Should -Match "commit=$AttrHead" would then
+        # degrade to matching bare "commit=" and pass VACUOUSLY, no longer
+        # testing what it claims to. This assertion is the designed guard that
+        # incidental throw was standing in for.
+        $script:AttrHead | Should -Match '^[0-9a-f]{40}$|^[0-9a-f]{64}$' `
+            -Because 'every assertion below compares against this value; a broken git here must fail loudly and by name, not degrade into a vacuous match downstream'
         $script:AttrDepthVar = 'PESTER_SHARDED_RUN_DEPTH'
 
         $stub = @'
@@ -292,7 +303,11 @@ Describe 'attribution stub' {
             $null = Invoke-PesterSharded -TestsPath $script:AttrOutsideDir -MinTestCount 1 -InformationVariable depth7Info
         }
         finally {
-            [Environment]::SetEnvironmentVariable($script:AttrDepthVar, $saved)
+            # NOT a bare SetEnvironmentVariable: this file dot-sources the library
+            # specifically because that restore does not remove a variable when
+            # $saved is $null -- the exact bug the library's own helper exists to
+            # avoid, and this file was recurring it in its own fixture cleanup.
+            script:Set-AttributionEnvVar -Name $script:AttrDepthVar -Value $saved
         }
 
         $line0 = @(@($depth0Info) | ForEach-Object { [string]$_ } | Where-Object { $_ -match 'RUN ATTRIBUTION' })[0]
@@ -329,7 +344,7 @@ Describe 'attribution stub' {
             }
         }
         finally {
-            [Environment]::SetEnvironmentVariable($script:AttrDepthVar, $saved)
+            script:Set-AttributionEnvVar -Name $script:AttrDepthVar -Value $saved
         }
     }
 
@@ -346,7 +361,7 @@ Describe 'attribution stub' {
             $line | Should -Match 'run=nested\(depth=1000000000\)'
         }
         finally {
-            [Environment]::SetEnvironmentVariable($script:AttrDepthVar, $saved)
+            script:Set-AttributionEnvVar -Name $script:AttrDepthVar -Value $saved
         }
     }
 
@@ -390,8 +405,15 @@ Describe 'attribution stub' {
             & git -C $fixture init --quiet 2>&1 | Out-Null
             Set-Content -Path (Join-Path $fixture 'seed.txt') -Value 'seed' -Encoding UTF8
             & git -C $fixture add seed.txt 2>&1 | Out-Null
+            # -c commit.gpgsign=false: without it, a caller with an ambient global
+            # commit.gpgsign=true gets a silently-swallowed commit failure (this
+            # call's own 2>&1 | Out-Null), the fixture is left with no commit at
+            # all, and the test then dies on the unrelated worktree=clean
+            # assertion below -- a misdiagnosis pointing at attribution logic
+            # rather than at the operator's signing config. The library applies
+            # the same override to its own sequential-shard fixtures.
             & git -C $fixture -c user.email='attribution@example.com' -c user.name='Attribution Fixture' `
-                commit -q -m 'seed' 2>&1 | Out-Null
+                -c commit.gpgsign=false commit -q -m 'seed' 2>&1 | Out-Null
 
             # The configuration that made the false clean possible.
             & git -C $fixture config status.showUntrackedFiles no 2>&1 | Out-Null
@@ -420,7 +442,7 @@ Describe 'untracked fixture stub' {
             # test files must change the VALUE, not just the wording.
             & git -C $fixture add -A 2>&1 | Out-Null
             & git -C $fixture -c user.email='attribution@example.com' -c user.name='Attribution Fixture' `
-                commit -q -m 'commit the tests' 2>&1 | Out-Null
+                -c commit.gpgsign=false commit -q -m 'commit the tests' 2>&1 | Out-Null
 
             $null = Invoke-PesterSharded -TestsPath $fixtureTests -MinTestCount 1 -InformationVariable cleanInfo
             $cleanLine = @(@($cleanInfo) | ForEach-Object { [string]$_ } | Where-Object { $_ -match 'RUN ATTRIBUTION' })[0]
@@ -489,6 +511,27 @@ Describe 'spaced path stub' {
         $after | Should -Be $before -Because 'the depth handoff is scoped to the run that published it'
     }
 
+    It 'A6b: the depth handoff primitive removes the variable when nothing was there before, never materialises it empty' {
+        # A6 above compares before/after around a real Invoke-PesterSharded call.
+        # Inside a full-suite run the ambient depth variable this file inherits is
+        # ALWAYS set by the outer run, so A6's own "before" baseline is never
+        # genuinely unset there -- driving a real Invoke-PesterSharded call with
+        # the depth variable forced absent would itself be a nested run reporting
+        # run=outer, stamping a false line into the enclosing run's census, which
+        # is exactly the defect this PR's earlier fix round introduced and fixed
+        # once already. So the genuinely-unset precondition is tested here at the
+        # primitive Invoke-PesterSharded's own restore delegates to, using a
+        # dedicated probe variable name that never touches run attribution at all.
+        $probeVar = 'PESTER_SHARDED_RUN_DEPTH_A6B_PROBE'
+        Remove-Item -Path "Env:\$probeVar" -ErrorAction SilentlyContinue
+        [bool](Test-Path -LiteralPath "Env:\$probeVar") | Should -Be $false -Because 'the probe variable must start genuinely absent'
+
+        script:Set-AttributionEnvVar -Name $probeVar -Value $null
+
+        [bool](Test-Path -LiteralPath "Env:\$probeVar") | Should -Be $false `
+            -Because 'restoring to "no prior value" must remove the variable, not leave it behind as an empty string'
+    }
+
     It 'A11: a run leaves the git discovery environment exactly as it found it' {
         # The attribution clears GIT_DIR and friends so an ambient value cannot
         # substitute a foreign repository for the tests path. Restoring those by
@@ -497,13 +540,22 @@ Describe 'spaced path stub' {
         # "not a git repository: ''".
         $discoveryVars = @('GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_OBJECT_DIRECTORY', 'GIT_INDEX_FILE')
         $existedBefore = @{}
-        foreach ($name in $discoveryVars) { $existedBefore[$name] = [bool](Test-Path -LiteralPath "Env:\$name") }
+        $valueBefore = @{}
+        foreach ($name in $discoveryVars) {
+            $existedBefore[$name] = [bool](Test-Path -LiteralPath "Env:\$name")
+            $valueBefore[$name] = [Environment]::GetEnvironmentVariable($name)
+        }
 
         $null = Invoke-PesterSharded -TestsPath $script:AttrOutsideDir -MinTestCount 1
 
         foreach ($name in $discoveryVars) {
             [bool](Test-Path -LiteralPath "Env:\$name") | Should -Be $existedBefore[$name] `
                 -Because "$name must be left exactly as the run found it, present or absent"
+            # Presence alone would pass a restore that preserved the variable but
+            # corrupted its value; the value must be the SAME value, not merely
+            # a value.
+            [Environment]::GetEnvironmentVariable($name) | Should -Be $valueBefore[$name] `
+                -Because "$name must keep the value the run found, not just remain present"
         }
 
         # And the process's git must still work afterwards.

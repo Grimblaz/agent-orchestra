@@ -222,15 +222,21 @@ function script:Get-RunAttribution {
 
     $depth = script:Get-InheritedRunDepth
 
-    $displayPath = $TestsPath
+    # Resolved ONCE and reused for every git call and for the returned/printed
+    # value. Resolving separately for git (raw $TestsPath) and for display
+    # (a lexically-resolved GetFullPath) let the two diverge -- GetFullPath
+    # normalizes '..' lexically while `git -C` chdir's physically, so a rooted
+    # path crossing a symlink or junction could print a location git never
+    # actually measured, in a field whose sole purpose is attribution.
+    $canonicalPath = $TestsPath
+    try { $canonicalPath = [System.IO.Path]::GetFullPath($TestsPath) } catch { }
+    $displayPath = $canonicalPath
     $commit = $null
     $treeState = 'unknown'
     $notes = [System.Collections.Generic.List[string]]::new()
 
     try {
-        try { $displayPath = [System.IO.Path]::GetFullPath($TestsPath) } catch { }
-
-        $head = script:Invoke-AttributionGit -Path $TestsPath -GitArgs @('rev-parse', 'HEAD')
+        $head = script:Invoke-AttributionGit -Path $canonicalPath -GitArgs @('rev-parse', 'HEAD')
         if ($head.Ok) {
             $candidate = (@($head.Lines) -join '').Trim()
             # 40 hex in a sha1 repository, 64 in a sha256 one. "git gave us
@@ -259,7 +265,7 @@ function script:Get-RunAttribution {
         # whose test files are not committed at all is clean. That is the exact
         # false attribution this runner exists to stop producing, it is silent,
         # and git configuration is sticky in a way an environment variable is not.
-        $status = script:Invoke-AttributionGit -Path $TestsPath -GitArgs @('status', '--porcelain', '--untracked-files=all')
+        $status = script:Invoke-AttributionGit -Path $canonicalPath -GitArgs @('status', '--porcelain', '--untracked-files=all')
         if ($status.Ok) {
             $changed = @($status.Lines | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
             if ($changed.Count -eq 0) {
