@@ -15,7 +15,7 @@ Run the **open-for-work** flow inline in this conversation for the provided issu
 
 1. **Require an issue number, and require it to be one.** Everything this flow writes — the affirmation record, the amendments, the arm's output artifact — is keyed to a filed issue. The argument must be a **bare positive integer**; anything else (a URL, a title, a shell fragment) is rejected rather than interpreted, because the number is substituted by hand into `gh api` paths later in the flow. If no issue number was supplied, ask for one and stop until it is given. Do not open an unfiled idea for work; ask for it to be filed first (`skills/safe-operations/SKILL.md` §2f states the three required things).
 2. **Load the methodology.** Read `skills/open-for-work/SKILL.md` and treat it as the authority for every step: the trivial floor, the worth-it doors, beat 1 and the affirmation gate, the affirmation record's five properties, beat 2's routing rule, both output arms, the escape hatch, resume-state detection, and gate-decision token emission. Resolve it with the plugin-cache-first sequence below.
-3. **Check for an existing affirmation record** before running anything. An issue that already carries one resumes rather than restarts — follow the skill's § Resuming an issue already opened for work to decide which of the three states applies, and enter the flow there.
+3. **Check for an existing affirmation record** before running anything. An issue that already carries one resumes rather than restarts — follow the skill's § Resuming an issue already opened for work to decide which of the four states applies, and enter the flow there.
 
 ### Skill-load halt-on-fail
 
