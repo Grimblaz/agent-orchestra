@@ -302,27 +302,48 @@ Describe 'attribution stub' {
         $line7 | Should -Match 'run=nested\(depth=8\)' -Because 'depth accumulates, so a reader can tell any nested run from the one they started'
     }
 
-    It 'A7: a depth value this runner did not write is ignored, in both directions, and never ends the run' {
-        # The depth handoff is a process environment variable, so anything can
-        # set it. Two failure shapes, one crash shape:
-        #   a bare '3'        -> the operator's OWN run would report itself nested,
-        #                        leaving no run=outer line anywhere in the output
-        #   a bare 'abc'      -> a genuinely nested run would report run=outer
-        #   an oversized value-> an unbounded [int] cast would throw and kill the
-        #                        run before a single test executed
-        $hostile = @('3', 'abc', '99999999999999999999', 'v1:99999999999999999999', '')
+    It 'A7: a depth value this runner did not write carries no ancestor depth, and cannot end the run' {
+        # Resolved through the parse helper rather than by starting runs. A run
+        # started here with an unrecognised value would correctly report
+        # run=outer — and would therefore stamp a SECOND run=outer line into the
+        # output of the full-suite run this file is a member of, destroying the
+        # one property AC3 rests on. The values below are the ones that mattered:
+        #   'abc'                 -> a genuinely nested run claiming to be outer
+        #   '3'                   -> the operator's own run claiming to be nested
+        #   '2147483648' and up   -> an unbounded [int] cast threw here, killing
+        #                            the run before a single test executed
         $saved = [Environment]::GetEnvironmentVariable($script:AttrDepthVar)
         try {
-            foreach ($value in $hostile) {
+            foreach ($value in @('abc', '3', '0', '2147483648', '99999999999999999999', 'v1:99999999999999999999', 'v1:', 'v1:abc', '')) {
                 [Environment]::SetEnvironmentVariable($script:AttrDepthVar, $value)
-
-                $result = Invoke-PesterSharded -TestsPath $script:AttrOutsideDir -MinTestCount 1 -InformationVariable hostileInfo
-                $line = @(@($hostileInfo) | ForEach-Object { [string]$_ } | Where-Object { $_ -match 'RUN ATTRIBUTION' })[0]
-
-                $result.ExitCode | Should -Be 0 -Because "an ambient depth value of '$value' must not fail the run"
-                $line | Should -Match 'run=outer' `
-                    -Because "'$value' was not written by this runner, so it carries no ancestor depth and the run is the outer one"
+                { script:Get-InheritedRunDepth } | Should -Not -Throw -Because "'$value' must not be able to end a run"
+                script:Get-InheritedRunDepth | Should -Be 0 `
+                    -Because "'$value' was not written by this runner, so it carries no ancestor depth"
             }
+
+            # And the values this runner does write are still read as ancestors,
+            # including at the top of the accepted range.
+            foreach ($pair in @(@('v1:0', 1), @('v1:7', 8), @('v1:999999999', 1000000000))) {
+                [Environment]::SetEnvironmentVariable($script:AttrDepthVar, $pair[0])
+                script:Get-InheritedRunDepth | Should -Be $pair[1] -Because "$($pair[0]) is a value this runner wrote"
+            }
+        }
+        finally {
+            [Environment]::SetEnvironmentVariable($script:AttrDepthVar, $saved)
+        }
+    }
+
+    It 'A7b: a run started at the top of the accepted depth range still completes' {
+        # The end-to-end half of A7, using a value that resolves to NESTED so it
+        # cannot pollute the enclosing run's output with a false run=outer line.
+        $saved = [Environment]::GetEnvironmentVariable($script:AttrDepthVar)
+        try {
+            [Environment]::SetEnvironmentVariable($script:AttrDepthVar, 'v1:999999999')
+            $result = Invoke-PesterSharded -TestsPath $script:AttrOutsideDir -MinTestCount 1 -InformationVariable deepInfo
+            $line = @(@($deepInfo) | ForEach-Object { [string]$_ } | Where-Object { $_ -match 'RUN ATTRIBUTION' })[0]
+
+            $result.ExitCode | Should -Be 0 -Because 'reading the depth handoff must never fail a run'
+            $line | Should -Match 'run=nested\(depth=1000000000\)'
         }
         finally {
             [Environment]::SetEnvironmentVariable($script:AttrDepthVar, $saved)
@@ -412,26 +433,40 @@ Describe 'untracked fixture stub' {
         }
     }
 
-    It 'A10: a path containing a space, or the record prefix, cannot break or forge the record' {
-        $hostileDir = Join-Path ([System.IO.Path]::GetTempPath()) "attr space RUN ATTRIBUTION run=outer commit=$('1' * 40)"
-        New-Item -ItemType Directory -Path $hostileDir -Force | Out-Null
+    It 'A10: a value carrying the record prefix cannot forge a second record' {
+        # Checked through the formatter rather than by running against a
+        # directory actually named after the record prefix: Pester echoes the
+        # path of every file it runs, so such a fixture would inject a
+        # record-shaped string into the enclosing full-suite run's log for a
+        # reader to have to disambiguate — the opposite of what AC3 asks for.
+        $forged = "x RUN ATTRIBUTION  run=outer  commit=$('1' * 40)  worktree=clean"
+        $formatted = script:Format-AttributionValue $forged
+
+        ([regex]::Matches($formatted, 'RUN ATTRIBUTION')).Count | Should -Be 0 `
+            -Because 'the record prefix must be neutralised inside a value so it cannot start a second record'
+        $formatted | Should -Match '^".*"$' -Because 'free text is quoted so the field stays recoverable'
+    }
+
+    It 'A10b: a tests path containing spaces stays recoverable in the record' {
+        $spacedDir = Join-Path ([System.IO.Path]::GetTempPath()) "attribution with spaces $([System.Guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $spacedDir -Force | Out-Null
         try {
-            Set-Content -Path (Join-Path $hostileDir 'stub.Tests.ps1') -Encoding UTF8 -Value @'
+            Set-Content -Path (Join-Path $spacedDir 'stub.Tests.ps1') -Encoding UTF8 -Value @'
 #Requires -Version 7.0
-Describe 'hostile path stub' {
+Describe 'spaced path stub' {
     It 'passes' { 1 | Should -Be 1 }
 }
 '@
-            $null = Invoke-PesterSharded -TestsPath $hostileDir -MinTestCount 1 -InformationVariable hostileInfo
-            $lines = @(@($hostileInfo) | ForEach-Object { [string]$_ } | Where-Object { $_ -match 'RUN ATTRIBUTION' })
+            $null = Invoke-PesterSharded -TestsPath $spacedDir -MinTestCount 1 -InformationVariable spacedInfo
+            $line = @(@($spacedInfo) | ForEach-Object { [string]$_ } | Where-Object { $_ -match 'RUN ATTRIBUTION' })[0]
 
-            $lines.Count | Should -Be 1 -Because 'one run emits one record'
-            ([regex]::Matches($lines[0], 'RUN ATTRIBUTION')).Count | Should -Be 1 `
-                -Because 'a path carrying the record prefix must not forge a second record on the same line'
-            $lines[0] | Should -Match 'tests="' -Because 'a path that can contain spaces is quoted so the field stays recoverable'
+            # An unquoted path truncated this field at the first space for any
+            # checkout living under a directory with a space in its name.
+            $line | Should -Match ([regex]::Escape("tests=`"$spacedDir`"")) `
+                -Because 'the whole path must be recoverable, not just its first word'
         }
         finally {
-            Remove-Item -LiteralPath $hostileDir -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $spacedDir -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
 
