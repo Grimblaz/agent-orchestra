@@ -242,21 +242,28 @@ function Get-MarkerFamilyRegistry {
 
         Rows are grounded in already-documented marker families (this
         repo's own CLAUDE.md, skills/session-memory-contract/references/handoff-markers.md,
-        and 893-D3's family table) rather than invented: plan-issue,
-        design-phase-complete, and frame-slices (s5) are upsert (all three
-        are found-or-created once, then repeatedly patched -- plan-issue
-        and design-phase-complete as persist-phase-ledger-core.ps1's own
-        plan/design modes already do today; frame-slices per
+        and 893-D3's family table) rather than invented: plan-issue and
+        frame-slices (s5) are upsert (both are found-or-created once, then
+        repeatedly patched -- plan-issue as persist-phase-ledger-core.ps1's
+        own plan mode already does today; frame-slices per
         handoff-markers.md's frame-slices-{ID} row: "re-persist reuses the
         existing sibling ... rather than creating a second one", which
         post-new's superseded-match-still-posts semantics would violate);
-        experience-owner-complete, review-judge-produced, engagement-record,
-        review-dispositions, and credit-input are post-new (freshly posted
+        design-phase-complete, experience-owner-complete,
+        review-judge-produced, engagement-record, review-dispositions, and
+        credit-input are post-new (freshly posted
         completion/sentinel/deferred-emission comments -- CLAUDE.md
         documents review-judge-produced as "written as a separate PR
         comment"; skills/frame-credit-emission/SKILL.md documents
         credit-input as posted "immediately after the agent's completion
-        marker comment").
+        marker comment"). open-for-work-affirmed (issue #974) is likewise
+        post-new, grounded in Documents/Design/open-for-work.md's
+        affirmation-record contract: an edited record is void as an
+        ordering witness, the escape hatch posts a new record rather than
+        editing the old one -- properties an upsert shape would destroy at
+        once. (The beat-2 re-route count is what the conversation observed,
+        never an arithmetic over these records; record counts are only a
+        diagnostic cross-check.)
     .OUTPUTS
         [PSCustomObject[]] one row per family: Family [string], MarkerTemplate
         [string] (placeholder tokens such as '{ID}'/'{PR}'/'{phase}'/'{port}'
@@ -382,6 +389,72 @@ function Get-MarkerFamilyRegistry {
             # comment id back onto the plan comment's frame-spine block as
             # slice_comment_id -- see script:Invoke-FrameSlicesSpineSplice.
             PostStep          = 'frame-slices-spine-splice'
+        }
+        [PSCustomObject]@{
+            # Issue #974 (chunk 3 of #957): the open-for-work affirmation
+            # record. APPENDED, never inserted: persist-marker-core.Tests.ps1
+            # binds $script:PostNewFamily to the FIRST post-new/issue row
+            # positionally (:250) and $issueOnlyFamily to the FIRST
+            # issue-surface row (:527). This row is post-new/issue with a
+            # null adapter and null post-step -- exactly the shape those
+            # fixtures select -- so placing it ahead of design-phase-complete
+            # would silently re-point roughly two dozen generic write-path
+            # assertions at this family while every one of them still passed.
+            Family            = 'open-for-work-affirmed'
+            # Placeholder token is '{ID}', not the '{N}' the doctrine prose
+            # used before this row existed: persist-marker-wrapper.Tests.ps1's
+            # catalog/registry drift guard only recognizes '-{ID}'/'-{PR}'
+            # and SKIPS any other token rather than checking it, so '{N}'
+            # would have opted this family out of the very guard that caught
+            # the design-phase-complete write-shape drift. Same runtime
+            # behavior either way (ConvertTo-MarkerFamilyLineStartPattern
+            # wildcards any '{Word}' token generically).
+            MarkerTemplate    = '<!-- open-for-work-affirmed-{ID} -->'
+            TargetSurface     = 'issue'
+            # post-new, NOT upsert -- and this is load-bearing rather than
+            # stylistic. Documents/Design/open-for-work.md's affirmation
+            # record rests on append-only in three places: an edited record
+            # is void as an ordering witness (property 3), the escape hatch
+            # posts a NEW record rather than editing the old one
+            # (Supersession), and every record stands as a durable ordering
+            # witness. upsert PATCHes in place, which would destroy all of
+            # that at once. See the design-phase-complete row above for this
+            # registry's own realized instance of exactly that drift. The
+            # beat-2 re-route count itself is what the conversation observed
+            # -- record counts are a diagnostic cross-check, never the
+            # definition.
+            WriteShape        = 'post-new'
+            # Free-form prose payload (the marker on the FIRST line, then a
+            # heading line, then the affirmed what-statement quoted in
+            # full); the universal Test-MarkerPayloadHygiene checks already
+            # cover the identity-marker concern, so no named adapter --
+            # mirroring experience-owner-complete.
+            #
+            # #974 review note: unlike experience-owner-complete, whose
+            # payload is agent-composed, this one quotes issue prose
+            # VERBATIM. Hygiene covers HTML-comment markers only, so the
+            # quoted span still re-fires any '@mention' and '#issue'
+            # cross-reference it contains and can break the composed
+            # comment's rendering with an unbalanced code fence. Both are
+            # noise rather than integrity failures -- recorded here so a
+            # later reader does not mistake the null adapter for a claim
+            # that the payload was checked for them.
+            #
+            # First-line placement IS enforced -- just not by this row.
+            # ValidatorAdapter is $null (no family-specific adapter), but
+            # the universal Test-MarkerPayloadHygiene rule 1 refuses any
+            # candidate whose own-family marker is not on line 1, before
+            # any network call. Do not read the null adapter as permissive:
+            # skills/open-for-work/SKILL.md states the convention at the
+            # write site and names that refusal as the primitive working.
+            #
+            # What hygiene does NOT check is that -Marker matches this
+            # row's MarkerTemplate with {ID} substituted -- preflight holds
+            # both the row and -Number but never compares them, so a
+            # wrong-token or unsubstituted marker writes successfully and
+            # is then invisible to every marker-keyed reader.
+            ValidatorAdapter  = $null
+            PostStep          = $null
         }
     )
 }
