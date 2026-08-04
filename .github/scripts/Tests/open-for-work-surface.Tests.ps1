@@ -211,6 +211,55 @@ Describe 'open-for-work surface (issue #974)' {
         BeforeAll {
             $script:CommandText = & $script:ReadRepoFile 'commands/open.md'
             $script:SkillText   = & $script:ReadRepoFile 'skills/open-for-work/SKILL.md'
+
+            # Slice one '## ' section out of the skill, so an assertion about
+            # the resume can only be satisfied by text inside the resume.
+            # Returns '' when the heading is absent, which reds the caller
+            # rather than passing vacuously.
+            $script:ResumeSection = {
+                [regex]::Match(
+                    $script:SkillText,
+                    '(?ms)^##\s+Resuming an issue already opened for work\b.*?(?=^##\s|\z)'
+                ).Value
+            }
+
+            # Tighter still: just the disclosure block, from its bolded
+            # lead-in to the next '### ' heading. Needed because the resume
+            # section ALREADY says 'earliest lawful' in step 2's ordering
+            # check, so a section-scoped assertion on that phrase is satisfied
+            # by text that predates #995 -- verified by mutation: deleting the
+            # phrase from the disclosure block left the section-scoped
+            # assertion green.
+            #
+            # Two scoping details, each closing a false green that a later
+            # #995 review pass demonstrated against a mirror of the tree (the
+            # first shape of this scoper stayed green through both mutations):
+            #
+            #   * It slices out of (& $script:ResumeSection), not out of
+            #     $script:SkillText. Matching the whole document meant that
+            #     relocating this entire block into a '##' section of its own
+            #     left the suite green while the resume section the test is
+            #     NAMED for carried no disclosure at all.
+            #   * Its terminator is any '### ' heading, not the literal
+            #     '### Deciding the state'. An end-of-document fallback
+            #     anchored on one heading title widens the block to \z the
+            #     moment that heading is renamed, and step 2's ordering check
+            #     -- which also says 'earliest lawful' -- then satisfies the
+            #     assertion from pre-#995 text.
+            #
+            # Residual, stated rather than left implied: DELETING every '###'
+            # heading below the block still widens it to the end of the resume
+            # section. Closing that needs a positive end anchor, which would
+            # pin prose this guard has no business pinning.
+            #
+            # The two scopers did not land together: ResumeSection came in
+            # f28b4aa, DisclosureBlock in 6193826.
+            $script:DisclosureBlock = {
+                [regex]::Match(
+                    (& $script:ResumeSection),
+                    '(?ms)^\*\*Who posted it.*?(?=^###\s|\z)'
+                ).Value
+            }
         }
 
         It 'the command exists and loads the methodology skill' {
@@ -308,7 +357,108 @@ Describe 'open-for-work surface (issue #974)' {
         It 'the skill tells a resume to read comments from a source carrying updated_at' {
             $script:SkillText | Should -Match ([regex]::Escape('gh api repos/{owner}/{repo}/issues/{ID}/comments --paginate')) `
                 -Because 'gh issue view --json comments carries includesCreatedEdit and no updated_at, so the void-if-edited rule cannot be evaluated from it -- and --paginate is load-bearing in its own right: a first-page-only read misses a lawful record on a long-threaded issue. Pin the flag, not just the endpoint; this PR already dropped it once elsewhere (round-2 finding gh-3706084076)'
-            $script:SkillText | Should -Match '(?i)affirmed-not-routed'
+            # Scoped to the section rather than the document. #995 round-1
+            # finding M17: this pin was `$script:SkillText | Should -Match`,
+            # and occurrences of `affirmed-not-routed` went 2 -> 3 when the
+            # trust model gained a paragraph ~90 lines away, so a
+            # document-wide match became satisfiable by prose that has
+            # nothing to do with the state table this test is about.
+            (& $script:ResumeSection) | Should -Match '(?i)affirmed-not-routed' `
+                -Because 'the state the resume lands in when a record exists but beat 2 is unrun must be named inside the section that decides state'
+        }
+
+        It 'the resume section carries the author-disclosure obligation (#995 guard, not criterion evidence)' {
+            # THIS IS A GUARD, NOT EVIDENCE. #995's acceptance criteria are
+            # discharged by cold reads of the changed text by fresh readers,
+            # never by text presence -- a test asserting a sentence exists
+            # cannot fail for the reason those criteria care about, and the
+            # brief says so in its own falsifiers. What this buys is narrower
+            # and still worth having: without it, deleting the disclosure
+            # outright leaves this suite green (round-1 finding M17).
+            $resuming = & $script:ResumeSection
+            $resuming | Should -Not -BeNullOrEmpty `
+                -Because 'the section heading must be findable before anything can be scoped to it'
+
+            $disclosure = & $script:DisclosureBlock
+            $disclosure | Should -Not -BeNullOrEmpty `
+                -Because 'the disclosure block must be findable; if its lead-in is gone the obligation is gone'
+
+            $disclosure | Should -Match ([regex]::Escape('user.login')) `
+                -Because 'the field the disclosure is built on has to be named where the resume reads comments, or the instruction has no referent'
+
+            # The load-bearing half. Round-1 finding M2 (the only sustained
+            # high): naming ONLY the record being resumed under leaves the
+            # earliest lawful record unnamed -- and the earliest is what step
+            # 2 derives lawfulness from, so a planted record can supply the
+            # authority and never appear in the output. Disclosure that runs
+            # and shows nothing is the failure mode this change exists to
+            # avoid, so it gets the assertion.
+            #
+            # Asserted against the DISCLOSURE BLOCK, not the whole section:
+            # step 2 already said 'earliest lawful' before #995, so a
+            # section-scoped assertion here passes on pre-existing text.
+            # Mutation-verified in 6193826, and again after the block scoper
+            # was rederived from the resume section (see BeforeAll).
+            $disclosure | Should -Match '(?i)earliest lawful' `
+                -Because 'the output obligation must itself name the record the ordering check reads, because that is the one a single-record disclosure hides'
+            $disclosure | Should -Match '(?i)name both' `
+                -Because 'M2: the output obligation must reach both records when they differ, not only the resumed-under one'
+        }
+
+        It 'both trust-model sites answer all four planted-record questions (#995 guard)' {
+            # Paired-presence, deliberately: the risk this guards is DRIFT
+            # BETWEEN the two sites, not the wording of either. Round-1
+            # finding M5 was exactly that -- the doctrine site had dropped the
+            # delete prohibition and the earliest-record consequence the skill
+            # carried. Deleting a clause from one site alone reds this; both
+            # sites drifting together does not, which is honest about what a
+            # presence pair can detect.
+            $doctrine = & $script:ReadRepoFile 'Documents/Design/open-for-work.md'
+            $doctrine | Should -Not -BeNullOrEmpty
+
+            # Scoped to each file's trust model, not to the whole file. A
+            # whole-file probe cannot see the drift it is named for: dropping
+            # the author-blind claim from the SKILL's trust model left the
+            # pair green, because the alternative 'is conditioned on who
+            # posted it' is answered in § Resuming -- a different section,
+            # about a different obligation. That mutation IS the drift.
+            # No `|\z` fallback here, deliberately, and this is the one
+            # asymmetry with $script:DisclosureBlock above. An end-of-document
+            # fallback would let the block widen to swallow § Resuming the
+            # moment no '##' heading follows the trust model -- and § Resuming
+            # carries 'is conditioned on who posted it', which is probe 5's
+            # third alternative. That is exactly the false green this scoper
+            # was written to close, restored through the back door.
+            # Reproduced before removing it: demote every '##' heading below
+            # the trust model and strip author-blind from the SKILL's copy,
+            # and the parity assertion passed. Without the fallback that shape
+            # yields an empty match instead, which the non-empty guards below
+            # turn into a loud red. Failing to find the block is the correct
+            # outcome when the block cannot be delimited; over-capturing is not.
+            $trustModel = {
+                param([string]$Text)
+                [regex]::Match($Text, '(?ms)^\*\*Trust model.*?(?=^#{2,}\s)').Value
+            }
+            $skillTrust    = & $trustModel $script:SkillText
+            $doctrineTrust = & $trustModel $doctrine
+            $skillTrust | Should -Not -BeNullOrEmpty `
+                -Because 'the skill''s trust model must be findable before anything can be scoped to it'
+            $doctrineTrust | Should -Not -BeNullOrEmpty `
+                -Because 'the doctrine''s trust model must be findable before anything can be scoped to it'
+
+            $probes = [ordered]@{
+                'anyone who can comment can post an accepted record' = '(?i)anyone (with a GitHub account )?who can comment'
+                'nothing gates it'                                   = '(?i)no author check, no permission check'
+                'this is accepted rather than overlooked'            = '(?i)known and accepted'
+                'what to do on noticing one'                         = '(?i)do not resume under (it|that record)'
+                'no authorship condition was added'                  = '(?i)author-blind|stay author-blind|is conditioned on who posted it'
+            }
+            foreach ($probe in $probes.GetEnumerator()) {
+                $skillTrust | Should -Match $probe.Value `
+                    -Because "the skill's trust model must answer: $($probe.Key)"
+                $doctrineTrust | Should -Match $probe.Value `
+                    -Because "the doctrine's trust model must answer: $($probe.Key) -- a statement landing at one site and not the other is the drift this repository's parity discipline exists against"
+            }
         }
 
         It 'the resume decides state from sequence, not merely from which artifacts exist' {
