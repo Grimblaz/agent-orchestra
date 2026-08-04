@@ -197,3 +197,112 @@ Describe 'Determinism stub' {
         }
     }
 }
+
+Describe 'run-pester-sharded — run attribution (issue #958)' {
+
+    BeforeAll {
+        # Every expectation below is checked against an INDEPENDENT reading of
+        # git taken here, never against the runner's own lookup, so no assertion
+        # can pass by a function agreeing with itself.
+        $script:AttrHead = ([string](& git -C $script:RepoRoot rev-parse HEAD)).Trim()
+        $script:AttrDepthVar = 'PESTER_SHARDED_RUN_DEPTH'
+
+        $stub = @'
+#Requires -Version 7.0
+Describe 'attribution stub' {
+    It 'passes' { 1 | Should -Be 1 }
+}
+'@
+
+        # A tests directory INSIDE this repository. '.tmp/' is gitignored, so the
+        # fixture leaves the working tree exactly as clean or dirty as it found
+        # it, and it sits outside .github/scripts/Tests so the suite's own static
+        # scanners never see the stub.
+        $script:AttrInRepoDir = Join-Path $script:RepoRoot ".tmp/attribution-in-repo-$([System.Guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $script:AttrInRepoDir -Force | Out-Null
+        Set-Content -Path (Join-Path $script:AttrInRepoDir 'stub.Tests.ps1') -Value $stub -Encoding UTF8
+
+        # A tests directory that is not inside any repository at all.
+        $script:AttrOutsideDir = Join-Path ([System.IO.Path]::GetTempPath()) "attribution-outside-$([System.Guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $script:AttrOutsideDir -Force | Out-Null
+        Set-Content -Path (Join-Path $script:AttrOutsideDir 'stub.Tests.ps1') -Value $stub -Encoding UTF8
+
+        # Read immediately before the run it is compared against.
+        $script:AttrPorcelain = @(& git -C $script:RepoRoot status --porcelain |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+
+        # NOTE: nothing here clears the depth variable, deliberately. Inside a
+        # full-suite run this file executes in a shard child that has inherited
+        # it, and a run that cleared it would emit a second 'run=outer' line into
+        # the outer run's output — destroying the property A5 exists to protect.
+        $script:AttrInRepoResult = Invoke-PesterSharded -TestsPath $script:AttrInRepoDir -MinTestCount 1 -InformationVariable inRepoInfo
+        $script:AttrInRepoLine = @(@($inRepoInfo) | ForEach-Object { [string]$_ } |
+            Where-Object { $_ -match 'RUN ATTRIBUTION' })[0]
+
+        $script:AttrOutsideResult = Invoke-PesterSharded -TestsPath $script:AttrOutsideDir -MinTestCount 1 -InformationVariable outsideInfo
+        $script:AttrOutsideText = (@($outsideInfo) | ForEach-Object { [string]$_ }) -join "`n"
+        $script:AttrOutsideLine = @(($script:AttrOutsideText -split "`n") |
+            Where-Object { $_ -match 'RUN ATTRIBUTION' })[0]
+    }
+
+    AfterAll {
+        Remove-Item -LiteralPath $script:AttrInRepoDir -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $script:AttrOutsideDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'A1: a run whose tests live in this repository names this repository''s commit' {
+        $script:AttrInRepoLine | Should -Not -BeNullOrEmpty -Because 'every run states what it ran against'
+        $script:AttrInRepoLine | Should -Match ([regex]::Escape("commit=$($script:AttrHead)")) `
+            -Because 'the reported commit must equal what git independently reports for this tree'
+    }
+
+    It 'A2: a run whose commit cannot be established claims none, and never the invoking checkout''s' {
+        $script:AttrOutsideLine | Should -Match 'commit=none\b' `
+            -Because 'a tests directory outside any repository has no commit to report'
+        $script:AttrOutsideText | Should -Not -Match ([regex]::Escape($script:AttrHead)) `
+            -Because 'an implementation anchored on the invoking process would print this repository''s commit here'
+    }
+
+    It 'A3: the attribution attempt does not fail a run whose commit cannot be established' {
+        $script:AttrOutsideResult.ExitCode | Should -Be 0 -Because 'a failed lookup must not red an otherwise-passing run'
+        $script:AttrOutsideResult.TotalPassed | Should -BeGreaterThan 0
+        $script:AttrOutsideResult.TotalFailed | Should -Be 0
+    }
+
+    It 'A4: the attribution states tree state matching an independent reading, and when it was observed' {
+        $expected = if ($script:AttrPorcelain.Count -eq 0) { 'worktree=clean' } else { 'worktree=dirty' }
+        $script:AttrInRepoLine | Should -Match ([regex]::Escape($expected)) `
+            -Because "git status --porcelain independently reported $($script:AttrPorcelain.Count) change(s)"
+        $script:AttrInRepoLine | Should -Match 'observed=before any tests ran' `
+            -Because 'a run takes minutes and can begin clean and end dirty, so the statement must say what moment it describes'
+    }
+
+    It 'A5: a run started inside another run identifies itself as nested, at the right depth' {
+        $saved = [Environment]::GetEnvironmentVariable($script:AttrDepthVar)
+        try {
+            [Environment]::SetEnvironmentVariable($script:AttrDepthVar, '0')
+            $null = Invoke-PesterSharded -TestsPath $script:AttrOutsideDir -MinTestCount 1 -InformationVariable depth0Info
+
+            [Environment]::SetEnvironmentVariable($script:AttrDepthVar, '7')
+            $null = Invoke-PesterSharded -TestsPath $script:AttrOutsideDir -MinTestCount 1 -InformationVariable depth7Info
+        }
+        finally {
+            [Environment]::SetEnvironmentVariable($script:AttrDepthVar, $saved)
+        }
+
+        $line0 = @(@($depth0Info) | ForEach-Object { [string]$_ } | Where-Object { $_ -match 'RUN ATTRIBUTION' })[0]
+        $line7 = @(@($depth7Info) | ForEach-Object { [string]$_ } | Where-Object { $_ -match 'RUN ATTRIBUTION' })[0]
+
+        $line0 | Should -Match 'run=nested\(depth=1\)' -Because 'a run started by an outer run is one level deeper than it'
+        $line7 | Should -Match 'run=nested\(depth=8\)' -Because 'depth accumulates, so a reader can tell any nested run from the one they started'
+    }
+
+    It 'A6: a run returns the depth handoff to the state it found it in' {
+        $before = [Environment]::GetEnvironmentVariable($script:AttrDepthVar)
+        $null = Invoke-PesterSharded -TestsPath $script:AttrOutsideDir -MinTestCount 1
+        $after = [Environment]::GetEnvironmentVariable($script:AttrDepthVar)
+
+        # Cast so an unset variable ('' both sides) compares as cleanly as a set one.
+        [string]$after | Should -Be ([string]$before) -Because 'the depth handoff is scoped to the run that published it'
+    }
+}

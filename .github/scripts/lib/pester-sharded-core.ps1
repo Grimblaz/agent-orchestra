@@ -27,6 +27,175 @@ function Get-RealGitFiles {
 }
 
 # ---------------------------------------------------------------------------
+# Run attribution (issue #958)
+#
+# A run of this suite says which tree its tests ran against and whether that
+# tree was clean, so its result can be read as evidence without the operator
+# separately remembering to record those two facts.
+#
+# Anchored on the TESTS PATH, never on the process that launched the run. Both
+# of this library's programmatic callers drive it against a tree that is not
+# the caller's own -- the runner's own contract tests use temporary fixture
+# directories, and the goal-contract validator runs a detached worktree's tests
+# from a child process sitting in a different checkout. A process-anchored
+# lookup would print a plausible commit that is the wrong commit, which reads
+# as attribution and is not.
+#
+# Every lookup is best-effort. A run whose commit cannot be established says so
+# and carries on: the attribution must never claim a commit it cannot know, and
+# must never turn an otherwise-passing run red.
+# ---------------------------------------------------------------------------
+
+function script:Get-RunDepthEnvName {
+    # Carries run depth to child processes. This suite contains tests that run
+    # this suite, so one run's output holds several attributions; depth is what
+    # lets a reader tell which one describes the run they started.
+    return 'PESTER_SHARDED_RUN_DEPTH'
+}
+
+function script:Get-AttributionReason {
+    param([string]$Text)
+
+    $collapsed = ($Text -replace '\s+', ' ').Trim()
+    if ($collapsed.Length -gt 140) { $collapsed = $collapsed.Substring(0, 137) + '...' }
+    return $collapsed
+}
+
+function script:Invoke-AttributionGit {
+    <#
+        Best-effort `git -C <Path> <GitArgs>`. Never throws and never writes to
+        an error stream. A missing git, a path outside any repository, and a
+        path git declines to read all come back the same way: Ok = $false with
+        a reason the caller can print.
+    #>
+    param(
+        [string]$Path,
+        [string[]]$GitArgs
+    )
+
+    # Function-local, so a caller running under $ErrorActionPreference = 'Stop'
+    # is not aborted by git writing to stderr.
+    $ErrorActionPreference = 'Continue'
+
+    # A failed lookup is normal here, so $LASTEXITCODE is restored on the way
+    # out: the attribution reports on the run, it does not alter what the
+    # caller observes afterwards.
+    $savedLastExitCode = if (Test-Path -LiteralPath 'Variable:\global:LASTEXITCODE') { $global:LASTEXITCODE } else { $null }
+
+    try {
+        $raw = & git '-C' $Path @GitArgs 2>&1
+        $exit = $LASTEXITCODE
+
+        $records = @($raw)
+        $stdout = @($records |
+            Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] } |
+            ForEach-Object { [string]$_ })
+
+        if ($exit -ne 0) {
+            $stderr = @($records |
+                Where-Object { $_ -is [System.Management.Automation.ErrorRecord] } |
+                ForEach-Object { [string]$_ })
+            $why = (@($stderr) + @($stdout) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join ' '
+            if ([string]::IsNullOrWhiteSpace($why)) { $why = "git exited with code $exit" }
+            return [pscustomobject]@{ Ok = $false; Lines = @(); Reason = (script:Get-AttributionReason $why) }
+        }
+
+        return [pscustomobject]@{ Ok = $true; Lines = $stdout; Reason = '' }
+    }
+    catch {
+        # Thrown rather than exited: git is not on PATH at all.
+        return [pscustomobject]@{ Ok = $false; Lines = @(); Reason = (script:Get-AttributionReason "git could not be run: $($_.Exception.Message)") }
+    }
+    finally {
+        $global:LASTEXITCODE = $savedLastExitCode
+    }
+}
+
+function script:Get-RunAttribution {
+    <#
+        Reads the facts once per run, BEFORE any test runs. Two consequences are
+        deliberate: the tree state reported is the tree the tests started
+        against (this suite takes minutes, and a run can begin clean and end
+        dirty), and no git call happens inside the sequential shard's
+        GIT_CONFIG_GLOBAL/GIT_CONFIG_SYSTEM swap window.
+    #>
+    param([string]$TestsPath)
+
+    $inherited = [Environment]::GetEnvironmentVariable((script:Get-RunDepthEnvName))
+    $depth = 0
+    if ($inherited -match '^\d+$') { $depth = [int]$inherited + 1 }
+
+    $displayPath = $TestsPath
+    $commit = $null
+    $treeState = 'unknown'
+    $notes = [System.Collections.Generic.List[string]]::new()
+
+    try {
+        try { $displayPath = [System.IO.Path]::GetFullPath($TestsPath) } catch { }
+
+        $head = script:Invoke-AttributionGit -Path $TestsPath -GitArgs @('rev-parse', 'HEAD')
+        if ($head.Ok) {
+            $candidate = (@($head.Lines) -join '').Trim()
+            if ($candidate -match '^[0-9a-f]{40}$') { $commit = $candidate }
+            else { $notes.Add('commit: git returned no commit id') | Out-Null }
+        }
+        else {
+            $notes.Add("commit: $($head.Reason)") | Out-Null
+        }
+
+        $status = script:Invoke-AttributionGit -Path $TestsPath -GitArgs @('status', '--porcelain')
+        if ($status.Ok) {
+            $changed = @($status.Lines | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+            if ($changed.Count -eq 0) {
+                $treeState = 'clean'
+            }
+            else {
+                $untracked = @($changed | Where-Object { $_.StartsWith('??') }).Count
+                $tracked = $changed.Count - $untracked
+                $treeState = "dirty($tracked tracked, $untracked untracked)"
+            }
+        }
+        else {
+            $notes.Add("worktree: $($status.Reason)") | Out-Null
+        }
+    }
+    catch {
+        # Reporting on a run must never be the reason the run ends. Anything
+        # unanticipated here degrades to 'we could not tell you', which is the
+        # honest answer, and the run proceeds.
+        $notes.Add((script:Get-AttributionReason "attribution could not be read: $($_.Exception.Message)")) | Out-Null
+    }
+
+    return [pscustomobject]@{
+        Depth     = $depth
+        Commit    = $commit
+        TreeState = $treeState
+        TestsPath = $displayPath
+        Notes     = $notes.ToArray()
+    }
+}
+
+function script:Write-RunAttribution {
+    <#
+        One line, deliberately. A full-suite run interleaves the console output
+        of up to eight shard processes plus any suite run nested inside them, so
+        a multi-line block would be torn apart by that interleaving.
+    #>
+    param([object]$Attribution)
+
+    $run = if ($Attribution.Depth -eq 0) { 'outer' } else { "nested(depth=$($Attribution.Depth))" }
+    $commit = if ($null -ne $Attribution.Commit) { $Attribution.Commit } else { 'none' }
+
+    $line = "  RUN ATTRIBUTION  run=$run  commit=$commit  worktree=$($Attribution.TreeState)" +
+        "  observed=before any tests ran  tests=$($Attribution.TestsPath)"
+    if (@($Attribution.Notes).Count -gt 0) {
+        $line += "  note=$(@($Attribution.Notes) -join '; ')"
+    }
+
+    Write-Host $line
+}
+
+# ---------------------------------------------------------------------------
 # Internal: build the per-shard launcher script content
 # The launcher is written to a temp .ps1 file so that file path and result
 # path do not require complex inline string escaping when passed to pwsh.
@@ -117,35 +286,50 @@ function Invoke-PesterSharded {
     $parallelFiles = @($allFiles | Where-Object { $realGitNames -notcontains $_.Name })
     $sequentialFiles = @($allFiles | Where-Object { $realGitNames -contains $_.Name })
 
-    if ($DeterminismCheck) {
-        # Run twice and compare
-        Write-Host "=== Determinism check: run 1 ===" -ForegroundColor Cyan
-        $run1 = script:Invoke-ShardedRun -ParallelFiles $parallelFiles -SequentialFiles $sequentialFiles -Output $Output -AllFileManifest $allFiles -MinTestCount $MinTestCount
-        Write-Host "=== Determinism check: run 2 ===" -ForegroundColor Cyan
-        $run2 = script:Invoke-ShardedRun -ParallelFiles $parallelFiles -SequentialFiles $sequentialFiles -Output $Output -AllFileManifest $allFiles -MinTestCount $MinTestCount
+    # Issue #958: read the attribution before anything runs, and publish this
+    # run's depth so that any run nested inside it -- this suite's own contract
+    # tests run this runner -- reports itself as nested rather than as the run
+    # the operator started.
+    $attribution = script:Get-RunAttribution -TestsPath $resolvedTestsPath
+    $depthEnvName = script:Get-RunDepthEnvName
+    $savedDepth = [Environment]::GetEnvironmentVariable($depthEnvName)
+    [Environment]::SetEnvironmentVariable($depthEnvName, [string]$attribution.Depth)
 
-        $diffFiles = script:Compare-RunResults -Run1 $run1.Results -Run2 $run2.Results
-        if ($diffFiles.Count -gt 0) {
-            Write-Host "`n=== DETERMINISM MISMATCH: the following files flipped between runs ===" -ForegroundColor Red
-            foreach ($d in $diffFiles) {
-                Write-Host "  $($d.File): run1=$($d.Run1Outcome) run2=$($d.Run2Outcome)" -ForegroundColor Red
+    try {
+        if ($DeterminismCheck) {
+            # Run twice and compare
+            Write-Host "=== Determinism check: run 1 ===" -ForegroundColor Cyan
+            $run1 = script:Invoke-ShardedRun -ParallelFiles $parallelFiles -SequentialFiles $sequentialFiles -Output $Output -AllFileManifest $allFiles -MinTestCount $MinTestCount
+            Write-Host "=== Determinism check: run 2 ===" -ForegroundColor Cyan
+            $run2 = script:Invoke-ShardedRun -ParallelFiles $parallelFiles -SequentialFiles $sequentialFiles -Output $Output -AllFileManifest $allFiles -MinTestCount $MinTestCount
+
+            $diffFiles = script:Compare-RunResults -Run1 $run1.Results -Run2 $run2.Results
+            if ($diffFiles.Count -gt 0) {
+                Write-Host "`n=== DETERMINISM MISMATCH: the following files flipped between runs ===" -ForegroundColor Red
+                foreach ($d in $diffFiles) {
+                    Write-Host "  $($d.File): run1=$($d.Run1Outcome) run2=$($d.Run2Outcome)" -ForegroundColor Red
+                }
+                return [pscustomobject]@{
+                    ExitCode        = 1
+                    TotalPassed     = $run1.TotalPassed
+                    TotalFailed     = $run1.TotalFailed
+                    Results         = $run1.Results
+                    DeterminismDiff = $diffFiles
+                }
             }
-            return [pscustomobject]@{
-                ExitCode        = 1
-                TotalPassed     = $run1.TotalPassed
-                TotalFailed     = $run1.TotalFailed
-                Results         = $run1.Results
-                DeterminismDiff = $diffFiles
+            else {
+                Write-Host "`nDeterminism check: PASSED (no flips between runs)" -ForegroundColor Green
             }
-        }
-        else {
-            Write-Host "`nDeterminism check: PASSED (no flips between runs)" -ForegroundColor Green
+
+            return $run1
         }
 
-        return $run1
+        return script:Invoke-ShardedRun -ParallelFiles $parallelFiles -SequentialFiles $sequentialFiles -Output $Output -AllFileManifest $allFiles -MinTestCount $MinTestCount
     }
-
-    return script:Invoke-ShardedRun -ParallelFiles $parallelFiles -SequentialFiles $sequentialFiles -Output $Output -AllFileManifest $allFiles -MinTestCount $MinTestCount
+    finally {
+        [Environment]::SetEnvironmentVariable($depthEnvName, $savedDepth)
+        script:Write-RunAttribution -Attribution $attribution
+    }
 }
 
 # ---------------------------------------------------------------------------
