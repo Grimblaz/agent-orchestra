@@ -73,8 +73,14 @@ function script:Invoke-AttributionGit {
         [string[]]$GitArgs
     )
 
-    # Function-local, so a caller running under $ErrorActionPreference = 'Stop'
-    # is not aborted by git writing to stderr.
+    # Function-local. When a caller has set 'Stop' and the host has
+    # $PSNativeCommandUseErrorActionPreference on, a non-zero git exit raises
+    # NativeCommandExitException rather than simply setting $LASTEXITCODE.
+    # Measured both ways under that caller: the run survives either way -- the
+    # catch below is what protects that -- but without this line the reported
+    # reason degrades from git's own message ("ambiguous argument 'HEAD'...")
+    # to a generic "ended with non-zero exit code: 128". Kept for the
+    # diagnostic, not for survival.
     $ErrorActionPreference = 'Continue'
 
     # A failed lookup is normal here, so $LASTEXITCODE is restored on the way
