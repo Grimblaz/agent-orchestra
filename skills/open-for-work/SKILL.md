@@ -1,20 +1,20 @@
 ---
 name: open-for-work
-description: The operating methodology for opening a filed standalone issue for work — the trivial floor, the worth-it doors, beat 1 alignment with its affirmation gate and durable affirmation record, beat 2 routing, and the two outputs (a brief on the routine arm, a continuation into design on the novel arm). Use when a person asks to open an issue for work, when `/open` is invoked, or when resuming an issue that already carries an affirmation record. DO NOT USE FOR: chunk sub-issues of a designed parent (they inherit authority source (a) — author the brief directly per plan-authoring § Brief plan variant), issue close-out mechanics, with or without a PR (use post-pr-review), or the adversarial review of the artifact this flow produces (use adversarial-review with the `design-challenge` adapter).
+description: The operating methodology for opening a filed standalone issue for work — the trivial floor, the worth-it doors, beat 1 alignment with its affirmation gate and durable affirmation record, beat 2 routing, and the two outputs (a brief on the routine arm, a continuation into design on the novel arm). Use when `/open {issue}` is invoked, when a `/plan` pre-flight finds an affirmed framing record, or when resuming an issue that already carries one. Activation is by those explicit surfaces only — a bare pickup ("let's work on #123") deliberately does not enter this flow. DO NOT USE FOR: chunk sub-issues of a designed parent (they inherit authority source (a) — author the brief directly per plan-authoring § Brief plan variant), issue close-out mechanics, with or without a PR (use post-pr-review), or the adversarial review of the artifact this flow produces (use adversarial-review with the `design-challenge` adapter).
 ---
 
 # Open for work
 
 This skill is the **operating methodology** for the open-for-work flow. The doctrine — why the flow exists, what each beat is for, and the contracts it must not break — lives in [`Documents/Design/open-for-work.md`](../../Documents/Design/open-for-work.md). That document is the rationale home; this file is what the conversation actually follows, and it is self-contained: a run does not need the doctrine document handed to it.
 
-> Auto-mode boundary: see [CLAUDE.md § Auto-mode boundary](/CLAUDE.md#auto-mode-boundary). Auto-mode does not suppress `AskUserQuestion`.
+> Auto-mode boundary: see [CLAUDE.md § Auto-mode boundary](../../CLAUDE.md#auto-mode-boundary). Auto-mode does not suppress `AskUserQuestion`.
 
 <!-- vocab-pointer -->
 > **Unfamiliar with a code or term?** Shortcodes like `SMC-NN`, `D1/D2/D3`, and `CE Gate` are defined in the [plain-language vocabulary](../../HOW-IT-WORKS.md#vocab).
 
 ## When to Use
 
-- A person asks to open a filed issue for work, in any phrasing, or invokes `/open {issue}`.
+- A person invokes `/open {issue}`, or a `/plan` pre-flight finds an affirmed framing record on the issue. **Explicit invocation only** — a bare pickup ("let's work on #123") must not silently enter a flow whose first act is an engagement gate, which is why there is deliberately no natural-language routing intent for the entrance.
 - A run resumes an issue that already carries an affirmation record (see [Resuming](#resuming-an-issue-already-opened-for-work)).
 
 **Not this flow**: a chunk sub-issue of a designed parent inherits authority source (a) and is planned directly as a brief — no worth-it check, no beat 1, no affirmation record. A person who explicitly asks for `/experience` or `/design` gets the phase pipeline, which remains fully lawful.
@@ -220,19 +220,26 @@ gh api repos/{owner}/{repo}/issues/{ID}/comments --paginate
 
 ### Deciding the state
 
-**Order matters, not just presence.** Every question below is about *sequence*; a state read from which artifacts exist, ignoring when they were written, cannot see the two failures this section exists to catch. Collect, in one pass: every affirmation record with its `created_at` and lawfulness, and every routing artifact (a `plan-variant: brief` plan comment, or the design-completion marker) with its `created_at`.
+**Order matters, not just presence.** Every question below is about *sequence*; a state read from which artifacts exist, ignoring when they were written, cannot see the two failures this section exists to catch. Collect, in one pass: every affirmation record with its `created_at` and lawfulness, and every routing artifact (a `plan-variant: brief` plan comment, or the design-completion marker) with **both** its `created_at` and its `updated_at`.
+
+Both timestamps are needed because the two artifact families behave differently, and the difference is not cosmetic. The design-completion marker is `post-new`: a re-route appends a **new** comment, so its `created_at` genuinely moves. The brief's plan comment is **`upsert-in-place`**: a re-persist PATCHes the existing comment, and a PATCH can never advance `created_at` — only `updated_at`. Reading a re-persisted brief by `created_at` alone therefore reports a routing artifact that is permanently older than the affirmation record that superseded it, which is exactly the misread step 3 below exists to avoid.
 
 Then, in order:
 
 1. **No lawful record** → the issue was not opened for work through this flow. Say so; do not infer authority.
-2. **Ordering check (property 3).** Compare the **earliest lawful** record against the **earliest** routing artifact. If a routing artifact predates it, the artifact is **not lawful under source (b)** — stop and report that, rather than resuming under it. This is the only moment a later reader can catch a back-fitted authority, and nothing else in the repository performs this check.
-3. **Supersession check.** If the **latest** lawful record postdates the latest routing artifact, the escape hatch fired and beat 2 has not yet been re-run against the newer what-statement. This is the **re-affirmed-not-re-routed** state below — not `routed`, even though both a record and an artifact exist.
+2. **Ordering check (property 3).** Compare the **earliest lawful** record against the **earliest** routing artifact, **by `created_at` on both sides**. If a routing artifact predates it, the artifact is **not lawful under source (b)** — stop and report that, rather than resuming under it. This is the only moment a later reader can catch a back-fitted authority, and nothing else in the repository performs this check. **Use `created_at` here and nowhere else negotiate it**: this step is asking when the artifact came into existence, and an `updated_at` reading would let an artifact created before any record pass simply because it was touched afterwards.
+3. **Supersession check.** Ask whether the routing decision is still current with respect to the newest affirmation. Start from the same conservative trigger: does the **latest lawful** record postdate the latest routing artifact's `created_at`? If no, routing is current → **`routed`**. If yes, the trigger has fired, and what follows depends on the artifact's family:
+
+   - **Design-completion marker** (`post-new`): the trigger is decisive. The escape hatch fired and beat 2 has not been re-run → **`re-affirmed-not-re-routed`**.
+   - **Brief plan comment** (`upsert-in-place`): the trigger over-fires by construction, so it does not settle the state on its own. Upgrade to **`routed`** only when **both** hold: (i) the artifact's **`updated_at`** postdates the latest lawful record — necessary, because if it does not, the brief genuinely has not been touched since the re-affirmation; and (ii) reading the brief, it **addresses the current what-statement** rather than the superseded one. If either fails, the state is **`re-affirmed-not-re-routed`**.
+
+   The asymmetry is deliberate: `updated_at` alone would be worse than the trigger, because a plan comment's `updated_at` advances on *any* touch — a typo fix, the `plan-issue-write-back-preserve` post-step, an unrelated append — none of which mean "routing was re-decided". Requiring the content read alongside it is what makes the upgrade safe, and the failure direction stays conservative: a wrong answer lands in `re-affirmed-not-re-routed`, whose cost is a redundant beat 2, not a lost brief.
 
 | State | Evidence | What the resume does |
 | --- | --- | --- |
 | **affirmed-not-routed** | A lawful record; no routing artifact | Resume at **beat 2**. Do not re-run the worth-it check or beat 1. The lawful record authorizes resuming beat 2; **beat 2 produces the verdict** — do not assume it is routine. A routine verdict authors the brief here, with no need to run `/design` first; a **novel** verdict continues into design, which is the correct destination and is not what this row forbids. |
-| **re-affirmed-not-re-routed** | The latest lawful record **postdates** the latest routing artifact, issue open | The escape hatch fired and stopped mid-cycle. Re-run **beat 2** against the updated still-open list and produce a fresh arm output. Do **not** continue under the existing artifact — it was authored against a what-statement that has since been superseded. Count this re-route. |
-| **routed** | A lawful record predating a routing artifact that is itself the latest of the two, issue open | The routing decision is current. Continue the run under that artifact; do not re-affirm unless the escape hatch fires. |
+| **re-affirmed-not-re-routed** | Step 3's trigger fired and the family-specific check above did **not** clear it, issue open | The escape hatch fired and stopped mid-cycle. Re-run **beat 2** against the updated still-open list and produce a fresh arm output. Do **not** continue under the existing artifact — it was authored against a what-statement that has since been superseded. Count this re-route. On the routine arm, re-persisting the brief **PATCHes the existing plan comment in place** rather than appending, so the superseded brief is overwritten: that is intended here, but it is also why step 3's check must be right before you act on this row. |
+| **routed** | Step 3 concluded the routing decision is current — either the trigger never fired, or the family-specific check cleared it | The routing decision is current. Continue the run under that artifact; do not re-affirm unless the escape hatch fires. |
 | **complete** | The issue is closed **and** it carries a lawful record | Nothing to resume. If the close-out record was not written before the close, write it now and say it is late — see `skills/post-pr-review/SKILL.md` § 9. Close-Out Record (Issues Opened For Work). A closed issue carrying **no** record is not this flow's business at all. |
 
 **A record alone, with beat 2 unrun, does not authorize a brief.** That is the affirmed-not-routed state, and its answer is to run beat 2 — not to author.
@@ -245,7 +252,7 @@ Every checkpoint this conversation runs emits a **gate-decision token** — the 
 
 | Checkpoint | `decision_id` | `window_position` | `classification` | `outcome` |
 | --- | --- | --- | --- | --- |
-| Worth-it doors | `worth-it-{ID}` | `pre-ask` | `load-bearing` (see below) | `asked`, or `same-decision-resume` when a prior `worth-it-{ID}` entry suppresses the prompt, or `declined` on `frame it` |
+| Worth-it doors | `worth-it-{ISSUE_NUMBER}` | `pre-ask` | `load-bearing` (see below) | `asked`, or `same-decision-resume` when a prior `worth-it-{ISSUE_NUMBER}` entry suppresses the prompt, or `declined` on `frame it` |
 | Affirmation gate | `open-for-work-affirmation-{ID}` | `pre-ask` | `load-bearing` | `asked` |
 | Brief approval (routine arm) | `open-for-work-brief-approval-{ID}` | `pre-ask` | `load-bearing` | `asked` |
 

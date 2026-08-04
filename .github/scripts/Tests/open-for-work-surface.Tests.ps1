@@ -178,8 +178,8 @@ Describe 'open-for-work surface (issue #974)' {
         }
 
         It 'was appended, not inserted: both positional fixtures still select their pre-#974 families' {
-            # persist-marker-core.Tests.ps1:250 binds $script:PostNewFamily to
-            # the FIRST post-new/issue row and :527 binds $issueOnlyFamily to
+            # persist-marker-core.Tests.ps1 binds $script:PostNewFamily to
+            # the FIRST post-new/issue row and $issueOnlyFamily to
             # the FIRST issue-surface row. open-for-work-affirmed is
             # post-new/issue with a null adapter and null post-step -- the
             # exact shape those fixtures select -- so an inserted row would
@@ -252,7 +252,13 @@ Describe 'open-for-work surface (issue #974)' {
                 $script:SkillText,
                 'permission, authentication, or data-integrity behavior is never below the floor(?<tail>[^\n]*(?:\n(?!\s*\n)[^\n]*)*)')
             $guard.Success | Should -BeTrue -Because 'the risk guard must be stated verbatim in the skill'
-            $guard.Groups['tail'].Value | Should -Not -Match '(?i)\b(unless|except|other than|save (for|where)|provided that|does not apply|only when)\b' `
+            # This alternation is INCREMENTAL HARDENING, not closure. It is an
+            # open-ended denylist -- 'aside from', 'subject to', 'so long as',
+            # 'barring', 'with the exception of' would all slip through. It
+            # raises the cost of an accidental invalidating append; it does not
+            # make one impossible. If that guarantee is ever needed, pin the
+            # whole risk-guard sentence verbatim and drop the denylist.
+            $guard.Groups['tail'].Value | Should -Not -Match '(?i)\b(unless|except|other than|save (for|where)|provided that|does not apply|only (when|if))\b' `
                 -Because 'the risk guard admits no exemption; a trailing qualifier anywhere in the same paragraph inverts it while leaving the clause present'
         }
 
@@ -300,8 +306,8 @@ Describe 'open-for-work surface (issue #974)' {
         }
 
         It 'the skill tells a resume to read comments from a source carrying updated_at' {
-            $script:SkillText | Should -Match ([regex]::Escape('gh api repos/{owner}/{repo}/issues/{ID}/comments')) `
-                -Because 'gh issue view --json comments carries includesCreatedEdit and no updated_at, so the void-if-edited rule cannot be evaluated from it'
+            $script:SkillText | Should -Match ([regex]::Escape('gh api repos/{owner}/{repo}/issues/{ID}/comments --paginate')) `
+                -Because 'gh issue view --json comments carries includesCreatedEdit and no updated_at, so the void-if-edited rule cannot be evaluated from it -- and --paginate is load-bearing in its own right: a first-page-only read misses a lawful record on a long-threaded issue. Pin the flag, not just the endpoint; this PR already dropped it once elsewhere (round-2 finding gh-3706084076)'
             $script:SkillText | Should -Match '(?i)affirmed-not-routed'
         }
 
@@ -317,6 +323,29 @@ Describe 'open-for-work surface (issue #974)' {
                 -Because 'the window between re-affirmation and beat-2 re-run needs its own state, or it reads as routed'
             $script:SkillText | Should -Match '(?i)not lawful under source \(b\)' `
                 -Because 'the ordering check must state the outcome when it fails'
+        }
+
+        It 'the supersession check accounts for the brief plan comment being upsert-in-place' {
+            # Round-3 finding fc-2: the plan-issue family is upsert, and a PATCH
+            # can never advance created_at — only updated_at. A created_at-only
+            # supersession check therefore reports a re-persisted brief as
+            # permanently older than the affirmation that superseded it, so a
+            # correctly-routed issue is misclassified re-affirmed-not-re-routed
+            # on every future resume, and that row instructs a re-author which
+            # PATCHes over the reviewed brief.
+            $script:SkillText | Should -Match '(?i)upsert-in-place' `
+                -Because 'the resume must name the write shape that makes created_at unreliable for this artifact'
+            $script:SkillText | Should -Match '(?i)can never advance' `
+                -Because 'the reason created_at is insufficient must be stated, not just worked around'
+            $script:SkillText | Should -Match '(?i)Upgrade to \*\*`routed`\*\* only when \*\*both\*\* hold' `
+                -Because 'the upgrade to routed requires the updated_at check AND the content read together, not either alone'
+
+            # Step 2 must stay on created_at: it asks when the artifact came
+            # into existence, and an updated_at reading would let an artifact
+            # created before any record pass merely because it was touched
+            # afterwards.
+            $script:SkillText | Should -Match '(?i)on both sides' `
+                -Because 'the back-fit check must be explicitly pinned to created_at so a later edit does not generalise the updated_at fix onto it'
         }
 
         It 'the re-route count is not defined as arithmetic over comment counts' {

@@ -20,7 +20,7 @@ Each skill should use this flow:
 
 This keeps prompts concise while preserving depth when needed.
 
-## Available Skills (53)
+## Available Skills (54)
 
 | Skill | Purpose | Status |
 | ----- | ------- | ------ |
