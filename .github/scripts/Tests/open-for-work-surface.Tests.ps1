@@ -211,6 +211,17 @@ Describe 'open-for-work surface (issue #974)' {
         BeforeAll {
             $script:CommandText = & $script:ReadRepoFile 'commands/open.md'
             $script:SkillText   = & $script:ReadRepoFile 'skills/open-for-work/SKILL.md'
+
+            # Slice one '## ' section out of the skill, so an assertion about
+            # the resume can only be satisfied by text inside the resume.
+            # Returns '' when the heading is absent, which reds the caller
+            # rather than passing vacuously.
+            $script:ResumeSection = {
+                [regex]::Match(
+                    $script:SkillText,
+                    '(?ms)^##\s+Resuming an issue already opened for work\b.*?(?=^##\s|\z)'
+                ).Value
+            }
         }
 
         It 'the command exists and loads the methodology skill' {
@@ -308,7 +319,68 @@ Describe 'open-for-work surface (issue #974)' {
         It 'the skill tells a resume to read comments from a source carrying updated_at' {
             $script:SkillText | Should -Match ([regex]::Escape('gh api repos/{owner}/{repo}/issues/{ID}/comments --paginate')) `
                 -Because 'gh issue view --json comments carries includesCreatedEdit and no updated_at, so the void-if-edited rule cannot be evaluated from it -- and --paginate is load-bearing in its own right: a first-page-only read misses a lawful record on a long-threaded issue. Pin the flag, not just the endpoint; this PR already dropped it once elsewhere (round-2 finding gh-3706084076)'
-            $script:SkillText | Should -Match '(?i)affirmed-not-routed'
+            # Scoped to the section rather than the document. #995 round-1
+            # finding M17: this pin was `$script:SkillText | Should -Match`,
+            # and occurrences of `affirmed-not-routed` went 2 -> 3 when the
+            # trust model gained a paragraph ~90 lines away, so a
+            # document-wide match became satisfiable by prose that has
+            # nothing to do with the state table this test is about.
+            (& $script:ResumeSection) | Should -Match '(?i)affirmed-not-routed' `
+                -Because 'the state the resume lands in when a record exists but beat 2 is unrun must be named inside the section that decides state'
+        }
+
+        It 'the resume section carries the author-disclosure obligation (#995 guard, not criterion evidence)' {
+            # THIS IS A GUARD, NOT EVIDENCE. #995's acceptance criteria are
+            # discharged by cold reads of the changed text by fresh readers,
+            # never by text presence -- a test asserting a sentence exists
+            # cannot fail for the reason those criteria care about, and the
+            # brief says so in its own falsifiers. What this buys is narrower
+            # and still worth having: without it, deleting the disclosure
+            # outright leaves this suite green (round-1 finding M17).
+            $resuming = & $script:ResumeSection
+            $resuming | Should -Not -BeNullOrEmpty `
+                -Because 'the section heading must be findable before anything can be scoped to it'
+
+            $resuming | Should -Match ([regex]::Escape('user.login')) `
+                -Because 'the field the disclosure is built on has to be named where the resume reads comments, or the instruction has no referent'
+
+            # The load-bearing half. Round-1 finding M2 (the only sustained
+            # high): naming ONLY the record being resumed under leaves the
+            # earliest lawful record unnamed -- and the earliest is what step
+            # 2 derives lawfulness from, so a planted record can supply the
+            # authority and never appear in the output. Disclosure that runs
+            # and shows nothing is the failure mode this whole change exists
+            # to avoid, so it gets the assertion.
+            $resuming | Should -Match '(?i)earliest lawful' `
+                -Because 'the record the ordering check reads must be named, because it is the one a single-record disclosure hides'
+            $resuming | Should -Match '(?i)name both' `
+                -Because 'M2: the output obligation must reach both records when they differ, not only the resumed-under one'
+        }
+
+        It 'both trust-model sites answer all four planted-record questions (#995 guard)' {
+            # Paired-presence, deliberately: the risk this guards is DRIFT
+            # BETWEEN the two sites, not the wording of either. Round-1
+            # finding M5 was exactly that -- the doctrine site had dropped the
+            # delete prohibition and the earliest-record consequence the skill
+            # carried. Deleting a clause from one site alone reds this; both
+            # sites drifting together does not, which is honest about what a
+            # presence pair can detect.
+            $doctrine = & $script:ReadRepoFile 'Documents/Design/open-for-work.md'
+            $doctrine | Should -Not -BeNullOrEmpty
+
+            $probes = [ordered]@{
+                'anyone who can comment can post an accepted record' = '(?i)anyone (with a GitHub account )?who can comment'
+                'nothing gates it'                                   = '(?i)no author check, no permission check'
+                'this is accepted rather than overlooked'            = '(?i)known and accepted'
+                'what to do on noticing one'                         = '(?i)do not resume under (it|that record)'
+                'no authorship condition was added'                  = '(?i)author-blind|stay author-blind|is conditioned on who posted it'
+            }
+            foreach ($probe in $probes.GetEnumerator()) {
+                $script:SkillText | Should -Match $probe.Value `
+                    -Because "the skill's trust model must answer: $($probe.Key)"
+                $doctrine | Should -Match $probe.Value `
+                    -Because "the doctrine's trust model must answer: $($probe.Key) -- a statement landing at one site and not the other is the drift this repository's parity discipline exists against"
+            }
         }
 
         It 'the resume decides state from sequence, not merely from which artifacts exist' {
