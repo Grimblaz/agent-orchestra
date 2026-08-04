@@ -2,6 +2,14 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.11.1] — 2026-08-03
+
+### Changed
+
+- **Affirmation records now disclose their author** (#995). The surfaces that resume or route on an open-for-work affirmation record — `skills/open-for-work/SKILL.md` § Resuming and the `commands/plan.md` pre-flight — now state who posted the record alongside the affirmed what-statement they are about to act under. `user.login` and `author_association` already ride the `gh api` comments call the resume makes, so no new fetch is involved.
+- **The planted-record gap is stated as known and accepted** at both trust-model sites (`skills/open-for-work/SKILL.md` § Writing the affirmation record and `Documents/Design/open-for-work.md` § The affirmation record): that anyone able to comment on a public issue can post a record every recognition surface accepts, that nothing gates it, that this was considered and accepted rather than overlooked, and what a reader should do on noticing one.
+- **No authorship check was added.** #957 Amendment 13 reaffirms self-attestation unamended; the sixth attestation degree of freedom Amendment 11 declined stays declined. Disclosure is not attestation — a record is still recognised by shape alone, from any author, and nothing is conditioned on the disclosed value.
+
 ## [3.11.0] — 2026-08-03
 
 ### Added
