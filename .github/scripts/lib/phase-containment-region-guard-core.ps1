@@ -7,8 +7,15 @@
 # "what did this body carry that I could not read", over a corpus of comments
 # that were already posted. This answers a different question — "is the body
 # somebody just wrote about to become another lost region" — and it answers it
-# at a moment when a human can still fix it. The two disagree on purpose in
-# one place, documented at Test-PhaseContainmentRegionIsReportable below.
+# at a moment when a human can still fix it. The two now share their two
+# load-bearing rules — a numeric id and an entry floor — and differ only in
+# what each is FOR, which is stated at Find-MalformedPhaseContainmentRegion
+# below. (An earlier revision of this line pointed at
+# `Test-PhaseContainmentRegionIsReportable` for the rationale of a deliberate
+# divergence; that function was never written, and the divergence it was meant
+# to explain turned out to be the defect itself — the reader lacked the entry
+# floor, so a prose mention flipped a clean surface to could-not-verify.
+# PR #1006 review, M1 and M27.)
 #
 # SECURITY: no ConvertFrom-Yaml / powershell-yaml, same invariant as the
 # reader it sits beside. Comment bodies are untrusted input.
@@ -58,7 +65,7 @@ function Find-MalformedPhaseContainmentRegion {
     .PARAMETER Body
         The comment or file text to scan.
     .OUTPUTS
-        Array of [PSCustomObject]@{ Id; Position; Line; EntryCount; Excerpt }.
+        Array of [PSCustomObject]@{ Id; Position; Line; EntryCount }.
         Empty array when the body is clean — which is the overwhelmingly
         common case and must stay cheap.
     #>
@@ -75,7 +82,17 @@ function Find-MalformedPhaseContainmentRegion {
     # negative lookahead for '-->' is what makes this the MALFORMED half — a
     # self-closed head is the well-formed shape and is none of this guard's
     # business. `(?!ledger-)` keeps the sibling ledger sentinel family out.
-    $pattern = '<!--[ \t]*phase-containment-(?!ledger-)(?<id>[0-9]+)(?![0-9A-Za-z_-])(?![ \t]*-->)'
+    # The trailing exclusion accepts a hyphen ONLY when it opens the terminator
+    # (PR #1006 review, M10): `[0-9A-Za-z_-]` treated the no-space shape as a
+    # different id and skipped it silently, in a scanner whose entire job is to
+    # stop that class from being silent.
+    #
+    # The well-formed exclusion is ONE SPACE, not `[ \t]*`. The reader matches
+    # the literal `<!-- phase-containment-{id} -->` and nothing else, so any
+    # other spacing — zero spaces, two spaces, a tab — is a head no reader can
+    # match and therefore this guard's business. Writing it as `[ \t]*` excused
+    # the zero-space shape, which is precisely the M10 variant.
+    $pattern = '<!--[ \t]*phase-containment-(?!ledger-)(?<id>[0-9]+)(?![0-9A-Za-z_])(?!-(?!->))(?! -->)'
 
     foreach ($m in [regex]::Matches($Body, $pattern)) {
         if (Test-IndexInBlockScalarSpan -Index $m.Index -Spans $blockScalarSpans) { continue }
@@ -85,18 +102,32 @@ function Find-MalformedPhaseContainmentRegion {
         $regionEnd = if ($terminator -ge 0) { $terminator } else { $Body.Length }
         $regionText = $Body.Substring($afterHead, $regionEnd - $afterHead)
 
+        # A head that closes immediately orphans its entries into the body
+        # below; the extent is taken past that empty close so rule 2 can see
+        # them. Mirrors Get-PhaseContainmentMalformedOpenRegion, which carries
+        # the full rationale (PR #1006 review, M10).
+        if ([string]::IsNullOrWhiteSpace($regionText) -and $terminator -ge 0) {
+            $afterEmptyClose = $terminator + 3
+            $nextTerminator = $Body.IndexOf('-->', $afterEmptyClose, [System.StringComparison]::Ordinal)
+            $orphanEnd = if ($nextTerminator -ge 0) { $nextTerminator } else { $Body.Length }
+            $regionText = $Body.Substring($afterEmptyClose, $orphanEnd - $afterEmptyClose)
+        }
+
         $entryCount = Get-PhaseContainmentRegionEntryCount -RegionText $regionText
         if ($entryCount -lt 1) { continue }
 
         $line = 1 + @([regex]::Matches($Body.Substring(0, $m.Index), "`n")).Count
-        $excerptLength = [Math]::Min(160, $Body.Length - $m.Index)
 
+        # No excerpt field (PR #1006 review, M28). It carried 160 bytes of
+        # untrusted body that nothing rendered -- dead weight that invites a
+        # future edit to echo attacker-authored text into a posted comment.
+        # The rendered advisory quotes nothing from the body: only the id
+        # (digits), the line number, and the entry count.
         $findings.Add([PSCustomObject]@{
             Id         = $m.Groups['id'].Value
             Position   = $m.Index
             Line       = $line
             EntryCount = $entryCount
-            Excerpt    = $Body.Substring($m.Index, $excerptLength)
         })
     }
 
@@ -139,18 +170,40 @@ function Format-MalformedRegionReport {
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add("**Unreadable phase-containment $regionWord detected** in $SourceLabel.")
     $lines.Add('')
-    $lines.Add("$($Findings.Count) $regionWord here open with a marker head that is **not** the self-closed form, so no reader will ever match $(if ($Findings.Count -eq 1) { 'it' } else { 'them' }). $totalEntries ledger $entryWord would be silently invisible: not parsed, not counted, and not warned about, because the parser's malformed-block warnings only fire after an open tag has matched.")
+    $regionVerb = if ($Findings.Count -eq 1) { 'opens' } else { 'open' }
+    $regionPronoun = if ($Findings.Count -eq 1) { 'it' } else { 'them' }
+    $lines.Add("$($Findings.Count) $regionWord here $regionVerb with a marker head that is **not** the self-closed form, so no reader will ever match $regionPronoun. $totalEntries ledger $entryWord would be silently invisible: not parsed, not counted, and not warned about, because the parser's malformed-block warnings only fire after an open tag has matched.")
     $lines.Add('')
     foreach ($f in $Findings) {
-        $lines.Add("- line $($f.Line): a `phase-containment-$($f.Id)` region carrying $($f.EntryCount) entry/entries")
+        # Single-quoted concatenation, not interpolation: in a double-quoted
+        # PowerShell string the backtick is the ESCAPE character, so the
+        # intended inline-code rendering was silently eaten and the suite's
+        # -Match assertion could not see it (PR #1006 review, M26).
+        $entryNoun = if ($f.EntryCount -eq 1) { 'entry' } else { 'entries' }
+        $lines.Add('- line ' + $f.Line + ': a `phase-containment-' + $f.Id + '` region carrying ' + $f.EntryCount + ' ' + $entryNoun)
     }
     $lines.Add('')
+    # THE EXEMPLARS USE A PLACEHOLDER ID, NOT A NUMBER (PR #1006 review, M2).
+    # An earlier revision wrote a literal `123`, which made this advisory a
+    # real malformed region for issue/PR #123 -- so the remedy manufactured the
+    # defect class it detects, on any thread where the guard fired. A `{ID}`
+    # placeholder is inert to both scanners by their shared numeric-id rule,
+    # and it is the same hygiene the sibling report already applies through
+    # Format-InertMarkerLabel.
+    #
+    # The `wrong:` exemplar is also rendered across LINES (M34). A single-line
+    # version is a complete, well-formed HTML comment -- so the one example a
+    # maintainer copies did not show the defect being described.
     $lines.Add('**The shape.** An open tag must be self-closed and paired with a closing tag:')
     $lines.Add('')
     $lines.Add('```text')
-    $lines.Add('  wrong:  <!-- phase-containment-123        ...entries...   -->')
-    $lines.Add('  right:  <!-- phase-containment-123 -->    ...one entry... <!-- /phase-containment-123 -->')
+    $lines.Add('  wrong:                          right:')
+    $lines.Add('    <!-- phase-containment-{ID}      <!-- phase-containment-{ID} -->')
+    $lines.Add('    ...entries...                    ...one entry...')
+    $lines.Add('    -->                              <!-- /phase-containment-{ID} -->')
     $lines.Add('```')
+    $lines.Add('')
+    $lines.Add('(`{ID}` stands in for the issue or PR number. It is written as a placeholder here on purpose: a real number would make this very comment another unreadable region.)')
     $lines.Add('')
     $lines.Add('One entry per block — the parser builds one flat mapping per block and has no YAML-sequence handling, so a multi-entry sequence in a single block parses as one last-wins entry with a null `finding_key`.')
     $lines.Add('')

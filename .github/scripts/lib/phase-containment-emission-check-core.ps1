@@ -3446,13 +3446,22 @@ function Get-EmissionGap {
             $bodySkipped = 0
             $bodyUnreadableEntries = 0
             $bodyMalformedRegions = 0
+            $bodyUnmatchedOpenTags = 0
             $rawBlocks = Get-PhaseContainmentBlock -Text $body -Id $Id `
                 -SkippedCount ([ref]$bodySkipped) `
                 -UnreadableEntryCount ([ref]$bodyUnreadableEntries) `
-                -MalformedRegionCount ([ref]$bodyMalformedRegions)
+                -MalformedRegionCount ([ref]$bodyMalformedRegions) `
+                -UnmatchedOpenTagCount ([ref]$bodyUnmatchedOpenTags)
             $totalUnreadableEntries += $bodyUnreadableEntries
             $totalMalformedRegions  += $bodyMalformedRegions
-            if ($bodySkipped -gt 0) { $sawUnreadableBlock = $true }
+            # PR #1006 review, M5: gated on the NEVER-MATCHED count, not on any
+            # skip. $bodySkipped also counts the #772/#833 matched-but-unclosed
+            # cases, and routing those into `block-unreadable` printed a
+            # diagnosis that was false for them — and silently changed
+            # ParseStatus on a path this issue never touched. Those cases keep
+            # their pre-#944 behaviour: dropped and warned by the reader, not
+            # re-diagnosed here.
+            if ($bodyUnmatchedOpenTags -gt 0) { $sawUnreadableBlock = $true }
             if ($rawBlocks) {
                 $surfacePrefix = "${Surface}:"
                 foreach ($rawBlock in $rawBlocks) {

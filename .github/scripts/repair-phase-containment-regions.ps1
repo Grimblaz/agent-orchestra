@@ -77,8 +77,22 @@ $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 function Get-CommentBody {
     param([Parameter(Mandatory)][string]$CommentId)
     $tmp = Join-Path $OutDir "fetch-$CommentId.json"
-    & gh api "repos/$Repo/issues/comments/$CommentId" > $tmp 2>$null
-    if ($LASTEXITCODE -ne 0) { throw "gh api GET failed for comment $CommentId" }
+    # PR #1006 review, M17: a PowerShell redirection decodes native stdout via
+    # [Console]::OutputEncoding before re-encoding, which on a non-UTF-8
+    # console mojibakes exactly the em dashes this file's header names as at
+    # risk — and a mojibake body would then pass every preflight and be
+    # PATCHed permanently, against a contract of "REFUSES BEFORE IT WRITES,
+    # NEVER AFTER". Pinned here rather than assumed from the host that
+    # happened to run the first repair.
+    $priorEncoding = [Console]::OutputEncoding
+    try {
+        [Console]::OutputEncoding = $utf8NoBom
+        & gh api "repos/$Repo/issues/comments/$CommentId" > $tmp 2>$null
+        if ($LASTEXITCODE -ne 0) { throw "gh api GET failed for comment $CommentId" }
+    }
+    finally {
+        [Console]::OutputEncoding = $priorEncoding
+    }
     $json = [System.IO.File]::ReadAllText($tmp, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
     return $json
 }
@@ -100,41 +114,93 @@ function Test-AffirmationRecordPresent {
 function Split-RegionIntoEntries {
     <#
         Splits a region's raw content into one YAML mapping per entry.
-        A sequence item's leading '- ' is removed and its continuation lines
-        are de-indented by the same amount, so each entry becomes a top-level
-        mapping the flat parser can read.
+        A sequence item's leading dash is removed and its continuation lines
+        are de-indented to match, so each entry becomes a top-level mapping the
+        flat parser can read.
+
+        THREE SILENT-DISCARD SHAPES WERE FIXED HERE (PR #1006 review, M12).
+        Each of them lost content that schema validation could not see,
+        because the fields they dropped are not required ones:
+
+          (a) EVERY LINE BEFORE THE FIRST SEQUENCE ITEM WAS DROPPED. The append
+              branch was gated on having seen a bullet, so a region leading
+              with `seed:` or `appended_at:` lost both. `appended_at` is the
+              rolling-window dedup recency key, so dropping it changes which
+              duplicate wins. Leading lines are now collected and, if they
+              carry any field, emitted as their own entry rather than binned.
+          (b) THE DE-INDENT GUARDED ON LENGTH, NOT INDENTATION. `Substring($n)`
+              on a line merely long enough chopped two characters off any
+              under-indented continuation (`severity` -> `everity`). It now
+              removes only whitespace that is actually there.
+          (c) A BULLET QUOTED INSIDE A BLOCK SCALAR STARTED A NEW ITEM. A
+              `rationale: |` scalar listing a decoy entry displaced the real
+              one entirely. Block-scalar content is now masked before the scan,
+              the same way the reader and the entry counter mask it.
     #>
     param([Parameter(Mandatory)][AllowEmptyString()][string]$Content)
 
+    # (c) Mask block-scalar CONTENT so a quoted bullet is string data. The mask
+    # preserves length and newline positions, so it indexes $Content exactly
+    # and the emitted text is always taken from the ORIGINAL, never the mask.
+    $spans = Get-BlockScalarSpans -Text $Content
+    $masked = $Content
+    if ($spans.Count -gt 0) {
+        $sb = [System.Text.StringBuilder]::new($Content)
+        foreach ($span in $spans) {
+            for ($i = $span.Start; $i -lt $span.End -and $i -lt $sb.Length; $i++) {
+                if ($sb[$i] -ne "`n" -and $sb[$i] -ne "`r") { $sb[$i] = ' ' }
+            }
+        }
+        $masked = $sb.ToString()
+    }
+
     $lines = $Content -split '\r?\n'
+    $maskedLines = $masked -split '\r?\n'
     $entries = [System.Collections.Generic.List[string]]::new()
     $current = $null
+    $leading = [System.Collections.Generic.List[string]]::new()
     $itemIndent = 0
 
-    foreach ($line in $lines) {
-        if ($line -match '^(?<lead>[ \t]*)-[ \t]+(?<rest>\S.*)$') {
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $line = $lines[$i]
+        $maskedLine = if ($i -lt $maskedLines.Count) { $maskedLines[$i] } else { $line }
+
+        # Bullet detection reads the MASKED line; the text kept is the original.
+        if ($maskedLine -match '^(?<lead>[ \t]*)-[ \t]+(?<rest>\S.*)$') {
             if ($null -ne $current) { $entries.Add(($current -join "`n")) }
             $current = [System.Collections.Generic.List[string]]::new()
-            $current.Add($Matches['rest'])
-            # Continuation lines of a `- key: value` item are indented to the
-            # column just past the dash-space.
-            $itemIndent = $Matches['lead'].Length + 2
+            $bulletMatch = [regex]::Match($line, '^(?<lead>[ \t]*)-[ \t]+')
+            $itemIndent = if ($bulletMatch.Success) { $bulletMatch.Length } else { $Matches['lead'].Length + 2 }
+            $current.Add($line.Substring([Math]::Min($itemIndent, $line.Length)))
             continue
         }
-        if ($null -ne $current) {
-            if ([string]::IsNullOrWhiteSpace($line)) { continue }
-            $stripped = if ($line.Length -ge $itemIndent) { $line.Substring($itemIndent) } else { $line.TrimStart() }
-            $current.Add($stripped)
+
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+
+        if ($null -eq $current) {
+            # (a) Content before the first bullet is kept, not binned.
+            $leading.Add($line)
+            continue
         }
+
+        # (b) Remove only whitespace that is actually present.
+        $actualIndent = [regex]::Match($line, '^[ \t]*').Length
+        $current.Add($line.Substring([Math]::Min($itemIndent, $actualIndent)))
     }
 
     if ($null -ne $current) {
         $entries.Add(($current -join "`n"))
+        # A leading run beside a sequence is its own mapping, and a caller that
+        # expected N entries will see N+1 and fail preflight 1 loudly -- which
+        # is the point. Silence here is what let (a) through.
+        if ($leading.Count -gt 0 -and ($leading -join "`n") -match '(?m)^[ \t]*[A-Za-z_][A-Za-z0-9_.-]*[ \t]*:') {
+            $entries.Insert(0, ($leading -join "`n"))
+        }
         return , $entries.ToArray()
     }
 
     # No sequence items: the region is a single mapping.
-    $single = ($Content -split '\r?\n' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join "`n"
+    $single = ($lines | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join "`n"
     if ([string]::IsNullOrWhiteSpace($single)) { return , @() }
     return , @($single)
 }
@@ -195,8 +261,29 @@ function Repair-Body {
         if ($afterHead -lt $Body.Length -and $Body[$afterHead] -match '[A-Za-z0-9_-]') { continue }
         if (Test-IndexInBlockScalarSpan -Index $idx -Spans $blockScalarSpans) { continue }
 
-        $terminator = $Body.IndexOf('-->', $afterHead, [System.StringComparison]::Ordinal)
-        if ($terminator -lt 0) { throw "Region at $idx in comment for id $Id has no terminator; refusing to guess its extent." }
+        # THE TERMINATOR SEARCH SKIPS BLOCK SCALARS (PR #1006 review, M9). An
+        # earlier revision took the first terminator after the head, and
+        # $blockScalarSpans was consulted only for the head-index test above.
+        # A region whose `disposition_rationale: |` scalar quoted a literal
+        # terminator was therefore truncated mid-scalar: the rationale spilled
+        # outside the block, a close tag was injected mid-sentence, an orphan
+        # terminator was left behind, and the field parsed as empty — with all
+        # four preflights and the post-write verify reporting success. Silent
+        # permanent corruption of a live comment under a green check is this
+        # work class's signature failure, so the region's extent is taken from
+        # the first terminator that is real structure.
+        $terminator = -1
+        $searchAt = $afterHead
+        while ($true) {
+            $candidate = $Body.IndexOf('-->', $searchAt, [System.StringComparison]::Ordinal)
+            if ($candidate -lt 0) { break }
+            if (-not (Test-IndexInBlockScalarSpan -Index $candidate -Spans $blockScalarSpans)) {
+                $terminator = $candidate
+                break
+            }
+            $searchAt = $candidate + 3
+        }
+        if ($terminator -lt 0) { throw "Region at $idx in comment for id $Id has no terminator outside a block scalar; refusing to guess its extent." }
         $regionEnd = $terminator + 3
 
         # An orphan close tag directly after the terminator (PR #937's shape)
@@ -253,7 +340,7 @@ else {
     throw "existing-keys.json not found beside the plan; the AC7 collision check cannot run against an unenumerated corpus."
 }
 
-$allNewKeys = [System.Collections.Generic.List[string]]::new()
+$allNewKeys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
 $report = [System.Collections.Generic.List[object]]::new()
 $anyFailure = $false
 
@@ -287,8 +374,15 @@ foreach ($target in $plan) {
 
     $expectedEntries = [int]$target.expected_entries
     $beforeWellFormed = 0
+    $beforeKeys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
     $bwf = Get-PhaseContainmentBlock -Text $before -Id $id -WarningAction SilentlyContinue
-    if ($null -ne $bwf) { $beforeWellFormed = $bwf.Count }
+    if ($null -ne $bwf) {
+        $beforeWellFormed = $bwf.Count
+        foreach ($b in $bwf) {
+            $bp = ConvertFrom-PhaseContainmentYaml -Yaml $b
+            if ($null -ne $bp['finding_key']) { [void]$beforeKeys.Add([string]$bp['finding_key']) }
+        }
+    }
     $expectedTotal = $beforeWellFormed + $expectedEntries
 
     $ok = $true
@@ -310,7 +404,14 @@ foreach ($target in $plan) {
     # goes to the invalid-entry counter, which is just as absent from the
     # rollup as an unread one -- with the advisory now looking satisfied.
     $newKeys = [System.Collections.Generic.List[string]]::new()
-    foreach ($blk in @($blocks)) {
+    # PR #1006 review, M22: `@($null)` is a ONE-element array containing $null,
+    # and the parser rejects it under the file's `$ErrorActionPreference =
+    # 'Stop'` — terminating the whole run, so no report was written and the
+    # RESULT line never printed, even though earlier targets may already have
+    # been PATCHed. Preflight 1 has already recorded the failure; this target
+    # should report and the run should continue.
+    $blockList = if ($null -eq $blocks) { @() } else { @($blocks) }
+    foreach ($blk in $blockList) {
         $parsed = ConvertFrom-PhaseContainmentYaml -Yaml $blk
         $validation = Test-PhaseContainmentEntry -Entry $parsed
         if (-not $validation.IsValid) {
@@ -324,34 +425,70 @@ foreach ($target in $plan) {
     # warning and no counter, so a collision preserves the corpus count while
     # destroying an entry. Counting after repair cannot see that.
     foreach ($k in $newKeys) {
-        if ($beforeWellFormed -gt 0 -and $existingKeys.Contains($k)) {
+        if ($beforeKeys.Contains($k)) {
             # A key already readable on THIS comment is the same entry, not a
             # collision -- it was in the enumerated corpus because it parsed.
+            #
+            # PR #1006 review, M4: this used to read `$beforeWellFormed -gt 0`,
+            # a COUNT of blocks readable on this comment, which waived EVERY
+            # collision against the whole corpus the moment the comment carried
+            # one readable block — including a collision with a completely
+            # different comment. The rationale sentence above said membership;
+            # the predicate said "at least one". It is membership now.
             continue
         }
         if ($existingKeys.Contains($k)) {
             Write-Host "  FAIL: key '$k' already exists in the readable corpus; writing it would silently overwrite that entry."; $ok = $false
         }
-        if ($allNewKeys -contains $k) {
+        # PR #1006 review, M13/M32: $allNewKeys was appended to only AFTER this
+        # loop, so two entries sharing a finding_id inside ONE comment both
+        # received the same authored key and neither check saw it — dedup then
+        # keeps one and drops the other silently. Comparison is ordinal on both
+        # halves; `-contains` is case-insensitive and disagreed with the
+        # ordinal corpus HashSet about what "the same key" means.
+        if ($allNewKeys.Contains($k)) {
             Write-Host "  FAIL: key '$k' is authored twice by this repair run."; $ok = $false
         }
+        [void]$allNewKeys.Add($k)
     }
-    foreach ($k in $newKeys) { $allNewKeys.Add($k) }
 
-    # ---- Preflight 4: nothing outside the regions was consumed ----
-    # Reassembles the ORIGINAL body from the segments the repair classified as
-    # untouched prose, interleaved with the spans it classified as regions. If
-    # that reconstruction is not byte-identical to what the server returned,
-    # the repair either swallowed prose or misjudged a region's extent, and it
-    # must not be written. Comparing the two OUTPUTS instead would be circular:
-    # any character the transform silently dropped would be absent from both.
+    # ---- Preflight 4: the prose survives INTO THE BODY THAT GETS WRITTEN ----
+    #
+    # THIS CHECK USED TO BE A TAUTOLOGY (PR #1006 review, M3). It reassembled
+    # the original from ProseSegments interleaved with ReplacedSpans — both
+    # slices of $before recorded under `cursor := regionEnd`, so their
+    # concatenation is $before BY CONSTRUCTION. It never inspected $after, the
+    # string actually PATCHed. Mutation-proved: with the transform altered to
+    # drop every prose segment from its output, the check still passed while
+    # the prose was gone from the written body. Its own comment argued it
+    # avoided circularity; it was circular the other way, comparing the input
+    # to a partition of the input.
+    #
+    # Both halves now run, and the second is the one with teeth:
+    #   (a) the partition still must reassemble into $before — that catches a
+    #       misjudged region EXTENT, which $after alone cannot show;
+    #   (b) every prose segment must appear in $after, in order, which is what
+    #       "nothing outside the regions was consumed" actually claims.
     $reconstruction = [System.Text.StringBuilder]::new()
     for ($s = 0; $s -lt $repair.ProseSegments.Count; $s++) {
         [void]$reconstruction.Append($repair.ProseSegments[$s])
         if ($s -lt $repair.ReplacedSpans.Count) { [void]$reconstruction.Append($repair.ReplacedSpans[$s]) }
     }
     if ($reconstruction.ToString() -cne $before) {
-        Write-Host '  FAIL: prose/region partition does not reassemble into the original body; the repair consumed text outside a region.'; $ok = $false
+        Write-Host '  FAIL: prose/region partition does not reassemble into the original body; the repair misjudged a region extent.'; $ok = $false
+    }
+
+    $cursorInAfter = 0
+    foreach ($segment in $repair.ProseSegments) {
+        if ($segment.Length -eq 0) { continue }
+        $found = $after.IndexOf($segment, $cursorInAfter, [System.StringComparison]::Ordinal)
+        if ($found -lt 0) {
+            $preview = $segment.Trim()
+            if ($preview.Length -gt 60) { $preview = $preview.Substring(0, 60) + '...' }
+            Write-Host "  FAIL: a prose segment is missing from the body that would be written: '$preview'"; $ok = $false
+            break
+        }
+        $cursorInAfter = $found + $segment.Length
     }
 
     if ($ok) {

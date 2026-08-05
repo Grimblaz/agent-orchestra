@@ -188,78 +188,6 @@ function script:Test-IndexInBlockScalarSpan {
 
 #endregion
 
-#region Get-CodeSpanSpans (private) — issue #944
-
-function script:Get-CodeSpanSpans {
-    <#
-    .SYNOPSIS
-        Finds every Markdown code span in a text: fenced blocks (``` / ~~~)
-        and inline spans (backtick runs), as character-offset spans.
-    .DESCRIPTION
-        Issue #944. The malformed-open detector below fires on marker-shaped
-        text that the pairing loop never matches. Prose ABOUT the malformed
-        shape — this repository's own filing, its brief, its skills' worked
-        examples, and the repair discussion — quotes that shape inside code
-        spans, and every one of those quotations is a false positive waiting
-        to happen. An unattended detector that cries wolf erodes the trust a
-        warn-only advisory depends on, so the false-positive direction is
-        bounded here rather than argued about later.
-
-        This is deliberately NOT applied to the well-formed pairing loop.
-        A well-formed block may legitimately carry fenced YAML *inside* it
-        (Get-PhaseContainmentBlock strips those fences), so gating the
-        pairing loop on fence membership would silently drop real blocks.
-        The new detector is warn-only, so a false negative there costs
-        nothing beyond the status quo while a false positive costs trust.
-
-        Hand-rolled scan only — no ConvertFrom-Yaml / powershell-yaml
-        (file-level SECURITY invariant at the top of this file).
-    .PARAMETER Text
-        The text to scan.
-    .OUTPUTS
-        Array of [PSCustomObject]@{ Start; End } spans (End exclusive).
-        Empty array when none found.
-    #>
-    param(
-        [Parameter(Mandatory)][AllowEmptyString()][string]$Text
-    )
-    $spans = [System.Collections.Generic.List[PSCustomObject]]::new()
-    if ([string]::IsNullOrEmpty($Text)) {
-        return , $spans.ToArray()
-    }
-
-    # Fenced blocks. Fences are paired in document order; an UNCLOSED final
-    # fence runs to end-of-text, matching how every Markdown renderer treats
-    # it. Treating an unclosed fence as "no span" would hand the detector a
-    # whole trailing document to fire in.
-    $fenceMatches = @([regex]::Matches($Text, '(?m)^[ \t]*(?:`{3,}|~{3,})[^\r\n]*$'))
-    for ($f = 0; $f -lt $fenceMatches.Count; $f += 2) {
-        $open = $fenceMatches[$f]
-        $start = $open.Index
-        if ($f + 1 -lt $fenceMatches.Count) {
-            $close = $fenceMatches[$f + 1]
-            $end = $close.Index + $close.Length
-        }
-        else {
-            $end = $Text.Length
-        }
-        if ($end -gt $start) {
-            $spans.Add([PSCustomObject]@{ Start = $start; End = $end })
-        }
-    }
-
-    # Inline spans. Matched per line so an unpaired backtick cannot swallow
-    # the rest of the document; the run length must match on both sides, per
-    # CommonMark.
-    foreach ($m in [regex]::Matches($Text, '(?<t>`+)(?:(?!\k<t>)[^\r\n])*\k<t>')) {
-        $spans.Add([PSCustomObject]@{ Start = $m.Index; End = $m.Index + $m.Length })
-    }
-
-    return , $spans.ToArray()
-}
-
-#endregion
-
 #region Get-PhaseContainmentRegionEntryCount (private) — issue #944
 
 function script:Get-PhaseContainmentRegionEntryCount {
@@ -283,25 +211,74 @@ function script:Get-PhaseContainmentRegionEntryCount {
         so a seven-item sequence given a close tag parses as a single
         last-wins entry with a null finding_key — trading a silent
         truncation for a silent invalid-entry drop.
+
+        WHY THE KEY SHAPE IS GENERIC RATHER THAN A NAMED FIELD LIST (PR #1006
+        review, M14/M33). An earlier revision matched a fixed twelve-name
+        alternation and required a SEQUENCE ITEM'S FIRST FIELD to be one of
+        them — a field-ordering assumption nothing enforces. Measured against
+        that revision: a sequence whose items lead with an unlisted field
+        counted 1 where the truth was 3. That is the undercount direction this
+        counter exists to eliminate, reproduced by the counter itself. And the
+        population is hand-authored regions written by people who did not
+        follow the schema — PR #937's authors invented `finding_id` — so a
+        closed name list is exactly the wrong instrument. A generic
+        `key: value` line shape cannot miss a novel field name. Prose does not
+        match it: a YAML key admits no interior spaces, so "Note for the
+        reader:" is not a key.
+
+        BLOCK SCALARS ARE EXCLUDED, for the overcount direction. A
+        `rationale: |` scalar quoting two bulleted fields counted 2 where the
+        truth was 1. Get-BlockScalarSpans lives in this file and was already
+        applied one level up; it is applied here too.
+
+        NESTED LISTS ARE EXCLUDED by indentation: a sequence item counts only
+        at the region's OUTERMOST bullet indentation, so a `related:` sub-list
+        indented beneath a mapping no longer inflates the count.
     .PARAMETER RegionText
         The raw text between a region's open tag and its terminator.
     .OUTPUTS
-        [int] entry count; 0 when the region carries no recognizable field.
+        [int] entry count; 0 when the region carries no key-shaped line.
     #>
     param(
         [Parameter(Mandatory)][AllowEmptyString()][string]$RegionText
     )
     if ([string]::IsNullOrWhiteSpace($RegionText)) { return 0 }
 
-    # Deliberately includes `finding_id`, which is NOT a schema field: PR
-    # #937's seven carry it instead of finding_key, and an entry the schema
-    # would reject is still an entry that was lost.
-    $fieldAlternation = 'finding_key|finding_id|introduced_phase|catchable_phase|caught_stage|escape_distance|severity|systemic_fix_type|category|apparatus_meta|seed|appended_at'
+    # A YAML key: a bare scalar with no interior whitespace, followed by ':'.
+    # Deliberately not a closed name list — see .DESCRIPTION.
+    $keyShape = '[A-Za-z_][A-Za-z0-9_.-]*'
 
-    $sequenceStarts = @([regex]::Matches($RegionText, "(?m)^[ \t]*-[ \t]+(?:$fieldAlternation)[ \t]*:"))
-    if ($sequenceStarts.Count -gt 0) { return $sequenceStarts.Count }
+    # Mask block-scalar content so a quoted bullet or key inside a `|`/`>`
+    # scalar is string data, exactly as it is one level up.
+    $spans = Get-BlockScalarSpans -Text $RegionText
+    $masked = $RegionText
+    if ($spans.Count -gt 0) {
+        $sb = [System.Text.StringBuilder]::new($RegionText)
+        foreach ($span in $spans) {
+            for ($i = $span.Start; $i -lt $span.End -and $i -lt $sb.Length; $i++) {
+                if ($sb[$i] -ne "`n" -and $sb[$i] -ne "`r") { $sb[$i] = ' ' }
+            }
+        }
+        $masked = $sb.ToString()
+    }
 
-    if ([regex]::IsMatch($RegionText, "(?m)^[ \t]*(?:$fieldAlternation)[ \t]*:")) { return 1 }
+    # A SEQUENCE IS DECIDED BY THE FIRST CONTENT LINE, NOT BY THE PRESENCE OF A
+    # BULLET ANYWHERE. A mapping carrying a nested `related:` sub-list has
+    # bullets in it and is still ONE entry; only a region that OPENS with a
+    # bullet is a sequence of entries. Deciding on presence counted such a
+    # mapping as two (PR #1006 review, M14).
+    $firstContent = [regex]::Match($masked, '(?m)^[ \t]*\S.*$')
+    $opensWithBullet = $firstContent.Success -and ($firstContent.Value -match "^[ \t]*-[ \t]+$keyShape[ \t]*:")
+
+    if ($opensWithBullet) {
+        $sequenceStarts = @([regex]::Matches($masked, "(?m)^(?<lead>[ \t]*)-[ \t]+$keyShape[ \t]*:"))
+        # Outermost bullet indentation only, so a sub-list nested beneath one
+        # of the items does not add entries of its own.
+        $minLead = ($sequenceStarts | ForEach-Object { $_.Groups['lead'].Value.Length } | Measure-Object -Minimum).Minimum
+        return @($sequenceStarts | Where-Object { $_.Groups['lead'].Value.Length -eq $minLead }).Count
+    }
+
+    if ([regex]::IsMatch($masked, "(?m)^[ \t]*$keyShape[ \t]*:")) { return 1 }
 
     return 0
 }
@@ -341,8 +318,9 @@ function script:Get-PhaseContainmentMalformedOpenRegion {
         The marker ID suffix, as in Get-PhaseContainmentBlock.
     .PARAMETER ExcludedSpans
         Spans in which a marker-shaped substring is string data rather than
-        structure: YAML block-scalar content, Markdown code spans, and the
-        content of blocks the pairing loop already extracted.
+        structure: YAML block-scalar content, and the content of blocks the
+        pairing loop already extracted. Markdown code spans are deliberately
+        NOT among them — see the caller's rationale, and PR #810.
     .OUTPUTS
         Array of [PSCustomObject]@{ Position; EntryCount; Terminator }.
         Empty array when none found.
@@ -377,8 +355,24 @@ function script:Get-PhaseContainmentMalformedOpenRegion {
         # every `phase-containment-944` marker in the text and reports a
         # neighbouring family's well-formed region as malformed. The close
         # tag needs no separate exclusion — it carries a '/' the head lacks.
-        if ($afterHead -lt $Text.Length -and $Text[$afterHead] -match '[A-Za-z0-9_-]') {
-            continue
+        #
+        # THE HYPHEN IS NOT AN ID-CONTINUATION CHARACTER HERE (PR #1006 review,
+        # M10). An earlier revision excluded `[A-Za-z0-9_-]`, and the hyphen is
+        # the first character of the terminator — so a head written with no
+        # space before it was read as an id-boundary violation and skipped
+        # silently, while the pairing loop could not match it either. Total
+        # silence, which is this issue's own defect class. A hyphen only
+        # continues the id when it is NOT opening the terminator.
+        if ($afterHead -lt $Text.Length) {
+            $nextChar = $Text[$afterHead]
+            $isIdChar = $nextChar -match '[A-Za-z0-9_]'
+            if (-not $isIdChar -and $nextChar -eq '-') {
+                # A hyphen that opens the terminator ends the id; any other
+                # hyphen continues it (e.g. a `-ledger-` sibling family).
+                $isIdChar = -not (($Text.Length - $afterHead) -ge 3 -and
+                    [string]::CompareOrdinal($Text, $afterHead, '-->', 0, 3) -eq 0)
+            }
+            if ($isIdChar) { continue }
         }
 
         if (Test-IndexInBlockScalarSpan -Index $idx -Spans $ExcludedSpans) {
@@ -392,9 +386,40 @@ function script:Get-PhaseContainmentMalformedOpenRegion {
         $regionEnd = if ($terminatorIdx -ge 0) { $terminatorIdx } else { $Text.Length }
         $regionText = $Text.Substring($afterHead, $regionEnd - $afterHead)
 
+        # THE HEAD THAT CLOSES IMMEDIATELY (PR #1006 review, M10). In the
+        # no-space shape the comment ends AT the head, so the region itself is
+        # empty and the entries meant to be inside it are orphaned in the body
+        # below — rendered as visible plain text, which is why this variant
+        # looks broken to its author even though every scanner was silent about
+        # it. The entries are still lost to every reader, so the extent is
+        # taken past that empty close to whatever follows.
+        if ([string]::IsNullOrWhiteSpace($regionText) -and $terminatorIdx -ge 0) {
+            $afterEmptyClose = $terminatorIdx + 3
+            $nextTerminator = $Text.IndexOf('-->', $afterEmptyClose, [System.StringComparison]::Ordinal)
+            $orphanEnd = if ($nextTerminator -ge 0) { $nextTerminator } else { $Text.Length }
+            $regionText = $Text.Substring($afterEmptyClose, $orphanEnd - $afterEmptyClose)
+        }
+
+        # THE ENTRY FLOOR (PR #1006 review, M1). A marker head followed by
+        # prose is DISCUSSION; a marker head followed by key-shaped lines is
+        # an emission somebody meant to make. Without this, any sentence
+        # mentioning a matching head — including this repository's own writing
+        # about the defect — was reported as a lost region, rendering the
+        # self-contradicting "1 region present and unreadable, carrying 0
+        # entries" and flipping a clean surface to could-not-verify. The
+        # unattended guard already had this rule; the reader, which drives the
+        # emission-gap check and the escape-rate report, did not. The
+        # asymmetry ran the wrong way — the bound sat on the advisory-only
+        # half and was absent from the consequential one.
+        $regionEntryCount = script:Get-PhaseContainmentRegionEntryCount -RegionText $regionText
+        if ($regionEntryCount -lt 1) {
+            $pos = if ($terminatorIdx -ge 0) { $terminatorIdx + 3 } else { $Text.Length }
+            continue
+        }
+
         $regions.Add([PSCustomObject]@{
             Position   = $idx
-            EntryCount = (script:Get-PhaseContainmentRegionEntryCount -RegionText $regionText)
+            EntryCount = $regionEntryCount
             Terminator = if ($terminatorIdx -ge 0) { 'html-comment-close' } else { 'end-of-text' }
         })
 
@@ -445,8 +470,25 @@ function Get-PhaseContainmentBlock {
         did fire reported three.
     .PARAMETER MalformedRegionCount
         Optional [ref] counter, issue #944: incremented once per skipped
-        region. Reported alongside UnreadableEntryCount so a reader can tell
-        one region holding seven entries from seven regions holding one.
+        region, of EITHER kind. Reported alongside UnreadableEntryCount so a
+        reader can tell one region holding seven entries from seven regions
+        holding one.
+    .PARAMETER UnmatchedOpenTagCount
+        Optional [ref] counter (PR #1006 review, M5): incremented ONLY for the
+        #944 class — a region whose open tag never matched the self-closed
+        form at all. The #772/#833 cases (an open tag that DID match and then
+        found no close tag) increment SkippedCount and MalformedRegionCount but
+        NOT this one.
+
+        WHY THE SPLIT EXISTS. Folding both kinds into one signal made the
+        emission check render "the open tag is not the self-closed form, so
+        nothing was ever matched there" over an input whose open tag was the
+        self-closed form and did match — sending a maintainer to inspect a head
+        that is correct while the missing close tag stays unfixed. That is this
+        issue's own defect class (an advisory sentence false about what
+        happened) reproduced one branch over. A caller that needs to NAME the
+        cause reads this counter; a caller that only needs "something was
+        dropped" keeps reading SkippedCount.
     .OUTPUTS
         [string[]] Array of raw YAML content strings, or $null if no blocks found.
     .NOTES
@@ -480,7 +522,8 @@ function Get-PhaseContainmentBlock {
         [Parameter(Mandatory)][string]$Id,
         [ref]$SkippedCount,
         [ref]$UnreadableEntryCount,
-        [ref]$MalformedRegionCount
+        [ref]$MalformedRegionCount,
+        [ref]$UnmatchedOpenTagCount
     )
 
     $openTag  = "<!-- phase-containment-$Id -->"
@@ -498,13 +541,26 @@ function Get-PhaseContainmentBlock {
     # Issue #944: report a skipped region once, in both currencies — regions
     # and the entries they carry. Called from every skip path so no path can
     # increment one counter and forget the other.
+    # THE SPAN IS AN ARGUMENT, NOT A TAIL (PR #1006 review, M8). The
+    # unclosed-final path used to hand this closure `$Text.Substring($contentStart)`
+    # — the whole remaining document — where the pair-match path beside it was
+    # correctly bounded. Every sequence item below the skipped block, including
+    # items belonging to a malformed-open region the post-loop scan counts
+    # again, landed in this count. Measured on a body genuinely losing 8
+    # entries: `skipped=2 regions=2 unreadable=14`. Wrong in both directions at
+    # once — the skipped block's own entry was shadowed by the tail's sequence
+    # match, and the region's entries were counted twice. UnreadableEntryCount
+    # is the number AC3 pins, so both callers take the span explicitly and the
+    # consumed range is recorded for exclusion.
     $reportSkip = {
-        param([string]$SkippedText)
+        param([int]$SpanStart, [int]$SpanEnd)
+        $skippedText = $Text.Substring($SpanStart, $SpanEnd - $SpanStart)
         if ($null -ne $SkippedCount) { $SkippedCount.Value++ }
         if ($null -ne $MalformedRegionCount) { $MalformedRegionCount.Value++ }
         if ($null -ne $UnreadableEntryCount) {
-            $UnreadableEntryCount.Value += (script:Get-PhaseContainmentRegionEntryCount -RegionText $SkippedText)
+            $UnreadableEntryCount.Value += (script:Get-PhaseContainmentRegionEntryCount -RegionText $skippedText)
         }
+        $extractedSpans.Add([PSCustomObject]@{ Start = $SpanStart; End = $SpanEnd })
     }
 
     while ($true) {
@@ -524,7 +580,13 @@ function Get-PhaseContainmentBlock {
             # pair-match case does (issue #772/#833 GH-2), then stop
             # scanning; there is nothing left to resume from.
             Write-Warning "Skipping malformed phase-containment-$Id block at position ${startIdx}: no close tag found (unclosed final block)."
-            & $reportSkip $Text.Substring($contentStart)
+            # Bounded at this block's own HTML-comment terminator when it has
+            # one — that is where a renderer ends it, and therefore where its
+            # entries end. Only a block with no terminator at all runs to
+            # end-of-text.
+            $unclosedEnd = $Text.IndexOf('-->', $contentStart, [System.StringComparison]::Ordinal)
+            if ($unclosedEnd -lt 0) { $unclosedEnd = $Text.Length }
+            & $reportSkip $contentStart $unclosedEnd
             break
         }
 
@@ -535,7 +597,7 @@ function Get-PhaseContainmentBlock {
         $nextOpenIdx = $Text.IndexOf($openTag, $contentStart, [System.StringComparison]::Ordinal)
         if ($nextOpenIdx -ge 0 -and $nextOpenIdx -lt $endIdx) {
             Write-Warning "Skipping malformed phase-containment-$Id block at position ${startIdx}: a later open tag was found before its close tag (unclosed block)."
-            & $reportSkip $Text.Substring($contentStart, $nextOpenIdx - $contentStart)
+            & $reportSkip $contentStart $nextOpenIdx
             $searchFrom = $nextOpenIdx
             continue
         }
@@ -573,12 +635,16 @@ function Get-PhaseContainmentBlock {
     # stay silent about a fenced region it lost, which is this issue's defect
     # wearing a different hat.
     #
-    # The false-positive direction is bounded where the risk actually lives:
-    # the unattended detector scans REPOSITORY FILES, where documenting this
-    # shape in a fence is routine, and it applies Get-CodeSpanSpans there.
-    # This reader scans GitHub comment bodies, where the same excuse does not
-    # hold. The block-scalar gate below stays — that is the #863 M6 forgery
-    # class, a different question from fenced documentation.
+    # THE FALSE-POSITIVE DIRECTION IS BOUNDED BY THE ENTRY FLOOR, NOT BY A
+    # FENCE GATE (corrected per PR #1006 review, M11). An earlier version of
+    # this comment claimed the bound lived in the unattended detector, which
+    # "applies Get-CodeSpanSpans there" — false twice over: that function had
+    # no caller anywhere and has since been deleted, and the detector's
+    # production trigger is the comment event, not repository files. The real
+    # bound is the entry floor both scanners now share — a head followed by
+    # prose carries no key-shaped line and is not reported, fenced or not.
+    # The block-scalar gate below stays — that is the #863 M6 forgery class,
+    # a different question from fenced documentation.
     $excludedSpans = @($blockScalarSpans) + @($extractedSpans)
     $malformedRegions = script:Get-PhaseContainmentMalformedOpenRegion `
         -Text $Text -Id $Id -ExcludedSpans $excludedSpans
@@ -589,6 +655,8 @@ function Get-PhaseContainmentBlock {
         if ($null -ne $SkippedCount) { $SkippedCount.Value++ }
         if ($null -ne $MalformedRegionCount) { $MalformedRegionCount.Value++ }
         if ($null -ne $UnreadableEntryCount) { $UnreadableEntryCount.Value += $region.EntryCount }
+        # The ONLY site that increments this — see the parameter's own note.
+        if ($null -ne $UnmatchedOpenTagCount) { $UnmatchedOpenTagCount.Value++ }
     }
 
     if ($allBlocks.Count -eq 0) { return $null }
