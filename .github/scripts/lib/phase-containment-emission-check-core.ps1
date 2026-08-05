@@ -3082,9 +3082,12 @@ function Get-EmissionGap {
                           'head-corrupt', 'decoy-ambiguous',
                           'judge-head-contradiction', 'duplicate-head',
                           'unknown-disposition-value', 'filter-not-run',
-                          'filter-unasserted', 'filter-value-unrecognized'.
-                          The last six are reachable on the brief-review
-                          surface only (issue #951). (811-D1 + issue #817,
+                          'filter-unasserted', 'filter-value-unrecognized',
+                          'review-not-run'.
+                          Six of these are reachable on the brief-review
+                          surface only (issue #951), and 'review-not-run' is
+                          reachable on the code-review surface only, and only
+                          when -TargetKind is 'pr' (issue #998). (811-D1 + issue #817,
                           plan-stress-test-relevant detail consumed by the s2
                           wrapper render; see below). Per-body derivation:
                           a could-not-verify body with no real marker head at
@@ -3100,7 +3103,8 @@ function Get-EmissionGap {
                           judge-head-contradiction > duplicate-head >
                           unknown-disposition-value > filter-not-run >
                           filter-value-unrecognized > filter-unasserted >
-                          head-corrupt > decoy-ambiguous > head-missing > ok.
+                          head-corrupt > decoy-ambiguous > head-missing >
+                          review-not-run > ok.
 
                           BOTH THE ENUM AND THIS ORDER ARE PINNED against the
                           reason ladder below, by leg 4 of
@@ -3123,7 +3127,24 @@ function Get-EmissionGap {
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Bodies,
         [Parameter(Mandatory)][int]$Id,
-        [Parameter(Mandatory)][ValidateSet('code-review', 'design-challenge', 'plan-stress-test', 'brief-review', 'post-review-observer')][string]$Surface
+        [Parameter(Mandatory)][ValidateSet('code-review', 'design-challenge', 'plan-stress-test', 'brief-review', 'post-review-observer')][string]$Surface,
+        # Issue #998: what KIND of unit these bodies belong to. Needed only by
+        # the code-review absence backstop below, and defaulted to
+        # 'unspecified' so no existing caller changes behaviour by omission.
+        #
+        # Why a parameter rather than a body-read predicate. The brief-surface
+        # backstop gates on brief-ROUTEDNESS, which it can read from the plan
+        # comment's own `plan-variant: brief` declaration -- a declaration
+        # independent of the review artifact. The code-review surface has no
+        # such independent declaration available from the bodies: the only
+        # in-body evidence that a review was owed is the review's own
+        # footprint, which is exactly what is absent in the population this
+        # backstop exists to surface. Deriving review-owedness from the
+        # bodies would therefore be circular. The entry point already KNOWS
+        # the unit is a pull request -- both of its surface lists hard-code
+        # 'code-review' for the pr branch -- so it states that here instead
+        # of the library guessing it back out.
+        [Parameter()][ValidateSet('pr', 'issue', 'unspecified')][string]$TargetKind = 'unspecified'
     )
 
     $totalSustained = 0
@@ -3159,6 +3180,22 @@ function Get-EmissionGap {
     $sawAnyBriefHead = $false
     $sawBriefDuplicateHead = $false
     $sawBriefUnknownValue = $false
+    # Issue #998: the code-review absence backstop's own flag.
+    #
+    # ITS NAME MUST NOT CONTAIN "brief", and that is a hard constraint rather
+    # than a style preference. Leg 2 of
+    # Get-PhaseContainmentReasonContractDriftStatus classifies a ladder branch
+    # as brief-only by looking for a variable named for the brief surface in
+    # its guard condition; a branch flagged with a brief-named variable is
+    # counted toward the ladder's pinned brief-surface reason tally, which
+    # would make that number wrong at the one moment a future author reads it.
+    # (Phrased without restating the tally itself: leg 2 requires exactly ONE
+    # such claim in the file, and a second one here would fail the check by
+    # being the very drift it guards against.)
+    # This is a code-review-only branch, so it must read as SHARED to leg 2 --
+    # which it does precisely because this identifier says nothing about
+    # briefs.
+    $sawNoCodeReviewHead = $false
 
     # Issue #951 D6, evaluated once at the AGGREGATION SEAM for the same
     # reason 863-s3 lives here: the predicate is a question about the
@@ -3524,6 +3561,66 @@ function Get-EmissionGap {
         }
     }
 
+    # Issue #998 (chunk 2 of #949) — the SAME absence-backstop shape as the
+    # #951 block above, pointed at the surface a code review is actually
+    # checked against.
+    #
+    # THE DEFECT IT CLOSES. code-review's arm of this function only ever
+    # SUBTRACTS from a count it already made (the CR-8 seam above); nothing in
+    # it asserts that a review head must be PRESENT. So a shipped unit whose
+    # adversarial review never ran touches nothing in the per-body loop --
+    # Test-EmissionMarkerPresent is false for every body, so the loop is never
+    # entered -- and the surface exits with ParseStatus 'ok', Gap 0, rendering
+    # the reassuring `clean -- sustained=0 blocks=0` that is indistinguishable
+    # from a genuinely reviewed-and-empty result. Measured before this change:
+    # a three-comment review-less body set returned SustainedCount=0
+    # BlockCount=0 Gap=0 ParseStatus=ok Reason=ok. That silent zero is the
+    # same shape 811-D1 closed on the plan surface and #951 closed on the
+    # brief surface; leaving it open here is the defect one surface over.
+    #
+    # WHY IT LIVES AT THE AGGREGATION SEAM. Same reason the brief block above
+    # does: the per-body loop inspects only bodies where
+    # Test-EmissionMarkerPresent returned true, and the whole population this
+    # exists to surface has no such body. A per-body check cannot ask a
+    # question about the absence of every body.
+    #
+    # WHY IT USES A DISTINCT REASON RATHER THAN REUSING $sawFallbackFired.
+    # That flag renders 'head-missing', which tells a maintainer a machine
+    # head is missing or corrupt. For this population the head is not missing
+    # -- the REVIEW is. Reusing it would ship a wrong diagnosis to the
+    # maintainer and, because the rendered line would be identical to a real
+    # head-missing case, no reader could tell the two populations apart.
+    #
+    # WHY IT IS GATED ON -TargetKind 'pr'. A direct -Surface 'code-review'
+    # call against an issue's bodies has no code-review artifacts to report on,
+    # and manufacturing a gap for it would be the same false-gap failure mode
+    # the brief block's brief-routedness gate exists to avoid. Both of the
+    # entry point's hard-coded pr surface lists pass 'pr'; nothing else does.
+    #
+    # WARN-ONLY. This sets ParseStatus, which every caller already treats as
+    # "treat as gap" in a maintainer advisory. It fails no run and returns no
+    # exit code. Do not wire it to the entry point's reserved -Mode enforce
+    # switch: that switch is documented as unimplemented pending a separate
+    # decision, and flipping it would convert this from a warning into the
+    # graded check #949's rejected-alternatives list rules out.
+    if ($Surface -eq 'code-review' -and $TargetKind -eq 'pr') {
+        $sawAnyCodeReviewHead = $false
+        foreach ($crBody in $Bodies) {
+            if ([string]::IsNullOrWhiteSpace($crBody)) { continue }
+            # The SAME vocab-gated scan Test-EmissionMarkerPresent and
+            # Get-JudgeRulingsSustainedCountInternal use, so "a real head" here
+            # cannot drift from what it means everywhere else in this file.
+            if ((Get-RealJudgeRulingsHeadMatches -Body $crBody).Count -gt 0) {
+                $sawAnyCodeReviewHead = $true
+                break
+            }
+        }
+        if (-not $sawAnyCodeReviewHead) {
+            $anyCouldNotVerify = $true
+            $sawNoCodeReviewHead = $true
+        }
+    }
+
     $parseStatus = if ($anyCouldNotVerify) { 'could-not-verify' } else { 'ok' }
     $gap = $totalSustained - $totalBlocks
 
@@ -3566,6 +3663,15 @@ function Get-EmissionGap {
     # lawful brief-only branch flagged some other way is counted as SHARED and
     # this count stays right while being wrong — the residual recorded as
     # finding M1 on PR #988. Follow the convention, or extend the check.
+    #
+    # A branch that is NOT brief-scoped leaves the count above alone. Issue
+    # #998 added exactly one such branch — 'review-not-run', reachable on the
+    # code-review surface only, guarded by $sawNoCodeReviewHead — placed BELOW
+    # every branch named above. Its flag is deliberately not named for the
+    # brief surface, so leg 2 reads it as shared and the tally here is
+    # unaffected. Leg 4 does see it: the aggregator's .OUTPUTS enum and its
+    # cross-body priority sentence both had to gain it in the same change,
+    # and both did.
     #
     # 'judge-head-contradiction' first because D6 is an unconditional refusal
     # rather than a parse diagnosis: whatever else is wrong with the comment, a
@@ -3617,6 +3723,17 @@ function Get-EmissionGap {
     }
     elseif ($sawFallbackFired) {
         'head-missing'
+    }
+    elseif ($sawNoCodeReviewHead) {
+        # Issue #998, and LAST among the could-not-verify reasons for a
+        # reason. The three head-shape reasons above all describe a head that
+        # exists and is broken, ambiguous, or decoyed; this one describes a
+        # population with no head-shaped thing anywhere. Whenever any body
+        # carried something head-shaped, that is the more specific and more
+        # actionable diagnosis, so it wins. This is the diagnosis of last
+        # resort before 'ok', which mirrors 'head-missing' sitting last among
+        # the head-shape trio for the same reason.
+        'review-not-run'
     }
     else {
         # M8 fix (issue #811 post-fix adversarial pass): this branch is

@@ -223,6 +223,20 @@ function script:Format-EmissionGapLine {
                 return "  ${Surface} #${Id}: COULD NOT VERIFY -- treat as gap (this issue declares or routes to the brief review shape but no ``brief_dispositions`` head authorizes a count: recorded-nothing, NOT verified-and-empty)"
             }
         }
+        # Issue #998: the code-review surface's absence backstop. Named
+        # separately from the generic wording below because the maintainer
+        # action is entirely different — nothing here is unparseable or
+        # missing a block; no adversarial review is recorded as having run at
+        # all, which is a shipped unit whose review never happened rather
+        # than a bookkeeping gap. Leg 5 of the reason-contract drift check
+        # covers brief-only reasons, so this block is not pinned by it; it is
+        # here because the generic "partial, do not trust" line would send a
+        # maintainer looking for a corrupt comment that does not exist.
+        if ($Surface -eq 'code-review') {
+            if ($reason -eq 'review-not-run') {
+                return "  ${Surface} #${Id}: COULD NOT VERIFY -- treat as gap (no adversarial review is recorded on this pull request: no judge-rulings head is present on any comment, so nothing here was examined. This is recorded-nothing, NOT reviewed-and-clean)"
+            }
+        }
         # M13 fix (issue #782 post-review): could-not-verify means the
         # sustained/blocks numbers reflect only the bodies that DID parse —
         # a skimming maintainer could otherwise mistake a small-looking
@@ -368,7 +382,12 @@ function Invoke-PhaseContainmentEmissionCheckSingleTarget {
     $anyGapRendered = $false
 
     foreach ($surface in $surfacesToCheck) {
-        $gap = Get-EmissionGap -Bodies $bodies -Id $targetId -Surface $surface
+        # Issue #998: -TargetKind is what lets the code-review absence backstop
+        # fire. This site already knows the answer ($isPr governs the surface
+        # list two lines up), so it states it rather than making the library
+        # re-derive review-owedness from bodies that, in the population the
+        # backstop exists for, contain no evidence either way.
+        $gap = Get-EmissionGap -Bodies $bodies -Id $targetId -Surface $surface -TargetKind ($isPr ? 'pr' : 'issue')
         $scannedCount++
         $sustainedTotal += $gap.SustainedCount
         $blocksTotal += $gap.BlockCount
@@ -472,7 +491,12 @@ function Invoke-PhaseContainmentEmissionCheckCorpus {
         $surfacesToCheck = if ($surfaceKind -eq 'pr') { @('code-review', 'post-review-observer') } else { @(Get-IssueEmissionSurfaces -Bodies $bodies -Id $number) }
 
         foreach ($surface in $surfacesToCheck) {
-            $gap = Get-EmissionGap -Bodies $bodies -Id $number -Surface $surface
+            # Issue #998: the corpus-mode twin of the single-target site above.
+            # This is the second of the two hard-coded surface lists, and the
+            # backstop is dead on a corpus sweep without it — which is exactly
+            # the "enumerable somewhere other than the surface a code review is
+            # checked against" shape the brief's ninth falsifier names.
+            $gap = Get-EmissionGap -Bodies $bodies -Id $number -Surface $surface -TargetKind ($surfaceKind -eq 'pr' ? 'pr' : 'issue')
             $scannedCount++
             $sustainedGrandTotal += $gap.SustainedCount
             $blocksGrandTotal += $gap.BlockCount

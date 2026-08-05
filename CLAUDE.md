@@ -67,15 +67,7 @@ The `orchestra-review-*` command namespace provides Claude-native adversarial re
 - `/orchestra:review-lite` runs the small-change variant with one compact prosecution pass before defense and judge.
 - `/orchestra:review-prosecute`, `/orchestra:review-defend`, and `/orchestra:review-judge` let power users rerun individual stages.
 
-Handshake disposition by command:
-
-| Command | Handshake |
-| --- | --- |
-| `/orchestra:review` | Required |
-| `/orchestra:review-lite` | Required |
-| `/orchestra:review-prosecute` | Required |
-| `/orchestra:review-defend` | Required |
-| `/orchestra:review-judge` | Optional |
+The environment handshake is required for every `orchestra-review-*` command except `/orchestra:review-judge`, where it is optional; the per-command table is in [skills/routing-tables/SKILL.md](skills/routing-tables/SKILL.md) § Handshake disposition by command.
 
 The judge result is designed for same-comment persistence: the Markdown score summary and the `<!-- judge-rulings ... -->` YAML block travel together in one PR comment so Copilot and Claude Code can consume the same durable artifact. The `<!-- review-judge-produced-{PR} -->` sentinel is written as a separate PR comment before the judge-rulings comment. The legacy `<!-- code-review-complete-{PR} -->` marker was retired in issue #441 Step 11; Code-Conductor reads `credits[]` from the PR-body pipeline-metrics block instead.
 
@@ -110,6 +102,18 @@ The supported Claude plugin CLI surface is `claude plugin list`, `claude plugin 
 Quality is the first constraint — ahead of speed and token cost; when they conflict, the methodology checkpoint wins (hence engagement gates and adversarial review are non-overridable by pacing directives). We shift defects **left**: the earlier in the pipeline (experience → design → plan → implementation) a defect is caught, the cheaper it is to fix, so every phase and review stage exists to catch a class before it reaches the next. Run the full methodology now — do not pre-emptively skip a stage because it "probably won't find anything."
 
 We remove later checks **only with evidence, never on a cost argument**: a stage earns relaxation only when its *irreducible-catch rate* (defects catchable **only** at that stage) trends to ~0 over a large-enough sample. The instrument is the **phase-containment ledger** — the per-finding record of where a defect was introduced, the earliest phase it was catchable, and where it was caught ([Documents/Design/phase-containment-ledger.md](Documents/Design/phase-containment-ledger.md)); governance lives in umbrella #761. So annotate every sustained finding, and retire later steps once they demonstrably catch nothing new.
+
+## What a finished run is true of
+
+Five properties, scoped to the **act** of a run declaring itself done — not to a lane, and not to every run. How a run makes each one true stays its own choice; that its completion account exists, outlives the session, and carries a review assertion that would read false had no review run, does not. Depth, the account's own shape, and the evidence obligations: [skills/verification-before-completion/SKILL.md](skills/verification-before-completion/SKILL.md).
+
+1. **The review is accounted for.** Every finding the adversarial review produced traces to an outcome that survived the judge — a fix commit, or a dismissal with its reason.
+2. **A review that ran and found nothing says so, in words that would be false if it had not run.** Silence is never readable as examined-and-clean. This is what stops property 1 being vacuously true over an empty finding set: a run that dispatched no review produces no findings, so it satisfies property 1 by doing nothing.
+3. **The suite's state is stated differentially** — what this change added, measured against a named baseline commit — **and, separately, pre-existing failures are named and routed** rather than blocking the work or vanishing from the account. Two obligations, not one, so a run that added a failure cannot read a single clause as broadly satisfied.
+4. **A fix that closes a finding is itself re-validated before the account closes.** A fix cycle is never itself the completion signal.
+5. **A stopped run reads as stopped** — in the lane's typed halt-report shape, never free prose that a reader could mistake for completion.
+
+Boundary: this file is repository-local, so in a consumer repository these properties reach a run only through the skill.
 
 ## Chunked delivery: design to the seams, plan to the contract
 
@@ -174,21 +178,7 @@ The canonical routing table, inheritance order, override-discipline rule, and pe
 
 ## Senior Engineer + skill-as-adapter pattern
 
-Senior Engineer is a single executor agent for routine implementation slices. The methodology lives in the frame slice's `adapter:` path, not in separate persona shells or runtime persona parameters. Spine-Runner resolves the adapter file, derives the executor, and dispatches the paired `agents/senior-engineer.md` shell when the slice uses the default skill-as-adapter path.
-
-Single-variant work adapters use `skills/{skill}/adapters/{port}-adapter.md`, for example `skills/implementation-discipline/adapters/implement-code-adapter.md`. Multi-variant ports keep selector-named adapter files such as `standard.md`, `lite.md`, or `proxy-github.md`, and choose among them with `applies-when:` predicates. Adapter frontmatter uses the enum literal `adapter-type: work | predicate`; work adapters execute a task, while predicate adapters decide not-applicable, skip, or variant-selection outcomes. Predicate adapters follow the unified suffix convention: `{port}-auto-na-adapter.md` for not-applicable and `{port}-explicit-skip-adapter.md` for manual skip, discovered by `Glob skills/*/adapters/*-adapter.md` and filtered by `adapter-type: predicate`.
-
-Frame slices may include optional `executor:`. The legal executor enum literal is `agents/*.agent.md path | inline`: agent paths dispatch the paired shell, while `inline` runs the resolved adapter in the active conductor context. When `executor:` is absent, derive it from `adapter-type`: `work` defaults to `agents/Senior-Engineer.agent.md`; `predicate` defaults to `inline`. `executor: none` is intentionally deferred and rejected by current validation.
-
-The three skill-loading types are: the planner-designated adapter path, auxiliary skills that adapter explicitly directs, and normal platform/bootstrap skills already required by the active shell. Senior Engineer does not scan the skill tree or infer methodology from nearby files.
-
-The halt-return contract is the structured `halt_return` YAML described in `agents/Senior-Engineer.agent.md`; Senior Engineer uses it instead of claiming partial completion when work cannot proceed safely. The adversarial-independence guard is exact: "Halt when the slice's adapter path matches the adversarial-pattern regex and the executor is the default Senior Engineer; emit halt-return with reason: adversarial-independence-required". This prevents the default editor-capable executor from serving as the reviewer half of adversarial workflows.
-
-Known follow-ups: #559 owns the rename sweep from older specialist language to the stable Senior Engineer + skill-as-adapter terminology where that sweep is outside #552's documentation slice. The current adversarial-pattern regex is intentionally brittle scaffolding; future work should replace it with a declarative adapter capability or independence flag when the adapter registry matures.
-
-## Frame Port Declarations
-
-Before adding or changing any adapter that fills a frame port, read the Adapter Model in [Documents/Design/frame-architecture.md](Documents/Design/frame-architecture.md). That design doc owns the declaration locations, provisional predicate DSL, and the distinction between port-filling adapters that declare `provides:` and supporting methodology skills that do not.
+Senior Engineer is the single executor agent for routine implementation slices; the methodology lives in the frame slice's `adapter:` path, not in separate persona shells. Adapter frontmatter uses the enum literal `adapter-type: work | predicate`, and a slice's optional `executor:` takes the enum literal `agents/*.agent.md path | inline` — when absent it derives from `adapter-type` (`work` → `agents/Senior-Engineer.agent.md`, `predicate` → `inline`). Adapter file conventions, the three skill-loading types, the `halt_return` contract, the adversarial-independence guard, and the frame-port declaration rule live in [Documents/Design/agent-body-architecture.md § Senior Engineer + skill-as-adapter pattern](Documents/Design/agent-body-architecture.md#senior-engineer--skill-as-adapter-pattern).
 
 ## Issue #369 traces the full history
 

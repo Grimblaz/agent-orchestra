@@ -128,7 +128,7 @@
 
 **Acceptance Criteria**:
 
-- [ ] All tests passing
+- [ ] No test failure this change introduced, measured against a named baseline commit; pre-existing failures named and routed
 - [ ] Code follows project patterns
 - [ ] No regression in existing functionality
 
@@ -159,7 +159,7 @@
 
 **Acceptance Criteria**:
 
-- [ ] All tests passing
+- [ ] No test failure this change introduced, measured against a named baseline commit; pre-existing failures named and routed
 - [ ] Coverage >= [CUSTOMIZE: threshold]%
 - [ ] No linting errors
 - [ ] All acceptance criteria satisfied
@@ -287,7 +287,7 @@
 ## Success Metrics
 
 - [ ] All acceptance criteria met
-- [ ] All tests passing
+- [ ] No test failure this change introduced, measured against a named baseline commit; pre-existing failures named and routed
 - [ ] Code coverage maintained/improved
 - [ ] No regressions introduced
 - [ ] Documentation updated

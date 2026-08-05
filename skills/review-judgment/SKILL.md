@@ -427,6 +427,14 @@ ac_cross_check:
 
 This ensures the follow-up issue carries AC-provenance for the deferral decision, which is the AC4 contract.
 
+### `DEFERRED-SIGNIFICANT (structural)` and `disposition: defer` name one outcome
+
+This skill owns the deferral mechanism, and until issue #998 its prose carried only one of the outcome's two names. A reader who arrived holding the consumer-facing label — the spelling every downstream surface uses — found no occurrence of it here and no way to learn that the mechanism described above is what produces it. The traversal dead-ended inside the skill that owns the thing.
+
+`scripts/Test-DeferralCriteria.ps1` — this skill's own script — returns `verdict = 'DEFERRED-SIGNIFICANT (structural)'` when a finding meets the structural deferral criteria. **That verdict and the `disposition: defer` value recorded in the accumulator are one outcome under two names**, not two stages, two tiers, or two severities. The verdict is what the script emits; `disposition: defer` is how that same outcome is written down in the durable record. A finding carrying either carries both, and the `ac_cross_check` obligations above attach to it under whichever name you met it by.
+
+Consumers see the script's spelling. `agents/Code-Review-Response.agent.md` § Vocabulary note already maps its own `SIGNIFICANT` tier onto `DEFERRED-SIGNIFICANT (structural)`, and the token travels the tree in that form. Nothing is renamed here — the seam was that this skill never said which of its own outputs the label referred to, and this section is that statement.
+
 ### Legitimate Partial-AC Defer — Loud Guard
 
 When the AC cross-check returns `routed: defer` (because `result: no-match` or `source: no-ac-section`), the agent has confirmed that this finding genuinely lacks plan AC coverage. **Silently recording a `defer` entry at this point is the exact anti-pattern this feature was built to prevent.**

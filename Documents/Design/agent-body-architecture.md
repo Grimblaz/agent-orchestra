@@ -225,5 +225,27 @@ Note: the user-session default (`/model` setting) never propagates to subagents 
 - **Subagent dispatches** from any command follow the inheritance order above. For a process-wide override of every subagent, set the `CLAUDE_CODE_SUBAGENT_MODEL` environment variable. For a one-off override, pass `model:` on a specific `Agent` tool call. Shell frontmatter still wins over the dispatcher model, so quality-justified shells (code-critic, code-review-response, etc.) keep their declared tier even when the dispatcher's model differs.
 - **Multi-turn `/orchestrate` interruption**: if you interrupt mid-flow and the next message is not `/orchestrate`, the model falls back to the user-session default until you re-invoke `/orchestrate`, which re-applies the command frontmatter.
 
+---
+
+## Senior Engineer + skill-as-adapter pattern
+
+Moved here from the root guidance file (`CLAUDE.md`) by issue #998, which needed the space for the standing statement of what a finished run is true of. The root file keeps the headline and the two enum literals; the mechanics live here. Nothing about the pattern changed in the move.
+
+Senior Engineer is a single executor agent for routine implementation slices. The methodology lives in the frame slice's `adapter:` path, not in separate persona shells or runtime persona parameters. Spine-Runner resolves the adapter file, derives the executor, and dispatches the paired `agents/senior-engineer.md` shell when the slice uses the default skill-as-adapter path.
+
+Single-variant work adapters use `skills/{skill}/adapters/{port}-adapter.md`, for example `skills/implementation-discipline/adapters/implement-code-adapter.md`. Multi-variant ports keep selector-named adapter files such as `standard.md`, `lite.md`, or `proxy-github.md`, and choose among them with `applies-when:` predicates. Adapter frontmatter uses the enum literal `adapter-type: work | predicate`; work adapters execute a task, while predicate adapters decide not-applicable, skip, or variant-selection outcomes. Predicate adapters follow the unified suffix convention: `{port}-auto-na-adapter.md` for not-applicable and `{port}-explicit-skip-adapter.md` for manual skip, discovered by `Glob skills/*/adapters/*-adapter.md` and filtered by `adapter-type: predicate`.
+
+Frame slices may include optional `executor:`. The legal executor enum literal is `agents/*.agent.md path | inline`: agent paths dispatch the paired shell, while `inline` runs the resolved adapter in the active conductor context. When `executor:` is absent, derive it from `adapter-type`: `work` defaults to `agents/Senior-Engineer.agent.md`; `predicate` defaults to `inline`. `executor: none` is intentionally deferred and rejected by current validation.
+
+The three skill-loading types are: the planner-designated adapter path, auxiliary skills that adapter explicitly directs, and normal platform/bootstrap skills already required by the active shell. Senior Engineer does not scan the skill tree or infer methodology from nearby files.
+
+The halt-return contract is the structured `halt_return` YAML described in `agents/Senior-Engineer.agent.md`; Senior Engineer uses it instead of claiming partial completion when work cannot proceed safely. The adversarial-independence guard is exact: "Halt when the slice's adapter path matches the adversarial-pattern regex and the executor is the default Senior Engineer; emit halt-return with reason: adversarial-independence-required". This prevents the default editor-capable executor from serving as the reviewer half of adversarial workflows.
+
+Known follow-ups: #559 owns the rename sweep from older specialist language to the stable Senior Engineer + skill-as-adapter terminology where that sweep is outside #552's documentation slice. The current adversarial-pattern regex is intentionally brittle scaffolding; future work should replace it with a declarative adapter capability or independence flag when the adapter registry matures.
+
+### Frame port declarations
+
+Before adding or changing any adapter that fills a frame port, read the Adapter Model in [frame-architecture.md](frame-architecture.md). That design doc owns the declaration locations, provisional predicate DSL, and the distinction between port-filling adapters that declare `provides:` and supporting methodology skills that do not.
+
 <!-- vocab-pointer -->
 > **Unfamiliar with a code or term?** Shortcodes like `SMC-NN`, `D1/D2/D3`, and `CE Gate` are defined in the [plain-language vocabulary](../../HOW-IT-WORKS.md#vocab).

@@ -20,7 +20,7 @@ After tests pass, validate they meet quality thresholds before considering the f
 ./gradlew test
 ```
 
-**Expected:** All tests pass.
+**Expected:** no failure this change introduced. Compare against the same command at a named baseline commit rather than requiring an absolute green — a failure already present at that baseline is named and routed, not a blocker on this change.
 
 ### 2. Check Code Coverage
 
@@ -95,13 +95,13 @@ void getUserByIdReturnsNonNull() {
 
 | Check    | Command                         | Threshold |
 | -------- | -------------------------------- | --------- |
-| Tests    | `./gradlew test`                | 100% pass |
+| Tests    | `./gradlew test`                | 0 added failures vs. baseline |
 | Coverage | `./gradlew jacocoTestReport`    | ≥80%      |
 | Mutation | `./gradlew pitest`              | ≥80%      |
 
 ## Checklist
 
-- [ ] All tests pass
+- [ ] No test failure this change introduced, against a named baseline commit; pre-existing failures named and routed (`skills/verification-before-completion/SKILL.md` § The Completion Account)
 - [ ] Coverage ≥80% for core logic
 - [ ] Mutation score ≥80%
 - [ ] No surviving mutants in critical paths
