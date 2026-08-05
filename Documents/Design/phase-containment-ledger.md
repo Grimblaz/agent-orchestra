@@ -249,6 +249,23 @@ The entry delta is exactly the recovered population, and the veto delta is exact
 
 **Stated plainly, because the criterion's own wording invites a stronger claim than the data supports:** no stage flipped from `ELIGIBLE` to vetoed. All three were already `NOT ELIGIBLE` before the repair — two on escape rate, one on severity — so "a stage carrying a critical or high finding reports as vetoed" was already true of the untouched corpus. What the repair changed is the *contents* of the veto and the attribution beneath it, not any verdict. The remaining eight recovered critical/high findings land in the `design-challenge` and `code-review` rows, which render `NOT ELIGIBLE (escape_rate > 0)` — a branch that prints no severity counts at all, so their arrival is invisible on that line. That is the wider render gap already recorded on **#987**, not something this repair introduced or closes.
 
+### The repair advanced `updated_at` on nine comments, through a write path SMC-01 reserves
+
+**Recorded as an accepted, unrecoverable cost, not as a clean run.** On 2026-08-05 the corpus repair PATCHed nine comments with a hand-composed `gh api -X PATCH`. `created_at` is untouched on all nine; `updated_at` moved from between 2026-06-29 and 2026-07-27 to 2026-08-05. **That cannot be restored** — a second PATCH would move it again, and reverting would also un-repair the 63 entries, so it is strictly worse on both axes.
+
+The repair script guarded exactly one marker family — the open-for-work affirmation record, which is void as an ordering witness once edited — while its own docstring stated the general principle that repairing one marker must not void another. Seven other registered families were co-located on the nine comments and had their `updated_at` advanced without disclosure:
+
+| Family | On |
+| --- | --- |
+| `plan-issue` | #471, #784, #871 (via the #884 comment) |
+| `review-judge-produced` | #853 (and its `-postfix` sibling) |
+| `adversarial-pipeline-atomic` | #471 |
+| `design-phase-complete` | #784 |
+
+`plan-issue` is registered `upsert-in-place` with `persist-marker.ps1` named as its **only** documented write path (`SMC-01`). **What this costs a future reader:** `updated_at` on those nine is no longer evidence of when their content last changed. `skills/open-for-work/SKILL.md` § Resuming upgrades routing state on an artifact whose `updated_at` postdates the latest lawful record, and warns that the field "advances on any touch". The consequence is bounded rather than realised: none of the three PATCHed plan comments carries `plan-variant: brief`, so that brief-specific upgrade path is not engaged for any of them, and a second condition still gates it.
+
+The script now discloses every co-located family before writing (`Get-CoLocatedMarkerFamily`), reading them from the body rather than from a hardcoded list — a hardcoded list would fail exactly the way the first one did, by knowing only the families its author thought of. **Whether corpus repair may use a raw PATCH at all is a doctrine question for the owner, open at the time of writing**, not something this work decided.
+
 ### What was deliberately not done
 
 - **The advisory-actionability question is deferred to #761.** The filing asked what makes a warn-only advisory actionable when the reader has already moved on. That is review-intensity governance, outside this issue's affirmed boundary. The unattended trigger is *mechanism*; adding automation does not answer what a human should do when it fires.
