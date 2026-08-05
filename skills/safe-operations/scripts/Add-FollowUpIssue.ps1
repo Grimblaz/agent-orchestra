@@ -119,6 +119,53 @@ function Add-FollowUpIssue {
         # of the five-value provenance enum — safe-operations SKILL.md §2e and
         # any consuming agent body reference these literal values and must be
         # kept in sync with this list, not the other way around.
+        #
+        # #1012: per-value semantics. Three of the five values ASSERT that a
+        # gate ruling occurred, and therefore assert that a durable, batch-
+        # scoped ruling record exists naming this issue's title; two assert
+        # no ruling and owe no record:
+        #
+        #   gate-approved   — ASSERTS a ruling: a maintainer approved this
+        #                     item in a presented batch. Record must list this
+        #                     title with outcome 'approved'.
+        #   gate-modified   — ASSERTS a ruling: a maintainer edited and then
+        #                     approved this item. Record must list the
+        #                     as-approved title with outcome 'modified'.
+        #   queue-consumed  — ASSERTS a ruling: a gate-capable session consumed
+        #                     a queued proposal and ruled on it. Record must
+        #                     list this title with 'approved' or 'modified'.
+        #   direct-request  — asserts NO ruling: the maintainer asked for this
+        #                     issue directly and the gate is bypassed by
+        #                     design. Out of the reconciliation domain.
+        #   pre-gate-legacy — asserts NO ruling: filed by a surface with no
+        #                     callable gate orchestrator. It means "filed
+        #                     BEFORE any gate existed", NOT "cleared under an
+        #                     older gate". Out of the reconciliation domain.
+        #
+        # What a reconciliation failure means (procedure: §2e "Reconciliation
+        # procedure"): for a ruling-asserting value, a record that cannot be
+        # located is a DEFECT SIGNAL — the ceremony's trace is missing where
+        # the stamp claims one. For a non-asserting value the correct verdict
+        # is "out of domain"; calling it "unsupported" is a FALSE ALARM, and
+        # emitting one across the pre-gate corpus trains readers to ignore the
+        # signal on the day it is real.
+        #
+        # Failed ruling-record write: the filing does NOT proceed. A caller
+        # that cannot durably write the ruling record must not call this
+        # function with a ruling-asserting value — the batch is re-presented on
+        # the next ruling instead (proposal assembly's dedup exclusion makes
+        # that lossless). Filing anyway would stamp a ruling assertion with no
+        # locatable record, which reconciliation cannot distinguish from a
+        # bypass. If the maintainer wants it filed while the write path is
+        # broken, that is 'direct-request'.
+        #
+        # Trust bound — stated honestly: this parameter is SELF-ATTESTED. The
+        # script stamps whatever value the caller passes and checks no gate
+        # artifact. A located ruling record evidences that the ceremony RAN and
+        # left a trace; it never evidences WHO ruled, and a session that
+        # fabricates a record defeats it. The deliverable is DETECTION of a
+        # missing trace (the honest-omission class), not PREVENTION of a
+        # determined bypass.
         [Parameter(Mandatory=$true)]
         [ValidateSet('gate-approved', 'gate-modified', 'queue-consumed', 'direct-request', 'pre-gate-legacy')]
         [string]$FilingProvenance,
