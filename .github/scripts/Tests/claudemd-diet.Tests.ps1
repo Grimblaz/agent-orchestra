@@ -85,5 +85,45 @@ Describe 'CLAUDE.md diet (#694)' {
             $content | Should -Match 'CLAUDE_CODE_SUBAGENT_MODEL' `
                 -Because 's6 must land the per-agent model routing table (including the CLAUDE_CODE_SUBAGENT_MODEL override env-var) into this design doc'
         }
+
+        # ─────────────────────────────────────────────────────────────
+        # Issue #998 destinations. The convention this Context records is
+        # that EACH destination carries a sentinel proving the moved content
+        # landed there. #998 extracted two more sections to pay for the
+        # finished-run statement and registered no sentinel for either, so
+        # deleting either moved section left CLAUDE.md's pointer dangling
+        # with this suite green (review finding M21). These two close that.
+        # The sentinels are strings from the MOVED body, not from content
+        # that was already at the destination — a sentinel satisfied by
+        # pre-existing text proves nothing about the move.
+        # ─────────────────────────────────────────────────────────────
+
+        It 'agent-body-architecture.md contains the moved Senior Engineer adapter mechanics (#998)' {
+            $path = Join-Path $script:RepoRoot 'Documents/Design/agent-body-architecture.md'
+            $content = Get-Content $path -Raw -ErrorAction SilentlyContinue
+            $content | Should -Match 'adversarial-independence-required' `
+                -Because '#998 moved the Senior Engineer adapter mechanics here; this string is from the moved body, so its absence means the move was reverted or deleted while CLAUDE.md still points here'
+            $content | Should -Match '\{port\}-auto-na-adapter\.md' `
+                -Because 'the adapter file conventions moved with it'
+        }
+
+        It 'routing-tables/SKILL.md contains the moved handshake disposition table (#998)' {
+            $path = Join-Path $script:RepoRoot 'skills/routing-tables/SKILL.md'
+            $content = Get-Content $path -Raw -ErrorAction SilentlyContinue
+            $content | Should -Match 'Handshake disposition by command' `
+                -Because '#998 moved the per-command handshake table here from CLAUDE.md'
+            $content | Should -Match 'orchestra:review-judge' `
+                -Because 'the table''s own rows moved with it, not just its heading'
+        }
+
+        It 'CLAUDE.md still points at both #998 destinations' {
+            # The other half of the pair: a sentinel at the destination proves
+            # the content landed, and this proves the pointer to it survives.
+            $content = Get-Content $script:ClaudeMdPath -Raw -ErrorAction SilentlyContinue
+            $content | Should -Match 'agent-body-architecture\.md#senior-engineer--skill-as-adapter-pattern' `
+                -Because 'CLAUDE.md must resolve a reader to the moved adapter mechanics'
+            $content | Should -Match 'routing-tables/SKILL\.md' `
+                -Because 'CLAUDE.md must resolve a reader to the moved handshake table'
+        }
     }
 }

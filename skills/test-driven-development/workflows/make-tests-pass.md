@@ -65,6 +65,14 @@ public class UserService {
 
 **Expected:** All tests pass.
 
+<!-- Deliberately unchanged by issue #998's absolute-pass sweep (chunk 2 of
+#949): found by that sweep, not excluded from it. This is GREEN-phase
+language about the one test you just wrote going from red to green, not a
+statement addressed to a run deciding whether it is done — the same reason
+RED-phase language is out of that sweep's population. The completion-time
+rule is differential and lives in
+skills/verification-before-completion/SKILL.md § The Completion Account. -->
+
 ```text
 [INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0
 [INFO] BUILD SUCCESS
@@ -121,7 +129,7 @@ public interface UserLookupStrategy {
 
 - [ ] Implementation makes the failing test pass
 - [ ] No extra code beyond what's tested
-- [ ] All existing tests still pass
+- [ ] No previously-passing test broken by this implementation, against a named baseline commit that predates it; a failure already present at that baseline is named and routed rather than blocking (`skills/verification-before-completion/SKILL.md` § The Completion Account)
 - [ ] Code compiles without warnings
 - [ ] Committed with descriptive message
 

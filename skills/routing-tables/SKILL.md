@@ -47,6 +47,18 @@ Review mode routing is driven by explicit top-level selector lines of the form `
 
 When multiple selector lines appear, the conflict rule applies in strict priority order: defense, then CE, then proxy, then design, then post-fix code prosecution, then lite code prosecution, then standard code prosecution. One explicit override exists: `Review mode selector: "Use code review perspectives"` beats `Review mode selector: "Use design review perspectives"` and forces normal code prosecution.
 
+### Handshake disposition by command
+
+Moved here from the root guidance file (`CLAUDE.md`) by issue #998, which needed the space for the standing statement of what a finished run is true of. The dispositions are unchanged by the move; the root file keeps the one-line summary and points here.
+
+| Command | Handshake |
+| --- | --- |
+| `/orchestra:review` | Required |
+| `/orchestra:review-lite` | Required |
+| `/orchestra:review-prosecute` | Required |
+| `/orchestra:review-defend` | Required |
+| `/orchestra:review-judge` | Optional |
+
 ## Surface Identification
 
 CE Gate surface identification maps the customer surface to the expected validation tool. Web UI uses native browser tools first, with Playwright MCP as fallback. REST or GraphQL uses terminal HTTP calls. CLI and SDK surfaces use representative terminal invocations. Batch and pipeline surfaces use representative test data. No customer surface returns the documented status marker `⏭️ CE Gate not applicable — {reason}` from structured data so consumers do not need a separate hardcoded case.

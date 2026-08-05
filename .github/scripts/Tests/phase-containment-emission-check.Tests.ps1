@@ -319,7 +319,23 @@ Describe 'Could-not-verify rendering' {
         $report | Should -Match 'COULD NOT VERIFY -- treat as gap'
     }
 
-    It 'renders clean (not could-not-verify) for a bare marker-head mention with no follow-on vocabulary (M6)' {
+    It 'treats a bare marker-head mention as no real marker (M6) and, since no review head exists anywhere, reports review-not-run rather than clean (issue #998)' {
+        # M6's PROPERTY is unchanged and is still what this test guards: a
+        # lone '<!-- judge-rulings pr=1 -->' with no follow-on vocabulary is a
+        # bare MENTION, not a real marker head, so it must never be diagnosed
+        # as a corrupt or unparseable head. The vocab-gated scan
+        # (Get-RealJudgeRulingsHeadMatches) still says "no real head here",
+        # exactly as before.
+        #
+        # WHAT CHANGED, AND WHY (issue #998, chunk 2 of #949). This test
+        # previously asserted the CONSEQUENCE of that property as
+        # 'clean -- sustained=0 blocks=0'. That consequence was the defect
+        # #949 was filed for: a pull request with no adversarial review
+        # recorded anywhere rendered a reassuring clean line, indistinguishable
+        # from a review that ran and found nothing. The code-review absence
+        # backstop now reports it instead. The old assertion is not being
+        # relaxed — it is being restated at the grain M6 actually cared about:
+        # the diagnosis must not be a head-shape/parse one.
         $bareMentionBody = '<!-- judge-rulings pr=1 -->' # unclosed / no recognizable vocabulary anywhere nearby
         function global:gh {
             param([Parameter(ValueFromRemainingArguments = $true)]$Args)
@@ -330,8 +346,14 @@ Describe 'Could-not-verify rendering' {
 
         $report = Invoke-PhaseContainmentEmissionCheckSingleTarget -PrNumber '1'
 
-        $report | Should -Not -Match 'COULD NOT VERIFY'
-        $report | Should -Match 'code-review #1: clean -- sustained=0 blocks=0'
+        # M6's own property: no corruption / unparseable / partial diagnosis.
+        $report | Should -Not -Match 'unparseable' -Because 'M6: a bare mention is not a real head, so it must never be reported as a corrupt one'
+        $report | Should -Not -Match 'partial, do not trust' -Because 'M6: the generic could-not-verify wording would send a maintainer hunting a broken comment that does not exist'
+        $report | Should -Not -Match 'machine-head missing' -Because 'M6: this is not the head-missing population either'
+
+        # Issue #998's property: the absence is enumerable rather than clean.
+        $report | Should -Not -Match 'code-review #1: clean' -Because 'issue #949: a shipped unit whose review never ran must not render clean on the code-review surface'
+        $report | Should -Match 'no adversarial review is recorded' -Because 'the backstop must name the actual condition: nothing was examined'
     }
 
     It 'M13 fix: qualifies the sustained/blocks numbers on a COULD NOT VERIFY line so a skimming maintainer is not misled' {
