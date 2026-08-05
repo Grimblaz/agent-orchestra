@@ -49,6 +49,9 @@ param(
     [string]$SourceLabel = 'this comment',
     [int]$PostTo = 0,
     [string]$InReplyToCommentId = '',
+    # M23: review-thread comments anchor differently from issue comments, and
+    # only the caller knows which event fired.
+    [switch]$SourceIsReviewComment,
     [string]$Repo = $env:GITHUB_REPOSITORY,
     [string]$SummaryPath = $env:GITHUB_STEP_SUMMARY
 )
@@ -95,9 +98,26 @@ try {
     }
 
     if ($PostTo -gt 0 -and -not [string]::IsNullOrWhiteSpace($Repo)) {
-        $commentBody = $report
+        # IDEMPOTENCY (PR #1006 review, M15). Without a marker this posted on
+        # every detection, so editing a triggering comment N times produced N
+        # advisories — attacker-drivable comment flooding attributed to the
+        # repository, on a workflow any GitHub user can trigger. Every other
+        # durable-marker writer in this repo checks first; this one did not.
+        $idempotencyMarker = "<!-- pc-region-guard-advised-$InReplyToCommentId -->"
+        $existing = & gh api "repos/$Repo/issues/$PostTo/comments" --paginate --jq '.[].body' 2>$null
+        if ($LASTEXITCODE -eq 0 -and $null -ne $existing -and (($existing -join "`n") -like "*$idempotencyMarker*")) {
+            Write-Host "phase-containment-region-guard: an advisory for comment $InReplyToCommentId is already posted on #$PostTo; not posting again."
+            exit 0
+        }
+
+        $commentBody = $idempotencyMarker + "`n" + $report
         if (-not [string]::IsNullOrWhiteSpace($InReplyToCommentId)) {
-            $commentBody += "`n`nSource: https://github.com/$Repo/issues/$PostTo#issuecomment-$InReplyToCommentId"
+            # M23: a review-comment id anchors as #discussion_r, not
+            # #issuecomment. The reviewed revision built the issue-comment
+            # anchor for both event types, so the one link a maintainer would
+            # click was dead for exactly the event whose region it described.
+            $anchor = if ($SourceIsReviewComment) { "discussion_r$InReplyToCommentId" } else { "issuecomment-$InReplyToCommentId" }
+            $commentBody += "`n`nSource: https://github.com/$Repo/issues/$PostTo#$anchor"
         }
         # Written through a file: the report carries backticks, angle brackets
         # and newlines, and passing it as an argument would hand a

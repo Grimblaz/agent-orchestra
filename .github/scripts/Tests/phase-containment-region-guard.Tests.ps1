@@ -162,6 +162,57 @@ next_field: value
     }
 }
 
+Describe 'Find-MalformedPhaseContainmentRegion — the production population (#1006 M20)' {
+
+    # THE BOUND IS NOW MEASURED WHERE THE GUARD ACTUALLY LOOKS. The repo-file
+    # scan above is a proxy over prose; the guard's production population is
+    # GitHub comment bodies, and nothing exercised the false-positive direction
+    # there. That gap cost a demonstrated production-shaped false positive
+    # during review: a maintainer quoting a real region inside a fence, in a
+    # comment, drew a hit. The cases below are the comment shapes this defect
+    # class generates while it is being discussed.
+
+    It 'stays silent on a comment that discusses the shape in prose and inline code' {
+        $body = @'
+The region on PR #937 opened with `<!-- phase-containment-937` on its own line
+and terminated with a bare `-->`, which is a valid multi-line HTML comment — so
+the parser never matched it and nothing warned.
+'@
+        (Find-MalformedPhaseContainmentRegion -Body $body).Count | Should -Be 0
+    }
+
+    It 'stays silent on a comment quoting the placeholder template in a fence' {
+        $body = "Write it like this instead:`n`n" + '```text' + "`n<!-- phase-containment-{ID} -->`nfinding_key: code-review:x:1`n<!-- /phase-containment-{ID} -->`n" + '```'
+        (Find-MalformedPhaseContainmentRegion -Body $body).Count | Should -Be 0
+    }
+
+    It 'stays silent on a comment carrying only well-formed regions' {
+        $body = "Judgment below.`n`n<!-- phase-containment-1006 -->`nfinding_key: code-review:1006:x:M1`nseverity: low`n<!-- /phase-containment-1006 -->"
+        (Find-MalformedPhaseContainmentRegion -Body $body).Count | Should -Be 0
+    }
+
+    It 'stays silent on the guard''s own advisory, at comment scale' {
+        # The advisory is itself a comment body, and it is the one body the
+        # guard is guaranteed to meet in production.
+        $findings = Find-MalformedPhaseContainmentRegion -Body (
+            "<!-- phase-containment-1006`n- finding_key: code-review:a:1`n- finding_key: code-review:a:2`n-->")
+        $report = Format-MalformedRegionReport -Findings $findings -SourceLabel 'comment 1 on #1006'
+        (Find-MalformedPhaseContainmentRegion -Body $report).Count | Should -Be 0
+    }
+
+    It 'STILL fires on a real lost region quoted verbatim into a comment' {
+        # The honest limit, pinned rather than papered over. A maintainer who
+        # pastes a real region into a comment while discussing it DOES draw an
+        # advisory: the text is indistinguishable from the emission it quotes,
+        # by every rule the guard has. The remedy is the placeholder form the
+        # advisory itself teaches, and the idempotency marker bounds the cost
+        # to one reply. Recorded here so the next reader knows it was measured,
+        # not missed.
+        $body = "Here is what PR #937 actually posted:`n`n" + '```yaml' + "`n<!-- phase-containment-937`n- finding_id: M1`n  severity: medium`n-->`n" + '```'
+        (Find-MalformedPhaseContainmentRegion -Body $body).Count | Should -Be 1
+    }
+}
+
 Describe 'Format-MalformedRegionReport' {
 
     It 'returns nothing to say when there is nothing to say' {

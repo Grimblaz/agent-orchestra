@@ -104,11 +104,47 @@ function Test-AffirmationRecordPresent {
         edited (skills/open-for-work/SKILL.md). Repairing one marker must not
         void another, so a comment carrying either the registered marker or
         the interim practiced form is refused rather than repaired.
+
+        THIS IS THE REFUSAL LIST, NOT THE DISCLOSURE LIST. It names only the
+        families where an edit destroys a property. Every OTHER co-located
+        family is surfaced by Get-CoLocatedMarkerFamily below rather than
+        refused — see its note for why the distinction had to be drawn.
     #>
     param([Parameter(Mandatory)][AllowEmptyString()][string]$Body)
     if ($Body -match '<!--\s*open-for-work-affirmed-') { return $true }
     if ($Body -match '(?m)^\*\*Open-for-work affirmation') { return $true }
     return $false
+}
+
+function Get-CoLocatedMarkerFamily {
+    <#
+        Lists every marker family present in a body, so a PATCH discloses what
+        else it is touching.
+
+        WHY THIS EXISTS (PR #1006 review, M7 — the only REALISED damage in that
+        review). The first repair run guarded exactly one family while its own
+        docstring stated the general principle "repairing one marker must not
+        void another". Nine comments were PATCHed, and their `updated_at` moved
+        on families the guard had never heard of: three `plan-issue`, two
+        `review-judge-produced`, `adversarial-pipeline-atomic-471` and
+        `design-phase-complete-784`. `plan-issue` is registered `upsert-in-place`
+        with `persist-marker.ps1` named as its ONLY documented write path
+        (SMC-01), and this script used a hand-composed `gh api -X PATCH`.
+
+        A hardcoded family list would have failed the same way the first one
+        did — it can only know the families its author thought of — so this
+        reads whatever is actually in the body. Disclosure, not refusal: the
+        maintainer decides, and the run says plainly what it is about to touch.
+        The write itself cannot be un-made; `updated_at` does not go backwards.
+    #>
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Body)
+    $families = [System.Collections.Generic.List[string]]::new()
+    foreach ($m in [regex]::Matches($Body, '<!--\s*/?\s*(?<family>[a-z][a-z0-9]*(?:-[a-z0-9]+)*)\s*(?:-->|\r?\n)')) {
+        $family = $m.Groups['family'].Value
+        if ($family -like 'phase-containment*') { continue }
+        if (-not $families.Contains($family)) { $families.Add($family) }
+    }
+    return , ($families.ToArray() | Sort-Object)
 }
 
 function Split-RegionIntoEntries {
@@ -358,6 +394,16 @@ foreach ($target in $plan) {
         Write-Host '  REFUSED: carries an open-for-work affirmation record; editing it would void it as an ordering witness.'
         $anyFailure = $true
         continue
+    }
+
+    # Disclosed before the write, on every target, whether or not it is
+    # actionable — see Get-CoLocatedMarkerFamily. A PATCH advances updated_at
+    # for every family on the body, and a maintainer cannot weigh that against
+    # a list they never saw.
+    $coLocated = Get-CoLocatedMarkerFamily -Body $before
+    if ($coLocated.Count -gt 0) {
+        Write-Host "  Co-located marker families whose updated_at this PATCH will advance: $($coLocated -join ', ')"
+        Write-Host '  (updated_at cannot be restored. Families with edit-sensitive semantics are named in skills/session-memory-contract/references/handoff-markers.md.)'
     }
 
     $keyOverrides = if ($target.PSObject.Properties['key_overrides']) { $target.key_overrides } else { $null }

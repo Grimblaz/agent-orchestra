@@ -48,6 +48,15 @@ concurrency:
 jobs:
   guard:
     runs-on: ubuntu-latest
+    # M31: a cheap substring gate before any runner work. Without it every
+    # comment anywhere in the repository provisioned a runner and a full
+    # checkout to run a scan whose own docstring calls the empty result "the
+    # overwhelmingly common case [that] must stay cheap". The gate is
+    # deliberately looser than the scanner's own rules -- it only has to avoid
+    # the 99% that mention nothing.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.comment.body, 'phase-containment-')
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
@@ -69,8 +78,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           COMMENT_ID: ${{ github.event.inputs.comment_id }}
+          ISSUE_NUMBER: ${{ github.event.inputs.issue_number }}
           REPO: ${{ github.repository }}
         run: |
+          # M29: both inputs are declared `type: string` and are unvalidated,
+          # and they reach a gh api PATH. A traversal-shaped value resolves to
+          # a different endpoint, and the same value is echoed into the posted
+          # advisory. Digits only, checked before either use.
+          case "$COMMENT_ID" in ''|*[!0-9]*) echo "comment_id must be digits" >&2; exit 1;; esac
+          case "$ISSUE_NUMBER" in ''|*[!0-9]*) echo "issue_number must be digits" >&2; exit 1;; esac
           gh api "repos/$REPO/issues/comments/$COMMENT_ID" --jq '.body' > "$RUNNER_TEMP/comment-body.md"
 
       - name: Scan for unreadable phase-containment regions
@@ -79,9 +95,18 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           TARGET_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number || github.event.inputs.issue_number }}
           TARGET_COMMENT: ${{ github.event.comment.id || github.event.inputs.comment_id }}
+          # Through the environment like every other value here. The event name
+          # comes from a fixed GitHub enum rather than from a user, but a `run:`
+          # block that interpolates one `${{ }}` teaches the next editor that
+          # interpolating the next one is fine — and the next one is a body.
+          EVENT_NAME: ${{ github.event_name }}
         run: |
+          REVIEW_FLAG=""
+          if [ "$EVENT_NAME" = "pull_request_review_comment" ]; then
+            REVIEW_FLAG="-SourceIsReviewComment"
+          fi
           pwsh -NoProfile -File ./.github/scripts/phase-containment-region-guard.ps1 \
             -BodyFile "$RUNNER_TEMP/comment-body.md" \
             -SourceLabel "comment $TARGET_COMMENT on #$TARGET_NUMBER" \
             -PostTo "$TARGET_NUMBER" \
-            -InReplyToCommentId "$TARGET_COMMENT"
+            -InReplyToCommentId "$TARGET_COMMENT" $REVIEW_FLAG
