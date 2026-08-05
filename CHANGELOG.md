@@ -16,6 +16,12 @@ All notable changes to agent-orchestra will be documented in this file.
 
 - **An unattended guard for the malformed-region class (#944).** `.github/workflows/phase-containment-region-guard.yml` fires on the **comment event itself** — every one of the 63 lost entries was hand-authored straight into a GitHub comment, and a repository-file check would have caught none of them — and replies in the thread while the author is still there. Warn-only by construction: a GitHub comment cannot be gated, so it reports and exits 0. Its three rules are semantic rather than syntactic — a numeric id only, at least one recognizable entry, and outside a YAML block scalar — which bounds the false-positive direction without the fence-based exemption that would have recreated PR #810's blind spot. The bound is tested against this repository's own prose about the shape across every tracked text file, with corpus-transcribed fixtures as the positive control that the scan reaches real shapes at all. (#944)
 
+## [3.12.0] — 2026-08-04
+
+### Added
+
+- New `agent-memory-compaction` skill: the lossless-compaction policy for an agent memory store's recall index. Ships the canonical policy text (the rules a compaction may never break, what may and may not be retired, the ratchet bound, and the authorized size-reduction moves), a consumer adapt-note, and `scripts/Test-MemoryIndexPolicy.ps1` — a read-only, invocation-only check reporting header presence and completeness, linked subjects carrying no recall hook, and unattributed shared notes. The check has no trigger and never writes. Issue #986.
+
 ## [3.11.1] — 2026-08-03
 
 ### Changed

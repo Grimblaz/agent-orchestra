@@ -20,11 +20,12 @@ Each skill should use this flow:
 
 This keeps prompts concise while preserving depth when needed.
 
-## Available Skills (54)
+## Available Skills (56)
 
 | Skill | Purpose | Status |
 | ----- | ------- | ------ |
 | `adversarial-review` | Evidence-first prosecution and defense methodology for review workflows | ✅ Included |
+| `agent-memory-compaction` | Lossless-compaction policy for an agent memory store's recall index: the rules a compaction may not break, what may and may not be retired, and a re-runnable check | ✅ Included |
 | `ai-first-documentation` | Research-backed standards for documentation in AI-first codebases: context-file architecture (CLAUDE.md, skills, subagents, rules), multi-agent interop, and project-doc organization, with a tiered audit rubric. Use when authoring or auditing CLAUDE.md/AGENTS.md, deciding where guidance belongs, or running a documentation gap analysis. DO NOT USE FOR: post-implementation doc updates (use documentation-finalization) or reference sidecar setup (use project-references). | ✅ Included |
 | `bdd-scenarios` | Structured Given/When/Then scenario authoring with ID traceability and CE Gate coverage gap detection | ✅ Included |
 | `brainstorming` | Structured Socratic questioning for exploring ideas and solutions | ✅ Included |
@@ -40,6 +41,7 @@ This keeps prompts concise while preserving depth when needed.
 | `frame-credit-ledger` | Warn-only frame port-coverage ledger posted as a PR comment after `gh pr create` | ✅ Included |
 | `frame-spine-lookup` | Frame spine lookup methodology for specialist plan-slice retrieval | ✅ Included |
 | `frontend-design` | Guide for creating distinctive UI designs that avoid generic templates | ✅ Included |
+| `goal-run` | Launch or resume the vendor-goal-loop harness (Arm I) for a single issue carrying an approved goal-contract | ✅ Included |
 | `guidance-measurement` | Guidance-complexity measurement tooling and deterministic analysis guidance | ✅ Included |
 | `implementation-discipline` | Minimal implementation workflow for plan-driven coding | ✅ Included |
 | `naming-register-policy` | Two-register naming policy for agent-orchestra: rules for when machine codes stay as-is vs get human names or first-use expansion. Use when authoring human-facing prose, sweeping rename-candidates, or resolving what a code like SMC-20 means. DO NOT USE FOR: deciding whether to create new vocabulary (use design-exploration), auditing docs for general readability (use ai-first-documentation for agent docs or #750/#751 for human docs). | ✅ Included |
