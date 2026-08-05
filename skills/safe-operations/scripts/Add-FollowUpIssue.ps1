@@ -7,7 +7,9 @@
     M1: Writes the <!-- code-conductor-filed-followup --> sentinel into the
         filed issue body carrying matched criterion_id(s) and the originating
         PR. The sentinel is the AC8 contract and is written unconditionally
-        (empty criterion_ids list and missing originating_pr are both legal).
+        (an empty criterion_ids list is always legal; a missing
+        originating_pr is legal ONLY for the two non-ruling-asserting
+        provenance values -- see the -FilingProvenance anchor requirement).
 
     M3: Emits a defensive Write-Warning when any element of -Labels contains
         a comma, which would cause `gh issue create --label <csv>` to mis-split
