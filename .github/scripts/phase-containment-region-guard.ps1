@@ -33,8 +33,13 @@
     Issue/PR number to reply on when a region is found. Omitted, the report is
     printed only.
 .PARAMETER InReplyToCommentId
-    The comment that carried the region, linked in the reply so the author can
-    find it.
+    The comment that carried the region. Used for the idempotency marker, so a
+    re-edited comment does not draw a second advisory.
+.PARAMETER SourceUrl
+    The triggering comment's own `html_url`, echoed as a source link. Supplied
+    by the caller rather than constructed here: GitHub already knows the right
+    anchor for an issue comment and a review comment, and building one from
+    parts is what produced a dead link for the second.
 .PARAMETER Repo
     owner/name. Defaults to the ambient GITHUB_REPOSITORY.
 .PARAMETER SummaryPath
@@ -49,9 +54,13 @@ param(
     [string]$SourceLabel = 'this comment',
     [int]$PostTo = 0,
     [string]$InReplyToCommentId = '',
-    # M23: review-thread comments anchor differently from issue comments, and
-    # only the caller knows which event fired.
-    [switch]$SourceIsReviewComment,
+    # M23, taking the external reviewer's better suggestion over the fix this
+    # PR first wrote. An earlier revision constructed the anchor itself and
+    # branched on a -SourceIsReviewComment switch; GitHub already hands the
+    # event the comment's own `html_url`, which is correct for BOTH event types
+    # by construction and cannot drift when a third one is added. Constructing
+    # a URL from parts is how the dead `#issuecomment-` anchor happened.
+    [string]$SourceUrl = '',
     [string]$Repo = $env:GITHUB_REPOSITORY,
     [string]$SummaryPath = $env:GITHUB_STEP_SUMMARY
 )
@@ -111,13 +120,17 @@ try {
         }
 
         $commentBody = $idempotencyMarker + "`n" + $report
-        if (-not [string]::IsNullOrWhiteSpace($InReplyToCommentId)) {
-            # M23: a review-comment id anchors as #discussion_r, not
-            # #issuecomment. The reviewed revision built the issue-comment
-            # anchor for both event types, so the one link a maintainer would
-            # click was dead for exactly the event whose region it described.
-            $anchor = if ($SourceIsReviewComment) { "discussion_r$InReplyToCommentId" } else { "issuecomment-$InReplyToCommentId" }
-            $commentBody += "`n`nSource: https://github.com/$Repo/issues/$PostTo#$anchor"
+        if (-not [string]::IsNullOrWhiteSpace($SourceUrl)) {
+            # Only an https URL on this repository's own host is echoed. The
+            # value is event-supplied rather than user-authored, but it lands
+            # in a comment the repository posts, and a link is the one thing in
+            # this advisory a reader will click.
+            if ($SourceUrl -match '^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/(issues|pull)/[0-9]+#[A-Za-z0-9_-]+$') {
+                $commentBody += "`n`nSource: $SourceUrl"
+            }
+            else {
+                [Console]::Error.WriteLine('phase-containment-region-guard: -SourceUrl is not a recognized GitHub comment URL; omitting the source link rather than echoing it.')
+            }
         }
         # Written through a file: the report carries backticks, angle brackets
         # and newlines, and passing it as an argument would hand a

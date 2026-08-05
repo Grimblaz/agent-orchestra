@@ -95,18 +95,14 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           TARGET_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number || github.event.inputs.issue_number }}
           TARGET_COMMENT: ${{ github.event.comment.id || github.event.inputs.comment_id }}
-          # Through the environment like every other value here. The event name
-          # comes from a fixed GitHub enum rather than from a user, but a `run:`
-          # block that interpolates one `${{ }}` teaches the next editor that
-          # interpolating the next one is fine — and the next one is a body.
-          EVENT_NAME: ${{ github.event_name }}
+          # GitHub's own anchor for whichever comment fired -- correct for an
+          # issue comment and a review comment alike, with no anchor built
+          # here. Empty on workflow_dispatch, and the script omits the line.
+          SOURCE_URL: ${{ github.event.comment.html_url }}
         run: |
-          REVIEW_FLAG=""
-          if [ "$EVENT_NAME" = "pull_request_review_comment" ]; then
-            REVIEW_FLAG="-SourceIsReviewComment"
-          fi
           pwsh -NoProfile -File ./.github/scripts/phase-containment-region-guard.ps1 \
             -BodyFile "$RUNNER_TEMP/comment-body.md" \
             -SourceLabel "comment $TARGET_COMMENT on #$TARGET_NUMBER" \
             -PostTo "$TARGET_NUMBER" \
-            -InReplyToCommentId "$TARGET_COMMENT" $REVIEW_FLAG
+            -InReplyToCommentId "$TARGET_COMMENT" \
+            -SourceUrl "$SOURCE_URL"

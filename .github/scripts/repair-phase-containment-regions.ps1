@@ -46,7 +46,10 @@
 .PARAMETER Repo
     owner/name. Defaults to Grimblaz/agent-orchestra.
 .PARAMETER OutDir
-    Where before/after bodies and the run report are written.
+    Where before/after bodies and the run report are written. Defaults under
+    the repository's ignored `.tmp/` scratch directory: these artifacts are
+    copies of GitHub comment bodies, and a default that lands them in
+    `git status` invites them into a commit.
 .EXAMPLE
     pwsh ./.github/scripts/repair-phase-containment-regions.ps1 -PlanPath ./repair-plan.json
 .EXAMPLE
@@ -65,7 +68,13 @@ $ErrorActionPreference = 'Stop'
 
 . (Join-Path $PSScriptRoot 'lib/phase-containment-core.ps1')
 
-if ([string]::IsNullOrWhiteSpace($OutDir)) { $OutDir = Join-Path (Get-Location) 'repair-out' }
+# Defaults under the repo's ignored scratch directory, not to a bare
+# `repair-out/` in the working tree. The external reviewer on PR #1006 flagged
+# the artifact location; `git check-ignore` confirmed `repair-out` was NOT
+# ignored, so a default run dropped before/after bodies and PATCH payloads into
+# `git status` -- untracked copies of GitHub comment bodies sitting where a
+# later `git add -A` would sweep them in.
+if ([string]::IsNullOrWhiteSpace($OutDir)) { $OutDir = Join-Path (Get-Location) '.tmp/phase-containment-repair' }
 if (-not (Test-Path -LiteralPath $OutDir)) { New-Item -ItemType Directory -Path $OutDir -Force | Out-Null }
 
 # All GitHub payloads move through FILES in UTF-8, never through the console.
