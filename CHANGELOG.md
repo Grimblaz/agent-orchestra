@@ -2,6 +2,12 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.12.0] — 2026-08-04
+
+### Added
+
+- New `agent-memory-compaction` skill: the lossless-compaction policy for an agent memory store's recall index. Ships the canonical policy text (the rules a compaction may never break, what may and may not be retired, the ratchet bound, and the authorized size-reduction moves), a consumer adapt-note, and `scripts/Test-MemoryIndexPolicy.ps1` — a read-only, invocation-only check reporting header presence and completeness, linked subjects carrying no recall hook, and unattributed shared notes. The check has no trigger and never writes. Issue #986.
+
 ## [3.11.1] — 2026-08-03
 
 ### Changed
