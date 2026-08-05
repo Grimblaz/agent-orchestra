@@ -1,0 +1,87 @@
+# Issue #944 — the unattended half of "make this class loud instead of silent".
+#
+# A phase-containment region whose open tag is not the self-closed form is a
+# valid multi-line HTML comment: GitHub renders nothing, no reader matches it,
+# and the parser's malformed-block warnings never fire because they only fire
+# AFTER a match. 63 ledger entries across seven issues were lost that way, 13
+# of them critical or high, suppressing the review-relaxation veto's severity
+# arm on all four stages at once.
+#
+# WHY A COMMENT TRIGGER AND NOT A PULL-REQUEST CHECK. Every one of those 63
+# entries was hand-authored straight into a GitHub comment. A repository-file
+# check would not have caught a single one. This fires on the comment itself,
+# and replies in the same thread while the author is still there.
+#
+# WARN-ONLY BY CONSTRUCTION. A GitHub comment cannot be gated — there is no
+# chokepoint — so this reports and never blocks. The step exits 0 even on a
+# detection; the signal is the posted reply, not a red check.
+name: Phase-containment region guard
+
+on:
+  issue_comment:
+    types: [created, edited]
+  pull_request_review_comment:
+    types: [created, edited]
+  workflow_dispatch:
+    inputs:
+      comment_id:
+        description: 'Issue-comment id to re-check (for verifying the guard itself).'
+        required: true
+        type: string
+      issue_number:
+        description: 'Issue/PR number the comment belongs to.'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  issues: write          # needed: the advisory is posted as a reply in the thread
+  pull-requests: write   # same, for comments that live on a PR
+
+concurrency:
+  # Keyed on the comment, not the issue: two comments posted at once are two
+  # independent checks, and cancelling one to run the other would drop a real
+  # detection.
+  group: pc-region-guard-${{ github.event.comment.id || github.event.inputs.comment_id }}
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          persist-credentials: false
+
+      - name: Write the comment body to a file
+        if: github.event_name != 'workflow_dispatch'
+        # Through the environment and then to a FILE, never interpolated into
+        # the shell. A comment body is untrusted, attacker-influencable input,
+        # and `${{ github.event.comment.body }}` inlined into a run: block is
+        # script injection with extra steps.
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        run: |
+          printf '%s' "$COMMENT_BODY" > "$RUNNER_TEMP/comment-body.md"
+
+      - name: Fetch the body for a dispatched re-check
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMENT_ID: ${{ github.event.inputs.comment_id }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh api "repos/$REPO/issues/comments/$COMMENT_ID" --jq '.body' > "$RUNNER_TEMP/comment-body.md"
+
+      - name: Scan for unreadable phase-containment regions
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          TARGET_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number || github.event.inputs.issue_number }}
+          TARGET_COMMENT: ${{ github.event.comment.id || github.event.inputs.comment_id }}
+        run: |
+          pwsh -NoProfile -File ./.github/scripts/phase-containment-region-guard.ps1 \
+            -BodyFile "$RUNNER_TEMP/comment-body.md" \
+            -SourceLabel "comment $TARGET_COMMENT on #$TARGET_NUMBER" \
+            -PostTo "$TARGET_NUMBER" \
+            -InReplyToCommentId "$TARGET_COMMENT"
