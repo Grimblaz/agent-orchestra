@@ -109,7 +109,9 @@ kind** — any failure, flaky or not, is `fail`.
 > **Raised and not acted on**: against a red baseline this gate fails every
 > goal-contract run, which is the same unfollowable-rule shape #949 was filed
 > about, one surface over. That is its own issue if it is worth addressing,
-> not a change smuggled in here. The gate predicate
+> not a change smuggled in here.
+
+The gate predicate
 (`Test-GCSuiteGatePass`) requires all three of `ExitCode -eq 0`,
 `TotalFailed -eq 0`, and `(TotalPassed + TotalFailed) -gt 0` — not
 `TotalFailed` alone. `Invoke-PesterSharded` returns `ExitCode=1,

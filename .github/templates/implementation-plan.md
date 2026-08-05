@@ -187,7 +187,7 @@
 
 - [ ] Code is DRY (Don't Repeat Yourself)
 - [ ] Functions are single-purpose
-- [ ] Tests still passing
+- [ ] No test failure this refactor introduced, against the pre-refactor commit
 - [ ] Code readability improved
 
 ---

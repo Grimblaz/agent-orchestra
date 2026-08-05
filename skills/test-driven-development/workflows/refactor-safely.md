@@ -148,9 +148,9 @@ public class StandardShipping implements ShippingCalculator {
 
 ## Checklist
 
-- [ ] Tests pass before refactoring
+- [ ] Suite state captured before refactoring, at a named commit — this is the baseline the check below is against, not a demand that it be green
 - [ ] Made one small change
-- [ ] Tests still pass
+- [ ] No test failure this refactor introduced, measured against that baseline; a failure already present there is named and routed rather than blocking (`skills/verification-before-completion/SKILL.md` § The Completion Account)
 - [ ] Code is cleaner/more readable
 - [ ] No behavior changes
 

@@ -129,7 +129,7 @@ public interface UserLookupStrategy {
 
 - [ ] Implementation makes the failing test pass
 - [ ] No extra code beyond what's tested
-- [ ] All existing tests still pass
+- [ ] No previously-passing test broken by this implementation, against a named baseline commit that predates it; a failure already present at that baseline is named and routed rather than blocking (`skills/verification-before-completion/SKILL.md` § The Completion Account)
 - [ ] Code compiles without warnings
 - [ ] Committed with descriptive message
 

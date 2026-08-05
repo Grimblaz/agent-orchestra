@@ -109,7 +109,7 @@ Five properties, scoped to the **act** of a run declaring itself done — not to
 
 1. **The review is accounted for.** Every finding the adversarial review produced traces to an outcome that survived the judge — a fix commit, or a dismissal with its reason.
 2. **A review that ran and found nothing says so, in words that would be false if it had not run.** Silence is never readable as examined-and-clean. This is what stops property 1 being vacuously true over an empty finding set: a run that dispatched no review produces no findings, so it satisfies property 1 by doing nothing.
-3. **The suite's state is stated differentially** — what this change added, measured against a named baseline commit — **and, separately, pre-existing failures are named and routed** rather than blocking the work or vanishing from the account. Two obligations, not one, so a run that added a failure cannot read a single clause as broadly satisfied.
+3. **The suite's state is stated differentially** — what this change added, against a named baseline commit **that predates the change** — **and, separately, pre-existing failures are named and routed** rather than blocking the work or vanishing from the account. Two obligations, not one, so a run that added a failure cannot read a single clause as broadly satisfied. The baseline may never be the run's own post-change commit; that reading satisfies every clause while checking nothing.
 4. **A fix that closes a finding is itself re-validated before the account closes.** A fix cycle is never itself the completion signal.
 5. **A stopped run reads as stopped** — in the lane's typed halt-report shape, never free prose that a reader could mistake for completion.
 

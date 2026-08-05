@@ -31,7 +31,7 @@ Quality gates are enforced in priority order:
 | Mutation Score    | ≥80%      | Core logic     | Primary quality gate  |
 | Line Coverage     | ≥80%      | Core logic     | All code exercised    |
 | Branch Coverage   | ≥80%      | Core logic     | All conditions tested |
-| Added Failures    | 0         | All            | Differential against a named baseline commit, not an absolute floor — a failure already present at the baseline is named and routed, never a blocker on this change (`skills/verification-before-completion/SKILL.md` § The Completion Account) |
+| Added Failures    | 0         | All            | Differential against a named baseline commit **that predates the change** (branch point or merge base, never the run's own post-change commit), not an absolute floor — a failure already present at that baseline is named and routed, never a blocker on this change (`skills/verification-before-completion/SKILL.md` § The Completion Account) |
 
 ## Tiered Mutation Strategy
 

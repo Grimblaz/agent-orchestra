@@ -3125,7 +3125,14 @@ function Get-EmissionGap {
                           make the claim true rather than to soften it.)
     #>
     param(
-        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Bodies,
+        # [AllowEmptyString()] added by #998 (review finding M23): the entry
+        # point builds bodies as [string]$_.body, filtering null COMMENTS but
+        # not null BODIES, and a null body casts to ''. Without it the whole
+        # check aborted on an uncatchable parameter-binding error rather than
+        # reporting — and the new backstop's own
+        # `if ([string]::IsNullOrWhiteSpace($crBody)) { continue }` guard could
+        # never execute its empty-string half.
+        [Parameter(Mandatory)][AllowEmptyCollection()][AllowEmptyString()][string[]]$Bodies,
         [Parameter(Mandatory)][int]$Id,
         [Parameter(Mandatory)][ValidateSet('code-review', 'design-challenge', 'plan-stress-test', 'brief-review', 'post-review-observer')][string]$Surface,
         # Issue #998: what KIND of unit these bodies belong to. Needed only by
@@ -3144,8 +3151,29 @@ function Get-EmissionGap {
         # the unit is a pull request -- both of its surface lists hard-code
         # 'code-review' for the pr branch -- so it states that here instead
         # of the library guessing it back out.
+        #
+        # 'issue' and 'unspecified' are BEHAVIOURALLY IDENTICAL today — the
+        # only read of this parameter is `-eq 'pr'` (review finding M24).
+        # They are kept distinct because they mean different things to a
+        # caller: 'issue' is a site that KNOWS the unit is an issue, while
+        # 'unspecified' is a site that has not said. A future gate written
+        # against 'unspecified' must not silently also fire for issues, and
+        # collapsing the two now would make that mistake easy to make later.
         [Parameter()][ValidateSet('pr', 'issue', 'unspecified')][string]$TargetKind = 'unspecified'
     )
+
+    # #998 (review finding M23): normalize the body set ONCE, here, before any
+    # inner call. The parameter attributes above let an empty string bind to
+    # THIS function, but several helpers this function forwards -Bodies to
+    # (Get-ExternalSourceNovelSustainedCount, the brief-surface predicates)
+    # declare their own mandatory string parameters without AllowEmptyString,
+    # so an empty element still aborted the whole check on an uncatchable
+    # binding error further in. The entry point produces exactly that: it
+    # builds bodies as [string]$_.body, filtering null COMMENTS but not null
+    # BODIES, and a null body casts to ''. Dropping empties is safe because a
+    # body with no content carries no marker head, contributes nothing to
+    # either count, and is skipped by every per-body branch anyway.
+    $Bodies = @($Bodies | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 
     $totalSustained = 0
     $totalBlocks = 0
@@ -3603,14 +3631,64 @@ function Get-EmissionGap {
     # switch: that switch is documented as unimplemented pending a separate
     # decision, and flipping it would convert this from a warning into the
     # graded check #949's rejected-alternatives list rules out.
+    # WHAT COUNTS AS "A REVIEW IS RECORDED" (issue #998 review, findings M4 and
+    # M5, both sustained). The first draft asked one question -- is there a
+    # judge-rulings head anywhere -- and got both halves wrong:
+    #
+    #   * M4: it never consulted $Id, so a ruling block pasted or quoted from a
+    #     DIFFERENT pull request switched the backstop off. The brief-surface
+    #     sibling is id-scoped (Test-BriefLedgerHeadPresent -Id $Id); this was
+    #     not. An ATTRIBUTED head (`<!-- judge-rulings pr=N -->`) carries its
+    #     own number, so a mismatched one is now rejected.
+    #     RESIDUAL, STATED RATHER THAN HIDDEN: a BARE `<!-- judge-rulings -->`
+    #     head carries no number, so a bare head pasted from elsewhere still
+    #     suppresses the backstop. That direction fails OPEN (silent, like the
+    #     pre-change tree) rather than producing a false accusation, which is
+    #     the right way for a warn-only advisory to be wrong.
+    #   * M5: a judge-rulings head is not the only artifact that records a
+    #     review. A pull request carrying `<!-- review-dispositions-{Id} -->`
+    #     has had an external review ingested and dispositioned -- the CR-8
+    #     seam above PARSED it ninety lines earlier to adjust this very
+    #     surface's count -- and one carrying `<!-- review-judge-produced-{Id} -->`
+    #     carries the judge's own sentinel saying a ruling finalized. Telling a
+    #     maintainer "nothing here was examined" about either is a false
+    #     statement in the instrument's primary output. Routes whose adapters
+    #     declare no judge stage at all (`proxy-github`, `post-fix`) reach the
+    #     backstop through exactly these artifacts.
     if ($Surface -eq 'code-review' -and $TargetKind -eq 'pr') {
         $sawAnyCodeReviewHead = $false
         foreach ($crBody in $Bodies) {
             if ([string]::IsNullOrWhiteSpace($crBody)) { continue }
-            # The SAME vocab-gated scan Test-EmissionMarkerPresent and
-            # Get-JudgeRulingsSustainedCountInternal use, so "a real head" here
-            # cannot drift from what it means everywhere else in this file.
-            if ((Get-RealJudgeRulingsHeadMatches -Body $crBody).Count -gt 0) {
+
+            # (a) A judge-rulings head. The SAME vocab-gated scan
+            #     Test-EmissionMarkerPresent and
+            #     Get-JudgeRulingsSustainedCountInternal use, so "a real head"
+            #     cannot drift from what it means elsewhere in this file.
+            foreach ($headMatch in (Get-RealJudgeRulingsHeadMatches -Body $crBody)) {
+                $attributed = [regex]::Match(
+                    $crBody.Substring($headMatch.Index),
+                    '\G[ \t]*<!--\s*judge-rulings\s+pr=(?<n>\d+)\s*-->')
+                if ($attributed.Success) {
+                    # Attributed: honour it only when it names THIS pull request.
+                    if ([int]$attributed.Groups['n'].Value -eq $Id) { $sawAnyCodeReviewHead = $true }
+                }
+                else {
+                    # Bare: unattributable, so it counts. See the residual above.
+                    $sawAnyCodeReviewHead = $true
+                }
+                if ($sawAnyCodeReviewHead) { break }
+            }
+            if ($sawAnyCodeReviewHead) { break }
+
+            # (b) An id-scoped review-dispositions head -- an ingested and
+            #     dispositioned external review.
+            if (Test-ReviewDispositionsHeadPresent -Body $crBody -ExpectedNumber $Id) {
+                $sawAnyCodeReviewHead = $true
+                break
+            }
+
+            # (c) The judge's own id-keyed sentinel.
+            if ($crBody -match ('(?m)^[ \t]*<!--\s*review-judge-produced-' + [regex]::Escape([string]$Id) + '\s*-->')) {
                 $sawAnyCodeReviewHead = $true
                 break
             }
@@ -3738,14 +3816,21 @@ function Get-EmissionGap {
     else {
         # M8 fix (issue #811 post-fix adversarial pass): this branch is
         # defensive and, as of the current code path, unreachable in
-        # practice. $anyCouldNotVerify is only ever set to $true at the one
-        # site above (inside `if ($bodyHasMarker)`, immediately after
-        # Get-SustainedFindingCount returns 'could-not-verify'), and that
-        # same site always also sets exactly one of $sawRealHeadCorrupt /
+        # practice.
+        #
+        # CORRECTED BY #998 (review finding M19). This comment used to say
+        # $anyCouldNotVerify "is only ever set to $true at the one site
+        # above". That was already false and #998 made it further so: there
+        # are now SEVERAL sites, and the rule that keeps this branch
+        # unreachable is not "one site" but an invariant every site must
+        # honour — **each site that sets $anyCouldNotVerify must also set a
+        # flag that a preceding `elseif` in this ladder tests.** The
+        # judge-rulings sites set exactly one of $sawRealHeadCorrupt /
         # $sawDecoyAmbiguous / $sawFallbackFired based on $hasRealHead (and,
         # when $hasRealHead is true, on the Get-JudgeRulingsDuplicateDiagnosis
-        # verdict) — so by the time this `else` is reached, at least one of
-        # the three preceding `elseif` branches has already matched. (The
+        # verdict); the brief seam sets its own flags; #998's code-review
+        # backstop sets $sawNoCodeReviewHead. That is the invariant to check
+        # when adding the next one — counting sites is not. (The
         # previously cited "empty-body AllowEmptyString could-not-verify"
         # example cannot occur here: Test-EmissionMarkerPresent returns
         # $false for whitespace/empty bodies, so $bodyHasMarker gates such a
