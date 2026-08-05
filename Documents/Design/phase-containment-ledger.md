@@ -198,6 +198,63 @@ Issue #878 (parent #761) closed a doc/parser shape mismatch that had been silent
 - **Issue #885** tracks the remaining marker-reader anchoring sites the step-6 inventory identified but this issue did not close, plus `review-judgment`'s PR-surface routing and the deferred prose-mention detector. #885 stays open independently of this issue's lifecycle.
 - **Issue #886** tracks the process gap F1 exposed — an adversarial-review checklist addition for sibling write-path guarantee parity — as a systemic follow-up under umbrella #761, not a #878 code fix.
 
+## Issue #944: Emitted-but-Unreadable Regions
+
+The third distinct failure of this same instrument, after #782 (emission never happened) and #811 (the check could not parse a surface). This one is emission that happened and does not parse — and, unlike both predecessors, produced **no signal of any kind**.
+
+### The shape, and why it was silent rather than warned
+
+A region hand-authored as
+
+```text
+<!-- phase-containment-{ID}
+...entries...
+-->
+```
+
+is a syntactically valid multi-line HTML comment. GitHub renders nothing and no human notices. `Get-PhaseContainmentBlock` matches only the self-closed `<!-- phase-containment-{ID} -->` by exact ordinal `IndexOf`, so that head never matched — and the parser's malformed-block warnings are reachable **only after an open tag has matched**. Not parsed, not counted, not warned.
+
+**Extent: 31 regions carrying 63 entries, across nine comments on seven issues/PRs** (#471, #784, #810, #853, #880, #884, #937). Five of the seven had *total* loss: no phase-containment entry had ever parsed on them. The filing's own title said "7 of 10 on PR #937"; grounding before the brief was authored corrected the single-PR framing, and #937 turned out to be the smallest non-trivial case rather than the only one.
+
+**13 of the 63 carry critical or high severity** — 1 critical and 12 high, spread across `plan-stress-test` (1c/5h), `design-challenge` (5h), `code-review` (1h) and `post-review-observer` (1h). Relaxation eligibility is vetoed by the *presence* of any critical or high finding in a stage's window, so those thirteen were absent from the severity arm on all four stages at once.
+
+### Both advisory surfaces were blind, in different ways
+
+The emission-gap check called the reader without `-SkippedCount` at all, so malformed and absent were literally the same observation. The escape-rate report threads `-SkippedCount` and renders distinguishing states — but the counter only incremented after an open-tag match, so a malformed region fell through to the branch that prints `WITHHELD (denominator=0) — N of M bodies matched; none carried a phase-containment block`. That sentence was affirmatively false over bodies carrying sixty-three of them.
+
+The advisory that *did* fire on PR #937 was also wrong in the reassuring direction: `code-review #937: GAP -- sustained=3 blocks=0 missing=3`, where seven entries were lost, under a summary line reading `Sustained counted: 3 | Blocks matched: 3` that scans as balanced. A maintainer who actioned it would have restored three of seven and believed the corpus whole.
+
+### What shipped
+
+- **The distinction lives at the shared reader layer**, which both advisories call, rather than in either one's rendering. A `$null` return with `SkippedCount` 0 means genuinely absent; with `SkippedCount > 0` it means present and unreadable. Two new optional counters report the loss at **entry grain** (`-UnreadableEntryCount`) beside region grain (`-MalformedRegionCount`) — one region carrying seven entries is exactly what made the live advisory understate by a factor of two.
+- **Markdown code spans are deliberately NOT gated**, and PR #810 is why. Its two lost regions sit inside ` ```yaml ` fences and are the judge's real emission, carrying lawful `finding_key`s. The pairing loop matches by ordinal `IndexOf` and has never cared about fences, so a *well-formed* tag inside a fence is read as structure today; gating only the malformed half would make the reader count a fenced block while staying silent about a fenced region it lost. The block-scalar gate (the #863 M6 forgery class) still applies. An earlier revision of this fix did exclude code spans, and went silent on exactly those two regions — the sweep caught it.
+- **`Get-EmissionGap` promotes an unreadable region to `could-not-verify`** under a new *shared* (not brief-only) reason `block-unreadable`, ranked above `head-corrupt`: the two send a maintainer to different files, and reporting an unreadable region as a corrupt head would send them to inspect a head that is fine while the region that is not stays unread. The counts are still returned, qualified rather than suppressed.
+- **The corpus is repaired.** All 63 entries are readable. Every sequence-shaped region was **split, one paired block per entry** — a bare terminator repair would have been unsafe, since the parser builds one flat mapping per block with no YAML-sequence handling, so #937's seven and #784's thirteen and fifteen would each have collapsed into a single last-wins entry with a null key. That trades a silent truncation for a silent invalid-entry drop, which is worse: the advisory then looks satisfied. PR #937's seven carried `finding_id`, not a schema field, so keys were **re-derived** from that PR's own disposition table (842-D5) as `code-review:937:post-fix-prosecution:M1..M7`, checked against 2,478 enumerated corpus keys for collisions — dedup keys strictly on `finding_key` and overwrites silently, so a collision would have preserved the entry count while destroying an entry.
+- **An unattended guard** (`.github/workflows/phase-containment-region-guard.yml`) fires on the **comment event itself**, because every one of the 63 entries was hand-authored straight into a GitHub comment and a repository-file check would have caught none of them. It replies in the thread while the author is still there, and is warn-only by construction: a GitHub comment cannot be gated, so it reports and exits 0. Its three rules are semantic rather than syntactic — a numeric id only (a `{ID}` placeholder is documentation, and no reader would match it), at least one recognizable entry (a marker head followed by prose is discussion), and outside a YAML block scalar. That bounds the false-positive direction without the fence exemption that would have recreated #810's blind spot.
+
+### What the repair moved, and one thing it did not
+
+Against a pinned pre-change baseline (`aae29ac`) and a 90-day window containing all seven affected issues (the oldest, #471, closed 35 days before the run):
+
+| | before | after | delta |
+| --- | --- | --- | --- |
+| Total entries processed | 2164 | 2227 | **+63** |
+| `plan-stress-test` veto counts | 12 critical, 158 high | 13 critical, 162 high | +1c, +4h |
+| — of which `plan-stress-test` | 11c, 105h | 12c, 109h | +1c, +4h |
+| `design-challenge` denominator | 905 | 918 | +13 |
+| `plan-stress-test` denominator | 551 | 575 | +24 |
+| `code-review` denominator | 451 | 474 | +23 |
+
+The entry delta is exactly the recovered population, and the veto delta is exactly the five recovered critical/high findings whose `catchable_phase` is `plan`.
+
+**Stated plainly, because the criterion's own wording invites a stronger claim than the data supports:** no stage flipped from `ELIGIBLE` to vetoed. All three were already `NOT ELIGIBLE` before the repair — two on escape rate, one on severity — so "a stage carrying a critical or high finding reports as vetoed" was already true of the untouched corpus. What the repair changed is the *contents* of the veto and the attribution beneath it, not any verdict. The remaining eight recovered critical/high findings land in the `design-challenge` and `code-review` rows, which render `NOT ELIGIBLE (escape_rate > 0)` — a branch that prints no severity counts at all, so their arrival is invisible on that line. That is the wider render gap already recorded on **#987**, not something this repair introduced or closes.
+
+### What was deliberately not done
+
+- **The advisory-actionability question is deferred to #761.** The filing asked what makes a warn-only advisory actionable when the reader has already moved on. That is review-intensity governance, outside this issue's affirmed boundary. The unattended trigger is *mechanism*; adding automation does not answer what a human should do when it fires.
+- **The report's render was not re-plumbed to entry grain.** `InvalidEntryCount` reaches the escape-rate render through five aggregation layers and a cache payload, and it is a *drop* count by contract. Malformed regions now increment it, so the report renders `INVALID-EMPTY` instead of the false "none carried a phase-containment block" — the distinction both surfaces were owed. The entry-grain figure is available at the reader layer and on `Get-EmissionGap`, which is where the count that answers "how much was lost" is reported. Threading a second counter through all five layers plus the cache is a coupled-field migration whose half-done state is invisible at count grain; it was judged not worth that risk for a number already reported where it is read.
+- **18 pre-existing duplicate `finding_key`s on issue #901** were observed while enumerating the corpus for the collision check. They are not part of this defect class and were not touched; recorded here so the next reader of that number knows it was seen rather than missed.
+
 ## Metric Definitions and Scope Boundary
 
 The ledger measures, per review stage, over a rolling window:
