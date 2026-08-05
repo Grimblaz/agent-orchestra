@@ -112,6 +112,60 @@ Describe 'Completion account reader (#998 AC2, AC15)' {
             $r.AssertionCount | Should -BeGreaterThan 1
         }
 
+        It 'does NOT treat two SAME-POLARITY YAML 1.1 synonyms as a conflict (review L3)' {
+            # `true` and `yes` both mean "ran". Before the fix, distinctness
+            # was computed over the RAW tokens, so this misreported as
+            # duplicate-assertion (ReviewRan=False) even though the account
+            # asserts the same polarity twice.
+            $r = Read-CompletionAccount -Text "adversarial_review_ran: true`nadversarial_review_ran: yes"
+            $r.Verdict | Should -BeExactly 'ran'
+            $r.ReviewRan | Should -BeTrue
+        }
+
+        It 'still reports a genuine truthy+falsy mix as duplicate-assertion after canonicalization (review L3)' {
+            $r = Read-CompletionAccount -Text "adversarial_review_ran: yes`nadversarial_review_ran: no"
+            $r.Verdict | Should -BeExactly 'duplicate-assertion'
+            $r.ReviewRan | Should -BeFalse
+        }
+
+        It 'does not silently swallow an unrecognized value mixed with a recognized one (review L3)' {
+            # Canonicalization must not fold a recognized token and an
+            # unrecognized token into apparent agreement -- value-unrecognized
+            # detection has to survive the mix.
+            $r = Read-CompletionAccount -Text "adversarial_review_ran: true`nadversarial_review_ran: probably"
+            $r.Verdict | Should -BeExactly 'duplicate-assertion'
+        }
+
+        It 'reports AssertionValue as the raw token WRITTEN, not the canonicalized bucket (PF3, review second pass)' {
+            # Before the fix, canonicalization fed AssertionValue too, so an
+            # account writing `yes` reported AssertionValue: true -- not what
+            # the account actually said.
+            $r = Read-CompletionAccount -Text 'adversarial_review_ran: yes'
+            $r.Verdict | Should -BeExactly 'ran'
+            $r.AssertionValue | Should -BeExactly 'yes'
+
+            $r2 = Read-CompletionAccount -Text 'adversarial_review_ran: no'
+            $r2.Verdict | Should -BeExactly 'declared-not-run'
+            $r2.AssertionValue | Should -BeExactly 'no'
+        }
+
+        It 'names the ACTUAL written tokens in the duplicate-assertion warning, not canonical ones (PF4, review second pass)' {
+            # Before the fix, an account writing yes/no got a warning saying
+            # "assertions (false, true)" -- neither of which the account
+            # contains. Isolated to the SPECIFIC "disagreeing" warning
+            # (rather than all warnings joined) so an unrelated warning's
+            # incidental "No author..." text cannot make this pass for the
+            # wrong reason.
+            $r = Read-CompletionAccount -Text "adversarial_review_ran: yes`nadversarial_review_ran: no"
+            $r.Verdict | Should -BeExactly 'duplicate-assertion'
+            $conflictWarning = @($r.Warnings | Where-Object { $_ -match 'disagreeing' })[0]
+            $conflictWarning | Should -Not -BeNullOrEmpty
+            $conflictWarning | Should -Match '\byes\b'
+            $conflictWarning | Should -Match '\bno\b'
+            $conflictWarning | Should -Not -Match '\btrue\b'
+            $conflictWarning | Should -Not -Match '\bfalse\b'
+        }
+
         It 'reads the assertion inside a bullet or blockquote, since payload format is the run''s choice' {
             (Read-CompletionAccount -Text '- adversarial_review_ran: true').Verdict | Should -BeExactly 'ran'
             (Read-CompletionAccount -Text '> adversarial_review_ran: true').Verdict | Should -BeExactly 'ran'
@@ -255,6 +309,75 @@ Describe 'Completion account reader (#998 AC2, AC15)' {
             $g.ReviewRan | Should -BeFalse
         }
 
+        It 'does not select a comment that merely MENTIONS the marker mid-line (review L1)' {
+            # Unanchored substring matching let a comment that discusses the
+            # marker inline -- not at a line start -- read as a candidate.
+            # The anchor requires the marker to open a line; prose text
+            # before it on the same line breaks that.
+            $comments = @(
+                [pscustomobject]@{ id = 1; body = "I already posted the account: <!-- completion-account-998 --> see above.`nadversarial_review_ran: false"; user = [pscustomobject]@{ login = 'mentioner' } }
+            )
+            $g = Get-CompletionAccountFromComments -Comments $comments -Id 998
+            $g.Found | Should -BeFalse -Because 'a mid-line mention of the marker is not a candidate'
+        }
+
+        It 'does not select a comment where the marker is on LINE 3, not line 1 (PF1, review second pass)' {
+            # A `(?m)^` anchor with no first-line restriction matches the
+            # start of EVERY line, so a marker several lines down still read
+            # as a candidate under the prior fix -- the exact shadowing
+            # defect PF1 exists to close.
+            $comments = @(
+                [pscustomobject]@{ id = 1; body = "Some preamble.`nMore preamble.`n<!-- completion-account-998 -->`nadversarial_review_ran: true"; user = [pscustomobject]@{ login = 'someone' } }
+            )
+            $g = Get-CompletionAccountFromComments -Comments $comments -Id 998
+            $g.Found | Should -BeFalse -Because 'the marker must be the FIRST line, not merely present somewhere in the body'
+        }
+
+        It 'does not select a comment where the marker is INDENTED on line 1 (PF1, review second pass)' {
+            $comments = @(
+                [pscustomobject]@{ id = 1; body = "  <!-- completion-account-998 -->`nadversarial_review_ran: true"; user = [pscustomobject]@{ login = 'someone' } }
+            )
+            $g = Get-CompletionAccountFromComments -Comments $comments -Id 998
+            $g.Found | Should -BeFalse -Because 'leading whitespace on line 1 disqualifies a candidate under the line-1-exact anchor'
+        }
+
+        It 'does not select a comment where the marker sits inside a FENCED code block (PF1, review second pass)' {
+            $comments = @(
+                [pscustomobject]@{ id = 1; body = "``````text`n<!-- completion-account-998 -->`n``````"; user = [pscustomobject]@{ login = 'someone' } }
+            )
+            $g = Get-CompletionAccountFromComments -Comments $comments -Id 998
+            $g.Found | Should -BeFalse -Because 'the fence opener is line 1, not the marker; a fenced example must not read as a live account'
+        }
+
+        It 'does not let a GitHub "Quote reply" shadow the real account (review L1)' {
+            # Every line of a quote reply is prefixed `> `, including the
+            # marker line. Before the fix this quote-reply's substring match
+            # made it a candidate, and being the newest (highest id), it
+            # outranked and shadowed the honest account -- flipping the read
+            # from true to false.
+            $comments = @(
+                [pscustomobject]@{ id = 1; body = "<!-- completion-account-998 -->`nadversarial_review_ran: true`nBaseline abc1234, 0 added failures."; user = [pscustomobject]@{ login = 'Grimblaz' } },
+                [pscustomobject]@{ id = 2; body = "> <!-- completion-account-998 -->`n> adversarial_review_ran: true`n> Baseline abc1234, 0 added failures.`n`nadversarial_review_ran: false"; user = [pscustomobject]@{ login = 'quoter' } }
+            )
+            $g = Get-CompletionAccountFromComments -Comments $comments -Id 998
+            $g.Found | Should -BeTrue
+            $g.CommentId | Should -Be 1 -Because 'the quote-reply''s marker line is `> `-prefixed and must not match the line-start anchor'
+            $g.CandidateCount | Should -Be 1
+            $g.Verdict | Should -BeExactly 'ran'
+        }
+
+        It 'does not throw when Comments is $null (review L7)' {
+            # `gh issue view --json comments --jq ''.comments''` on a
+            # zero-comment issue emits `[]`, which ConvertFrom-Json returns as
+            # $null. Before the fix, a $null argument to this Mandatory
+            # parameter failed parameter BINDING and threw instead of
+            # reaching the advertised Found=$false path.
+            { Get-CompletionAccountFromComments -Comments $null -Id 998 } | Should -Not -Throw
+            $g = Get-CompletionAccountFromComments -Comments $null -Id 998
+            $g.Found | Should -BeFalse
+            $g.ReviewRan | Should -BeFalse
+        }
+
         It 'carries the comment author through, because a shape-recognised record does not authenticate itself' {
             $g = Get-CompletionAccountFromComments -Comments @(
                 [pscustomobject]@{ id = 7; body = "<!-- completion-account-998 -->`nadversarial_review_ran: true"; user = [pscustomobject]@{ login = 'Grimblaz' } }) -Id 998
@@ -276,6 +399,79 @@ Describe 'Completion account reader (#998 AC2, AC15)' {
                 [pscustomobject]@{ id = 2; body = "<!-- completion-account-998 -->`nadversarial_review_ran: false"; user = [pscustomobject]@{ login = 'Grimblaz' } }) -Id 998
             $g.CandidateCount | Should -Be 2
             ($g.Warnings -join ' ') | Should -Match 'planted'
+        }
+
+        It 'selects the highest comment ID, not the last array element (review PF-D1)' {
+            # The prior selection took $candidates[-1], encoding an unchecked
+            # assumption that the caller's fetch returns ascending ids. Here
+            # the array order is DELIBERATELY reversed against id order: if
+            # selection is positional it picks the planted id-100 record and
+            # reports 'declared-not-run'; if it sorts by id it picks the run's
+            # own id-900 record and reports 'ran'.
+            $g = Get-CompletionAccountFromComments -Comments @(
+                [pscustomobject]@{ id = 900; body = "<!-- completion-account-998 -->`nadversarial_review_ran: true";  user = [pscustomobject]@{ login = 'Grimblaz' } },
+                [pscustomobject]@{ id = 100; body = "<!-- completion-account-998 -->`nadversarial_review_ran: false"; user = [pscustomobject]@{ login = 'planter'  } }) -Id 998
+
+            $g.CommentId | Should -Be 900 -Because 'the newest comment is the highest id, whatever order the fetch returned them in'
+            $g.Verdict | Should -BeExactly 'ran'
+            $g.PostedBy | Should -BeExactly 'Grimblaz'
+        }
+
+        It 'compares ids numerically, not as strings (review PF-D1)' {
+            # A lexicographic comparison would rank '99' above '100'. GitHub
+            # comment ids also exceed [int], hence [long] in the implementation.
+            $g = Get-CompletionAccountFromComments -Comments @(
+                [pscustomobject]@{ id = 5186569899; body = "<!-- completion-account-998 -->`nadversarial_review_ran: true";  user = [pscustomobject]@{ login = 'Grimblaz' } },
+                [pscustomobject]@{ id = 999999999;  body = "<!-- completion-account-998 -->`nadversarial_review_ran: false"; user = [pscustomobject]@{ login = 'planter'  } }) -Id 998
+
+            $g.CommentId | Should -Be 5186569899
+            $g.Verdict | Should -BeExactly 'ran'
+        }
+
+        It 'falls back to caller order when any candidate lacks a usable id (review PF-D1)' {
+            # Deliberate degradation: a partial sort would look authoritative
+            # while being arbitrary. Assert the fallback is reached without
+            # throwing and still returns a usable verdict.
+            { Get-CompletionAccountFromComments -Comments @(
+                    [pscustomobject]@{ body = "<!-- completion-account-998 -->`nadversarial_review_ran: true" },
+                    [pscustomobject]@{ id = 900; body = "<!-- completion-account-998 -->`nadversarial_review_ran: false" }) -Id 998 } |
+                Should -Not -Throw
+
+            $g = Get-CompletionAccountFromComments -Comments @(
+                [pscustomobject]@{ body = "<!-- completion-account-998 -->`nadversarial_review_ran: true" },
+                [pscustomobject]@{ id = 900; body = "<!-- completion-account-998 -->`nadversarial_review_ran: false" }) -Id 998
+            $g.CandidateCount | Should -Be 2
+            $g.Verdict | Should -BeExactly 'declared-not-run' -Because 'caller order is preserved when ids are unusable'
+        }
+    }
+
+    Context 'unreadable values are not reported as disagreements (#998 review PF-D2, PF-D3)' {
+
+        It 'reports two DIFFERENT unrecognized values as value-unrecognized, not duplicate-assertion (PF-D2)' {
+            # Neither token carries a polarity, so there is nothing to
+            # disagree about. Calling it a disagreement sends the maintainer
+            # to reconcile a contradiction that does not exist, when the real
+            # edit is that no value is readable.
+            $r = Read-CompletionAccount -Text "adversarial_review_ran: probably`nadversarial_review_ran: maybe"
+            $r.Verdict | Should -BeExactly 'value-unrecognized'
+            $r.ReviewRan | Should -BeFalse
+            ($r.Warnings -join ' ') | Should -Match 'no value is a recognized polarity'
+        }
+
+        It 'still reports a recognized value mixed with an unrecognized one as a conflict (PF-D2 boundary)' {
+            # The deliberate NON-change: a readable polarity contradicted by
+            # an unreadable token genuinely cannot be trusted.
+            (Read-CompletionAccount -Text "adversarial_review_ran: true`nadversarial_review_ran: probably").Verdict |
+                Should -BeExactly 'duplicate-assertion'
+        }
+
+        It 'names the empty-after-trim case instead of quoting an empty token (PF-D3)' {
+            # `***` is consumed entirely by the punctuation trim, leaving ''.
+            # The prior message read "its value '' is neither polarity".
+            $r = Read-CompletionAccount -Text 'adversarial_review_ran: ***'
+            $r.Verdict | Should -BeExactly 'value-unrecognized'
+            ($r.Warnings -join ' ') | Should -Match 'empty after trimming'
+            ($r.Warnings -join ' ') | Should -Not -Match "value '' is neither polarity" -Because 'quoting an empty token tells a maintainer nothing about what to edit'
         }
     }
 

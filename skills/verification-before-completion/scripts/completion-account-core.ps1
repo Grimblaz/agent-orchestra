@@ -199,6 +199,56 @@ function script:Get-CAReadableText {
     return $sb.ToString()
 }
 
+function script:Test-CACommentIsAccount {
+    <#
+    .SYNOPSIS
+        True iff Body's first line -- LF-normalized, trailing whitespace
+        stripped -- is EXACTLY Marker, byte-for-byte. The line-1-exact
+        anchor PF1 requires (issue #998 second review).
+    .DESCRIPTION
+        Deliberately TrimEnd, not Trim: leading whitespace on line 1 is
+        SIGNIFICANT and disqualifies a candidate. An indented marker is one
+        of PF1's explicit non-matches -- a full `.Trim()` (the judge's
+        illustrative snippet, taken literally) would strip that indentation
+        away and let an indented marker match, silently reopening the class
+        of defect this anchor exists to close. Trailing whitespace is
+        immaterial to which line-1 payload was posted, so it alone is
+        stripped, the same asymmetry Get-MarkerWholeLinePattern's own
+        `\s*$` (marker-transport-core.ps1) applies at end-of-line.
+
+        Deliberately [System.StringComparison]::Ordinal, not PowerShell's
+        default `-eq`: `-eq` on strings is CULTURE-AWARE linguistic
+        comparison, which was verified empirically to (a) ignore case and
+        (b) treat a leading BOM (U+FEFF) or ZWSP (U+200B) as ignorable, so a
+        BOM/ZWSP-prefixed marker line matched under `-eq` even though the
+        write primitive's own finder (Get-MarkerWholeLinePattern's regex
+        `\s`, which excludes those two Unicode "format" characters) does
+        not. Ordinal comparison removes both surprises and keeps this
+        reader's accept set a subset of, not wider than, the write
+        primitive's -- the same parity property PF1 exists to establish for
+        trailing content. This resolves PF6: a BOM/ZWSP-prefixed marker
+        reads as not-a-candidate here, matching the write primitive.
+        Widening either side to catch `\p{Cf}` format characters as
+        equivalent to whitespace was tried and reverted in this
+        repository's marker-write primitive (persist-marker-core.ps1, lines
+        681-696) for causing false-duplicate matches; this file does not
+        reopen that class of fix.
+    .OUTPUTS
+        [bool]
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Body,
+        [Parameter(Mandatory)][string]$Marker
+    )
+
+    if ([string]::IsNullOrEmpty($Body)) { return $false }
+
+    $lf = $Body -replace "`r`n", "`n" -replace "`r", "`n"
+    $lines = $lf -split "`n"
+    return $lines.Count -gt 0 -and
+        [string]::Equals($lines[0].TrimEnd(), $Marker, [System.StringComparison]::Ordinal)
+}
+
 function Read-CompletionAccount {
     <#
     .SYNOPSIS
@@ -283,12 +333,39 @@ function Read-CompletionAccount {
         # prose with a full stop -- is consistent, and reporting it as a
         # conflict would train a reader to ignore the conflict verdict for the
         # case that matters (M27).
+        #
+        # PF3/PF4 (issue #998 second review): $rawValues is what the account
+        # actually WROTE and is the only collection AssertionValue and the
+        # duplicate-assertion warning may report from. $canonicalValues below
+        # buckets to 'true'/'false' polarity and drives the conflict/verdict
+        # DECISION only -- it must never leak into reported text, or an
+        # account that wrote `yes` reports AssertionValue: true, and a
+        # genuine yes/no conflict gets told its assertions are "(false,
+        # true)", neither of which the account contains.
         $rawValues = @(
             $matchesFound | ForEach-Object {
                 $_.Groups['value'].Value.Trim().Trim('"', "'", ',', '.', ';', '*', '`').ToLowerInvariant()
             }
         )
-        $distinctValues = @($rawValues | Where-Object { $_ -ne '' } | Sort-Object -Unique)
+        $distinctRawValues = @($rawValues | Where-Object { $_ -ne '' } | Sort-Object -Unique)
+
+        # Canonicalize to POLARITY before computing distinctness for the
+        # conflict check: two same-polarity YAML 1.1 synonyms (`true` and
+        # `yes`) already mean the same thing, and comparing raw tokens
+        # reported that agreement as a conflict. An unrecognized token has no
+        # polarity bucket, so it passes through unchanged -- a recognized
+        # value mixed with an unrecognized one still yields two distinct
+        # canonical tokens and still reports as a conflict, which keeps
+        # value-unrecognized detection from being silently swallowed by this
+        # normalization.
+        $canonicalValues = @(
+            $rawValues | Where-Object { $_ -ne '' } | ForEach-Object {
+                if ($script:CompletionAccountTruthy -contains $_) { 'true' }
+                elseif ($script:CompletionAccountFalsy -contains $_) { 'false' }
+                else { $_ }
+            }
+        )
+        $distinctValues = @($canonicalValues | Sort-Object -Unique)
 
         # M14: a suite word alone is not a suite statement. Evaluated per line
         # so a label on one line and a number three paragraphs away do not
@@ -303,21 +380,72 @@ function Read-CompletionAccount {
         }
 
         $assertionPresent = $matchesFound.Count -gt 0
-        $assertionValue = if ($distinctValues.Count -eq 1) { $distinctValues[0] } else { $null }
+
+        # PF3: report what was WRITTEN. The common case is one raw spelling,
+        # reported as-is. The rare case is multiple raw spellings that agree
+        # on one polarity (`true` restated `yes`) -- there report the most
+        # recently asserted raw token, consistent with this reader's
+        # newest-wins handling elsewhere (Get-CompletionAccountFromComments'
+        # candidate selection). A genuine conflict ($distinctValues.Count -gt
+        # 1) reports $null here, same as before the fix; the duplicate
+        # warning below is what names the actual values in that case.
+        $assertionValue =
+            if ($distinctValues.Count -ne 1) { $null }
+            elseif ($distinctRawValues.Count -eq 1) { $distinctRawValues[0] }
+            else { $rawValues[-1] }
+
+        # The verdict DECISION stays on the canonical bucket, never the raw
+        # form -- an account writing `yes` must land on the same branch as
+        # one writing `true`.
+        $canonicalAssertionValue = if ($distinctValues.Count -eq 1) { $distinctValues[0] } else { $null }
 
         $verdict =
             if (-not $assertionPresent) {
                 $warnings.Add('The account carries no live `adversarial_review_ran` assertion. An account omitting the field -- or carrying it only inside a fenced example, a block scalar, or an HTML comment -- reads as NOT RUN, never as examined-and-clean.')
                 'unasserted'
             }
+            elseif ($distinctValues.Count -eq 0) {
+                # PF-D3 (issue #998 second review): every asserted value
+                # trimmed to empty -- e.g. `adversarial_review_ran: ***`,
+                # where the punctuation trim consumes the whole token. Both
+                # value collections filter '' out, so distinctness is 0 and
+                # the field falls through to the unrecognized branch below,
+                # which then renders "its value '' is neither polarity" --
+                # a message quoting an empty token, which tells a maintainer
+                # nothing about what to edit. Named explicitly instead.
+                $warnings.Add('The `adversarial_review_ran` assertion is present but its value is empty after trimming (the written token was punctuation or quoting only). The field is there with nothing in it.')
+                'value-unrecognized'
+            }
+            elseif ($distinctValues.Count -gt 1 -and
+                    -not ($distinctValues | Where-Object {
+                            $script:CompletionAccountTruthy -contains $_ -or
+                            $script:CompletionAccountFalsy -contains $_ })) {
+                # PF-D2 (issue #998 second review): two or more values, NONE
+                # of which carries a polarity -- e.g. `probably` and `maybe`.
+                # Reporting that as `duplicate-assertion` ("two or more
+                # assertions disagree") is wrong twice over: neither value is
+                # readable enough to disagree with anything, and it sends the
+                # maintainer to reconcile a contradiction that does not exist
+                # when the real edit is that no value is readable at all.
+                # A MIXED case (one recognized, one not) is deliberately NOT
+                # routed here -- it stays a conflict below, because a readable
+                # polarity contradicted by an unreadable token genuinely
+                # cannot be trusted, and a committed fixture pins that.
+                $warnings.Add("The ``adversarial_review_ran`` assertion is present $($distinctRawValues.Count) times and no value is a recognized polarity ($($distinctRawValues -join ', ')). The field is there and unreadable -- this is a different edit from a disagreement.")
+                'value-unrecognized'
+            }
             elseif ($distinctValues.Count -gt 1) {
-                $warnings.Add("The account carries disagreeing ``adversarial_review_ran`` assertions ($($distinctValues -join ', ')). No statement either makes can be trusted; resolve to one before reading the account.")
+                # PF4: name what the account actually WROTE, not the
+                # canonical bucket -- an account writing yes/no must not be
+                # told its assertions are "(false, true)", neither of which
+                # it contains.
+                $warnings.Add("The account carries disagreeing ``adversarial_review_ran`` assertions ($($distinctRawValues -join ', ')). No statement either makes can be trusted; resolve to one before reading the account.")
                 'duplicate-assertion'
             }
-            elseif ($script:CompletionAccountTruthy -contains $assertionValue) {
+            elseif ($script:CompletionAccountTruthy -contains $canonicalAssertionValue) {
                 'ran'
             }
-            elseif ($script:CompletionAccountFalsy -contains $assertionValue) {
+            elseif ($script:CompletionAccountFalsy -contains $canonicalAssertionValue) {
                 $warnings.Add('The account asserts that no adversarial review ran. The run has not met property 1: no review is accounted for.')
                 'declared-not-run'
             }
@@ -388,6 +516,12 @@ function Get-CompletionAccountFromComments {
         otherwise be the one a reader retrieves and the one the run PATCHes.
         Disclosure is the settled mitigation, so both the winner's author and
         the collision are surfaced rather than silently resolved.
+
+        "Newest" means HIGHEST COMMENT ID, resolved by an explicit numeric
+        sort -- not by trusting the order the caller's fetch happened to
+        return (PF-D1). When any candidate lacks a parseable id the set is
+        left in caller order, and that degradation is deliberate: a partial
+        sort would look authoritative while being arbitrary.
     .PARAMETER Comments
         Objects carrying at least `body`; `user.login` (or `author.login`) and
         `id` are used when present. The shape `gh issue view --json comments`
@@ -402,16 +536,43 @@ function Get-CompletionAccountFromComments {
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Comments,
+        # `gh issue view --json comments --jq '.comments'` on a zero-comment
+        # issue emits `[]`, which `ConvertFrom-Json` returns as $null rather
+        # than an empty array -- a well-known PowerShell behavior.
+        # [AllowNull()] is the REAL fix: without it, a $null argument fails
+        # parameter BINDING before this body ever runs, throwing instead of
+        # reaching the Found=$false path this function already advertises in
+        # .OUTPUTS for the no-comments case. No body-level guard is needed --
+        # `$Comments | Where-Object { $null -ne $_ -and ... }` below already
+        # filters a $null pipeline input down to zero candidates on its own
+        # (PF7, issue #998 second review).
+        [Parameter(Mandatory)][AllowNull()][AllowEmptyCollection()][object[]]$Comments,
         [Parameter(Mandatory)][int]$Id
     )
 
     $marker = "<!-- completion-account-$Id -->"
+    # PF1 (issue #998 second review): a comment is selected iff its FIRST
+    # LINE, after LF-normalization and with trailing whitespace stripped, is
+    # EXACTLY the marker -- matching the marker-write primitive's own line-1
+    # payload hygiene contract ("The marker must be the body's first line",
+    # this skill's own SKILL.md). Leading whitespace on that line is left
+    # alone and disqualifies a match (see Test-CACommentIsAccount). This is
+    # deliberately NOT a multiline anchor: the prior fix's
+    # `(?m)^\s*Escape(marker)` let `^` match the start of EVERY line, so a
+    # marker on line 3, an indented marker, or a marker inside a fenced code
+    # block still read as a candidate -- the exact shadowing defect this
+    # anchor exists to close. It also had no trailing anchor, so it accepted
+    # a marker with trailing content on line 1 that Get-MarkerWholeLinePattern
+    # (marker-transport-core.ps1, the write primitive's own finder) would
+    # reject -- meaning this reader could select a comment the write
+    # primitive could not itself locate. Line-1-exact closes both gaps at
+    # once: nothing past line 1 can match, and nothing on line 1 but the bare
+    # marker (give or take trailing whitespace) can match either.
     $candidates = @(
         $Comments | Where-Object {
             $null -ne $_ -and
             $_.PSObject.Properties.Match('body').Count -gt 0 -and
-            ([string]$_.body) -like "*$marker*"
+            (script:Test-CACommentIsAccount -Body ([string]$_.body) -Marker $marker)
         }
     )
 
@@ -423,7 +584,35 @@ function Get-CompletionAccountFromComments {
             Add-Member -NotePropertyName CommentId -NotePropertyValue $null -PassThru
     }
 
-    $chosen = $candidates[-1]
+    # PF-D1 (issue #998 second review): select the newest by COMMENT ID, not
+    # by array position. The prior `$candidates[-1]` encoded an unchecked
+    # assumption that `gh` returns comments in ascending id order, and stated
+    # it in a comment as though it were guaranteed. It is not a documented
+    # ordering, and the consequence of it being wrong is the same shadowing
+    # class PF1 closed on the selection side: an OLDER planted record read as
+    # the account while the run's own newer one is ignored.
+    #
+    # Ids are compared numerically ([long], since GitHub comment ids exceed
+    # [int]) and only when EVERY candidate carries a usable one. A candidate
+    # set with a missing or unparseable id falls back to array order rather
+    # than to a partial sort -- a half-ordered set is worse than an honestly
+    # unordered one, because it looks authoritative. That fallback is the
+    # pre-existing behaviour, so this change can only improve ordering,
+    # never make it worse.
+    $candidateIds = @(
+        $candidates | ForEach-Object {
+            if ($_.PSObject.Properties.Match('id').Count -eq 0) { return $null }
+            $parsed = [long]0
+            if ([long]::TryParse([string]$_.id, [ref]$parsed)) { $parsed } else { $null }
+        }
+    )
+    $chosen =
+        if ($candidateIds.Count -eq $candidates.Count -and $candidateIds -notcontains $null) {
+            @($candidates | Sort-Object -Property @{ Expression = { [long]$_.id } })[-1]
+        }
+        else {
+            $candidates[-1]
+        }
     $login = $null
     foreach ($path in @('user', 'author')) {
         if ($chosen.PSObject.Properties.Match($path).Count -gt 0 -and $null -ne $chosen.$path) {
