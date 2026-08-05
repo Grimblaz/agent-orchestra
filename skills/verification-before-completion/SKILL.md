@@ -27,6 +27,99 @@ If evidence is missing, the work is not complete yet.
 
 **And evidence that could not have come out negative is missing evidence.** A proof that would read exactly the same against the unchanged tree tells you nothing about the change; it is a claim wearing evidence's clothes. The three properties every offered proof must carry — discriminating, attributed, per-criterion — are defined once under [Evidence Obligations](#evidence-obligations), and every checklist item and table row below **that prescribes or accepts proof** carries them in place. Sections that check something other than proof — code quality, integration, documentation, release and demo readiness — are unchanged and carry no such obligation. The *form* the proof takes is always your choice.
 
+## The Completion Account
+
+The checklists below govern whether each acceptance criterion has evidence behind it. They do not govern what sits *outside* the criteria — whether the mandatory adversarial review ran, what state the run left the suite in. A run can therefore report accurately on everything it was told to care about and still owe a review nobody records as outstanding. That gap is what this section closes.
+
+Five properties hold of a run **declaring itself done** — the act, not a lane and not every run. They are restated in full here rather than pointed at, because this skill is served to consumer repositories that never receive this repository's root guidance file: for those runs, this section is the *only* place the properties exist.
+
+1. **The review is accounted for.** Every finding the adversarial review produced traces to an outcome that survived the judge — a fix commit, or a dismissal with its reason.
+2. **A review that ran and found nothing says so, in words that would be false if it had not run.** Silence is never readable as examined-and-clean. This is what stops property 1 being vacuously true over an empty finding set: a run that dispatched no review produces no findings, so it satisfies property 1 by doing nothing.
+3. **The suite's state is stated differentially** — what this change added, against a named baseline commit **that predates the change** — **and, separately, pre-existing failures are named and routed** rather than blocking the work or vanishing from the account. Two obligations, not one, so a run that added a failure cannot read a single clause as broadly satisfied. The baseline may never be the run's own post-change commit; that reading satisfies every clause while checking nothing.
+4. **A fix that closes a finding is itself re-validated before the account closes.** A fix cycle is never itself the completion signal.
+5. **A stopped run reads as stopped** — in the lane's typed halt-report shape, never free prose that a reader could mistake for completion.
+
+In this repository they are also stated in `CLAUDE.md` § What a finished run is true of, which is read live at session start; this section is their depth. The two copies are one statement and must move together — a parity test pins them, because an unpinned "they move together" claim is the two-surfaces-disagreeing shape this file's own differential rule exists to prevent, and the first draft's copies had already diverged by the time they shipped.
+
+### Which commit may be named as the baseline
+
+Property 3 is only as good as the commit it measures against, and the first draft left that unconstrained — which made the whole rule vacuously satisfiable (issue #998 review, finding M13, sustained).
+
+**The named baseline must be an ancestor of the work being declared done** — the branch point, the merge base with the target branch, or any commit that predates this change. It may never be the run's own post-change `HEAD`.
+
+Without that constraint there is a reading in which every clause of property 3 is met and nothing is checked: a run that broke the suite names its own current commit as the baseline, every failure is then "present at that baseline and still present now", each is dispositioned as pre-existing and routed, and the account truthfully reports **"failures this change added: 0."** That is not a strained reading — it is the *natural* one, because the suite runner's own `RUN ATTRIBUTION` line emits `commit=` as the run's current commit, so a run transcribing it into the baseline slot names exactly the wrong commit and still reads compliant. The absolute rule this replaced had no such reading; restoring it would have been a regression disguised as a rewrite.
+
+**How** a run makes each property true is its own choice. Three things are not: the account exists, it outlives the session that wrote it, and it carries the review assertion below.
+
+### Where the account lives
+
+Every artifact the review pipeline leaves that carries finding-level content is keyed on a pull request, and a conductorless run reviews *before* one exists — so an account left format-free has nowhere to land and the only surviving copy is the transcript. The account is therefore persisted as an **issue-keyed durable marker**, written through the repository's existing marker-write primitive like every other marker family: `<!-- completion-account-{ID} -->`, where `{ID}` is the issue number. The issue is the one identifier that exists before a pull request does. See `skills/session-memory-contract/references/handoff-markers.md` for the family's row.
+
+An account held only in the session transcript, in a scratch file, or in a working-tree path does not satisfy the durability obligation above: a later reader on a different machine, after the worktree is deleted, must still be able to retrieve it.
+
+Write it with the shared primitive — never a hand-composed `gh issue comment`, for the same reason every other registered family is written this way:
+
+```bash
+pwsh skills/session-memory-contract/scripts/persist-marker.ps1 -Family completion-account -TargetSurface issue -Owner {owner} -Repo {repo} -Number {ID} -Marker '<!-- completion-account-{ID} -->' -BodyFile .tmp/completion-account-{ID}.md
+```
+
+Two things that refuse the write before any network call, both of them easy to hit:
+
+- **`-Owner` and `-Repo` are mandatory.** Omitting either fails parameter binding, not the write.
+- **`-BodyFile` must resolve inside the repository scratch root `.tmp/`.** A path outside it is refused.
+
+And two things the payload itself must satisfy:
+
+- **The marker is the body's first line.** Payload hygiene refuses a candidate whose own-family marker sits anywhere else.
+- **The body must not carry another registered family's marker at the start of any line.** This one is easy to trip precisely because an account is *narrative about the run's own pipeline artifacts* — and a fenced block does not save you, because every marker reader is a raw-text scan rather than a semantic parse. The repository already has the remedy and it is not "indent it": render marker mentions **inertly**, stripping the HTML-comment delimiters so the pattern has nothing to anchor on. See `skills/session-memory-contract/references/handoff-markers.md` § Writing about markers safely, which states the hazard, names `Format-InertMarkerLabel`, and gives the worked form. Write `` `phase-containment-ledger-{ID}` ``, never the delimited literal at column zero.
+
+The family declares **no validator adapter**, so nothing about the account's *own* shape is refused: an account with no review assertion, or a false one, still writes and is then flagged by the reader rather than blocked. That is deliberate — an account that cannot be written is worse than one that can be read and found wanting. But note the boundary carefully: the universal cross-family hygiene above runs regardless of that null adapter, so "no validator" does not mean "anything writes."
+
+### The required review assertion, and its two polarities
+
+The account MUST carry this field:
+
+```yaml
+adversarial_review_ran: true    # or false
+```
+
+Two polarities, both lexically present, and **absence is not a third**: an account omitting the field reads as *not run*, never as clean. Silence must not be readable as examined-and-clean.
+
+This exists because property 1 is quantified over the findings a review produced. A run that dispatches no review produces no findings, so "every finding traces to an outcome" is vacuously true over the empty set and the run can write a closed-looking account without a review having happened. A single sentence forbidding that would be administered by the same run writing the claim — a hope, not a check. The assertion is what a reader other than the author can act on.
+
+`Read-CompletionAccount` (`skills/verification-before-completion/scripts/completion-account-core.ps1`) is that reader. It is **warn-only**: it never blocks a write and never fails a run.
+
+**Who runs it, and when.** A reader nobody invokes is not a check — it is the same hope one layer down, and this repository has already measured that shape: a stated-once terminal obligation shipped into three skills emitted **zero** across three consecutive reviews, and the recorded remedy was a warn-only reader-side *sweep*. So the trigger is named here rather than left to be inferred:
+
+```bash
+# Read the account for issue {ID}, with the comment author carried through.
+pwsh -c ". skills/verification-before-completion/scripts/completion-account-core.ps1; \
+  Get-CompletionAccountFromComments -Id {ID} \
+    -Comments (gh issue view {ID} --json comments --jq '.comments' | ConvertFrom-Json)"
+```
+
+Run it **whenever you pick up an issue that has been worked before** — resuming a paused run, opening a follow-up, or reviewing someone else's finished work. `Get-CompletionAccountFromComments` selects the account by its family marker (never by concatenating every comment, which would let any unrelated comment supply the assertion), reports `Found: $false` when there is none, and surfaces the comment's author because a record recognised by shape alone does not authenticate itself. Everything it returns is advisory.
+
+### What the guidance rejects
+
+An account is nonconforming when any of these holds. Each is a rejection, not a suggestion:
+
+- **No review is accounted for.** The account carries `adversarial_review_ran: false`, or omits the field entirely, or claims `true` while naming no findings-to-outcome trace and no explicit "ran and returned nothing" result. A run that dispatched no adversarial review cannot write a conforming account.
+- **A finding has no outcome that survived the judge.** Every finding the review produced traces to a fix commit or to a dismissal carrying its reason. A finding that simply stops being mentioned is not dispositioned.
+- **A fix closes a finding with no post-fix re-validation.** A fix cycle is never itself the completion signal. This repository's own record is that a fix introduced a new defect in three of five rounds on one issue and in three consecutive rounds on another, so an account closing on the fix commit alone certifies work nothing re-checked. **This clause is a restatement, not a new rule**, and saying so matters: the Insufficient Evidence list already rejects such an account under *"Evidence that the change is present offered as evidence that it is sufficient — a diff, a field that was added"*, and an independent reader applying the pre-#998 text alone reached NONCONFORMING on exactly this artifact. What this clause adds is location and grain — the general evidence principle now also appears where a run writes its *account*, and names the fix case explicitly — not a rejection that was previously unavailable.
+- **The account says nothing at all about the suite.** An account that discharges every other property and is silent on suite state is incomplete. Distinct from the differential rule below, which governs how a *stated* suite result is judged.
+- **A pre-existing failure is carried silently.** A failure present at the named baseline and still present now must be both *named* and *routed*. An account that names one but routes it nowhere has left it in the account and nowhere else; one that routes it without saying so leaves the next reader unable to tell it was ever seen.
+- **A stopped run's artifact could be read as completion.** A run that stops leaves the lane's typed halt-report shape (`skills/goal-run/schemas/goal-halt-report.schema.json`), not free prose. Neither artifact may be readable as the other.
+
+### Routing a pre-existing failure
+
+The differential rule takes a baseline failure *off* the blocking path, which only helps if something else picks it up. Routing is what does, and it is available on both paths:
+
+- **With an interactive surface**: the failure enters the `§2e Filing Approval Gate` batch (`skills/safe-operations/SKILL.md` § 2e) as a proposal, and an approved proposal files through `Add-FollowUpIssue.ps1` with provenance and a parent — never a bare `gh issue create`.
+- **Without one** (an unattended run has no one to ask): §2e's headless fallback lawfully **queues** the proposal and files nothing. A queued proposal discharges the routing obligation. It has to: otherwise an unattended run would be simultaneously obliged to file and unable to lawfully do so, and the rule would be unfollowable in exactly the way the absolute rule it replaces was.
+
+Both outcomes are reachable today; what changed is that the failure is no longer a blocker instead.
+
 ## Universal Verification Checklist
 
 ### 1. Requirements Verification
@@ -49,7 +142,8 @@ If evidence is missing, the work is not complete yet.
 
 ### 3. Testing Verification
 
-- [ ] All existing tests pass
+- [ ] Suite state stated **differentially** — what this change *added*, measured against a named baseline commit **that is an ancestor of this work** (branch point or merge base, never your own post-change commit) — not whether the suite is absolutely green
+- [ ] Every failure present at that baseline and still present now is **named and routed** (filed, or queued as a proposal where the run has no interactive surface), never silently carried and never treated as this change's blocker
 - [ ] New tests written for new code
 - [ ] **Every test offered as evidence for a criterion proven able to fail** — run against the pre-change code (stash, prior commit, reverted patch) and observed red, or otherwise shown to go red without the fix
 - [ ] Any test that would pass identically against the pre-change tree is identified as such — a characterization test, a regression guard, a test added alongside a refactor. Those are legitimate and worth keeping; they are simply not evidence that this change did anything, and are not offered as proof of a criterion
@@ -171,6 +265,8 @@ One block per acceptance criterion — the block structure is what makes the evi
 
 The "Verified by" and "Date" fields at the end attribute the **log**, not the evidence — each criterion still carries its own provenance line.
 
+The suite-health block's first three lines are where the differential rule becomes readable to a run filling this artifact out. A block reporting only an absolute result — a CI link, a green run, a pass count — is **incomplete**: it leaves the baseline commit unnamed, so nothing in it distinguishes a failure this change caused from one it inherited.
+
 ```markdown
 ## Verification: [Ticket/Feature ID]
 
@@ -189,6 +285,12 @@ The "Verified by" and "Date" fields at the end attribute the **log**, not the ev
 
 ### Suite health (not per-criterion evidence)
 
+- Baseline commit: [an ANCESTOR of this work — the branch point or merge base.
+  Never this run's own post-change commit: that makes every failure
+  "pre-existing" and the differential vacuous]
+- Failures at baseline: [count, and where each is named/routed — "none" is a
+  result, an empty line is not]
+- Failures this change added: [count; the differential, not the absolute]
 - Unit tests: [Link to CI run]
 - Integration: [Link or screenshot]
 - Manual: [Description of what tested]
@@ -217,6 +319,9 @@ Date: [Date]
 | "The green run proves it"   | Was it green before the change too?                                  |
 | "The doc now says it"       | Text presence is not behavior — what does the guidance reject now that it accepted before? |
 | "The numbers look right"    | Out of what population, enumerated how?                              |
+| "The suite is red anyway"   | Red against *what*? Name the baseline commit and say which failures are yours |
+| "The review found nothing"  | Did a review run? An account that omits the assertion reads as *not run* |
+| "The fix is committed"      | A fix cycle is never itself the completion signal — what re-validated it? |
 
 ## Rationalization Prevention
 
@@ -232,12 +337,16 @@ Use this table when you catch yourself justifying instead of verifying.
 | "The evidence is right there in the diff" | "A diff shows the change exists; show what it now rejects that it previously accepted" |
 | "The test is obviously correct"        | "Run it against the pre-change code and watch it go red"                   |
 | "Everything's green"                   | "Name the criterion this green proves, and what it would have looked like unmet" |
+| "Those failures were already there"    | "Name them and route them — filed, or queued where there is no interactive surface. Already-there is a reason not to block, never a reason not to say" |
+| "The review is the next step"          | "Then the account says `adversarial_review_ran: false`. Write that, or run the review" |
 
 ## When NOT Done
 
 Stop and address if:
 
-- Any test is failing (even "unrelated" ones)
+- Any test **this change made fail** — measured against a named baseline commit that predates the change, not against green. A failure already present at that baseline is not this change's stop condition; it is property 3's routing obligation, below.
+- Any baseline you named that is not an ancestor of this work. Naming your own post-change commit makes every failure "pre-existing" and the rule vacuous.
+- Any baseline failure you have neither named nor routed. Carrying it silently is the stop, not the failure itself.
 - Any warning you don't understand
 - Any TODO/FIXME you added
 - Any hardcoded value that should be config
@@ -253,7 +362,7 @@ Do not mark complete while any of these are true:
 - You are covering several criteria with one aggregate green
 - You are relying on memory instead of a current verification run
 - You are skipping a check because "it's probably fine"
-- You are deferring known validation to "after merge" or "later"
+- You are deferring **your own change's** known validation to "after merge" or "later". This does not reach a pre-existing baseline failure: naming and routing one rather than fixing it now is what property 3 requires, not a deferral this flag catches. The flag fires when the validation you are deferring is of the work you are declaring done.
 
 ## Project-Specific Requirements
 

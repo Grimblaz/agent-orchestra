@@ -239,7 +239,7 @@ Write it **before** marking the issue closed (`## Completion` below), so the rec
 Before considering work fully complete, verify:
 
 - [ ] Close-out record written (issues opened for work only — Step 9; skip with a stated reason when the issue carries no affirmation record)
-- [ ] All tests passing in main branch
+- [ ] No test failure in main branch that this work introduced, measured against a named baseline commit; any failure already present at that baseline is named and routed rather than carried silently (`skills/verification-before-completion/SKILL.md` § The Completion Account)
 - [ ] No merge conflicts or issues
 - [ ] Tracking files moved to `.copilot-tracking-archive/{year}/{month}/issue-{ID}/` (local only — do not commit)
 - [ ] Documentation is current and accurate

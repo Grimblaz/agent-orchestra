@@ -8,7 +8,7 @@ Quality gates are enforced in priority order:
 | ------------ | ---------------- | ------ | --------- | -------------------------------- |
 | 🥇 PRIMARY   | Mutation Testing | PIT    | ≥80%      | Validates tests catch real bugs  |
 | 🥈 SECONDARY | Code Coverage    | JaCoCo | ≥80%      | Ensures code is exercised        |
-| 🥉 BASELINE  | Tests Pass       | JUnit  | 100%      | Basic correctness                |
+| 🥉 BASELINE  | Added Failures   | JUnit  | 0 vs. baseline | Basic correctness           |
 
 ## Why This Order?
 
@@ -31,7 +31,7 @@ Quality gates are enforced in priority order:
 | Mutation Score    | ≥80%      | Core logic     | Primary quality gate  |
 | Line Coverage     | ≥80%      | Core logic     | All code exercised    |
 | Branch Coverage   | ≥80%      | Core logic     | All conditions tested |
-| Test Pass Rate    | 100%      | All            | No failing tests      |
+| Added Failures    | 0         | All            | Differential against a named baseline commit **that predates the change** (branch point or merge base, never the run's own post-change commit), not an absolute floor — a failure already present at that baseline is named and routed, never a blocker on this change (`skills/verification-before-completion/SKILL.md` § The Completion Account) |
 
 ## Tiered Mutation Strategy
 

@@ -201,9 +201,22 @@ function script:Format-EmissionGapLine {
         # not mistake it for "missing" and append a redundant second block.
         # Matches the existing M13 "partial, do not trust" tone/style.
         # Scoped to plan-stress-test only (Reason is a plan-stress-test-
-        # relevant detail per Get-EmissionGap's docstring) so code-review and
-        # design-challenge rendering is byte-for-byte unchanged (hard
-        # invariant — those surfaces keep the generic M13 wording below).
+        # relevant detail per Get-EmissionGap's docstring).
+        #
+        # 817-D3, AMENDED BY #998 — read this before adding another surface.
+        # This comment used to declare code-review and design-challenge
+        # rendering "byte-for-byte unchanged (hard invariant)". #998 needed a
+        # bespoke code-review line and crossed that invariant; the review
+        # caught it (finding M7, sustained). The invariant is now amended
+        # rather than quietly broken, and the amendment is recorded in
+        # Documents/Design/phase-containment-ledger.md at the 817-D3 row.
+        #
+        # What survives of it: DESIGN-CHALLENGE rendering is still
+        # byte-for-byte unchanged, and a surface earns a bespoke line only
+        # when the generic "partial, do not trust" wording would send the
+        # maintainer to a defect that does not exist. That was true here —
+        # nothing is unparseable when no review ran — and it is the test to
+        # apply next time, not "any surface may have its own wording."
         if ($Surface -eq 'plan-stress-test') {
             if ($reason -eq 'head-missing') {
                 return "  ${Surface} #${Id}: COULD NOT VERIFY -- treat as gap (machine-head missing, blocks=$($Gap.BlockCount) present: sustained=$($Gap.SustainedCount))"
@@ -242,6 +255,32 @@ function script:Format-EmissionGapLine {
             }
             if ($reason -eq 'head-missing') {
                 return "  ${Surface} #${Id}: COULD NOT VERIFY -- treat as gap (this issue declares or routes to the brief review shape but no ``brief_dispositions`` head authorizes a count: recorded-nothing, NOT verified-and-empty)"
+            }
+        }
+        # Issue #998: the code-review surface's absence backstop. Named
+        # separately from the generic wording below because the maintainer
+        # action is entirely different — nothing here is unparseable or
+        # missing a block; no adversarial review is recorded as having run at
+        # all, which is a shipped unit whose review never happened rather
+        # than a bookkeeping gap. Leg 5 of the reason-contract drift check
+        # covers brief-only reasons, so this block is not pinned by it; it is
+        # here because the generic "partial, do not trust" line would send a
+        # maintainer looking for a corrupt comment that does not exist.
+        #
+        # THE COUNTS TRAVEL WITH IT (issue #998 review, finding M5, sustained
+        # and escalated). The first draft returned a line carrying NO numbers,
+        # which sat above the negative-gap arm below and silently suppressed
+        # it. That arm carries its own settled invariant — 811-D1: a negative
+        # gap means MORE blocks than sustained findings and must never render
+        # reassuringly — so the new line was quieter than the `clean` line
+        # 811-D1 was written to prevent. Carrying sustained/blocks here keeps
+        # the anomaly visible, and the excess is named explicitly when the
+        # arithmetic is negative so this branch cannot hide it.
+        if ($Surface -eq 'code-review') {
+            if ($reason -eq 'review-not-run') {
+                $counts = "sustained=$($Gap.SustainedCount), blocks=$($Gap.BlockCount)"
+                if ($Gap.Gap -lt 0) { $counts += ", excess=$(-$Gap.Gap) (more blocks than sustained findings — 811-D1)" }
+                return "  ${Surface} #${Id}: COULD NOT VERIFY -- treat as gap (no adversarial review is recorded on this pull request: no judge-rulings head, review-dispositions record, or judge sentinel names it, so nothing here was examined. This is recorded-nothing, NOT reviewed-and-clean: $counts)"
             }
         }
         # M13 fix (issue #782 post-review): could-not-verify means the
@@ -394,7 +433,12 @@ function Invoke-PhaseContainmentEmissionCheckSingleTarget {
     $anyGapRendered = $false
 
     foreach ($surface in $surfacesToCheck) {
-        $gap = Get-EmissionGap -Bodies $bodies -Id $targetId -Surface $surface
+        # Issue #998: -TargetKind is what lets the code-review absence backstop
+        # fire. This site already knows the answer ($isPr governs the surface
+        # list two lines up), so it states it rather than making the library
+        # re-derive review-owedness from bodies that, in the population the
+        # backstop exists for, contain no evidence either way.
+        $gap = Get-EmissionGap -Bodies $bodies -Id $targetId -Surface $surface -TargetKind ($isPr ? 'pr' : 'issue')
         $scannedCount++
         $sustainedTotal += $gap.SustainedCount
         $blocksTotal += $gap.BlockCount
@@ -510,7 +554,36 @@ function Invoke-PhaseContainmentEmissionCheckCorpus {
         $surfacesToCheck = if ($surfaceKind -eq 'pr') { @('code-review', 'post-review-observer') } else { @(Get-IssueEmissionSurfaces -Bodies $bodies -Id $number) }
 
         foreach ($surface in $surfacesToCheck) {
-            $gap = Get-EmissionGap -Bodies $bodies -Id $number -Surface $surface
+            # Issue #998: the corpus-mode twin of the single-target site above.
+            # Passed for consistency, and so this site is not the reason the
+            # backstop is inert here.
+            #
+            # WHAT THIS DOES *NOT* BUY, stated because the first draft's
+            # comment claimed the opposite and the review sustained it as
+            # finding M8. The backstop CANNOT reach its target population on
+            # the corpus path, and passing -TargetKind does not change that:
+            # corpus tuples come from Get-PhaseContainmentCommentCorpus, whose
+            # PR arms both DROP a pull request with no judge-rulings marker
+            # before a tuple is ever built (phase-containment-rolling-history-
+            # core.ps1: GraphQL at :1146-1155, REST at :1495-1496). A
+            # review-less pull request therefore never reaches Get-EmissionGap
+            # here at all.
+            #
+            # Worse, the two detectors are different predicates: discovery uses
+            # the bare presence regex $script:JudgeRulingsPresencePattern,
+            # while the backstop uses the vocab-gated
+            # Get-RealJudgeRulingsHeadMatches. So the only pull requests that
+            # can both enter the corpus AND trip 'review-not-run' are ones
+            # carrying a bare or malformed `<!-- judge-rulings` mention — the
+            # M6 population, not the no-review-ran population.
+            #
+            # The mechanism's live reach is the single-target `-Pr N` path.
+            # Widening the corpus denominator to include review-less pull
+            # requests is a design change to the rolling-history corpus (the
+            # brief's § 5 names that exclusion as EVIDENCE of the problem and
+            # explicitly rules it out as a landing site), so it is filed as
+            # follow-up work rather than taken here.
+            $gap = Get-EmissionGap -Bodies $bodies -Id $number -Surface $surface -TargetKind ($surfaceKind -eq 'pr' ? 'pr' : 'issue')
             $scannedCount++
             $sustainedGrandTotal += $gap.SustainedCount
             $blocksGrandTotal += $gap.BlockCount

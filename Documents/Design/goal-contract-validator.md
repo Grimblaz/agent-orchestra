@@ -94,7 +94,24 @@ fails closed to the same refusal disposition.
 An owner decision that replaced the originally-designed baseline-delta
 model: any suite failure fails validation outright, there is no baseline
 artifact, and there is deliberately **no retry-on-failure logic of any
-kind** — any failure, flaky or not, is `fail`. The gate predicate
+kind** — any failure, flaky or not, is `fail`.
+
+> **Deliberately unchanged by issue #998's absolute-pass sweep** (chunk 2 of
+> #949), and found by that sweep rather than excluded from it. #949 replaced
+> the absolute suite rule with a differential one for *a run declaring itself
+> done*; 873-D4 is a different object — a **validator's verdict predicate**,
+> adjudicating a run from outside rather than guiding a run's own completion
+> declaration. Nothing in #949 authorizes reversing an owner decision on that
+> surface, so it stands as written. Note the argument this disposition does
+> **not** rest on: "#949 never mentions it" is true of nearly every hit the
+> sweep found and would have excluded all of them.
+>
+> **Raised and not acted on**: against a red baseline this gate fails every
+> goal-contract run, which is the same unfollowable-rule shape #949 was filed
+> about, one surface over. That is its own issue if it is worth addressing,
+> not a change smuggled in here.
+
+The gate predicate
 (`Test-GCSuiteGatePass`) requires all three of `ExitCode -eq 0`,
 `TotalFailed -eq 0`, and `(TotalPassed + TotalFailed) -gt 0` — not
 `TotalFailed` alone. `Invoke-PesterSharded` returns `ExitCode=1,

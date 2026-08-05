@@ -3091,9 +3091,20 @@ function Get-EmissionGap {
                           'judge-head-contradiction', 'duplicate-head',
                           'unknown-disposition-value', 'filter-not-run',
                           'filter-unasserted', 'filter-value-unrecognized',
-                          'block-unreadable'.
-                          The last six are reachable on the brief-review
-                          surface only (issue #951). (811-D1 + issue #817,
+                          'block-unreadable', 'review-not-run'.
+                          Surface scoping, named rather than counted: the six
+                          reachable on the brief-review surface ONLY (issue
+                          #951) are judge-head-contradiction, duplicate-head,
+                          unknown-disposition-value, filter-not-run,
+                          filter-unasserted and filter-value-unrecognized.
+                          'review-not-run' is reachable on the code-review
+                          surface only, and only when -TargetKind is 'pr'
+                          (issue #998). The rest are shared.
+                          (An earlier revision said "the last six", which was
+                          true only while this list ended at
+                          filter-value-unrecognized; #944 and #998 each
+                          appended a value and the positional phrasing went
+                          silently false. Name them.) (811-D1 + issue #817,
                           plan-stress-test-relevant detail consumed by the s2
                           wrapper render; see below). Per-body derivation:
                           a could-not-verify body with no real marker head at
@@ -3110,7 +3121,7 @@ function Get-EmissionGap {
                           unknown-disposition-value > filter-not-run >
                           filter-value-unrecognized > filter-unasserted >
                           block-unreadable > head-corrupt > decoy-ambiguous >
-                          head-missing > ok.
+                          head-missing > review-not-run > ok.
 
                           BOTH THE ENUM AND THIS ORDER ARE PINNED against the
                           reason ladder below, by leg 4 of
@@ -3131,10 +3142,55 @@ function Get-EmissionGap {
                           make the claim true rather than to soften it.)
     #>
     param(
-        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Bodies,
+        # [AllowEmptyString()] added by #998 (review finding M23): the entry
+        # point builds bodies as [string]$_.body, filtering null COMMENTS but
+        # not null BODIES, and a null body casts to ''. Without it the whole
+        # check aborted on an uncatchable parameter-binding error rather than
+        # reporting — and the new backstop's own
+        # `if ([string]::IsNullOrWhiteSpace($crBody)) { continue }` guard could
+        # never execute its empty-string half.
+        [Parameter(Mandatory)][AllowEmptyCollection()][AllowEmptyString()][string[]]$Bodies,
         [Parameter(Mandatory)][int]$Id,
-        [Parameter(Mandatory)][ValidateSet('code-review', 'design-challenge', 'plan-stress-test', 'brief-review', 'post-review-observer')][string]$Surface
+        [Parameter(Mandatory)][ValidateSet('code-review', 'design-challenge', 'plan-stress-test', 'brief-review', 'post-review-observer')][string]$Surface,
+        # Issue #998: what KIND of unit these bodies belong to. Needed only by
+        # the code-review absence backstop below, and defaulted to
+        # 'unspecified' so no existing caller changes behaviour by omission.
+        #
+        # Why a parameter rather than a body-read predicate. The brief-surface
+        # backstop gates on brief-ROUTEDNESS, which it can read from the plan
+        # comment's own `plan-variant: brief` declaration -- a declaration
+        # independent of the review artifact. The code-review surface has no
+        # such independent declaration available from the bodies: the only
+        # in-body evidence that a review was owed is the review's own
+        # footprint, which is exactly what is absent in the population this
+        # backstop exists to surface. Deriving review-owedness from the
+        # bodies would therefore be circular. The entry point already KNOWS
+        # the unit is a pull request -- both of its surface lists hard-code
+        # 'code-review' for the pr branch -- so it states that here instead
+        # of the library guessing it back out.
+        #
+        # 'issue' and 'unspecified' are BEHAVIOURALLY IDENTICAL today — the
+        # only read of this parameter is `-eq 'pr'` (review finding M24).
+        # They are kept distinct because they mean different things to a
+        # caller: 'issue' is a site that KNOWS the unit is an issue, while
+        # 'unspecified' is a site that has not said. A future gate written
+        # against 'unspecified' must not silently also fire for issues, and
+        # collapsing the two now would make that mistake easy to make later.
+        [Parameter()][ValidateSet('pr', 'issue', 'unspecified')][string]$TargetKind = 'unspecified'
     )
+
+    # #998 (review finding M23): normalize the body set ONCE, here, before any
+    # inner call. The parameter attributes above let an empty string bind to
+    # THIS function, but several helpers this function forwards -Bodies to
+    # (Get-ExternalSourceNovelSustainedCount, the brief-surface predicates)
+    # declare their own mandatory string parameters without AllowEmptyString,
+    # so an empty element still aborted the whole check on an uncatchable
+    # binding error further in. The entry point produces exactly that: it
+    # builds bodies as [string]$_.body, filtering null COMMENTS but not null
+    # BODIES, and a null body casts to ''. Dropping empties is safe because a
+    # body with no content carries no marker head, contributes nothing to
+    # either count, and is skipped by every per-body branch anyway.
+    $Bodies = @($Bodies | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 
     $totalSustained = 0
     $totalBlocks = 0
@@ -3177,6 +3233,22 @@ function Get-EmissionGap {
     $sawAnyBriefHead = $false
     $sawBriefDuplicateHead = $false
     $sawBriefUnknownValue = $false
+    # Issue #998: the code-review absence backstop's own flag.
+    #
+    # ITS NAME MUST NOT CONTAIN "brief", and that is a hard constraint rather
+    # than a style preference. Leg 2 of
+    # Get-PhaseContainmentReasonContractDriftStatus classifies a ladder branch
+    # as brief-only by looking for a variable named for the brief surface in
+    # its guard condition; a branch flagged with a brief-named variable is
+    # counted toward the ladder's pinned brief-surface reason tally, which
+    # would make that number wrong at the one moment a future author reads it.
+    # (Phrased without restating the tally itself: leg 2 requires exactly ONE
+    # such claim in the file, and a second one here would fail the check by
+    # being the very drift it guards against.)
+    # This is a code-review-only branch, so it must read as SHARED to leg 2 --
+    # which it does precisely because this identifier says nothing about
+    # briefs.
+    $sawNoCodeReviewHead = $false
 
     # Issue #951 D6, evaluated once at the AGGREGATION SEAM for the same
     # reason 863-s3 lives here: the predicate is a question about the
@@ -3566,6 +3638,135 @@ function Get-EmissionGap {
         }
     }
 
+    # Issue #998 (chunk 2 of #949) — the SAME absence-backstop shape as the
+    # #951 block above, pointed at the surface a code review is actually
+    # checked against.
+    #
+    # THE DEFECT IT CLOSES. code-review's arm of this function only ever
+    # SUBTRACTS from a count it already made (the CR-8 seam above); nothing in
+    # it asserts that a review head must be PRESENT. So a shipped unit whose
+    # adversarial review never ran touches nothing in the per-body loop --
+    # Test-EmissionMarkerPresent is false for every body, so the loop is never
+    # entered -- and the surface exits with ParseStatus 'ok', Gap 0, rendering
+    # the reassuring `clean -- sustained=0 blocks=0` that is indistinguishable
+    # from a genuinely reviewed-and-empty result. Measured before this change:
+    # a three-comment review-less body set returned SustainedCount=0
+    # BlockCount=0 Gap=0 ParseStatus=ok Reason=ok. That silent zero is the
+    # same shape 811-D1 closed on the plan surface and #951 closed on the
+    # brief surface; leaving it open here is the defect one surface over.
+    #
+    # WHY IT LIVES AT THE AGGREGATION SEAM. Same reason the brief block above
+    # does: the per-body loop inspects only bodies where
+    # Test-EmissionMarkerPresent returned true, and the whole population this
+    # exists to surface has no such body. A per-body check cannot ask a
+    # question about the absence of every body.
+    #
+    # WHY IT USES A DISTINCT REASON RATHER THAN REUSING $sawFallbackFired.
+    # That flag renders 'head-missing', which tells a maintainer a machine
+    # head is missing or corrupt. For this population the head is not missing
+    # -- the REVIEW is. Reusing it would ship a wrong diagnosis to the
+    # maintainer and, because the rendered line would be identical to a real
+    # head-missing case, no reader could tell the two populations apart.
+    #
+    # WHY IT IS GATED ON -TargetKind 'pr'. A direct -Surface 'code-review'
+    # call against an issue's bodies has no code-review artifacts to report on,
+    # and manufacturing a gap for it would be the same false-gap failure mode
+    # the brief block's brief-routedness gate exists to avoid. Both of the
+    # entry point's hard-coded pr surface lists pass 'pr'; nothing else does.
+    #
+    # WARN-ONLY. This sets ParseStatus, which every caller already treats as
+    # "treat as gap" in a maintainer advisory. It fails no run and returns no
+    # exit code. Do not wire it to the entry point's reserved -Mode enforce
+    # switch: that switch is documented as unimplemented pending a separate
+    # decision, and flipping it would convert this from a warning into the
+    # graded check #949's rejected-alternatives list rules out.
+    # WHAT COUNTS AS "A REVIEW IS RECORDED" (issue #998 review, findings M4 and
+    # M5, both sustained). The first draft asked one question -- is there a
+    # judge-rulings head anywhere -- and got both halves wrong:
+    #
+    #   * M4: it never consulted $Id, so a ruling block pasted or quoted from a
+    #     DIFFERENT pull request switched the backstop off. The brief-surface
+    #     sibling is id-scoped (Test-BriefLedgerHeadPresent -Id $Id); this was
+    #     not. An ATTRIBUTED head (`<!-- judge-rulings pr=N -->`) carries its
+    #     own number, so a mismatched one is now rejected.
+    #     RESIDUAL, STATED RATHER THAN HIDDEN: a BARE `<!-- judge-rulings -->`
+    #     head carries no number, so a bare head pasted from elsewhere still
+    #     suppresses the backstop. That direction fails OPEN (silent, like the
+    #     pre-change tree) rather than producing a false accusation, which is
+    #     the right way for a warn-only advisory to be wrong.
+    #   * M5: a judge-rulings head is not the only artifact that records a
+    #     review. A pull request carrying `<!-- review-dispositions-{Id} -->`
+    #     has had an external review ingested and dispositioned -- the CR-8
+    #     seam above PARSED it ninety lines earlier to adjust this very
+    #     surface's count -- and one carrying `<!-- review-judge-produced-{Id} -->`
+    #     carries the judge's own sentinel saying a ruling finalized. Telling a
+    #     maintainer "nothing here was examined" about either is a false
+    #     statement in the instrument's primary output. Routes whose adapters
+    #     declare no judge stage at all (`proxy-github`, `post-fix`) reach the
+    #     backstop through exactly these artifacts.
+    if ($Surface -eq 'code-review' -and $TargetKind -eq 'pr') {
+        $sawAnyCodeReviewHead = $false
+        foreach ($crBody in $Bodies) {
+            if ([string]::IsNullOrWhiteSpace($crBody)) { continue }
+
+            # (a) A judge-rulings head. The SAME vocab-gated scan
+            #     Test-EmissionMarkerPresent and
+            #     Get-JudgeRulingsSustainedCountInternal use, so "a real head"
+            #     cannot drift from what it means elsewhere in this file.
+            foreach ($headMatch in (Get-RealJudgeRulingsHeadMatches -Body $crBody)) {
+                $attributed = [regex]::Match(
+                    $crBody.Substring($headMatch.Index),
+                    '\G[ \t]*<!--\s*judge-rulings\s+pr=(?<n>\d+)\s*-->')
+                if ($attributed.Success) {
+                    # Attributed: honour it only when it names THIS pull request.
+                    #
+                    # BOUNDED parse, not a bare [int] cast. `\d+` is unbounded,
+                    # so a head such as `pr=99999999999999` overflows Int32 and
+                    # THROWS -- and that throw leaves Get-EmissionGap for the
+                    # entry point's top-level catch, which in warn mode exits 0
+                    # with no report at all. One malformed or crafted comment
+                    # would silence the advisory for every unit in the sweep.
+                    # This repository already closed the identical class on the
+                    # brief surface (Get-BriefReviewSustainedCountInternal's
+                    # [int]::TryParse, #963 finding M); the bare cast here was
+                    # the same mistake one surface over.
+                    #
+                    # An unparseable or out-of-range id is treated as "does not
+                    # name this pull request" -- the same fail-open direction
+                    # already documented for bare heads above.
+                    $attributedId = 0
+                    if ([int]::TryParse($attributed.Groups['n'].Value, [ref]$attributedId) -and
+                        $attributedId -eq $Id) {
+                        $sawAnyCodeReviewHead = $true
+                    }
+                }
+                else {
+                    # Bare: unattributable, so it counts. See the residual above.
+                    $sawAnyCodeReviewHead = $true
+                }
+                if ($sawAnyCodeReviewHead) { break }
+            }
+            if ($sawAnyCodeReviewHead) { break }
+
+            # (b) An id-scoped review-dispositions head -- an ingested and
+            #     dispositioned external review.
+            if (Test-ReviewDispositionsHeadPresent -Body $crBody -ExpectedNumber $Id) {
+                $sawAnyCodeReviewHead = $true
+                break
+            }
+
+            # (c) The judge's own id-keyed sentinel.
+            if ($crBody -match ('(?m)^[ \t]*<!--\s*review-judge-produced-' + [regex]::Escape([string]$Id) + '\s*-->')) {
+                $sawAnyCodeReviewHead = $true
+                break
+            }
+        }
+        if (-not $sawAnyCodeReviewHead) {
+            $anyCouldNotVerify = $true
+            $sawNoCodeReviewHead = $true
+        }
+    }
+
     # Issue #944: an unreadable region makes the whole surface unverifiable.
     # The arithmetic gap below is computed from counts that BOTH exclude the
     # unreadable entries, so it can land on any value at all — on PR #937 it
@@ -3573,6 +3774,12 @@ function Get-EmissionGap {
     # seven entries sat unread. Promoting this to could-not-verify is what
     # stops a number derived from a truncated input being presented as a
     # measurement; the counts are still returned, qualified, not suppressed.
+    #
+    # Independent of the #998 backstop above and deliberately unordered
+    # against it: that one asks whether a review is RECORDED, this one whether
+    # what was recorded is READABLE. Both set $anyCouldNotVerify; the ladder
+    # below is what resolves which reason a body carrying both conditions
+    # reports, and block-unreadable outranks review-not-run there.
     if ($sawUnreadableBlock) { $anyCouldNotVerify = $true }
 
     $parseStatus = if ($anyCouldNotVerify) { 'could-not-verify' } else { 'ok' }
@@ -3617,6 +3824,15 @@ function Get-EmissionGap {
     # lawful brief-only branch flagged some other way is counted as SHARED and
     # this count stays right while being wrong — the residual recorded as
     # finding M1 on PR #988. Follow the convention, or extend the check.
+    #
+    # A branch that is NOT brief-scoped leaves the count above alone. Issue
+    # #998 added exactly one such branch — 'review-not-run', reachable on the
+    # code-review surface only, guarded by $sawNoCodeReviewHead — placed BELOW
+    # every branch named above. Its flag is deliberately not named for the
+    # brief surface, so leg 2 reads it as shared and the tally here is
+    # unaffected. Leg 4 does see it: the aggregator's .OUTPUTS enum and its
+    # cross-body priority sentence both had to gain it in the same change,
+    # and both did.
     #
     # 'judge-head-contradiction' first because D6 is an unconditional refusal
     # rather than a parse diagnosis: whatever else is wrong with the comment, a
@@ -3686,17 +3902,35 @@ function Get-EmissionGap {
     elseif ($sawFallbackFired) {
         'head-missing'
     }
+    elseif ($sawNoCodeReviewHead) {
+        # Issue #998, and LAST among the could-not-verify reasons for a
+        # reason. The three head-shape reasons above all describe a head that
+        # exists and is broken, ambiguous, or decoyed; this one describes a
+        # population with no head-shaped thing anywhere. Whenever any body
+        # carried something head-shaped, that is the more specific and more
+        # actionable diagnosis, so it wins. This is the diagnosis of last
+        # resort before 'ok', which mirrors 'head-missing' sitting last among
+        # the head-shape trio for the same reason.
+        'review-not-run'
+    }
     else {
         # M8 fix (issue #811 post-fix adversarial pass): this branch is
         # defensive and, as of the current code path, unreachable in
-        # practice. $anyCouldNotVerify is only ever set to $true at the one
-        # site above (inside `if ($bodyHasMarker)`, immediately after
-        # Get-SustainedFindingCount returns 'could-not-verify'), and that
-        # same site always also sets exactly one of $sawRealHeadCorrupt /
+        # practice.
+        #
+        # CORRECTED BY #998 (review finding M19). This comment used to say
+        # $anyCouldNotVerify "is only ever set to $true at the one site
+        # above". That was already false and #998 made it further so: there
+        # are now SEVERAL sites, and the rule that keeps this branch
+        # unreachable is not "one site" but an invariant every site must
+        # honour — **each site that sets $anyCouldNotVerify must also set a
+        # flag that a preceding `elseif` in this ladder tests.** The
+        # judge-rulings sites set exactly one of $sawRealHeadCorrupt /
         # $sawDecoyAmbiguous / $sawFallbackFired based on $hasRealHead (and,
         # when $hasRealHead is true, on the Get-JudgeRulingsDuplicateDiagnosis
-        # verdict) — so by the time this `else` is reached, at least one of
-        # the three preceding `elseif` branches has already matched. (The
+        # verdict); the brief seam sets its own flags; #998's code-review
+        # backstop sets $sawNoCodeReviewHead. That is the invariant to check
+        # when adding the next one — counting sites is not. (The
         # previously cited "empty-body AllowEmptyString could-not-verify"
         # example cannot occur here: Test-EmissionMarkerPresent returns
         # $false for whitespace/empty bodies, so $bodyHasMarker gates such a

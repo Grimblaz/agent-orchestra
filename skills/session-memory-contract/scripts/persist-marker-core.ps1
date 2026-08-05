@@ -456,6 +456,50 @@ function Get-MarkerFamilyRegistry {
             ValidatorAdapter  = $null
             PostStep          = $null
         }
+        [PSCustomObject]@{
+            # Issue #998 (chunk 2 of #949): the completion account -- the
+            # durable record a run leaves when it declares itself done.
+            # APPENDED for the same positional reason the row above records:
+            # persist-marker-core.Tests.ps1 binds $script:PostNewFamily to the
+            # FIRST post-new/issue row and $issueOnlyFamily to the FIRST
+            # issue-surface row, so inserting a post-new/issue row anywhere
+            # earlier re-points those generic fixtures silently.
+            Family            = 'completion-account'
+            MarkerTemplate    = '<!-- completion-account-{ID} -->'
+            # ISSUE-keyed, and that is the whole point of the family rather
+            # than a default. #949's design: every artifact the review
+            # pipeline leaves that carries finding-level content is keyed on
+            # a pull request, and a conductorless run reviews BEFORE one
+            # exists -- so an account keyed on a PR has nowhere to land at
+            # the moment it is written. The issue number is the one
+            # identifier that exists before a pull request does.
+            TargetSurface     = 'issue'
+            # upsert, NOT post-new: an account is a single standing statement
+            # about one run's completion, revised as the run's own fix cycle
+            # closes findings. post-new would leave a reader choosing among
+            # several accounts for the same issue with no rule saying which
+            # governs -- the exact third-reading ambiguity #949 was filed to
+            # remove. Contrast open-for-work-affirmed above, whose
+            # append-only shape IS load-bearing because each record is an
+            # ordering witness; an account witnesses no ordering.
+            WriteShape        = 'upsert'
+            # $null, and DELIBERATELY so -- read this before adding one.
+            # skills/review-judgment/SKILL.md:522 states that any finding a
+            # validator adapter returns becomes a HARD PRE-WRITE REFUSAL,
+            # before any network write. #949's design requires both of this
+            # chunk's mechanisms to be warn-only: neither may fail a run.
+            # Enforcing the required `adversarial_review_ran` assertion here
+            # would make a non-conforming account UNWRITABLE rather than
+            # flagged -- which is strictly worse than the status quo, since
+            # the run then leaves no durable account at all, and it builds
+            # the "detector that fails the run" alternative #949 explicitly
+            # rejected. The assertion's reader is Read-CompletionAccount
+            # (skills/verification-before-completion/scripts/
+            # completion-account-core.ps1), which warns and returns; it is
+            # never wired into this field.
+            ValidatorAdapter  = $null
+            PostStep          = $null
+        }
     )
 }
 
