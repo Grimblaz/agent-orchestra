@@ -453,6 +453,27 @@ function Invoke-PhaseContainmentCommentScan {
           AuthorFilteredCount [int]   — count of bodies dropped by the author gate before ever being
                                         scanned (issue #842 M8), so a caller can distinguish "the judge
                                         filter matched nothing" from "genuinely empty window."
+          UnreadableEntryCount [int]  — issue #944: entries carried by regions the parser could not
+                                        read at all. This is the number that answers "how much of the
+                                        corpus is missing"; InvalidEntryCount answers "how many drops
+                                        happened", and one region-shaped drop can hide seven entries.
+          MalformedRegionCount [int]  — issue #944: regions reported as unreadable. Reported beside
+                                        UnreadableEntryCount so one region holding seven entries is
+                                        distinguishable from seven regions holding one.
+
+        SCOPE OF THE LAST TWO FIELDS (PR #1006 review, M24). They are
+        SCAN-LOCAL. The fetch layers above this function aggregate
+        InvalidEntryCount and do not carry these two forward, and neither does
+        the 1-hour value cache — so a caller reading them off a corpus-level
+        result, a cache hit, or an error shape gets nothing, and under
+        StrictMode gets a throw rather than a zero. That is a bounded, stated
+        limit rather than a half-finished migration: the escape-rate render
+        consumes drop grain by contract (see the InvalidEntryCount note at the
+        scan loop), and the entry-grain number is reported by Get-EmissionGap,
+        which calls the reader directly. Propagating them through all five
+        aggregation layers plus the cache payload is a coupled-field migration
+        whose half-done state is invisible at count grain; do it as one change
+        with a test that reads the field end-to-end, or not at all.
     #>
     [CmdletBinding()]
     [OutputType([PSCustomObject])]
@@ -468,6 +489,8 @@ function Invoke-PhaseContainmentCommentScan {
     $results = [System.Collections.Generic.List[hashtable]]::new()
     $id      = [string]$IssueOrPrNumber
     $invalidEntryCount = 0
+    $unreadableEntryCount = 0
+    $malformedRegionCount = 0
     $matched = 0
     $authorFilteredCount = 0
     $gateOnAuthor = -not [string]::IsNullOrWhiteSpace($JudgeLogin)
@@ -491,9 +514,32 @@ function Invoke-PhaseContainmentCommentScan {
         # unclosed block that never reaches this loop still counts toward
         # InvalidEntryCount, alongside the parse-failure and
         # validation-failure drops below.
+        #
+        # Issue #944: the same call now also returns how many ENTRIES those
+        # skipped regions carried, and how many regions there were.
+        #
+        # INVALIDENTRYCOUNT STAYS DROP-GRAIN, DELIBERATELY (corrected per PR
+        # #1006 review, M16). An earlier version of this comment said folding
+        # only the region count into it "would understate the loss" — and then
+        # the line below folded exactly that, so the comment contradicted the
+        # code three lines under it, at the site a maintainer consults before
+        # changing the grain. The contract is what it says on the tin: this
+        # counter counts DROPS, and one dropped region is one drop. Mixing
+        # entry grain into it would make every existing consumer's arithmetic
+        # wrong in a way no count-grain assertion could see. The entry-grain
+        # figure is a separate field, returned beside it and consumed by
+        # Get-EmissionGap, which is where the "how much was lost" number is
+        # reported.
         $parserSkippedCount = 0
-        $yamlBlocks = Get-PhaseContainmentBlock -Text $body -Id $id -SkippedCount ([ref]$parserSkippedCount)
+        $bodyUnreadableEntries = 0
+        $bodyMalformedRegions = 0
+        $yamlBlocks = Get-PhaseContainmentBlock -Text $body -Id $id `
+            -SkippedCount ([ref]$parserSkippedCount) `
+            -UnreadableEntryCount ([ref]$bodyUnreadableEntries) `
+            -MalformedRegionCount ([ref]$bodyMalformedRegions)
         $invalidEntryCount += $parserSkippedCount
+        $unreadableEntryCount += $bodyUnreadableEntries
+        $malformedRegionCount += $bodyMalformedRegions
         if ($null -eq $yamlBlocks) { continue }
 
         foreach ($yamlText in $yamlBlocks) {
@@ -527,10 +573,12 @@ function Invoke-PhaseContainmentCommentScan {
     }
 
     return [PSCustomObject]@{
-        Entries             = $results.ToArray()
-        InvalidEntryCount   = $invalidEntryCount
-        Matched             = $matched
-        AuthorFilteredCount = $authorFilteredCount
+        Entries              = $results.ToArray()
+        InvalidEntryCount    = $invalidEntryCount
+        Matched              = $matched
+        AuthorFilteredCount  = $authorFilteredCount
+        UnreadableEntryCount = $unreadableEntryCount
+        MalformedRegionCount = $malformedRegionCount
     }
 }
 
@@ -3296,7 +3344,17 @@ function Format-PhaseContainmentReport {
                 $lines.Add("  Relaxation signal:  FILTERED-EMPTY — judge filter matched $matched of $commentBodyCount bodies (looked for '$judgeLogin'); check -JudgeLogin")
             }
             elseif ($invalidEntryCount -gt 0 -and $rollup.WindowEntryCount -eq 0) {
-                $lines.Add("  Relaxation signal:  INVALID-EMPTY — $matched of $commentBodyCount bodies matched but every parsed block failed validation ($invalidEntryCount dropped); see WARNINGs above")
+                # Issue #944: "every parsed block failed validation" was true
+                # of the only drop kind this branch could see when it was
+                # written. It is no longer: a region whose open tag never
+                # matched is dropped WITHOUT being parsed, and after #944 it
+                # reaches this counter. Saying "parsed" of a region nothing
+                # parsed would send a maintainer looking for a validation
+                # error that does not exist — and this whole issue is about
+                # advisory sentences that are false in the reassuring
+                # direction. The wording now covers both drop kinds; the
+                # per-kind detail is in the WARNINGs the line points at.
+                $lines.Add("  Relaxation signal:  INVALID-EMPTY — $matched of $commentBodyCount bodies matched but no block reached the rollup ($invalidEntryCount dropped as invalid or unreadable); see WARNINGs above")
             }
             elseif ($commentBodyCount -gt 0 -and $rollup.WindowEntryCount -eq 0) {
                 $lines.Add("  Relaxation signal:  WITHHELD (denominator=0) — $matched of $commentBodyCount bodies matched; none carried a phase-containment block")

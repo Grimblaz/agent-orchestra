@@ -3078,16 +3078,33 @@ function Get-EmissionGap {
           BlockCount     [int]
           Gap            [int]
           ParseStatus    [string] — 'ok' or 'could-not-verify'
+          UnreadableEntryCount [int] — issue #944: entries carried by regions
+                          the reader could not read at all. NOT part of
+                          BlockCount and NOT part of the Gap arithmetic; it is
+                          the count that answers "how much did this surface
+                          lose", which neither of those can.
+          MalformedRegionCount [int] — issue #944: how many such regions.
+                          Beside the entry count so one region holding seven
+                          entries is distinguishable from seven holding one.
           Reason         [string] — one of: 'ok', 'head-missing',
                           'head-corrupt', 'decoy-ambiguous',
                           'judge-head-contradiction', 'duplicate-head',
                           'unknown-disposition-value', 'filter-not-run',
                           'filter-unasserted', 'filter-value-unrecognized',
-                          'review-not-run'.
-                          Six of these are reachable on the brief-review
-                          surface only (issue #951), and 'review-not-run' is
-                          reachable on the code-review surface only, and only
-                          when -TargetKind is 'pr' (issue #998). (811-D1 + issue #817,
+                          'block-unreadable', 'review-not-run'.
+                          Surface scoping, named rather than counted: the six
+                          reachable on the brief-review surface ONLY (issue
+                          #951) are judge-head-contradiction, duplicate-head,
+                          unknown-disposition-value, filter-not-run,
+                          filter-unasserted and filter-value-unrecognized.
+                          'review-not-run' is reachable on the code-review
+                          surface only, and only when -TargetKind is 'pr'
+                          (issue #998). The rest are shared.
+                          (An earlier revision said "the last six", which was
+                          true only while this list ended at
+                          filter-value-unrecognized; #944 and #998 each
+                          appended a value and the positional phrasing went
+                          silently false. Name them.) (811-D1 + issue #817,
                           plan-stress-test-relevant detail consumed by the s2
                           wrapper render; see below). Per-body derivation:
                           a could-not-verify body with no real marker head at
@@ -3103,8 +3120,8 @@ function Get-EmissionGap {
                           judge-head-contradiction > duplicate-head >
                           unknown-disposition-value > filter-not-run >
                           filter-value-unrecognized > filter-unasserted >
-                          head-corrupt > decoy-ambiguous > head-missing >
-                          review-not-run > ok.
+                          block-unreadable > head-corrupt > decoy-ambiguous >
+                          head-missing > review-not-run > ok.
 
                           BOTH THE ENUM AND THIS ORDER ARE PINNED against the
                           reason ladder below, by leg 4 of
@@ -3177,6 +3194,14 @@ function Get-EmissionGap {
 
     $totalSustained = 0
     $totalBlocks = 0
+    # Issue #944: entry-grain and region-grain accounting for regions the
+    # reader could not read at all. Kept separate from $totalBlocks
+    # deliberately — an unreadable entry is neither a block that counted nor a
+    # block that was absent, and collapsing it into either is how the
+    # instrument reported a whole corpus as clean.
+    $totalUnreadableEntries = 0
+    $totalMalformedRegions = 0
+    $sawUnreadableBlock = $false
     $anyCouldNotVerify = $false
     # 811-D1 (M5): distinguishes WHY the aggregate went could-not-verify, for
     # s2's differentiated render. 'head-missing' means the 811 plan-stress-test
@@ -3484,7 +3509,31 @@ function Get-EmissionGap {
         #      (M2/M5) — TODO-human scaffolds (escape_distance: -1) and
         #      other invalid entries can never silently count as satisfied.
         if ($bodyHasMarker) {
-            $rawBlocks = Get-PhaseContainmentBlock -Text $body -Id $Id
+            # Issue #944: this call previously discarded every parser-layer
+            # signal, passing no [ref] at all. That is why the advisory on PR
+            # #937 read `sustained=3 blocks=0 missing=3` over a body carrying
+            # seven entries it could not read: the reader knew nothing was
+            # matched, and the only number the check had was an arithmetic
+            # difference between two counts that both silently excluded them.
+            $bodySkipped = 0
+            $bodyUnreadableEntries = 0
+            $bodyMalformedRegions = 0
+            $bodyUnmatchedOpenTags = 0
+            $rawBlocks = Get-PhaseContainmentBlock -Text $body -Id $Id `
+                -SkippedCount ([ref]$bodySkipped) `
+                -UnreadableEntryCount ([ref]$bodyUnreadableEntries) `
+                -MalformedRegionCount ([ref]$bodyMalformedRegions) `
+                -UnmatchedOpenTagCount ([ref]$bodyUnmatchedOpenTags)
+            $totalUnreadableEntries += $bodyUnreadableEntries
+            $totalMalformedRegions  += $bodyMalformedRegions
+            # PR #1006 review, M5: gated on the NEVER-MATCHED count, not on any
+            # skip. $bodySkipped also counts the #772/#833 matched-but-unclosed
+            # cases, and routing those into `block-unreadable` printed a
+            # diagnosis that was false for them — and silently changed
+            # ParseStatus on a path this issue never touched. Those cases keep
+            # their pre-#944 behaviour: dropped and warned by the reader, not
+            # re-diagnosed here.
+            if ($bodyUnmatchedOpenTags -gt 0) { $sawUnreadableBlock = $true }
             if ($rawBlocks) {
                 $surfacePrefix = "${Surface}:"
                 foreach ($rawBlock in $rawBlocks) {
@@ -3699,6 +3748,21 @@ function Get-EmissionGap {
         }
     }
 
+    # Issue #944: an unreadable region makes the whole surface unverifiable.
+    # The arithmetic gap below is computed from counts that BOTH exclude the
+    # unreadable entries, so it can land on any value at all — on PR #937 it
+    # landed on 3, next to a summary line reading "Blocks matched: 3", while
+    # seven entries sat unread. Promoting this to could-not-verify is what
+    # stops a number derived from a truncated input being presented as a
+    # measurement; the counts are still returned, qualified, not suppressed.
+    #
+    # Independent of the #998 backstop above and deliberately unordered
+    # against it: that one asks whether a review is RECORDED, this one whether
+    # what was recorded is READABLE. Both set $anyCouldNotVerify; the ladder
+    # below is what resolves which reason a body carrying both conditions
+    # reports, and block-unreadable outranks review-not-run there.
+    if ($sawUnreadableBlock) { $anyCouldNotVerify = $true }
+
     $parseStatus = if ($anyCouldNotVerify) { 'could-not-verify' } else { 'ok' }
     $gap = $totalSustained - $totalBlocks
 
@@ -3793,6 +3857,23 @@ function Get-EmissionGap {
     elseif ($sawBriefFilterUnasserted) {
         'filter-unasserted'
     }
+    elseif ($sawUnreadableBlock) {
+        # Issue #944. Above 'head-corrupt' because the two diagnoses send a
+        # maintainer to different files: head-corrupt says the JUDGE-RULINGS
+        # head is broken, whereas this says the LEDGER REGION beside it was
+        # never readable. Reporting an unreadable region as a corrupt head
+        # would send them to inspect a head that is fine, and the region that
+        # is not would stay unread — which is the failure this issue exists
+        # to close, reproduced by its own remedy. Below the six brief-only
+        # reasons because those are refusals to count at all, which outrank
+        # a diagnosis about what was counted.
+        #
+        # Shared, not brief-only: reachable on every surface, and its guard
+        # variable deliberately carries no "brief" in its name, which is how
+        # leg 2 of Get-PhaseContainmentReasonContractDriftStatus tells the
+        # two kinds apart. Do not rename it to something brief-flavoured.
+        'block-unreadable'
+    }
     elseif ($sawRealHeadCorrupt) {
         'head-corrupt'
     }
@@ -3844,11 +3925,13 @@ function Get-EmissionGap {
     }
 
     return [PSCustomObject]@{
-        SustainedCount = $totalSustained
-        BlockCount     = $totalBlocks
-        Gap            = $gap
-        ParseStatus    = $parseStatus
-        Reason         = $reason
+        SustainedCount       = $totalSustained
+        BlockCount           = $totalBlocks
+        Gap                  = $gap
+        ParseStatus          = $parseStatus
+        Reason               = $reason
+        UnreadableEntryCount = $totalUnreadableEntries
+        MalformedRegionCount = $totalMalformedRegions
     }
 }
 

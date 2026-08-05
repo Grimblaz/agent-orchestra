@@ -694,18 +694,34 @@ Describe 'Format-PhaseContainmentReport — four-state DenominatorZero discrimin
         )
     }
 
-    It 'renders INVALID-EMPTY when bodies matched but every parsed block failed validation, in a window that is genuinely empty everywhere' {
+    It 'renders INVALID-EMPTY when bodies matched but no block reached the rollup, in a window that is genuinely empty everywhere' {
         # Uses $script:FullyEmptyRollup (WindowEntryCount -eq 0), not
         # $script:ZeroedRollup -- INVALID-EMPTY is only a legitimate
         # explanation for THIS stage's own emptiness when the whole window
         # has zero entries. See the M3 Describe block below for the
         # boundary case where a sibling stage has real entries.
+        #
+        # Issue #944 rewording. The pinned sentence used to say "every parsed
+        # block failed validation", which was true of the only drop kind this
+        # counter could see when the pin was written. A region whose open tag
+        # never matches is now counted here too, and it is dropped WITHOUT
+        # being parsed -- so the old sentence would send a maintainer hunting
+        # a validation error that never happened. The pin is re-aimed at the
+        # claim that is true of both kinds, not relaxed: it still asserts the
+        # exact rendered sentence, the exact drop count, and the pointer to
+        # the WARNINGs.
         $context = New-PC772Context -Rollup $script:FullyEmptyRollup -Matched 3 -CommentBodyCount 3 -AuthorFilteredCount 0 -InvalidEntryCount 2
         $reportText = (Format-PhaseContainmentReport -Context $context) -join "`n"
         $codeReviewBlock = Get-PC842StageBlock -ReportText $reportText -StageName 'code-review'
 
-        $codeReviewBlock.Contains('Relaxation signal:  INVALID-EMPTY — 3 of 3 bodies matched but every parsed block failed validation (2 dropped); see WARNINGs above') | Should -BeTrue -Because (
-            "a window where every parsed block failed validation must never render as an unqualified 'nothing here' -- the WARNINGs above must be pointed to explicitly.`nActual code-review block:`n$codeReviewBlock"
+        $codeReviewBlock.Contains('Relaxation signal:  INVALID-EMPTY — 3 of 3 bodies matched but no block reached the rollup (2 dropped as invalid or unreadable); see WARNINGs above') | Should -BeTrue -Because (
+            "a window where blocks were dropped must never render as an unqualified 'nothing here' -- the WARNINGs above must be pointed to explicitly.`nActual code-review block:`n$codeReviewBlock"
+        )
+
+        # The rewording must not have quietly widened into the sibling state
+        # this branch exists to be distinguishable FROM (#944 AC2).
+        $codeReviewBlock.Contains('none carried a phase-containment block') | Should -BeFalse -Because (
+            "INVALID-EMPTY and the bare WITHHELD variant must stay distinguishable; a drop is not an absence.`nActual code-review block:`n$codeReviewBlock"
         )
     }
 

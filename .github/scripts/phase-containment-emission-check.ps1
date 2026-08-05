@@ -169,7 +169,28 @@ function script:Format-EmissionGapLine {
     # M13 could-not-verify wording rather than throwing under StrictMode.
     $reason = if ($Gap.PSObject.Properties.Match('Reason').Count -gt 0) { $Gap.Reason } else { 'ok' }
 
+    # Issue #944 — the count that answers what `missing=` could not. Read
+    # defensively for the same reason $reason is: an older Gap-shaped object
+    # without the fields must not throw under StrictMode.
+    $unreadableEntries = if ($Gap.PSObject.Properties.Match('UnreadableEntryCount').Count -gt 0) { [int]$Gap.UnreadableEntryCount } else { 0 }
+    $malformedRegions  = if ($Gap.PSObject.Properties.Match('MalformedRegionCount').Count -gt 0) { [int]$Gap.MalformedRegionCount } else { 0 }
+
     if ($Gap.ParseStatus -eq 'could-not-verify') {
+        # Issue #944: checked BEFORE every surface-scoped branch below,
+        # because an unreadable region invalidates whatever those branches
+        # would say about the numbers. This is the line the PR #937 advisory
+        # should have printed: it names the real quantity — SEVEN entries
+        # present and unread — instead of `missing=3`, an arithmetic
+        # difference between two counts that both excluded them, printed
+        # under a summary line reading "Blocks matched: 3" that scanned as
+        # balanced.
+        if ($reason -eq 'block-unreadable') {
+            $regionWord = if ($malformedRegions -eq 1) { 'region' } else { 'regions' }
+            $entryWord  = if ($unreadableEntries -eq 1) { 'entry' } else { 'entries' }
+            # `${entryWord}` is brace-delimited because the ':' that follows
+            # would otherwise be parsed as a scope qualifier on the variable.
+            return "  ${Surface} #${Id}: COULD NOT VERIFY -- treat as gap ($malformedRegions phase-containment $regionWord present and unreadable, carrying $unreadableEntries ${entryWord}: the open tag is not the self-closed form, so nothing was ever matched there; sustained=$($Gap.SustainedCount), blocks=$($Gap.BlockCount) count only the readable ones)"
+        }
         # 811-D1 (M5): differentiate WHY this surface could not be verified
         # when the Reason detail says so. 'head-missing' means the
         # plan-stress-test honest fallback fired — blocks may already exist,
@@ -404,6 +425,11 @@ function Invoke-PhaseContainmentEmissionCheckSingleTarget {
     $scannedCount = 0
     $sustainedTotal = 0
     $blocksTotal = 0
+    # Issue #944: the summary line below read `Sustained counted: 3 | Blocks
+    # matched: 3` on PR #937 — perfectly balanced, directly under two GAP
+    # lines, over a body carrying seven entries nothing had read. A total that
+    # can only go up when a block is READ cannot report a block that was not.
+    $unreadableTotal = 0
     $anyGapRendered = $false
 
     foreach ($surface in $surfacesToCheck) {
@@ -416,6 +442,9 @@ function Invoke-PhaseContainmentEmissionCheckSingleTarget {
         $scannedCount++
         $sustainedTotal += $gap.SustainedCount
         $blocksTotal += $gap.BlockCount
+        if ($gap.PSObject.Properties.Match('UnreadableEntryCount').Count -gt 0) {
+            $unreadableTotal += [int]$gap.UnreadableEntryCount
+        }
 
         $lines.Add((script:Format-EmissionGapLine -Surface $surface -Id $targetId -Gap $gap))
         $anyGapRendered = $true
@@ -433,7 +462,14 @@ function Invoke-PhaseContainmentEmissionCheckSingleTarget {
     }
 
     $lines.Add('')
-    $lines.Add("Surfaces scanned: $scannedCount | Sustained counted: $sustainedTotal | Blocks matched: $blocksTotal")
+    $summaryLine = "Surfaces scanned: $scannedCount | Sustained counted: $sustainedTotal | Blocks matched: $blocksTotal"
+    if ($unreadableTotal -gt 0) {
+        # Appended rather than folded into either count: an unreadable entry
+        # is neither sustained-and-counted nor a matched block, and putting it
+        # inside one of those numbers would make a different sentence false.
+        $summaryLine = "$summaryLine | Entries present but unreadable: $unreadableTotal"
+    }
+    $lines.Add($summaryLine)
     $lines.Add('')
     $markerLabel = script:Format-InertMarkerLabel -MarkerText "<!-- phase-containment-$targetId -->"
     $lines.Add("(Ledger blocks use the $markerLabel marker; this report intentionally avoids emitting a live marker literal.)")
@@ -502,6 +538,8 @@ function Invoke-PhaseContainmentEmissionCheckCorpus {
     $scannedCount = 0
     $sustainedGrandTotal = 0
     $blocksGrandTotal = 0
+    # Issue #944 — see the single-target path's identical counter.
+    $unreadableGrandTotal = 0
 
     foreach ($tuple in @($corpus.Tuples)) {
         $number = [int]$tuple['Number']
@@ -549,6 +587,9 @@ function Invoke-PhaseContainmentEmissionCheckCorpus {
             $scannedCount++
             $sustainedGrandTotal += $gap.SustainedCount
             $blocksGrandTotal += $gap.BlockCount
+            if ($gap.PSObject.Properties.Match('UnreadableEntryCount').Count -gt 0) {
+                $unreadableGrandTotal += [int]$gap.UnreadableEntryCount
+            }
 
             # Positive coverage is only meaningful for surfaces that actually
             # produced sustained findings or blocks; still render every
@@ -560,7 +601,11 @@ function Invoke-PhaseContainmentEmissionCheckCorpus {
     }
 
     $lines.Add('')
-    $lines.Add("Surfaces scanned: $scannedCount | Sustained counted: $sustainedGrandTotal | Blocks matched: $blocksGrandTotal")
+    $grandSummaryLine = "Surfaces scanned: $scannedCount | Sustained counted: $sustainedGrandTotal | Blocks matched: $blocksGrandTotal"
+    if ($unreadableGrandTotal -gt 0) {
+        $grandSummaryLine = "$grandSummaryLine | Entries present but unreadable: $unreadableGrandTotal"
+    }
+    $lines.Add($grandSummaryLine)
 
     $reportBody = ($lines -join "`n")
 
