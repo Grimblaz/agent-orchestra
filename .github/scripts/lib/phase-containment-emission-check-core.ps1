@@ -3719,7 +3719,26 @@ function Get-EmissionGap {
                     '\G[ \t]*<!--\s*judge-rulings\s+pr=(?<n>\d+)\s*-->')
                 if ($attributed.Success) {
                     # Attributed: honour it only when it names THIS pull request.
-                    if ([int]$attributed.Groups['n'].Value -eq $Id) { $sawAnyCodeReviewHead = $true }
+                    #
+                    # BOUNDED parse, not a bare [int] cast. `\d+` is unbounded,
+                    # so a head such as `pr=99999999999999` overflows Int32 and
+                    # THROWS -- and that throw leaves Get-EmissionGap for the
+                    # entry point's top-level catch, which in warn mode exits 0
+                    # with no report at all. One malformed or crafted comment
+                    # would silence the advisory for every unit in the sweep.
+                    # This repository already closed the identical class on the
+                    # brief surface (Get-BriefReviewSustainedCountInternal's
+                    # [int]::TryParse, #963 finding M); the bare cast here was
+                    # the same mistake one surface over.
+                    #
+                    # An unparseable or out-of-range id is treated as "does not
+                    # name this pull request" -- the same fail-open direction
+                    # already documented for bare heads above.
+                    $attributedId = 0
+                    if ([int]::TryParse($attributed.Groups['n'].Value, [ref]$attributedId) -and
+                        $attributedId -eq $Id) {
+                        $sawAnyCodeReviewHead = $true
+                    }
                 }
                 else {
                     # Bare: unattributable, so it counts. See the residual above.

@@ -10,7 +10,7 @@ After tests pass, validate they meet quality thresholds before considering the f
 | ------------ | ---------- | --------- | -------------------------------- |
 | 🥇 PRIMARY   | Mutation   | ≥80%      | `./gradlew pitest`               |
 | 🥈 SECONDARY | Coverage   | ≥80%      | `./gradlew jacocoTestReport`     |
-| 🥉 BASELINE  | Tests Pass | 100%      | `./gradlew test`                 |
+| 🥉 BASELINE  | Added Failures | 0 vs. baseline | `./gradlew test`            |
 
 ## Workflow Steps
 

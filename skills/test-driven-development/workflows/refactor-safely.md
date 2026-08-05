@@ -35,7 +35,7 @@ Common smells to address:
 ./gradlew test
 ```
 
-**Expected:** All tests still pass.
+**Expected:** no failure this refactor introduced, measured against the baseline captured before it — not an absolute green. A failure already present at that baseline is named and routed, never a blocker on the refactor (`skills/verification-before-completion/SKILL.md` § The Completion Account).
 
 ### 4. Repeat
 
@@ -158,7 +158,7 @@ public class StandardShipping implements ShippingCalculator {
 
 Stop refactoring when:
 
-- Tests pass and code is clean enough
+- The refactor added no failure against its baseline, and code is clean enough
 - Further changes would require new tests (behavior change)
 - Time budget is exhausted
 - Diminishing returns on readability improvements

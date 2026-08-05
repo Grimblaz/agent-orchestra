@@ -8,7 +8,7 @@ Quality gates are enforced in priority order:
 | ------------ | ---------------- | ------ | --------- | -------------------------------- |
 | 🥇 PRIMARY   | Mutation Testing | PIT    | ≥80%      | Validates tests catch real bugs  |
 | 🥈 SECONDARY | Code Coverage    | JaCoCo | ≥80%      | Ensures code is exercised        |
-| 🥉 BASELINE  | Tests Pass       | JUnit  | 100%      | Basic correctness                |
+| 🥉 BASELINE  | Added Failures   | JUnit  | 0 vs. baseline | Basic correctness           |
 
 ## Why This Order?
 
