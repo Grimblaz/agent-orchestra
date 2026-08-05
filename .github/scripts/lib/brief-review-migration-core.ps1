@@ -407,7 +407,19 @@ function Test-BRMCorrectedVerdict {
         # blocks and left this guard scanning nothing — it reported success on
         # a corpus it had not looked at, which is the failure mode it exists to
         # prevent. Get-EmissionGap assigns directly for the same reason.
-        $rawBlocks = Get-PhaseContainmentBlock -Text $b -Id $Issue
+        # PR #1006 review, M19: this call passed no [ref] at all, so a region
+        # the reader could not read was invisible to a guard whose whole job is
+        # to report on a corpus — the same "reported success on a corpus it had
+        # not looked at" failure the comment above describes, one class over.
+        # Threaded and surfaced rather than silently dropped.
+        $migrationSkipped = 0
+        $migrationUnreadable = 0
+        $rawBlocks = Get-PhaseContainmentBlock -Text $b -Id $Issue `
+            -SkippedCount ([ref]$migrationSkipped) `
+            -UnreadableEntryCount ([ref]$migrationUnreadable)
+        if ($migrationSkipped -gt 0) {
+            Write-Warning "brief-review-migration: issue $Issue carries $migrationSkipped unreadable phase-containment region(s) holding $migrationUnreadable entry/entries; this migration cannot see them."
+        }
         if ($null -eq $rawBlocks) { continue }
         foreach ($raw in $rawBlocks) {
             if ([string]::IsNullOrWhiteSpace($raw)) { continue }
