@@ -1,6 +1,6 @@
 ---
 name: agent-memory-compaction
-description: "Lossless-compaction policy for an agent memory store's recall index: the rules a compaction may not break, what may and may not be retired, and a re-runnable check. Use when compacting, pruning, or repairing a memory index, including a compaction the harness hands to an agent. DO NOT USE FOR: writing or recalling individual memory entries; durable session-state and handoff markers (use session-memory-contract); repository documentation cleanup (use documentation-finalization)."
+description: "Lossless-compaction policy for an agent memory store's recall index: the rules a compaction may not break, what may and may not be retired, and a re-runnable check. Use when compacting, pruning, or repairing a memory index. DO NOT USE FOR: individual memory entries; session-state or handoff markers (use session-memory-contract); repository docs (use documentation-finalization)."
 ---
 
 <!-- markdownlint-disable-file MD041 -->
@@ -87,6 +87,7 @@ The canonical text above is written for a store whose entry filenames carry the 
 If your store names its entries differently, adapt before adopting:
 
 - Map the four kinds onto whatever kinds your store actually has. The load-bearing distinction is not the prefix — it is **which kinds have a settlement notion** (a task that can close) and which are **standing** (a lesson that cannot). Rewrite the two bullets under *What may be retired, and what may not* to name your kinds, and keep the affirmative statement for the standing ones: silence about a kind is what authorizes a hostile-literal reader to retire it.
+- **Write each kind as a backticked identifier ending in an underscore** — `` `task_` ``, not `task-` or plain `task`. That is not decoration: it is the declaration the check reads to learn your store's vocabulary, and a kind written any other way is invisible to it. A policy whose kinds are all written some other way names no kinds at all, and the check refuses rather than guessing.
 - Keep the ratchet bound and R1–R3 verbatim. They do not depend on the taxonomy.
 - **Keep your adapted copy outside the plugin cache.** The check defaults its reference to the `SKILL.md` beside it, which lives in a per-version install directory; the next plugin update creates a new directory with the pristine text and silently orphans your adaptation. Save the adapted copy somewhere durable and pass `-PolicyReferencePath` — and put that same invocation in your store's header, so whoever reads the header runs the right comparison.
 - The check reads the entry-kind vocabulary from your index's own header when it can find one there, and falls back to the reference copy otherwise. It refuses to report counts when no linked entry matches any kind the policy names. That refusal is the signal that this adaptation has not been done — it is not a bug, and the fix is to adapt the text, not to ignore the exit code.
