@@ -8,8 +8,11 @@
         filed issue body carrying matched criterion_id(s) and the originating
         PR. The sentinel is the AC8 contract and is written unconditionally
         (an empty criterion_ids list is always legal; a missing
-        originating_pr is legal ONLY for the two non-ruling-asserting
-        provenance values -- see the -FilingProvenance anchor requirement).
+        originating_pr is legal whenever the filing carries some other
+        anchor -- a Parent: #N line naming the presentation surface --
+        or when the provenance value asserts no ruling. Only a
+        ruling-asserting stamp with NEITHER anchor is non-conforming;
+        see the -FilingProvenance anchor requirement below).
 
     M3: Emits a defensive Write-Warning when any element of -Labels contains
         a comma, which would cause `gh issue create --label <csv>` to mis-split
