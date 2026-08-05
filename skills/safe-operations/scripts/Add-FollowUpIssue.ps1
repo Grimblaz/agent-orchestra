@@ -137,18 +137,39 @@ function Add-FollowUpIssue {
         #   direct-request  — asserts NO ruling: the maintainer asked for this
         #                     issue directly and the gate is bypassed by
         #                     design. Out of the reconciliation domain.
-        #   pre-gate-legacy — asserts NO ruling: filed by a surface with no
-        #                     callable gate orchestrator. It means "filed
-        #                     BEFORE any gate existed", NOT "cleared under an
-        #                     older gate". Out of the reconciliation domain.
+        #   pre-gate-legacy — asserts NO ruling: filed by a surface that has
+        #                     no callable gate orchestrator to hand off to.
+        #                     NOT "cleared under an older gate", and NOT
+        #                     purely historical: create-improvement-issue-
+        #                     core.ps1 stamps it TODAY on an active headless
+        #                     surface (#837 R1). It marks an ONGOING
+        #                     exemption. Out of the reconciliation domain.
+        #
+        # Anchor requirement (#1012): a filing stamped with a ruling-asserting
+        # value MUST carry -OriginatingPr naming the surface the batch was
+        # presented against (or a parent issue that is that surface). Both
+        # -OriginatingPr and -ParentIssue are optional here by design, and
+        # that stays true for the two non-asserting values — but a ruling-
+        # asserting stamp with neither anchor leaves the reconciliation
+        # procedure nothing to search, and its honest verdict is
+        # 'not-reconcilable', NOT 'unsupported'. The anchor names a SURFACE TO
+        # SEARCH, never the record itself: a filer-authored pointer at the
+        # record would reconcile vacuously.
         #
         # What a reconciliation failure means (procedure: §2e "Reconciliation
         # procedure"): for a ruling-asserting value, a record that cannot be
-        # located is a DEFECT SIGNAL — the ceremony's trace is missing where
-        # the stamp claims one. For a non-asserting value the correct verdict
-        # is "out of domain"; calling it "unsupported" is a FALSE ALARM, and
-        # emitting one across the pre-gate corpus trains readers to ignore the
-        # signal on the day it is real.
+        # located is a DEFECT SIGNAL — the record is missing where the stamp
+        # claims one. For a non-asserting value the correct verdict is "out of
+        # domain"; calling it "unsupported" is a FALSE ALARM, and emitting one
+        # across an exempt population trains readers to ignore the signal on
+        # the day it is real. Two further verdicts exist precisely so they are
+        # not collapsed into "unsupported": 'could-not-verify' when the read
+        # itself failed (the read helper returns an empty set on five failure
+        # paths, one of them silently), and 'not-reconcilable' when the filing
+        # carries no anchor to search from. And note the era bound: ruling
+        # records were first owed 2026-08-05, so every earlier ruling-
+        # asserting filing reads "unsupported" without that carrying any
+        # accusation.
         #
         # Failed ruling-record write: the filing does NOT proceed. A caller
         # that cannot durably write the ruling record must not call this
@@ -159,13 +180,16 @@ function Add-FollowUpIssue {
         # bypass. If the maintainer wants it filed while the write path is
         # broken, that is 'direct-request'.
         #
-        # Trust bound — stated honestly: this parameter is SELF-ATTESTED. The
+        # Trust bound — stated exactly: this parameter is SELF-ATTESTED. The
         # script stamps whatever value the caller passes and checks no gate
-        # artifact. A located ruling record evidences that the ceremony RAN and
-        # left a trace; it never evidences WHO ruled, and a session that
-        # fabricates a record defeats it. The deliverable is DETECTION of a
-        # missing trace (the honest-omission class), not PREVENTION of a
-        # determined bypass.
+        # artifact. A located ruling record evidences that A CONFORMING RECORD
+        # WAS WRITTEN AT OR BEFORE FILING TIME — not that the ruling ceremony
+        # ran, and not who ruled. Nothing artifact-side distinguishes a
+        # presented batch from a session that assembled the batch, wrote the
+        # record, and filed in the same breath. So the detected class is a
+        # session that omits THE RECORD WRITE (the honest-omission case), not
+        # one that omits the presentation. DETECTION of a missing record, not
+        # PREVENTION of a bypass.
         [Parameter(Mandatory=$true)]
         [ValidateSet('gate-approved', 'gate-modified', 'queue-consumed', 'direct-request', 'pre-gate-legacy')]
         [string]$FilingProvenance,

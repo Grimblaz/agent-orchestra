@@ -4,6 +4,12 @@ All notable changes to agent-orchestra will be documented in this file.
 
 ## [Unreleased]
 
+## [3.12.1] — 2026-08-05
+
+### Changed
+
+- **Filing Approval Gate presentations must argue, and every ruling must leave a record (#1012).** §2e's batched presentation now carries two argued cases per item — file-vs-do-now (the tripped structural criterion *and* why inline handling is wrong for this change) and placement (against the named alternatives) — and a computed-fields-only presentation is nonconforming on its face, with a stated conformance test that rejects "arguments" mechanically fillable from already-computed values. Every ruling, approve-only batches included, now owes one durable batch-scoped **ruling record** carrying the batch counts, presentation surface, decision timestamp, and each item's as-filed title and outcome; a failed record write blocks the filing rather than producing a stamp with nothing behind it. §2e states a reconciliation procedure with five deliberately distinct outcomes — *located*, *unsupported*, *out of domain*, *could-not-verify*, *not-reconcilable* — because collapsing them is how a detection mechanism becomes a false-accusation generator, and ruling-asserting filings now owe a surface anchor (`-OriginatingPr`) for the reader to search from. The trust bound is stated exactly at both the contract and the enum's defining surface: a located record evidences that a conforming record was written at or before filing time, not that the ceremony ran and not who ruled — detection of a missing record, not prevention of a bypass. The headless-queue payload gap is named rather than papered over and stays deferred until that path has a live producer.
+
 ### Fixed
 
 - **A phase-containment region that no reader could match produced no signal at all (#944).** A region hand-authored as an open tag on its own line, entries, then a bare `-->` is a syntactically valid multi-line HTML comment. `Get-PhaseContainmentBlock` matches only the self-closed `<!-- phase-containment-{ID} -->` by exact ordinal `IndexOf`, and its malformed-block warnings are reachable only *after* an open tag has matched — so such a region was not parsed, not counted, and not warned about. **31 regions carrying 63 ledger entries** were invisible across nine comments on seven issues/PRs (#471, #784, #810, #853, #880, #884, #937), five of them with total loss. **13 of the 63 carry critical or high severity**, absent from the relaxation veto's severity arm on all four review stages at once. This is the third distinct failure of the same instrument after #782 (emission never happened) and #811 (the check could not parse a surface); unlike both, it was silent rather than wrong.
@@ -15,12 +21,6 @@ All notable changes to agent-orchestra will be documented in this file.
 ### Added
 
 - **An unattended guard for the malformed-region class (#944).** `.github/workflows/phase-containment-region-guard.yml` fires on the **comment event itself** — every one of the 63 lost entries was hand-authored straight into a GitHub comment, and a repository-file check would have caught none of them — and replies in the thread while the author is still there. Warn-only by construction: a GitHub comment cannot be gated, so it reports and exits 0. Its three rules are semantic rather than syntactic — a numeric id only, at least one recognizable entry, and outside a YAML block scalar — which bounds the false-positive direction without the fence-based exemption that would have recreated PR #810's blind spot. The bound is tested against this repository's own prose about the shape across every tracked text file, with corpus-transcribed fixtures as the positive control that the scan reaches real shapes at all. (#944)
-
-## [3.12.1] — 2026-08-05
-
-### Changed
-
-Filing Approval Gate presentations must now argue file-vs-do-now and placement per item, and every ruling - approve-only batches included - leaves a durable batch-scoped ruling record a provenance stamp reconciles against from the filed issue alone (#1012).
 
 ## [3.12.0] — 2026-08-04
 
