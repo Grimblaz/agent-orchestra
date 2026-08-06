@@ -35,6 +35,35 @@ contract against a reference stub (Invoke-StubbedGateRuling); a future
 production §2e implementation must preserve this ordering, which this
 test does not and cannot enforce against non-existent production code
 (plan step 3 Requirement Contract).
+
+SUPERSEDED IN PART (#1012, 2026-08-06) -- read this before treating the
+stub as the spec. Everything above still holds: record-before-file
+ordering, the provenance stamp, and the drop/modify entries are all
+still contract. But §2e gained obligations this stub does NOT model, so
+it is no longer a complete reference for a production implementation:
+
+  1. EVERY ruling owes a durable ruling record -- approve-only batches
+     included. Invoke-StubbedGateRuling appends to $decisions only on
+     'drop' and the modify-redirect branch, so an all-approve batch
+     leaves no entry at all. That traceless-approval asymmetry is
+     exactly what #1012 closed.
+  2. The ruling record is BATCH-SCOPED and carries named fields --
+     gate_ruling_counts, gate_ruling_surface, gate_ruling_decided_at,
+     and gate_ruling_items (per-item title + outcome). This stub only
+     ever returns counts on its result object; nothing reaches the
+     record body.
+  3. The write must compose with Merge-FollowupRecords and carry the
+     phase's other load_bearing_decisions forward. This stub
+     hand-composes a body and pushes it through Find-OrUpsertComment
+     with no merge step.
+  4. A ruling-asserting filing owes a surface anchor (-OriginatingPr,
+     or a Parent: #N line naming the presentation surface).
+
+Deliberately NOT fixed here: modelling those in a stub would pin a
+contract for an orchestrator that still does not exist, which is the
+speculative design #1012's brief declined. The authoritative statement
+is skills/safe-operations/SKILL.md §2e -- read it, not this file, when
+building the real thing.
 #>
 
 BeforeAll {
