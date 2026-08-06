@@ -37,10 +37,14 @@ test does not and cannot enforce against non-existent production code
 (plan step 3 Requirement Contract).
 
 SUPERSEDED IN PART (#1012, 2026-08-06) -- read this before treating the
-stub as the spec. Everything above still holds: record-before-file
-ordering, the provenance stamp, and the drop/modify entries are all
-still contract. But §2e gained obligations this stub does NOT model, so
-it is no longer a complete reference for a production implementation:
+stub as the spec. The sequencing above still holds: record before file,
+the provenance stamp, and the drop/modify entries are all still
+contract. But §2e also added a precondition the stub does NOT honor:
+when the record write fails, filing must not proceed -- this stub
+discards Find-OrUpsertComment's failure signal (`| Out-Null` on line
+197) and files regardless. That is one more gap this stub does not
+model, so together with the four below it is no longer a complete
+reference for a production implementation:
 
   1. EVERY ruling owes a durable ruling record -- approve-only batches
      included. Invoke-StubbedGateRuling appends to $decisions only on
