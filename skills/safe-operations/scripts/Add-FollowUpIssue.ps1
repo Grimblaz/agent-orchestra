@@ -7,7 +7,12 @@
     M1: Writes the <!-- code-conductor-filed-followup --> sentinel into the
         filed issue body carrying matched criterion_id(s) and the originating
         PR. The sentinel is the AC8 contract and is written unconditionally
-        (empty criterion_ids list and missing originating_pr are both legal).
+        (an empty criterion_ids list is always legal; a missing
+        originating_pr is legal whenever the filing carries some other
+        anchor -- a Parent: #N line naming the presentation surface --
+        or when the provenance value asserts no ruling. Only a
+        ruling-asserting stamp with NEITHER anchor is non-conforming;
+        see the -FilingProvenance anchor requirement below).
 
     M3: Emits a defensive Write-Warning when any element of -Labels contains
         a comma, which would cause `gh issue create --label <csv>` to mis-split
@@ -119,6 +124,77 @@ function Add-FollowUpIssue {
         # of the five-value provenance enum — safe-operations SKILL.md §2e and
         # any consuming agent body reference these literal values and must be
         # kept in sync with this list, not the other way around.
+        #
+        # #1012: per-value semantics. Three of the five values ASSERT that a
+        # gate ruling occurred, and therefore assert that a durable, batch-
+        # scoped ruling record exists naming this issue's title; two assert
+        # no ruling and owe no record:
+        #
+        #   gate-approved   — ASSERTS a ruling: a maintainer approved this
+        #                     item in a presented batch. Record must list this
+        #                     title with outcome 'approved'.
+        #   gate-modified   — ASSERTS a ruling: a maintainer edited and then
+        #                     approved this item. Record must list the
+        #                     as-approved title with outcome 'modified'.
+        #   queue-consumed  — ASSERTS a ruling: a gate-capable session consumed
+        #                     a queued proposal and ruled on it. Record must
+        #                     list this title with 'approved' or 'modified'.
+        #   direct-request  — asserts NO ruling: the maintainer asked for this
+        #                     issue directly and the gate is bypassed by
+        #                     design. Out of the reconciliation domain.
+        #   pre-gate-legacy — asserts NO ruling: filed by a surface that has
+        #                     no callable gate orchestrator to hand off to.
+        #                     NOT "cleared under an older gate", and NOT
+        #                     purely historical: create-improvement-issue-
+        #                     core.ps1 stamps it TODAY on an active headless
+        #                     surface (#837 R1). It marks an ONGOING
+        #                     exemption. Out of the reconciliation domain.
+        #
+        # Anchor requirement (#1012): a filing stamped with a ruling-asserting
+        # value MUST carry -OriginatingPr naming the surface the batch was
+        # presented against (or a parent issue that is that surface). Both
+        # -OriginatingPr and -ParentIssue are optional here by design, and
+        # that stays true for the two non-asserting values — but a ruling-
+        # asserting stamp with neither anchor leaves the reconciliation
+        # procedure nothing to search, and its honest verdict is
+        # 'not-reconcilable', NOT 'unsupported'. The anchor names a SURFACE TO
+        # SEARCH, never the record itself: a filer-authored pointer at the
+        # record would reconcile vacuously.
+        #
+        # What a reconciliation failure means (procedure: §2e "Reconciliation
+        # procedure"): for a ruling-asserting value, a record that cannot be
+        # located is a DEFECT SIGNAL — the record is missing where the stamp
+        # claims one. For a non-asserting value the correct verdict is "out of
+        # domain"; calling it "unsupported" is a FALSE ALARM, and emitting one
+        # across an exempt population trains readers to ignore the signal on
+        # the day it is real. Two further verdicts exist precisely so they are
+        # not collapsed into "unsupported": 'could-not-verify' when the read
+        # itself failed (the read helper returns an empty set on five failure
+        # paths, one of them silently), and 'not-reconcilable' when the filing
+        # carries no anchor to search from. And note the era bound: ruling
+        # records were first owed 2026-08-05, so every earlier ruling-
+        # asserting filing reads "unsupported" without that carrying any
+        # accusation.
+        #
+        # Failed ruling-record write: the filing does NOT proceed. A caller
+        # that cannot durably write the ruling record must not call this
+        # function with a ruling-asserting value — the batch is re-presented on
+        # the next ruling instead (proposal assembly's dedup exclusion makes
+        # that lossless). Filing anyway would stamp a ruling assertion with no
+        # locatable record, which reconciliation cannot distinguish from a
+        # bypass. If the maintainer wants it filed while the write path is
+        # broken, that is 'direct-request'.
+        #
+        # Trust bound — stated exactly: this parameter is SELF-ATTESTED. The
+        # script stamps whatever value the caller passes and checks no gate
+        # artifact. A located ruling record evidences that A CONFORMING RECORD
+        # WAS WRITTEN AT OR BEFORE FILING TIME — not that the ruling ceremony
+        # ran, and not who ruled. Nothing artifact-side distinguishes a
+        # presented batch from a session that assembled the batch, wrote the
+        # record, and filed in the same breath. So the detected class is a
+        # session that omits THE RECORD WRITE (the honest-omission case), not
+        # one that omits the presentation. DETECTION of a missing record, not
+        # PREVENTION of a bypass.
         [Parameter(Mandatory=$true)]
         [ValidateSet('gate-approved', 'gate-modified', 'queue-consumed', 'direct-request', 'pre-gate-legacy')]
         [string]$FilingProvenance,
