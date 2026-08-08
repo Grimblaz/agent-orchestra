@@ -502,7 +502,7 @@ Describe 'Test-MemoryIndexPolicy' {
             $store = script:New-SplitStore -Body $script:ConformingBody -Values $values
             $r = script:Invoke-Check -IndexPath $store.IndexPath
             $r.Report.Size.State | Should -BeExactly 'could-not-verify'
-            $r.Text | Should -Match 'budget_fraction must be a number'
+            $r.Text | Should -Match 'budget_fraction must be a finite number'
         }
     }
 
@@ -795,6 +795,248 @@ Describe 'Test-MemoryIndexPolicy' {
         }
     }
 
+    Context 'adversarial review fix cycle - store-side markers and paths (grouping a)' {
+        It 'does not let an index that QUOTES the adoption snippet become a split store' {
+            # The panel's anchor finding. The shipped docs print these markers, so an index that
+            # copies the migration recipe into itself was read as split - and the preserved-text
+            # route then refused, blaming the shipped template for the index's own content.
+            $quoted = @('The migration recipe, for later:', '', '```text',
+                '   <!-- memory-policy-stanza-begin: POLICY.md -->', '   ...stanza...',
+                '   <!-- memory-policy-stanza-end -->', '```', '') + $script:ConformingBody
+            $r = script:Invoke-Check -IndexPath (script:New-Index -Body $quoted)
+            $r.Report.StoreShape | Should -BeExactly 'legacy'
+            $r.Text | Should -Match 'RESULT: clean'
+            $r.Code | Should -Be 0
+        }
+
+        It 'keeps the preserved-text route clean for a legacy store that quotes the snippet' {
+            # AC7(ii) under the same input: this is the consequence that made the finding high.
+            $quoted = @('Notes to self:', '', '<!-- memory-policy-stanza-begin: POLICY.md -->',
+                '<!-- memory-policy-stanza-end -->', '') + $script:ConformingBody
+            $r = script:Invoke-Check -IndexPath (script:New-Index -Body $quoted -Header $script:LegacyCanonicalLines) `
+                -ReferencePath $script:PreSupersession
+            $r.Text | Should -Match 'RESULT: clean'
+            $r.Text | Should -Not -Match 'malformed'
+            $r.Code | Should -Be 0
+        }
+
+        It 'does not read the shipped SKILL.md as a split-store declaration' {
+            # The direct probe: SKILL.md carries a well-formed store-side marker in an example.
+            $lines = @([System.IO.File]::ReadAllLines($script:Skill))
+            $firstSection = [array]::FindIndex([string[]]$lines, [Predicate[string]] { param($l) $l -match '^##\s' })
+            $firstSection | Should -BeGreaterThan -1
+            (Get-MIPStoreStanza -Lines $lines -HeaderLineCount $firstSection).Found | Should -BeFalse
+            # ...and the marker text really is in the file, so the guard is not vacuous. It is
+            # at column 0 (the adoption snippet is copy-pasteable), well below the first heading.
+            $markerLines = @($lines | Where-Object { $_.TrimEnd() -match '^<!--\s*memory-policy-stanza-begin' })
+            $markerLines.Count | Should -BeGreaterThan 0 -Because 'SKILL.md must still show the marker it documents'
+            [array]::FindIndex([string[]]$lines, [Predicate[string]] { param($l) $l.TrimEnd() -match '^<!--\s*memory-policy-stanza-begin' }) |
+                Should -BeGreaterThan $firstSection
+        }
+
+        It 'refuses an indented stanza marker rather than accepting it' {
+            $store = script:New-SplitStore -Body $script:ConformingBody
+            $lines = @([System.IO.File]::ReadAllLines($store.IndexPath))
+            $lines[0] = '   ' + $lines[0]
+            [System.IO.File]::WriteAllLines($store.IndexPath, $lines)
+            $r = script:Invoke-Check -IndexPath $store.IndexPath
+            $r.Report.StoreShape | Should -BeExactly 'legacy'
+        }
+
+        It 'refuses a stanza marker written without its path rather than reading it back as legacy' {
+            $store = script:New-SplitStore -Body $script:ConformingBody
+            $lines = @([System.IO.File]::ReadAllLines($store.IndexPath))
+            $lines[0] = '<!-- memory-policy-stanza-begin -->'
+            [System.IO.File]::WriteAllLines($store.IndexPath, $lines)
+            $r = script:Invoke-Check -IndexPath $store.IndexPath
+            $r.Code | Should -Be 2
+            $r.Text | Should -Match 'names no policy file'
+            $r.Text | Should -Not -Match 'in-index header - absent'
+        }
+
+        It 'calls an unusable policy-file declaration malformed, not half-migrated' {
+            # Three declarations that cannot name a file beside the index. Each must be told
+            # apart from a store that simply has not created its policy file yet.
+            foreach ($bad in @('..\..\outside\POLICY.md', 'C:\Windows\win.ini', '/etc/passwd')) {
+                $store = script:New-SplitStore -Body $script:ConformingBody -MarkerPath $bad -OmitPolicyFile
+                $r = script:Invoke-Check -IndexPath $store.IndexPath
+                $r.Code | Should -Be 2 -Because "'$bad' cannot name a file beside the index"
+                $r.Text | Should -Match 'malformed declaration, not the half-migrated state'
+            }
+            # control: the same store with a lawful path IS half-migrated, a defect not a refusal
+            $ok = script:New-SplitStore -Body $script:ConformingBody -OmitPolicyFile
+            (script:Invoke-Check -IndexPath $ok.IndexPath).Code | Should -Be 1
+        }
+
+        It 'reports policy text left in the header region beside the stanza' {
+            # Migration residue: a store that "split" without removing what it was splitting out.
+            $store = script:New-SplitStore -Body $script:ConformingBody
+            $lines = @($script:LegacyCanonicalLines) + @('') + @([System.IO.File]::ReadAllLines($store.IndexPath))
+            [System.IO.File]::WriteAllLines($store.IndexPath, $lines)
+            $r = script:Invoke-Check -IndexPath $store.IndexPath
+            $r.Code | Should -Be 1
+            $r.Text | Should -Match "header region still carries policy text outside the stanza"
+        }
+
+        It 'refuses nested links instead of throwing on a negative substring length' {
+            # Pre-existing at origin/main; repaired here because this release ships the claim
+            # that an unparsable link construct is an exit-2 refusal.
+            $body = @('- [alpha](reference_alpha_lesson.md) - a stale read drops the write',
+                '- [see [ref:foo](reference_foo_lesson.md) detail](reference_bar_lesson.md) - a clause')
+            $r = script:Invoke-Check -IndexPath (script:New-Index -Body $body)
+            $r.Code | Should -Be 2
+            $r.Text | Should -Match 'could not be parsed'
+            $r.Text | Should -Match 'nested or overlapping links'
+        }
+    }
+
+    Context 'adversarial review fix cycle - the values record as a record (grouping b)' {
+        It 'rejects a non-finite budget fraction instead of throwing' {
+            # NaN and Infinity both survive TryParse, and every comparison against NaN is false,
+            # so a range guard alone waved them through to a cast that threw: exit 1 with no
+            # report at all and an empty -Json payload.
+            foreach ($bad in @('NaN', 'Infinity', '-Infinity')) {
+                $store = script:New-SplitStore -Body $script:ConformingBody -Values @("budget_fraction: $bad")
+                # An unhandled throw fails this line outright, which is the red state.
+                $r = script:Invoke-Check -IndexPath $store.IndexPath
+                $r.Report.Size.State | Should -BeExactly 'could-not-verify' -Because "'$bad' must be reported, not thrown on"
+                $r.Code | Should -Be 1
+                $j = (script:Invoke-Check -IndexPath $store.IndexPath -AsJson).Text
+                $j | Should -Not -BeNullOrEmpty -Because 'the -Json payload must exist on every terminal path'
+                ($j | ConvertFrom-Json).size.state | Should -BeExactly 'could-not-verify'
+            }
+        }
+
+        It 'rejects a future-dated observation, which would otherwise govern forever' {
+            # The freshest date governs and the record is append-only, so a mistyped year
+            # outranks every honest re-observation that follows it - permanently, and rendered
+            # as an evaluated axis rather than one that could not verify.
+            $values = @(
+                "limit_observation: 2126-08-06 | 24978 | characters | mistyped year",
+                'limit_observation: 2026-09-01 | 20000 | characters | the limit shrank')
+            $store = script:New-SplitStore -Body $script:ConformingBody -Values $values
+            $r = script:Invoke-Check -IndexPath $store.IndexPath
+            $r.Report.Size.State | Should -BeExactly 'could-not-verify'
+            $r.Text | Should -Match 'dated 2126-08-06, in the future'
+            $r.Code | Should -Be 1
+
+            # control: the same two rows with an honest year - the later, smaller limit governs
+            $ok = script:New-SplitStore -Body $script:ConformingBody -Values @(
+                "limit_observation: 2026-08-06 | 24978 | characters | truncation-boundary test",
+                'limit_observation: 2026-09-01 | 20000 | characters | the limit shrank')
+            $c = script:Invoke-Check -IndexPath $ok.IndexPath -AsOf ([datetime]::ParseExact('2026-09-10', 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture))
+            $c.Report.Size.ObservedOn | Should -BeExactly '2026-09-01'
+            $c.Report.Size.Budget | Should -Be ([int][Math]::Floor(0.80 * 20000))
+        }
+
+        It 'rejects a repeated scalar key instead of silently taking the last one' {
+            $store = script:New-SplitStore -Body $script:ConformingBody -Values @(
+                'budget_fraction: 0.80', 'budget_fraction: 0.10',
+                "limit_observation: $script:ObservationDate | 24978 | characters | m")
+            $r = script:Invoke-Check -IndexPath $store.IndexPath
+            $r.Report.Size.State | Should -BeExactly 'could-not-verify'
+            $r.Text | Should -Match "'budget_fraction' is recorded more than once"
+            $r.Code | Should -Be 1
+        }
+
+        It 'rejects a second values region rather than letting the first silently govern' {
+            # The shipped format example, left above the real values, governed the budget.
+            $store = script:New-SplitStore -Body $script:ConformingBody
+            $policy = @([System.IO.File]::ReadAllLines($store.PolicyPath))
+            $example = @('<!-- store-values-begin -->', 'budget_fraction: 0.80',
+                'limit_observation: 2020-01-01 | 500 | characters | an example', '<!-- store-values-end -->', '')
+            [System.IO.File]::WriteAllLines($store.PolicyPath, (@($policy[0..1]) + $example + @($policy[2..($policy.Count - 1)])))
+            $r = script:Invoke-Check -IndexPath $store.IndexPath
+            $r.Report.Size.State | Should -BeExactly 'could-not-verify'
+            $r.Text | Should -Match "carries 2 '<!-- store-values-begin -->' regions"
+            $r.Code | Should -Be 1
+        }
+
+        It 'reads a declared-but-empty values region the same way whichever way it was written' {
+            # A blank line inside the markers used to flip the verdict across the clean/defect
+            # line. Declared-and-empty is one intent and must read as one outcome.
+            $adjacent = script:New-SplitStore -Body $script:ConformingBody -Values @()
+            $blank = script:New-SplitStore -Body $script:ConformingBody -Values @('')
+            $a = script:Invoke-Check -IndexPath $adjacent.IndexPath
+            $b = script:Invoke-Check -IndexPath $blank.IndexPath
+            $a.Report.Size.State | Should -BeExactly 'could-not-verify'
+            $b.Report.Size.State | Should -BeExactly $a.Report.Size.State
+            $a.Code | Should -Be $b.Code
+            # ...and a store with no region at all still reads as recording nothing
+            $none = script:New-SplitStore -Body $script:ConformingBody -OmitValuesBlock
+            (script:Invoke-Check -IndexPath $none.IndexPath).Report.Size.State | Should -BeExactly 'not-evaluated'
+        }
+
+        It 'rejects a unit that differs only in case' {
+            $store = script:New-SplitStore -Body $script:ConformingBody -Values @(
+                "limit_observation: $script:ObservationDate | 24978 | CHARACTERS | m")
+            $r = script:Invoke-Check -IndexPath $store.IndexPath
+            $r.Report.Size.State | Should -BeExactly 'could-not-verify'
+            $r.Text | Should -Match "unit must be 'characters'"
+        }
+    }
+
+    Context 'adversarial review fix cycle - honest reporting' {
+        It 'does not refuse an adapted store while it is half-migrated' {
+            # Chunk 3 puts every store it migrates through this state. Refusing here told an
+            # adapted owner to "adapt the policy text first" - which they had done - and
+            # suppressed every count.
+            $rename = { param($t) $t -replace '`reference_`', '`lesson_`' -replace '`feedback_`', '`howto_`' -replace '`project_`', '`task_`' -replace '`user_`', '`me_`' }
+            $adapted = @($script:CanonicalLines | ForEach-Object { & $rename $_ })
+            $body = @('- [alpha](lesson_alpha_thing.md) — a stale read drops the write', '- [beta](task_beta_thing.md) — the retry cap is three')
+            $store = script:New-SplitStore -Body $body -PolicyText $adapted -OmitPolicyFile
+            $r = script:Invoke-Check -IndexPath $store.IndexPath
+            $r.Code | Should -Be 1
+            $r.Report.Result | Should -BeExactly 'defects'
+            $r.Text | Should -Not -Match 'entry-kind vocabulary not recognized'
+            $r.Text | Should -Match 'half-migrated'
+            $r.Text | Should -Match 'subjects_without_hook: 0'
+        }
+
+        It 'harvests entry kinds only from the region the comparison actually audits' {
+            # A kind named outside the compared region was governing behaviour under a verdict
+            # that said the policy file matched the reference.
+            $store = script:New-SplitStore -Body @('- [alpha](zzz_alpha_lesson.md) — a stale read drops the write')
+            $policy = @([System.IO.File]::ReadAllLines($store.PolicyPath)) + @('', 'Notes: we also keep `zzz_` entries.')
+            [System.IO.File]::WriteAllLines($store.PolicyPath, $policy)
+            $r = script:Invoke-Check -IndexPath $store.IndexPath
+            $r.Code | Should -Be 2
+            $r.Text | Should -Match 'entry-kind vocabulary not recognized'
+            $r.Text | Should -Not -Match 'zzz_' -Because 'a kind named outside the compared region must not enter the vocabulary'
+        }
+
+        It 'states both readings of a legacy divergence instead of one false remedy' {
+            # The divergence explanation is unconditional by design (no version recognition),
+            # so its remedies must be too: a store diverging by an ordinary typo in the CURRENT
+            # text gets no clean verdict from the pre-supersession reference.
+            $header = @($script:CanonicalLines)
+            $header[-1] = $header[-1].Replace('runs it', 'runsit')
+            $r = script:Invoke-Check -IndexPath (script:New-Index -Body $script:ConformingBody -Header $header)
+            $r.Text | Should -Match 'cannot tell which policy text this store adopted'
+            $r.Text | Should -Match 'will NOT produce a clean verdict in that case'
+        }
+
+        It 'reports the policy axis honestly in -Json for a half-migrated store' {
+            $j = (script:Invoke-Check -IndexPath (script:New-SplitStore -Body $script:ConformingBody -OmitPolicyFile).IndexPath -AsJson).Text | ConvertFrom-Json
+            $j.policy_present | Should -BeFalse
+            $j.header_present | Should -BeFalse -Because 'the retained legacy key must carry the same truth, not a constant'
+            $j.policy_complete | Should -BeFalse
+            $j.policy_divergence | Should -Not -BeNullOrEmpty
+        }
+
+        It 'exercises the unreadable-policy-file refusal on every platform' {
+            # The Windows lock has no POSIX equivalent, so the one construction that separates
+            # AC8's refusal from the half-migrated defect had no standing guard on the merge
+            # path. A directory standing where the file should be is readable-as-a-path and
+            # unreadable-as-a-file on both.
+            $store = script:New-SplitStore -Body $script:ConformingBody -OmitPolicyFile
+            New-Item -ItemType Directory -Path $store.PolicyPath -Force | Out-Null
+            $r = script:Invoke-Check -IndexPath $store.IndexPath
+            $r.Code | Should -Be 2
+            $r.Text | Should -Match 'not the half-migrated state'
+        }
+    }
+
     Context 'the shipped surfaces describe what the check actually does' {
         It 'keeps the documented parameter surface exactly, and keeps -Policy and -Index unambiguous' {
             $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:EntryPoint, [ref]$null, [ref]$null)
@@ -821,8 +1063,10 @@ Describe 'Test-MemoryIndexPolicy' {
             $canon = ($script:CanonicalLines -join "`n")
             $canon | Should -Match 'four axes'
             $canon | Should -Not -Match 'three axes'
+            # -Match is case-insensitive, so one spelling covers both; the alternation an
+            # earlier revision carried was a no-op dressed as thoroughness.
             foreach ($p in @($script:EntryPoint, $script:Core)) {
-                (Get-Content -LiteralPath $p -Raw) | Should -Not -Match 'Three axes|three axes'
+                (Get-Content -LiteralPath $p -Raw) | Should -Not -Match 'three axes'
             }
         }
 

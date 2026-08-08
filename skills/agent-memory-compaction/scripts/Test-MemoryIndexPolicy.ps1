@@ -28,19 +28,30 @@
     Refusals come before any count is printed, so that input the check does not fully
     understand gets a loud failure instead of a plausible wrong verdict:
 
-      - the index, the reference copy, or a split store's policy file cannot be read
+      - the index, the reference copy, or a split store's policy file cannot be read, or
+        something that is not a file sits where the policy file should be
       - the reference copy is missing its canonical-policy or canonical-stanza markers, or
         either block contains a section heading (which would make the index-side header
         boundary ambiguous)
       - a split store's policy file is missing its canonical-policy markers
-      - the index declares the split shape with a stanza that is never closed, is empty, or
-        names no policy file
+      - the index declares the split shape with a stanza that is never closed above the first
+        section heading, is empty, names no policy file, or names a path that cannot resolve to
+        a file beside the index
       - the index has no section heading, or no pointer line at all
-      - a link-like construct could not be parsed, so some subject would be judged silently
-      - no linked entry matches the entry-kind vocabulary the policy names
+      - a link-like construct could not be parsed, so some subject would be judged silently -
+        including links nested inside one another, where which subject owns a clause has no
+        answer
+      - no linked entry matches the entry-kind vocabulary the policy names, AND this store's
+        own policy text was available to read (a half-migrated store's is not, so it is
+        reported rather than refused)
 
     A split store whose policy file does not exist yet is half-migrated: a defect with its own
-    wording, deliberately NOT the same verdict as a policy file that exists and cannot be read.
+    wording, deliberately NOT the same verdict as a policy file that exists and cannot be read,
+    nor as a stanza whose declared path could never name a file beside the index.
+
+    The stanza is looked for ONLY above the index's first section heading and ONLY at column 0.
+    Both bounds exist so that an index which quotes this skill's own adoption instructions does
+    not thereby change the shape the check reads it as.
 
     Both count axes are syntactic proxies for questions about meaning. Novel filler evades
     the hook axis; a pointer whose words are absent from its filename passes it while saying

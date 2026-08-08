@@ -137,7 +137,17 @@ unattributed_shared_notes: 0
 
 The size axis is **data-driven**: it is evaluated only for a store that records budget inputs, and it reports `not evaluated` for a store that records none. A store that records inputs the check cannot use — no observation, a malformed one, or one counted in some other unit — gets `could not verify` naming the cause, on that axis alone, with the other three still counted.
 
-Exit 0 means clean. Exit 1 means defects, and each offending subject is printed on its own line. Exit 2 means the check refused: it did not recognize the index's structure, could not parse every link it found, found no entry matching the entry-kind vocabulary, or could not read the reference copy or this store's policy file — in each case it reports no counts rather than return a plausible wrong verdict. Exit 3 means the invocation itself was wrong, such as an index path that does not exist.
+Exit 0 means clean. Exit 1 means defects, and each offending subject is printed on its own line. Exit 3 means the invocation itself was wrong, such as an index path that does not exist.
+
+Exit 2 means the check refused — it reports no counts rather than return a plausible wrong verdict. It refuses when:
+
+- the index's structure is not recognized (no section heading, or no pointer line at all);
+- a link-like construct could not be parsed unambiguously, so some subject would be judged silently — including links nested inside one another, where which subject a clause belongs to has no answer;
+- no linked entry matches any entry kind the policy names, and this store's own policy text was available to read;
+- the index, the reference copy, or this store's policy file could not be read, or something that is not a file sits where the policy file should be;
+- the reference copy is malformed — missing its markers, or carrying a `## ` heading inside a compared region;
+- this store's policy file is malformed, missing the markers around its policy text;
+- the stanza is malformed — opened and never closed above the first section heading, empty, naming no policy file, or naming a path that could not resolve to a file beside the index.
 
 Both count axes are syntactic proxies for questions that are really about meaning, and each has known escapes: novel filler evades the hook axis, a pointer whose words are absent from the filename passes it while saying nothing, and the shared-note axis recognizes a note only when it leads or trails a run of subjects that carry no clauses of their own. The size axis is exact about the file and only as good as the limit observation behind it. It is a floor, not a judge.
 
@@ -162,33 +172,45 @@ The full policy — what may be retired, how an exit is recorded, and this store
 
 ## Adopting the split shape
 
-Splitting moves the policy text out of the index and leaves the budget to the content. It is three limbs, and a store needs all three:
+Splitting moves the policy text out of the index and leaves the budget to the content. It is three limbs, and a store needs all three.
 
-1. **The stanza, in the index.** Copy the canonical stanza above into the top of the index — above its first section heading — wrapped in these two markers, with the policy file's path on the opening one:
+### Limb 1 — the stanza, in the index
 
-   ```text
-   <!-- memory-policy-stanza-begin: POLICY.md -->
-   ...the canonical stanza text...
-   <!-- memory-policy-stanza-end -->
-   ```
+Copy the canonical stanza above into the top of the index — above its first section heading — wrapped in these two markers, with the policy file's path on the opening one:
 
-   The path is relative to the index's own directory. It is an instance value and sits on the marker line, outside the compared text, so naming a different file never reads as a divergence.
+```text
+<!-- memory-policy-stanza-begin: POLICY.md -->
+...the canonical stanza text...
+<!-- memory-policy-stanza-end -->
+```
 
-2. **The policy file, beside the index.** Create the file the marker names. It carries the canonical policy text between `<!-- policy-canonical-begin -->` and `<!-- policy-canonical-end -->`, and this store's own values between `<!-- store-values-begin -->` and `<!-- store-values-end -->` — outside the canonical region, so per-store numbers never read as policy drift:
+**Both marker lines start at column 0, and both sit above the index's first section heading.** Neither rule is decoration. The check looks for the stanza *only* in that region and *only* at column 0, so that an index which quotes these instructions — in a note to self, inside a code fence — does not thereby change what shape the check reads it as. Indent the marker, or write it below the first heading, and the store reads as unsplit.
 
-   ```text
-   <!-- store-values-begin -->
-   budget_fraction: 0.80
-   staleness_bound_days: 30
-   limit_observation: 2026-08-06 | 24978 | characters | truncation-boundary test (agent-orchestra#1015 review round 3)
-   <!-- store-values-end -->
-   ```
+The path is relative to the index's own directory and must resolve to a file beside it. It is an instance value and sits on the marker line, outside the compared text, so naming a different file never reads as a divergence. Under the split shape the header region carries the stanza and nothing else: policy text left beside it is migration residue, and the check says so.
 
-   `limit_observation` is `date | value | unit | method`, and the line repeats: re-observing the limit **appends** a row and the latest date governs, so nothing already recorded is rewritten. `budget_fraction` and `staleness_bound_days` are optional; the defaults are 0.80 and 30 days.
+### Limb 2 — the policy file, beside the index
 
-3. **The admission rule, where the writing sessions read.** The stanza and the policy file govern *compaction*. What governs *admission* is whatever instruction file every session already loads — for a Claude Code store, the user-global `CLAUDE.md`. That is where an entry is required to state its recall trigger and its exit plan. Neither this skill nor its check can reach that file; a store that skips this limb has a governed outflow and an ungoverned inflow, and will notice.
+Create the file the marker names. It carries the canonical policy text between `<!-- policy-canonical-begin -->` and `<!-- policy-canonical-end -->`, and this store's own values between `<!-- store-values-begin -->` and `<!-- store-values-end -->` — outside the canonical region, so per-store numbers never read as policy drift:
 
-Until the policy file exists the store is **half-migrated**: the check names that state specifically, as a defect rather than a refusal, and distinguishes it from a policy file that exists and cannot be read.
+```text
+<!-- store-values-begin -->
+budget_fraction: 0.80
+staleness_bound_days: 30
+limit_observation: 2026-08-06 | 24978 | characters | truncation-boundary test (agent-orchestra#1015 review round 3)
+<!-- store-values-end -->
+```
+
+`limit_observation` is `date | value | unit | method`, and it is the one key that repeats: re-observing the limit **appends** a row and the latest date governs, so nothing already recorded is rewritten. `budget_fraction` and `staleness_bound_days` are optional; the defaults are 0.80 and 30 days.
+
+The record is checked as a record, not only line by line, because a file of individually valid lines can still say something false. Recording the values region twice, repeating a key that is not `limit_observation`, and dating an observation in the future are each reported rather than silently resolved — the last because the freshest date governs, so a mistyped year would outrank every honest observation appended after it, permanently, while the store went on reading clean.
+
+### Limb 3 — the admission rule, where the writing sessions read
+
+The stanza and the policy file govern *compaction*. What governs *admission* is whatever instruction file every session already loads — for a Claude Code store, the user-global `CLAUDE.md`. That is where an entry is required to state its recall trigger and its exit plan. Neither this skill nor its check can reach that file; a store that skips this limb has a governed outflow and an ungoverned inflow, and will notice.
+
+### While you are mid-migration
+
+Until the policy file exists the store is **half-migrated**: the check names that state specifically, as a defect rather than a refusal. It stays distinct from a policy file that exists and cannot be read, and from a stanza whose declared path could never name a file beside the index — that last is a malformed declaration, not a store waiting to create something. A half-migrated store is also not refused over its entry-kind vocabulary: its policy text lives in a file it has not written yet, which is not the same as never having adapted.
 
 ## Adapting this to your store (not part of the compared text)
 
@@ -200,13 +222,16 @@ If your store names its entries differently, adapt before adopting:
 - **Write each kind as a backticked identifier ending in an underscore** — `` `task_` ``, not `task-` or plain `task`. That is not decoration: it is the declaration the check reads to learn your store's vocabulary, and a kind written any other way is invisible to it. A policy whose kinds are all written some other way names no kinds at all, and the check refuses rather than guessing.
 - Keep R1–R3 and the three replacement rules verbatim. They do not depend on the taxonomy.
 - **Keep your adapted copy outside the plugin cache.** The check defaults its reference to the `SKILL.md` beside it, which lives in a per-version install directory; the next plugin update creates a new directory with the pristine text and silently orphans your adaptation. Save the adapted copy somewhere durable and pass `-PolicyReferencePath` — and put that same invocation in your store's stanza or header, so whoever reads it runs the right comparison.
+- **A reference copy carries both compared texts, not just the policy.** `-PolicyReferencePath` supplies the canonical policy *and* the canonical stanza, so an adapted copy needs a `<!-- stanza-canonical-begin -->` / `<!-- stanza-canonical-end -->` region as well — copy it verbatim from this file unless you adapted the stanza too. Copying only the policy region produces a file that checks a legacy store fine and refuses every split store. For the same reason a store's own policy file cannot double as its reference copy: it carries the policy region and never the stanza one.
 - The check reads the entry-kind vocabulary from **your store's own policy text** — the policy file under the split shape, the index's header otherwise — and falls back to the reference copy when it finds none there. It refuses to report counts when no linked entry matches any kind the policy names. That refusal is the signal that this adaptation has not been done — it is not a bug, and the fix is to adapt the text, not to ignore the exit code.
 
 This section is deliberately excluded from the policy comparison, so an adapted store and this copy can still match on the text that matters. The exclusion is by construction: the comparison spans only the region between the `policy-canonical-begin` and `policy-canonical-end` markers above, and this section sits outside it.
 
 ## Stores that have not split
 
-A store still carrying the full policy as its index header keeps working, and keeps being supported. Checked against this version's reference it reports its policy text as **present but diverged**, because this version rewrote that text — the divergence is real and the report says what it is and what the options are. The size axis reads `not evaluated` for such a store: there is nowhere in that shape to record budget inputs, and an axis that fired anyway would be migration pressure rather than a measurement.
+A store still carrying the full policy as its index header keeps working, and keeps being supported. Checked against this version's reference it reports its policy text as **present but diverged**, because this version rewrote that text — the divergence is real, and the report states both readings of it, since the check deliberately cannot tell which text a store adopted.
+
+The size axis reads `not evaluated` for such a store. The check reads budget inputs from a split store's policy file and from nowhere else, so an unsplit store's size is never measured against a budget — an axis that fired anyway would be migration pressure rather than a measurement. If you write a `store-values` block into an unsplit index it will be ignored; the axis says only that no inputs were read, which is why that sentence is worded the way it is.
 
 To keep a clean verdict without changing anything, check against the preserved pre-supersession text:
 

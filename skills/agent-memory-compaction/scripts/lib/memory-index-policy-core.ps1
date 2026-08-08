@@ -50,7 +50,17 @@ $script:AdaptNoteHeadingLabel = '## Adapting this to your store (not part of the
 # The opening stanza marker carries the policy file's path. That is an instance value, and it
 # sits on the marker line precisely so it stays outside every compared region: naming a
 # different file must never read as a divergence from the shipped text.
+#
+# Both patterns are anchored at column 0 and matched against the line with only its TRAILING
+# whitespace removed. An indented marker does not declare anything - the shipped documentation
+# prints this marker inside examples, and a store that quotes those examples must not thereby
+# change what shape it is. Scoping (the header region only) is the primary guard; refusing
+# indentation is the second, because prose can quote a marker at column 0 too.
 $script:StoreStanzaBeginPattern = '^<!--\s*memory-policy-stanza-begin\s*:\s*(?<path>.+?)\s*-->$'
+# Anything that is recognisably an opening stanza marker, however malformed. A store whose
+# marker matches this but not the pattern above declared the split shape and got the
+# declaration wrong, which is a refusal - never a silent fall back to the legacy shape.
+$script:StoreStanzaLooseBeginPattern = '^<!--\s*memory-policy-stanza-begin\b.*-->$'
 $script:StoreStanzaEndMarker = '<!-- memory-policy-stanza-end -->'
 $script:StoreValuesBeginMarker = '<!-- store-values-begin -->'
 $script:StoreValuesEndMarker = '<!-- store-values-end -->'
@@ -104,11 +114,20 @@ $script:SeparatorTrimTail = '[\s—–\-:;,·|]+$'
 function Get-MIPLinksInLine {
     <#
         .SYNOPSIS
-        Returns every markdown link in one line, in order, plus any ']( ' construct the tail
-        pattern could not parse.
+        Returns every markdown link in one line, ordered by where it starts, plus any ']( '
+        construct that could not be parsed unambiguously.
 
         A single left-to-right scan with a bracket stack, so link text may itself contain
         square brackets (a literal [ref], say) and the cost stays linear in line length.
+
+        The stack closes inner links first, so the raw scan yields links in CLOSING order. The
+        caller slices each subject's clause from one link's end to the next link's start, which
+        needs starting order - and a nested link ([a [b](x.md) c](y.md)) has no consistent
+        order at all, because one link's span contains the other's. So the result is sorted by
+        start, and any pair that still overlaps is reported as unparsed: the caller's existing
+        refusal is the honest answer, since which subject a clause belongs to is genuinely
+        ambiguous there. Left unhandled this computed a negative substring length and threw,
+        exiting 1 with no report and an empty -Json payload.
     #>
     param([string]$Text)
 
@@ -139,7 +158,15 @@ function Get-MIPLinksInLine {
                 IsSubject = $path -match '\.md$'
             })
     }
-    return [pscustomobject]@{ Links = $links; Unparsed = $unparsed }
+
+    $ordered = @($links | Sort-Object -Property Start)
+    for ($k = 0; $k -lt $ordered.Count - 1; $k++) {
+        if ($ordered[$k].End -gt $ordered[$k + 1].Start) {
+            $at = $ordered[$k].Start
+            $unparsed.Add('nested or overlapping links: ' + $Text.Substring($at, [Math]::Min(40, $Text.Length - $at)))
+        }
+    }
+    return [pscustomobject]@{ Links = $ordered; Unparsed = $unparsed }
 }
 
 function Get-MIPWordTokens {
@@ -209,24 +236,43 @@ function Get-MIPMarkedRegion {
     <#
         .SYNOPSIS
         Returns the normalized block between two literal marker lines, with the indices of the
-        markers themselves. Found is false when either marker is missing or they are adjacent.
+        markers themselves.
+
+        Three facts about a region, kept apart because callers need different ones:
+          MarkersPresent - both markers were found, in order. Says the region was DECLARED.
+          Found          - MarkersPresent and the region holds at least one line. Says it has
+                           CONTENT.
+          BeginCount     - how many opening markers the file carries. More than one means the
+                           file has two regions and this function silently chose the first, so
+                           a caller that cares about being governed by the right one must check.
     #>
     param([string[]]$Lines, [string]$BeginMarker, [string]$EndMarker)
 
     $beginIdx = -1
     $endIdx = -1
+    $beginCount = 0
     for ($i = 0; $i -lt $Lines.Count; $i++) {
-        if ($beginIdx -lt 0 -and $Lines[$i].Trim() -eq $BeginMarker) { $beginIdx = $i; continue }
+        if ($Lines[$i].Trim() -eq $BeginMarker) {
+            $beginCount++
+            if ($beginIdx -lt 0) { $beginIdx = $i }
+            continue
+        }
         if ($beginIdx -ge 0 -and $endIdx -lt 0 -and $Lines[$i].Trim() -eq $EndMarker) { $endIdx = $i }
     }
-    if ($beginIdx -lt 0 -or $endIdx -lt 0 -or $endIdx -le $beginIdx + 1) {
-        return [pscustomobject]@{ Found = $false; Block = @(); BeginIndex = $beginIdx; EndIndex = $endIdx }
+    $markersPresent = ($beginIdx -ge 0 -and $endIdx -gt $beginIdx)
+    if (-not $markersPresent -or $endIdx -le $beginIdx + 1) {
+        return [pscustomobject]@{
+            Found = $false; MarkersPresent = $markersPresent; Block = @()
+            BeginIndex = $beginIdx; EndIndex = $endIdx; BeginCount = $beginCount
+        }
     }
     return [pscustomobject]@{
-        Found      = $true
-        Block      = @(Get-MIPNormalizedBlock -Lines $Lines[($beginIdx + 1)..($endIdx - 1)])
-        BeginIndex = $beginIdx
-        EndIndex   = $endIdx
+        Found          = $true
+        MarkersPresent = $true
+        Block          = @(Get-MIPNormalizedBlock -Lines $Lines[($beginIdx + 1)..($endIdx - 1)])
+        BeginIndex     = $beginIdx
+        EndIndex       = $endIdx
+        BeginCount     = $beginCount
     }
 }
 
@@ -281,31 +327,57 @@ function Measure-MIPCharacters {
 function Get-MIPStoreStanza {
     <#
         .SYNOPSIS
-        Finds the split-shape stanza in an index and the policy-file path its opening marker
-        carries. Found is true as soon as the opening marker appears: a store that has
-        declared itself split is never silently read back as legacy, even when the rest of the
-        declaration is broken.
-    #>
-    param([string[]]$Lines)
+        Finds the split-shape stanza in an index's HEADER REGION and the policy-file path its
+        opening marker carries.
 
+        Two scoping rules, and both are load-bearing rather than defensive habit. The search
+        covers only the lines above the index's first section heading, because that is the only
+        place a stanza may lawfully sit; and a marker counts only at column 0, because the
+        shipped documentation prints these markers inside examples. Scanning the whole file
+        meant an index that merely QUOTED the adoption snippet stopped being read as the shape
+        it actually is - and, worse, made the preserved-text route report the shipped reference
+        as malformed. The sibling policy-presence probe was scoped for the same reason; this one
+        was not, and that asymmetry was the defect.
+
+        Found is true as soon as a recognisable opening marker appears in that region, matched
+        by the deliberately loose pattern: a store that has declared the split shape is never
+        silently read back as legacy, even when the declaration is broken - including the
+        marker written without its ': <path>' suffix.
+    #>
+    param([string[]]$Lines, [int]$HeaderLineCount)
+
+    $bound = [Math]::Min($HeaderLineCount, $Lines.Count)
     $beginIdx = -1
     $policyPath = ''
-    for ($i = 0; $i -lt $Lines.Count; $i++) {
-        $m = [regex]::Match($Lines[$i].Trim(), $script:StoreStanzaBeginPattern)
-        if ($m.Success) { $beginIdx = $i; $policyPath = $m.Groups['path'].Value.Trim(); break }
+    $wellFormedBegin = $false
+    for ($i = 0; $i -lt $bound; $i++) {
+        $line = $Lines[$i].TrimEnd()
+        if ($line -notmatch $script:StoreStanzaLooseBeginPattern) { continue }
+        $beginIdx = $i
+        $m = [regex]::Match($line, $script:StoreStanzaBeginPattern)
+        if ($m.Success) { $wellFormedBegin = $true; $policyPath = $m.Groups['path'].Value.Trim() }
+        break
     }
     if ($beginIdx -lt 0) {
         return [pscustomobject]@{ Found = $false; Malformed = $false; Reason = ''; PolicyPath = ''; Block = @(); BeginIndex = -1; EndIndex = -1 }
     }
+    if (-not $wellFormedBegin -or [string]::IsNullOrWhiteSpace($policyPath)) {
+        return [pscustomobject]@{
+            Found = $true; Malformed = $true; PolicyPath = ''; Block = @(); BeginIndex = $beginIdx; EndIndex = -1
+            Reason = ("the stanza opens at line $($beginIdx + 1) and names no policy file; " +
+                "expected '<!-- memory-policy-stanza-begin: POLICY.md -->'")
+        }
+    }
 
     $endIdx = -1
-    for ($i = $beginIdx + 1; $i -lt $Lines.Count; $i++) {
-        if ($Lines[$i].Trim() -eq $script:StoreStanzaEndMarker) { $endIdx = $i; break }
+    for ($i = $beginIdx + 1; $i -lt $bound; $i++) {
+        if ($Lines[$i].TrimEnd() -eq $script:StoreStanzaEndMarker) { $endIdx = $i; break }
     }
     if ($endIdx -lt 0) {
         return [pscustomobject]@{
             Found = $true; Malformed = $true; PolicyPath = $policyPath; Block = @(); BeginIndex = $beginIdx; EndIndex = -1
-            Reason = "the stanza opens at line $($beginIdx + 1) and is never closed by '$script:StoreStanzaEndMarker'"
+            Reason = ("the stanza opens at line $($beginIdx + 1) and is never closed by " +
+                "'$script:StoreStanzaEndMarker' above the index's first section heading")
         }
     }
     $block = @(Get-MIPNormalizedBlock -Lines $Lines[($beginIdx + 1)..($endIdx - 1)])
@@ -321,6 +393,36 @@ function Get-MIPStoreStanza {
     }
 }
 
+function Resolve-MIPPolicyFilePath {
+    <#
+        .SYNOPSIS
+        Resolves the stanza's declared policy-file path against the index's own directory and
+        says whether the declaration is usable at all.
+
+        A declaration that cannot name a file - rooted, empty, syntactically impossible on this
+        filesystem, or pointing outside the store - is a MALFORMED DECLARATION, and that is a
+        different thing from a policy file that has not been created yet. Collapsing them told
+        an owner to "create the policy file the stanza names" when the name could never exist.
+    #>
+    param([string]$StoreDirectory, [string]$DeclaredPath)
+
+    if ([System.IO.Path]::IsPathRooted($DeclaredPath)) {
+        return [pscustomobject]@{ Ok = $false; Path = ''; Reason = "the stanza names an absolute path ('$DeclaredPath'); the path is relative to the index's own directory" }
+    }
+    try {
+        $storeFull = [System.IO.Path]::GetFullPath($StoreDirectory)
+        $candidate = [System.IO.Path]::GetFullPath((Join-Path $storeFull $DeclaredPath))
+    }
+    catch {
+        return [pscustomobject]@{ Ok = $false; Path = ''; Reason = "the stanza names a path this filesystem cannot express ('$DeclaredPath'): $($_.Exception.Message)" }
+    }
+    $prefix = $storeFull.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+    if (-not $candidate.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return [pscustomobject]@{ Ok = $false; Path = $candidate; Reason = "the stanza names '$DeclaredPath', which resolves outside the index's own directory (to $candidate); the policy file lives beside the index" }
+    }
+    return [pscustomobject]@{ Ok = $true; Path = $candidate; Reason = '' }
+}
+
 function Get-MIPStoreValues {
     <#
         .SYNOPSIS
@@ -334,11 +436,18 @@ function Get-MIPStoreValues {
         A line the parser does not understand becomes an error rather than a skipped line: a
         budget silently computed from a partially-understood record is exactly the wrong
         failure.
+
+        The record is validated AS A RECORD, not only line by line. Every check below exists
+        because per-line validation passed while the record as a whole said something false:
+        a second values region (a documentation example left above the real one) silently
+        governed; a repeated scalar silently replaced the first; and a mistyped year outranked
+        every honest observation forever, since the freshest date governs and the format is
+        append-only. Syntax-valid lines, nonsense record.
     #>
-    param([string[]]$Lines)
+    param([string[]]$Lines, [datetime]$AsOf)
 
     $region = Get-MIPMarkedRegion -Lines $Lines -BeginMarker $script:StoreValuesBeginMarker -EndMarker $script:StoreValuesEndMarker
-    if (-not $region.Found) {
+    if (-not $region.MarkersPresent) {
         return [pscustomobject]@{ Present = $false; Fraction = $null; StalenessBoundDays = $null; Observations = @(); Errors = @() }
     }
 
@@ -346,6 +455,13 @@ function Get-MIPStoreValues {
     $staleness = $null
     $observations = [System.Collections.Generic.List[object]]::new()
     $errors = [System.Collections.Generic.List[string]]::new()
+    $seenScalar = @{}
+
+    # Declared twice is not the same as declared once: this function would silently take the
+    # first region and never say the second exists.
+    if ($region.BeginCount -gt 1) {
+        $errors.Add("the policy file carries $($region.BeginCount) '$script:StoreValuesBeginMarker' regions; only the first would govern, so which values apply is ambiguous")
+    }
 
     foreach ($raw in $region.Block) {
         $line = $raw.Trim()
@@ -356,11 +472,26 @@ function Get-MIPStoreValues {
         $key = $line.Substring(0, $split).Trim().ToLowerInvariant()
         $value = $line.Substring($split + 1).Trim()
 
+        # 'limit_observation' is the one key designed to repeat - that is the append path. A
+        # repeated scalar is a contradiction, and taking the last one silently is how a budget
+        # moves by a factor of eight without a word.
+        if ($key -ne 'limit_observation') {
+            if ($seenScalar.ContainsKey($key)) {
+                $errors.Add("'$key' is recorded more than once; it is not a repeatable key, so which value applies is ambiguous")
+                continue
+            }
+            $seenScalar[$key] = $true
+        }
+
         switch ($key) {
             'budget_fraction' {
                 $parsed = 0.0
-                if (-not [double]::TryParse($value, [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$parsed) -or $parsed -le 0 -or $parsed -gt 1) {
-                    $errors.Add("budget_fraction must be a number greater than 0 and at most 1; found '$value'")
+                # IsFinite first: TryParse accepts 'NaN' and 'Infinity', and every comparison
+                # against NaN is false, so a range guard alone waves it through to a cast that
+                # throws - exit 1 with no report and an empty -Json payload.
+                if (-not [double]::TryParse($value, [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$parsed) -or
+                    -not [double]::IsFinite($parsed) -or $parsed -le 0 -or $parsed -gt 1) {
+                    $errors.Add("budget_fraction must be a finite number greater than 0 and at most 1; found '$value'")
                 }
                 else { $fraction = $parsed }
             }
@@ -382,12 +513,22 @@ function Get-MIPStoreValues {
                     $errors.Add("limit_observation date must be yyyy-MM-dd; found '$($fields[0])'")
                     continue
                 }
+                # The freshest observation governs, so a date after today outranks every honest
+                # one - permanently, because the record is append-only and a later honest
+                # re-observation can never overtake it. A store then reads clean while its index
+                # truncates, which is the one outcome this axis exists to make impossible.
+                if ($observedOn.Date -gt $AsOf.Date) {
+                    $errors.Add("limit_observation is dated $($fields[0]), in the future; the freshest observation governs, so a future date would outrank every later one that is honest")
+                    continue
+                }
                 $observedValue = 0
                 if (-not [int]::TryParse($fields[1], [ref]$observedValue) -or $observedValue -le 0) {
                     $errors.Add("limit_observation value must be a positive whole number; found '$($fields[1])'")
                     continue
                 }
-                if ($fields[2] -ne $script:SizeAxisUnit) {
+                # Case-sensitive on purpose: the unit is pinned, not inferred, and this file
+                # uses -ceq / -ccontains everywhere else for exactly that reason.
+                if ($fields[2] -cne $script:SizeAxisUnit) {
                     $errors.Add("limit_observation unit must be '$script:SizeAxisUnit'; found '$($fields[2])' - this check does not convert between units")
                     continue
                 }
@@ -593,7 +734,8 @@ function Invoke-MemoryIndexPolicyCheck {
     $headerBeforeFirstPointer = ($firstSectionIdx -le $firstPointerIdx)
     $pointerInsideHeader = @($headerBlock | Where-Object { $_ -match $script:PointerLinePattern -and $_ -match '\]\(' }).Count -gt 0
 
-    $stanza = Get-MIPStoreStanza -Lines $indexLines
+    # Scoped to the header region: see Get-MIPStoreStanza for why the whole-file scan was wrong.
+    $stanza = Get-MIPStoreStanza -Lines $indexLines -HeaderLineCount $firstSectionIdx
     if ($stanza.Found -and $stanza.Malformed) {
         return New-MIPRefusal -IndexPath $IndexPath -Reason 'split-store stanza is malformed' -Detail @(
             $stanza.Reason,
@@ -632,21 +774,26 @@ function Invoke-MemoryIndexPolicyCheck {
             if ($pointerInsideHeader) {
                 $policyDivergence = 'a pointer line sits inside the header region, above the first section heading'
             }
-            elseif (-not $headerBeforeFirstPointer) {
-                $policyDivergence = 'the policy text does not sit before the first pointer line'
-            }
             else {
                 $policyDivergence = Get-MIPFirstDivergence -Actual $headerBlock -Expected $canonicalBlock -Label 'header'
             }
-            # Stated for every diverged legacy header, and conditionally, because recognizing
-            # WHICH text a store carries is machinery this release deliberately does not add.
+            # Emitted for every diverged legacy header, because recognizing WHICH text a store
+            # carries is machinery this release deliberately does not add. Every clause is
+            # therefore conditional in its own right - including the remedies. An earlier
+            # revision stated the remedies flatly, which made "pass the pre-supersession text
+            # for a clean verdict" false advice to a store whose divergence was an ordinary
+            # typo in the current text: following it diverges at line 1 instead.
             $policyExplanation = @(
-                'if this header predates the supersession of the never-retire ratchet, the divergence is that rewrite, not a defect in this store.',
-                'three onward paths, and nothing here obliges any of them:',
-                '  - adopt the split shape (see "Adopting the split shape" in the reference copy)',
-                '  - keep a clean verdict by passing -PolicyReferencePath with the preserved pre-supersession text,',
-                '    shipped at skills/agent-memory-compaction/templates/policy-pre-supersession.md',
-                '  - do nothing; a diverged verdict is an honest report, not a failure')
+                'this check cannot tell which policy text this store adopted, so both readings are stated:',
+                '  - if this header predates the supersession of the never-retire ratchet, the divergence IS that',
+                '    rewrite, not a defect in this store. Three onward paths, and nothing here obliges any of them:',
+                '    adopt the split shape (see "Adopting the split shape" in the reference copy); or keep a clean',
+                '    verdict by passing -PolicyReferencePath with the preserved pre-supersession text, shipped at',
+                '    skills/agent-memory-compaction/templates/policy-pre-supersession.md; or do nothing, since a',
+                '    diverged verdict is an honest report and not a failure.',
+                '  - if this store had already adopted the text it is being compared against, the divergence is an',
+                '    ordinary drift in this store - repair it to match the reference it was adopted from. Passing',
+                '    the pre-supersession text will NOT produce a clean verdict in that case.')
         }
     }
     else {
@@ -658,19 +805,40 @@ function Invoke-MemoryIndexPolicyCheck {
         }
         $stanzaBlock = @($stanza.Block)
         $stanzaText = ($stanzaBlock -join "`n")
-        $headerPresent = $true
-        $stanzaInHeaderRegion = ($stanza.BeginIndex -lt $firstSectionIdx)
-        $stanzaComplete = $stanzaInHeaderRegion -and -not $pointerInsideHeader -and ($stanzaText -ceq $canonicalStanzaText)
 
-        if ([string]::IsNullOrWhiteSpace($stanza.PolicyPath)) {
+        # The stanza is the ONLY policy text the split shape puts in the index. Leftover policy
+        # prose above or below it is migration residue that contradicts the governing policy
+        # file, and without this check a store that "split" without removing the text it was
+        # splitting out reads exactly like one that did - silently, until the size axis
+        # eventually catches it, which is never for a store with room to spare.
+        $probeLines = @($canonicalBlock | Where-Object { $_.Trim().Length -ge $script:PresenceProbeMinLength })
+        $stanzaLineNumbers = @($stanza.BeginIndex..$stanza.EndIndex)
+        $residue = @(for ($i = 0; $i -lt [Math]::Min($firstSectionIdx, $indexLines.Count); $i++) {
+                if ($stanzaLineNumbers -contains $i) { continue }
+                if ($probeLines -ccontains $indexLines[$i].TrimEnd()) { $indexLines[$i].TrimEnd() }
+            })
+
+        # Detection is already scoped to the header region, so "the stanza sits above the first
+        # section heading" is true by construction and is not re-tested here.
+        $stanzaComplete = (-not $pointerInsideHeader) -and ($stanzaText -ceq $canonicalStanzaText) -and $residue.Count -eq 0
+
+        $resolved = Resolve-MIPPolicyFilePath -StoreDirectory (Split-Path -Parent $indexResolved) -DeclaredPath $stanza.PolicyPath
+        if (-not $resolved.Ok) {
+            # A declaration that cannot name a file is not a store waiting to create one.
             return New-MIPRefusal -IndexPath $IndexPath -Reason 'split-store stanza is malformed' -Detail @(
-                "the stanza's opening marker names no policy file",
-                "expected: <!-- memory-policy-stanza-begin: POLICY.md -->")
+                $resolved.Reason,
+                'this is a malformed declaration, not the half-migrated state')
         }
-        $policyFilePath = Join-Path (Split-Path -Parent $indexResolved) $stanza.PolicyPath
+        $policyFilePath = $resolved.Path
 
         $policyTextComplete = $false
         $policyFileDivergence = ''
+        # Something that exists at the path but is not a file has not "not been created yet".
+        if (Test-Path -LiteralPath $policyFilePath -PathType Container) {
+            return New-MIPRefusal -IndexPath $IndexPath -Reason "this store's policy file could not be read" -Detail @(
+                "path: $policyFilePath", 'a directory sits where the policy file should be',
+                'something exists there, so this is not the half-migrated state')
+        }
         if (-not (Test-Path -LiteralPath $policyFilePath -PathType Leaf)) {
             # Half-migrated: the stanza landed, the policy file has not. A defect with its own
             # wording, and deliberately not the same verdict as a file that cannot be read.
@@ -695,11 +863,16 @@ function Invoke-MemoryIndexPolicyCheck {
             if (-not $policyTextComplete) {
                 $policyFileDivergence = Get-MIPFirstDivergence -Actual $storePolicyBlock -Expected $canonicalBlock -Label 'policy file'
             }
-            $policySourceText = ($policyLines -join "`n")
-            $storeValues = Get-MIPStoreValues -Lines $policyLines
+            # The vocabulary comes from the COMPARED region only. Harvesting it from the whole
+            # file let a store name a kind in text no comparison ever sees, while the same
+            # report asserted the policy file matched the reference - a verdict about an audited
+            # region governing behaviour sourced from an unaudited one.
+            $policySourceText = ($storePolicyBlock -join "`n")
+            $storeValues = Get-MIPStoreValues -Lines $policyLines -AsOf $AsOf
         }
 
         $policyComplete = $stanzaComplete -and $policyTextComplete
+        $headerPresent = $policyTextComplete -or ($storeShape -ne 'split-incomplete' -and $policyFileDivergence -ne '')
         $shapeLabel = if ($storeShape -eq 'split-incomplete') { 'split, half-migrated' } else { 'split' }
         if ($policyComplete) {
             $policyStatus = 'split - stanza and policy file both match the reference'
@@ -710,8 +883,11 @@ function Invoke-MemoryIndexPolicyCheck {
             $policyStatus = "$shapeLabel - $stanzaWord, $fileWord"
             $parts = [System.Collections.Generic.List[string]]::new()
             if (-not $stanzaComplete) {
-                if (-not $stanzaInHeaderRegion) { $parts.Add("the stanza opens at line $($stanza.BeginIndex + 1), below the index's first section heading") }
-                elseif ($pointerInsideHeader) { $parts.Add('a pointer line sits inside the header region, above the first section heading') }
+                if ($pointerInsideHeader) { $parts.Add('a pointer line sits inside the header region, above the first section heading') }
+                elseif ($residue.Count -gt 0) {
+                    $parts.Add(("the index's header region still carries policy text outside the stanza " +
+                            "($($residue.Count) line(s), first: '$($residue[0])') - the split moves that text to the policy file"))
+                }
                 else { $parts.Add((Get-MIPFirstDivergence -Actual $stanzaBlock -Expected $canonicalStanzaBlock -Label 'stanza')) }
             }
             if ($policyFileDivergence -ne '') { $parts.Add($policyFileDivergence) }
@@ -805,7 +981,13 @@ function Invoke-MemoryIndexPolicyCheck {
             foreach ($p in $kindPrefixes) { if ($name.StartsWith($p, [System.StringComparison]::OrdinalIgnoreCase)) { $hit = $true } }
             $hit
         })
-    if ($matchingKind.Count -eq 0) {
+    # The refusal is the documented signal that a store has not adapted the policy to its own
+    # entry kinds. It cannot mean that for a HALF-MIGRATED store: that store's policy text is
+    # in a file it has not created yet, so its vocabulary is knowably unavailable rather than
+    # missing. Refusing there told an adapted store to "adapt the policy text first" - which it
+    # had done - and suppressed every count, in the one state chunk 3 puts every store through.
+    $vocabularyKnowable = ($storeShape -ne 'split-incomplete')
+    if ($matchingKind.Count -eq 0 -and $vocabularyKnowable) {
         return New-MIPRefusal -IndexPath $IndexPath -Reason 'entry-kind vocabulary not recognized' -Detail @(
             ("policy names: " + ($kindPrefixes -join ', ') + " (read from the $kindSource)"),
             'no linked entry in this index carries any of those prefixes',
@@ -907,6 +1089,13 @@ function Format-MemoryIndexPolicyReport {
                 $payload['entries_matching_kind'] = $Report.EntriesMatchingKind
                 $payload['entries_not_matching_kind'] = $Report.EntriesNotMatchingKind
                 $payload['subjects_total'] = $Report.SubjectsTotal
+                # policy_* is the axis's real name since the split; header_* is retained because
+                # every consumer is external, and is populated with the SAME truth rather than a
+                # convenient constant. A half-migrated store used to report header_present: true
+                # while carrying no policy text anywhere.
+                $payload['policy_present'] = $Report.HeaderPresent
+                $payload['policy_complete'] = $Report.HeaderComplete
+                $payload['policy_divergence'] = $Report.HeaderDivergence
                 $payload['header_present'] = $Report.HeaderPresent
                 $payload['header_complete'] = $Report.HeaderComplete
                 $payload['header_before_first_pointer'] = $Report.HeaderBeforeFirstPointer

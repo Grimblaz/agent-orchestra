@@ -18,8 +18,19 @@ pwsh <agent-orchestra>/skills/agent-memory-compaction/scripts/Test-MemoryIndexPo
 ```
 
 A store checked this way reports `RESULT: clean` exactly as it did before the
-supersession. See `skills/agent-memory-compaction/SKILL.md` for the current policy
-and for what migrating to the split shape involves.
+supersession, and its two count axes read the same.
+
+**The verdict is preserved; the output shape is not.** The check now reports four
+axes and labels the first one `policy:` rather than `header:`, so the lines below
+`RESULT: clean` no longer match the example inside the archived text further down
+this file. That example describes the checker as it stood before the supersession
+and is deliberately left untouched: it sits inside the compared region, and editing
+one character of that region is what would make every store this file exists for
+report a divergence. Read it as a historical record of the old output, not as a
+description of what you will see.
+
+See `skills/agent-memory-compaction/SKILL.md` for the current policy, the current
+output shape, and what migrating to the split shape involves.
 
 <!-- policy-canonical-begin -->
 **COMPACTION POLICY FOR THIS INDEX — read this before removing or shortening anything below.**
