@@ -2,7 +2,7 @@
 
 **Status**: Assessment record — this document applies no changes; execution sequencing is owned by the portfolio (see #933)
 **Sources**: Anthropic, "The new rules of context engineering for Claude 5 generation models" (claude.com blog, July 2026, Thariq Shihipar); "Prompting Claude Fable 5" (platform.claude.com docs); "Introducing Claude Fable 5 and Claude Mythos 5" (platform.claude.com docs).
-**Date**: 2026-07-27 (assessment); sequencing settled 2026-08-08
+**Date**: 2026-07-27 (assessment); sequencing settled 2026-08-08; recommendation text corrected 2026-08-08 after adversarial review of PR #1020 (marked **[corrected 2026-08-08]** inline — the assessment's July judgments are otherwise unaltered)
 **Sequencing (settled 2026-08-08, recorded on #933)**: #970 → #761 (incl. the #944 siblings) → #936's chunks → #923 cost-truth → then open #933 for R1/R3/R5, so the trim program reads instruments that are trustworthy by the time it runs. R2 and R4 are carved out ahead of that order as small additive children (no instrument dependency): they harden the very goal-lane runs whose soak window generates the evidence the rest of the sequence reads. R3 additionally waits behind #923 because an effort re-tune would confound its before/after cost comparison.
 
 ## What Anthropic's guidance says
@@ -52,7 +52,7 @@ Also run `claude doctor` against a consumer install of the plugin; it is purpose
 
 ### R2 — Add the three Fable-specific harness instructions to autonomous paths
 
-Small, additive, high value for `/goal-run` (Arm I) and `/spine-run`:
+Small, additive, high value for `/goal-run` (Arm I — the unattended vendor-goal-loop harness; see [HOW-IT-WORKS.md § Goal-run](../../HOW-IT-WORKS.md#3-goal-run-the-unattended-pipeline)) and `/spine-run`:
 
 1. **Progress-claim grounding**: "Before reporting progress, audit each claim against a tool result from this session. Only report work you can point to evidence for; if something is not yet verified, say so explicitly." This belongs in the Goal-Run body and the Senior Engineer dispatch preamble — it directly hardens halt reports and `halt_return` YAML against fabricated status, the failure mode the unattended harness can least afford.
 2. **Autonomy reminder**: "You are operating autonomously. … Before ending your turn, check your last paragraph. If it is a plan, a question, or a promise about work you have not done, do that work now with tool calls." Prevents the documented rare early-stop (text-only "I'll now run X" without the tool call) — which in an unattended goal-run would strand the inflight marker.
@@ -65,11 +65,19 @@ Every shell currently declares `high` (one `xhigh`). The guidance is explicit th
 - Keep `high`/`xhigh` where depth is the product: adversarial review roles (`code-critic`, `code-review-response`), deep synthesis (`solution-designer`, `issue-planner`, `research-agent`, `specification`).
 - Drop to `medium` for routine/mechanical roles: predicate-adapter evaluation, `process-review`, `refactor-specialist` on mechanical sweeps, and orchestrator turns whose job is dispatch bookkeeping rather than reasoning.
 
-This is a cost-and-latency win with no quality claim being relaxed, so it does not require ledger evidence — but the calibration-pipeline skill is the natural place to measure before/after.
+**[corrected 2026-08-08]** The drop-target list above names a granularity the mechanism cannot express, and R3's first design question is what to do about that. `effort:` is a **per-shell frontmatter declaration** (`Documents/Design/agent-body-architecture.md` § Per-agent model + reasoning routing), so of the four named targets: *orchestrator turns* is not addressable (`agents/code-conductor.md` declares one value for the whole shell, gate turns included), *`refactor-specialist` on mechanical sweeps* is not addressable (no per-sweep lever), and *predicate-adapter evaluation* has no shell at all (`adapter-type: predicate` resolves to `executor: inline`). Only `process-review` is expressible — and its own routing-table row justifies its tier as "workflow meta-analysis requires extended reasoning," which contradicts classifying it routine. Re-derive the target list from shells whose whole role is routine before proposing any value change.
+
+**[corrected 2026-08-08]** The original text claimed this "does not require ledger evidence." That claim is withdrawn: an effort re-tune is large enough to confound #923's before/after cost comparison (which is why the settled sequencing puts R3 behind it), and a change that can confound another issue's instrument is not one with nothing to measure. Ledger *gating* is still not imported here — the phase-containment doctrine governs retiring review stages by irreducible-catch rate, and an effort declaration is not a review stage — but the calibration pipeline is the place to measure before/after, and R3 owes that measurement rather than an exemption from it.
 
 ### R4 — Handle Fable 5 refusals at the two pinned dispatch sites
 
 `code-review-response` pins `model: fable`, and prosecution generalist-B dispatches on `fable`. Fable 5's classifiers target offensive cybersecurity; adversarial prosecution of security-sensitive diffs (exploit-adjacent code, credential handling, attack-surface analysis) can occasionally trip them even when benign. The fallback order is documented in `agent-body-architecture.md`, but nothing states *when* it fires. Add one rule to `skills/adversarial-review/platforms/claude.md`: a `fable` dispatch that returns a refusal (or dies without output) is re-dispatched once on `opus` with the same prompt, and the substitution is recorded in the pass metadata. Cheap insurance for the review pipeline's most capable seat.
+
+**[corrected 2026-08-08]** Three corrections; R4 is neither as simple nor as additive as written above, and its scope is now carried by its child issue rather than this paragraph.
+
+1. **The premise was already false when this was written.** `skills/adversarial-review/platforms/claude.md:152` has carried a generalist-B refusal reroute since 2026-07-03 (#790) — 24 days before this assessment. One of the two named seats is already covered.
+2. **Refusal and death-without-output are different failure classes and must not share a retry.** A refusal (`stop_reason: refusal`) is a clean no-op and reroutes safely. A dispatch that dies without returning may have completed side effects first: the judge's own step 9 persists the `<!-- review-judge-produced-{PR} -->` sentinel (idempotent) and *then* posts the `judge-rulings` comment, which carries **no** idempotency guard — so a same-prompt retry can leave two rulings comments with different verdicts, and the credit harvester (`skills/calibration-pipeline/references/review-credit-emission.md`) selects with `Select-Object -Last 1`, i.e. silently. The plan surface faced this and its owner decision (811-D1, `skills/plan-authoring/SKILL.md`) *rejected* latest-wins in favor of failing loud; the two schemas are not interchangeable, so that is an analogy rather than a breach — but it is the same trap.
+3. **Extending this to the judge reverses a standing decision.** The same file states at `:151-152` that degraded-recovery is not used for defense or judge, and that the reroute "does not apply to judge-class dispatches." A judge-covering retry rule is therefore a reversal requiring its own argument plus a write-idempotency protocol — not the "Low — additive" change the sequencing table below rates it.
 
 ### R5 — Exploit parallel and long-lived subagents in orchestration
 
@@ -79,6 +87,12 @@ Code-Conductor and Spine-Runner currently dispatch one specialist per slice, seq
 - **Long-lived executors across slices.** Re-using one Senior Engineer agent for consecutive slices in the same chunk (continue-by-message rather than fresh dispatch) preserves its warm context, saves cache reads, and matches the "long-lived subagents that keep context across subtasks" recommendation. The `subagent-env-handshake` skill is the natural home for the continuation contract.
 
 Sequence R5 *after* R1 — parallelism multiplies whatever per-dispatch context weight exists today.
+
+**[corrected 2026-08-08]** Three premise corrections; each becomes a design question R5 must answer rather than inherit as settled:
+
+- **`depends-on` does not establish write-independence.** Per `skills/plan-authoring/SKILL.md` it is an explicit depth-1, deliberately non-transitive field whose purpose is bounding specialist prompts — context provisioning, not a write-set declaration. Two slices can both carry no unmet `depends-on` and still edit the same file, so concurrent dispatch needs its own independence check (write-set declaration, conflict detection, or workspace isolation).
+- **Editor-parallel batches have no documented v1 recovery.** They sit outside the analysis-only read-only discipline in `skills/subagent-env-handshake/SKILL.md` (so this is not a prohibition — `skills/parallel-execution/SKILL.md` already ships parallel Code-Smith ↔ Test-Writer dispatch), but that skill also records that under `workspace_mode: shared` such batches may produce ND-2 cascades with no documented recovery clause in v1, tracked as #606. R5 either waits on that or supplies the missing clause.
+- **Continuation-by-message bypasses the handshake.** The per-dispatch environment recapture obligation is keyed to `Agent` dispatches, so a continued executor never re-runs Step 0 and carries the prior slice's `parent_head` and dirty fingerprint after the parent has committed. The continuation contract must define live recapture (or an explicit, argued exception) — naming `subagent-env-handshake` as its home does not by itself close the gap.
 
 ### R6 — Add intent context to dispatch prompts ("the reason, not only the request")
 
@@ -96,14 +110,16 @@ The Session Memory Contract persists *decisions and handoffs*; nothing persists 
 
 ## Suggested sequencing
 
-| Order | Item | Effort | Risk |
-| --- | --- | --- | --- |
-| 1 | R2 harness instructions | Small | Low — additive |
-| 2 | R4 refusal fallback rule | Small | Low — additive |
-| 3 | R3 effort re-tune | Small | Low — measurable via calibration pipeline |
-| 4 | R6 intent line in dispatches | Small | Low |
-| 5 | R1 prescription-debt audit | Large | Medium — governed by ledger + D10 ceiling |
-| 6 | R7 lessons memory | Medium | Low |
-| 7 | R5 parallel/long-lived executors | Large | Medium — sequence after R1 |
+> **This table is the July 2026 assessment's recommended order and does not override the settled portfolio sequence in the header.** Where the two differ, the header (line 6) governs. The rows are retained because they carry the only ordering statement for **R6 and R7**, which the settlement does not address. Row-level status is marked below as of 2026-08-08.
+
+| Order | Item | Effort | Risk | Status (2026-08-08) |
+| --- | --- | --- | --- | --- |
+| 1 | R2 harness instructions | Small | Low — additive | **Carved out early** — filed as #1021 (child of #848); no instrument dependency |
+| 2 | R4 refusal fallback rule | Small | ~~Low — additive~~ **Not additive** — reverses a standing carve-out (see R4 corrections) | **Carved out early** — filed as #1022; scope corrected |
+| 3 | R3 effort re-tune | Small | ~~Low — measurable via calibration pipeline~~ **Measurable only after #923** — run before it, the calibration measurement this cell offered as the mitigation is itself confounded | **Superseded by the header: R3 waits behind #923.** Not a do-now item; see also the R3 drop-target corrections. |
+| 4 | R6 intent line in dispatches | Small | Low | Unsettled — this row is the current ordering statement |
+| 5 | R1 prescription-debt audit | Large | Medium — governed by ledger + D10 ceiling | **Superseded by the header**: opens with #933 after #970 → #761 → #936 → #923 |
+| 6 | R7 lessons memory | Medium | Low | Unsettled — this row is the current ordering statement; note the memory-store redesign (#1017–#1019) now overlaps its territory and must be reconciled at open |
+| 7 | R5 parallel/long-lived executors | Large | Medium — sequence after R1 | **Superseded by the header**: opens with #933; see the R5 premise corrections first |
 
 Each of R1–R7 should become its own issue through the normal upstream pipeline; R1 is the umbrella-scale item and the one with the largest expected payoff, since a lighter context surface improves every dispatch downstream.
