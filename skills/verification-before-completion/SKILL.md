@@ -18,7 +18,7 @@ Systematic verification process to ensure work is truly complete.
 ## Core Principle
 
 > **Iron Law**: Claims do not count as completion—only evidence does.
-
+>
 > "Done" means verified, not just implemented.
 
 The gap between "I wrote the code" and "it works correctly" is where bugs hide.
@@ -105,6 +105,7 @@ Run it **whenever you pick up an issue that has been worked before** — resumin
 An account is nonconforming when any of these holds. Each is a rejection, not a suggestion:
 
 - **No review is accounted for.** The account carries `adversarial_review_ran: false`, or omits the field entirely, or claims `true` while naming no findings-to-outcome trace and no explicit "ran and returned nothing" result. A run that dispatched no adversarial review cannot write a conforming account.
+- **An external review posted findings the account never mentions.** Property 1 is quantified over the findings *a review* produced — not over the findings this run's own panel produced. A pull request carrying review comments holds findings that were produced and reached nobody, so an account written over them is closed-looking for exactly the reason an unreviewed account is: it is true over the wrong set. See § External review on the pull request for the trigger and for the distinction that keeps the check honest.
 - **A finding has no outcome that survived the judge.** Every finding the review produced traces to a fix commit or to a dismissal carrying its reason. A finding that simply stops being mentioned is not dispositioned.
 - **A fix closes a finding with no post-fix re-validation.** A fix cycle is never itself the completion signal. This repository's own record is that a fix introduced a new defect in three of five rounds on one issue and in three consecutive rounds on another, so an account closing on the fix commit alone certifies work nothing re-checked. **This clause is a restatement, not a new rule**, and saying so matters: the Insufficient Evidence list already rejects such an account under *"Evidence that the change is present offered as evidence that it is sufficient — a diff, a field that was added"*, and an independent reader applying the pre-#998 text alone reached NONCONFORMING on exactly this artifact. What this clause adds is location and grain — the general evidence principle now also appears where a run writes its *account*, and names the fix case explicitly — not a rejection that was previously unavailable.
 - **The account says nothing at all about the suite.** An account that discharges every other property and is silent on suite state is incomplete. Distinct from the differential rule below, which governs how a *stated* suite result is judged.
@@ -119,6 +120,38 @@ The differential rule takes a baseline failure *off* the blocking path, which on
 - **Without one** (an unattended run has no one to ask): §2e's headless fallback lawfully **queues** the proposal and files nothing. A queued proposal discharges the routing obligation. It has to: otherwise an unattended run would be simultaneously obliged to file and unable to lawfully do so, and the rule would be unfollowable in exactly the way the absolute rule it replaces was.
 
 Both outcomes are reachable today; what changed is that the failure is no longer a blocker instead.
+
+### External review on the pull request
+
+A run that opened a pull request has published its work to reviewers that answer on their own schedule. Those answers are findings, and property 1 does not distinguish them from the run's own.
+
+**Why this needs a named trigger and not just the rejection clause above.** `/review-github` already ingests and adjudicates external review properly — the gap is that nothing tells a run to invoke it. It is opt-in and manually triggered, and a conductor-side step would not close the gap either: the bare `/goal` lane runs no conductor at all. The obligation therefore lives here, where every lane reads it, and carries its trigger with it — this file's own record is that a stated-once terminal obligation shipped into three skills emitted **zero** across three consecutive reviews.
+
+**Measured cost of not doing this** (PR #1023, 2026-08-08, all times UTC): the PR opened at 18:08; three findings posted at 18:11 and five more at 18:14 — all eight available **seven minutes** in. The run pushed its next commit at 19:46 without reading them, and closed them at 20:51, a full extra round later. That run had already completed a 5-pass prosecution panel, defense, judge, and **two** further post-fix adversarial passes: 27 internal findings, 23 sustained. The eight external findings were disjoint from every one of them and were sustained 8/8 through proxy prosecution → defense → judge, including a **high** — a duplicated policy region that made the checker report `clean` over a contradicting policy — whose defect class the internal panel had found and fixed at one call site while never sweeping for the other two.
+
+**Before declaring done, when the run opened or pushed to a pull request:**
+
+```bash
+# THREE distinct collections. A reviewer may use any of them, and reading two of
+# the three is how a review with findings reads as a review with none.
+gh api "repos/{owner}/{repo}/pulls/{PR}/comments"  --paginate --jq '.[] | "\(.created_at) \(.user.login) inline \(.path):\(.line)"'
+gh api "repos/{owner}/{repo}/pulls/{PR}/reviews"   --paginate --jq '.[] | select(.body != "") | "\(.submitted_at) \(.user.login) review-summary \(.state)"'
+gh api "repos/{owner}/{repo}/issues/{PR}/comments" --paginate --jq '.[] | "\(.created_at) \(.user.login) top-level"'
+```
+
+**All three, and paginated — both corrections came from a reviewer on this very section, which is the argument for the rule in miniature.** The first revision listed only inline threads and top-level comments. `gh` keeps submitted-review bodies in a third collection entirely, so a reviewer who puts a finding *only* in its review summary is invisible to both — and `skills/code-review-intake/SKILL.md` already requires review summaries in the ingested ledger, so the trigger has to actually fetch them. `--paginate` is the same class of gap one level down: `skills/safe-operations/SKILL.md` records that an unpaginated read caps out and can shadow the record on a busy thread.
+
+State the exposure honestly, because the check this section describes is the one that would have to catch it: on PR #1023 the two-command pair happened to reach **every** reviewer, since each had also commented inline or top-level — no reviewer was exclusive to `reviews`. So this is a **latent** gap, not a demonstrated miss, and it is recorded that way rather than dressed up with an exhibit that does not reproduce. What the pair genuinely does not return is the review-summary *body* — the object carrying, on that PR, one reviewer's "diff exceeds the review limit" verdict, which is a finding about coverage that a completion account needs and neither other collection holds.
+
+Findings from this route are ingested through `skills/code-review-intake/SKILL.md` — as proxy prosecution over the ingested ledger, never as conductor-side merit judgments — and their dispositions then travel in the same account as everything else.
+
+**The distinction that keeps this honest: an empty result is not a clean review.** Reviewers post asynchronously, so "no comments" minutes after opening a PR and "no comments after the reviewer finished" are different states, and only the second says anything. Check whether the review actually reported — `gh pr checks {PR}` names bots that are still `pending`, and several post a summary comment when they finish. Record which of the three the run is in, because collapsing them is how an unread review becomes an examined-and-clean claim:
+
+- **findings present** → ingest and disposition them
+- **reviewer finished, no findings** → an accounted-for review that returned nothing, in the words property 2 requires
+- **reviewer not finished, or none configured** → say that, and say the account is closing without it
+
+The last is a lawful close, not a failure. A reviewer that never answers cannot block a run; an account that quietly reads its silence as approval is what this clause forbids.
 
 ## Universal Verification Checklist
 
@@ -196,6 +229,8 @@ These commands establish that the tree is healthy. They are **not** per-criterio
 - [ ] Per-criterion evidence in the PR description, each item saying what could have failed and where it came from
 - [ ] Reviewers assigned
 - [ ] Labels/tags applied
+
+After the PR is open — and before declaring done — read what the reviewers actually posted (§ External review on the pull request). Findings arrive minutes after the PR opens, not at the moment you finish writing it.
 
 ### Before Release
 

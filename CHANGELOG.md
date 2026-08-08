@@ -4,6 +4,12 @@ All notable changes to agent-orchestra will be documented in this file.
 
 ## [Unreleased]
 
+## [3.14.1] — 2026-08-08
+
+### Changed
+
+- #1024: **read what the reviewers actually posted, before declaring done.** External code-review bots answer on their own schedule — measured on PR #1023, eight findings were available seven minutes after the PR opened, the run pushed its next commit 91 minutes later without reading them, and closed them a full extra round after that. All eight were sustained 8/8 through proxy prosecution, defense and judge, and were disjoint from the 27 findings that run's own 5-pass panel, defense, and two post-fix passes had already produced — including a `high` whose defect class the internal panel had fixed at one call site while never sweeping for the other two. `skills/verification-before-completion/SKILL.md` now rejects an account whose pull request carries unread external findings (property 1 is quantified over the findings *a review* produced, not the ones this run's own panel produced), and carries the trigger with it rather than stating the obligation once and hoping — the same file already records a stated-once terminal obligation emitting **zero** across three consecutive reviews. The trigger reads all **three** distinct collections, paginated: inline threads, submitted-review bodies, and top-level comments. It distinguishes three states, because collapsing them is how an unread review becomes an examined-and-clean claim: findings present, reviewer finished with none, and reviewer not finished — the last being a lawful close that must say so. Warn-only and reader-side; `/review-github` remains the ingestion path and no CI gate is added.
+
 ## [3.14.0] — 2026-08-08
 
 ### Changed
