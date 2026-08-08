@@ -251,19 +251,23 @@ function Get-MIPMarkedRegion {
     $beginIdx = -1
     $endIdx = -1
     $beginCount = 0
+    $endCount = 0
     for ($i = 0; $i -lt $Lines.Count; $i++) {
         if ($Lines[$i].Trim() -eq $BeginMarker) {
             $beginCount++
             if ($beginIdx -lt 0) { $beginIdx = $i }
             continue
         }
-        if ($beginIdx -ge 0 -and $endIdx -lt 0 -and $Lines[$i].Trim() -eq $EndMarker) { $endIdx = $i }
+        if ($Lines[$i].Trim() -eq $EndMarker) {
+            $endCount++
+            if ($beginIdx -ge 0 -and $endIdx -lt 0) { $endIdx = $i }
+        }
     }
     $markersPresent = ($beginIdx -ge 0 -and $endIdx -gt $beginIdx)
     if (-not $markersPresent -or $endIdx -le $beginIdx + 1) {
         return [pscustomobject]@{
             Found = $false; MarkersPresent = $markersPresent; Block = @()
-            BeginIndex = $beginIdx; EndIndex = $endIdx; BeginCount = $beginCount
+            BeginIndex = $beginIdx; EndIndex = $endIdx; BeginCount = $beginCount; EndCount = $endCount
         }
     }
     return [pscustomobject]@{
@@ -273,6 +277,7 @@ function Get-MIPMarkedRegion {
         BeginIndex     = $beginIdx
         EndIndex       = $endIdx
         BeginCount     = $beginCount
+        EndCount       = $endCount
     }
 }
 
@@ -346,32 +351,49 @@ function Get-MIPStoreStanza {
     #>
     param([string[]]$Lines, [int]$HeaderLineCount)
 
+    # Three bounds, and each closes a way that quoted text answered the shape question:
+    # the header region (scope), column 0 (the anchored patterns), and fenced-code state.
+    # The last one is not belt-and-braces: this skill's own adoption instructions print the
+    # marker at column 0 inside a ```text fence, precisely so a store owner can copy it - so a
+    # store that pastes those instructions into its own header as a note reproduces the exact
+    # bytes of a real declaration. Inside a fence is quoting; outside it is declaring.
     $bound = [Math]::Min($HeaderLineCount, $Lines.Count)
     $beginIdx = -1
     $policyPath = ''
     $wellFormedBegin = $false
+    $casingOnly = $false
+    $inFence = $false
     for ($i = 0; $i -lt $bound; $i++) {
         $line = $Lines[$i].TrimEnd()
+        if ($line -match '^\s*(```|~~~)') { $inFence = -not $inFence; continue }
+        if ($inFence) { continue }
         if ($line -notmatch $script:StoreStanzaLooseBeginPattern) { continue }
         $beginIdx = $i
         $m = [regex]::Match($line, $script:StoreStanzaBeginPattern)
         if ($m.Success) { $wellFormedBegin = $true; $policyPath = $m.Groups['path'].Value.Trim() }
+        else { $casingOnly = ($line -cnotmatch $script:StoreStanzaLooseBeginPattern) }
         break
     }
     if ($beginIdx -lt 0) {
         return [pscustomobject]@{ Found = $false; Malformed = $false; Reason = ''; PolicyPath = ''; Block = @(); BeginIndex = -1; EndIndex = -1 }
     }
     if (-not $wellFormedBegin -or [string]::IsNullOrWhiteSpace($policyPath)) {
+        # Name the real cause. Sending an owner to "add the path" when the path is present and
+        # only the marker's casing is wrong points them at the wrong half of the line.
+        $why = if ($casingOnly) { 'the marker name must be written in lower case' } else { 'it names no policy file' }
         return [pscustomobject]@{
             Found = $true; Malformed = $true; PolicyPath = ''; Block = @(); BeginIndex = $beginIdx; EndIndex = -1
-            Reason = ("the stanza opens at line $($beginIdx + 1) and names no policy file; " +
+            Reason = ("the stanza opens at line $($beginIdx + 1) and $why; " +
                 "expected '<!-- memory-policy-stanza-begin: POLICY.md -->'")
         }
     }
 
     $endIdx = -1
+    $inFence = $false
     for ($i = $beginIdx + 1; $i -lt $bound; $i++) {
-        if ($Lines[$i].TrimEnd() -eq $script:StoreStanzaEndMarker) { $endIdx = $i; break }
+        $line = $Lines[$i].TrimEnd()
+        if ($line -match '^\s*(```|~~~)') { $inFence = -not $inFence; continue }
+        if (-not $inFence -and $line -eq $script:StoreStanzaEndMarker) { $endIdx = $i; break }
     }
     if ($endIdx -lt 0) {
         return [pscustomobject]@{
@@ -409,6 +431,12 @@ function Resolve-MIPPolicyFilePath {
     if ([System.IO.Path]::IsPathRooted($DeclaredPath)) {
         return [pscustomobject]@{ Ok = $false; Path = ''; Reason = "the stanza names an absolute path ('$DeclaredPath'); the path is relative to the index's own directory" }
     }
+    # A trailing separator names a directory, not a file. GetFullPath keeps it, containment
+    # accepts it, and it then arrives at the read as an exception whose detail line claims the
+    # file exists - so it is caught here, where the declaration is judged.
+    if ($DeclaredPath -match '[\\/]\s*$') {
+        return [pscustomobject]@{ Ok = $false; Path = ''; Reason = "the stanza names '$DeclaredPath', which ends in a path separator and so names a directory rather than a file" }
+    }
     try {
         $storeFull = [System.IO.Path]::GetFullPath($StoreDirectory)
         $candidate = [System.IO.Path]::GetFullPath((Join-Path $storeFull $DeclaredPath))
@@ -416,9 +444,17 @@ function Resolve-MIPPolicyFilePath {
     catch {
         return [pscustomobject]@{ Ok = $false; Path = ''; Reason = "the stanza names a path this filesystem cannot express ('$DeclaredPath'): $($_.Exception.Message)" }
     }
+    # Path case matters everywhere except Windows. Comparing case-insensitively on a POSIX
+    # store would accept '../STORE/POLICY.md' as being inside '/a/store' - a different
+    # directory, and the containment rule undone on the platform CI actually runs.
+    $comparison = if ($IsWindows) { [System.StringComparison]::OrdinalIgnoreCase } else { [System.StringComparison]::Ordinal }
     $prefix = $storeFull.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
-    if (-not $candidate.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-        return [pscustomobject]@{ Ok = $false; Path = $candidate; Reason = "the stanza names '$DeclaredPath', which resolves outside the index's own directory (to $candidate); the policy file lives beside the index" }
+    if (-not $candidate.StartsWith($prefix, $comparison)) {
+        $where = if ($candidate.TrimEnd([System.IO.Path]::DirectorySeparatorChar) -eq $storeFull.TrimEnd([System.IO.Path]::DirectorySeparatorChar)) {
+            'names the index''s own directory rather than a file in it'
+        }
+        else { "resolves outside the index's own directory (to $candidate)" }
+        return [pscustomobject]@{ Ok = $false; Path = $candidate; Reason = "the stanza names '$DeclaredPath', which $where; the policy file lives beside the index" }
     }
     return [pscustomobject]@{ Ok = $true; Path = $candidate; Reason = '' }
 }
@@ -444,7 +480,15 @@ function Get-MIPStoreValues {
         every honest observation forever, since the freshest date governs and the format is
         append-only. Syntax-valid lines, nonsense record.
     #>
-    param([string[]]$Lines, [datetime]$AsOf)
+    param(
+        # Not marked Mandatory: PowerShell's mandatory binding rejects a string[] carrying blank
+        # elements, and a policy file is full of blank lines.
+        [string[]]$Lines,
+        # Mandatory, like its sibling in Get-MIPSizeAxis. Left optional it defaults to
+        # DateTime.MinValue, under which the future-date comparison throws on a non-terminating
+        # error stream and the guard M2 added silently fails OPEN - the poisoned row accepted.
+        [Parameter(Mandatory = $true)][datetime]$AsOf
+    )
 
     $region = Get-MIPMarkedRegion -Lines $Lines -BeginMarker $script:StoreValuesBeginMarker -EndMarker $script:StoreValuesEndMarker
     if (-not $region.MarkersPresent) {
@@ -459,8 +503,11 @@ function Get-MIPStoreValues {
 
     # Declared twice is not the same as declared once: this function would silently take the
     # first region and never say the second exists.
-    if ($region.BeginCount -gt 1) {
-        $errors.Add("the policy file carries $($region.BeginCount) '$script:StoreValuesBeginMarker' regions; only the first would govern, so which values apply is ambiguous")
+    # Both markers are counted. Guarding only the opening one left the other half of the same
+    # defect live: one stray closing marker truncates the region at the wrong line, and every
+    # row appended after it - which is how this format is meant to grow - silently vanishes.
+    if ($region.BeginCount -gt 1 -or $region.EndCount -gt 1) {
+        $errors.Add("the policy file carries $($region.BeginCount) '$script:StoreValuesBeginMarker' and $($region.EndCount) '$script:StoreValuesEndMarker' marker(s); exactly one of each is expected, so which values apply is ambiguous")
     }
 
     foreach ($raw in $region.Block) {
@@ -807,16 +854,22 @@ function Invoke-MemoryIndexPolicyCheck {
         $stanzaText = ($stanzaBlock -join "`n")
 
         # The stanza is the ONLY policy text the split shape puts in the index. Leftover policy
-        # prose above or below it is migration residue that contradicts the governing policy
-        # file, and without this check a store that "split" without removing the text it was
-        # splitting out reads exactly like one that did - silently, until the size axis
-        # eventually catches it, which is never for a store with room to spare.
+        # prose is migration residue that contradicts the governing policy file, and without
+        # this check a store that "split" without removing the text it was splitting out reads
+        # exactly like one that did - silently, until the size axis eventually catches it,
+        # which is never for a store with room to spare.
+        #
+        # The scan covers the WHOLE index, not just the header region: an earlier revision
+        # checked only above the first heading, so the identical un-removed text one heading
+        # lower read clean. That is the same header-region-only mistake, one line down.
         $probeLines = @($canonicalBlock | Where-Object { $_.Trim().Length -ge $script:PresenceProbeMinLength })
         $stanzaLineNumbers = @($stanza.BeginIndex..$stanza.EndIndex)
-        $residue = @(for ($i = 0; $i -lt [Math]::Min($firstSectionIdx, $indexLines.Count); $i++) {
+        $residueLines = @(for ($i = 0; $i -lt $indexLines.Count; $i++) {
                 if ($stanzaLineNumbers -contains $i) { continue }
-                if ($probeLines -ccontains $indexLines[$i].TrimEnd()) { $indexLines[$i].TrimEnd() }
+                if ($probeLines -ccontains $indexLines[$i].TrimEnd()) { $i }
             })
+        $residue = @($residueLines | ForEach-Object { $indexLines[$_].TrimEnd() })
+        $residueAllInHeader = ($residue.Count -gt 0 -and @($residueLines | Where-Object { $_ -ge $firstSectionIdx }).Count -eq 0)
 
         # Detection is already scoped to the header region, so "the stanza sits above the first
         # section heading" is true by construction and is not re-tested here.
@@ -885,7 +938,8 @@ function Invoke-MemoryIndexPolicyCheck {
             if (-not $stanzaComplete) {
                 if ($pointerInsideHeader) { $parts.Add('a pointer line sits inside the header region, above the first section heading') }
                 elseif ($residue.Count -gt 0) {
-                    $parts.Add(("the index's header region still carries policy text outside the stanza " +
+                    $where = if ($residueAllInHeader) { "in its header region, outside the stanza" } else { "at line(s) $(($residueLines | Select-Object -First 5 | ForEach-Object { $_ + 1 }) -join ', ')" }
+                    $parts.Add(("the index still carries policy text $where " +
                             "($($residue.Count) line(s), first: '$($residue[0])') - the split moves that text to the policy file"))
                 }
                 else { $parts.Add((Get-MIPFirstDivergence -Actual $stanzaBlock -Expected $canonicalStanzaBlock -Label 'stanza')) }
@@ -997,10 +1051,14 @@ function Invoke-MemoryIndexPolicyCheck {
     # --- size ------------------------------------------------------------------------------------
     # A half-migrated store has no budget inputs because its policy file does not exist yet.
     # Saying that is not the same statement as "records none", and it is the one a reader can act on.
-    $absentCause = if ($storeShape -eq 'split-incomplete') {
-        "this store's policy file does not exist yet, so it records no budget inputs"
+    # Named for what was actually read, not for what the store contains. "This store records no
+    # budget inputs" is a claim ABOUT THE STORE, and it was false for an unsplit store that had
+    # written a values block: the check simply never looks there.
+    $absentCause = switch ($storeShape) {
+        'split-incomplete' { "this store's policy file does not exist yet, so no budget inputs were read" }
+        'legacy' { 'budget inputs are read only from a split store''s policy file, and this store has none' }
+        default { "this store's policy file records no budget inputs" }
     }
-    else { 'this store records no budget inputs' }
     $size = Get-MIPSizeAxis -MeasuredCharacters $indexCharacters -StoreValues $storeValues -AsOf $AsOf -AbsentCause $absentCause
 
     $noHook = @($subjects | Where-Object { -not $_.HasHook })
