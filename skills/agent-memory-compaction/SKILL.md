@@ -1,6 +1,6 @@
 ---
 name: agent-memory-compaction
-description: "Lossless-compaction policy for an agent memory store's recall index: the rules a compaction may not break, what may and may not be retired, and a re-runnable check. Use when compacting, pruning, or repairing a memory index. DO NOT USE FOR: individual memory entries; session-state or handoff markers (use session-memory-contract); repository docs (use documentation-finalization)."
+description: "Compaction policy for an agent memory store's recall index: the rules a compaction may not break, how an entry leaves, the size budget the index is held to, and a re-runnable check. Use when compacting, pruning, or repairing a memory index. DO NOT USE FOR: individual memory entries; session-state or handoff markers (use session-memory-contract); repository docs (use documentation-finalization)."
 ---
 
 <!-- markdownlint-disable-file MD041 -->
@@ -8,25 +8,52 @@ description: "Lossless-compaction policy for an agent memory store's recall inde
 ## When to Use
 
 - A memory store's index is being compacted, pruned, merged, or rewritten — whether a person is doing it or the harness handed the job to an agent.
-- An index's policy header is missing, partial, or has drifted from the text below and needs restoring.
+- An index's policy text is missing, partial, or has drifted from the text below and needs restoring.
+- A store is being moved to the split shape — a compact stanza in the index, the full policy and the store's own values beside it.
 - Someone wants to check an index against the policy without changing it.
 
-Not this skill: `session-memory-contract` owns durable session state and cross-session handoff markers. This skill owns one file — a memory store's recall index — and what may be removed from it.
+Not this skill: `session-memory-contract` owns durable session state and cross-session handoff markers. This skill owns one file — a memory store's recall index — what may be removed from it, and how big it is allowed to be.
 
 ## What this is for
 
 An agent memory store keeps one index file whose lines point at entry files. Recall is triggered by what a pointer line *says*, not by what the entry body contains. So the cheapest way to make an index smaller — cutting a pointer down to a bare title — leaves the fact on disk and makes it unfindable. That is a silent, unreviewable loss: the store sits outside version control, so there is no diff, no history, and no review of what a compaction removed.
 
+There is a second silent loss, and it is not a compaction defect at all. The index is loaded in full at the start of a session, and a load past the harness's limit is truncated without a word. An index over that limit has a tail that exists, conforms, and is never recalled. A policy that only governs *removal* cannot see that, which is why size is one of the things this policy governs and one of the things the check reports.
+
 This skill does not build a trigger, a detector, a hook, or a second writer. The compaction already happens and the harness owns when. What ships here is the **policy the existing writer follows**, plus a check anyone can run against a result.
 
-**Two surfaces, and which one governs.** The policy's primary surface is a header inside the index file itself, because it travels with the file being compacted. The copy below is the versioned reference text, delivered to consumers with the plugin. For the store an index belongs to, **the header is authoritative**; this copy is the text it is compared against. After delivery the two can drift — an edit here at a later version leaves an existing header behind, and the check will report divergence correctly but indefinitely. The repair is ordinary: any session already writing that store may edit the header to match the current text below. Until someone does, "diverged" is the honest state, not a false alarm.
+## Two surfaces, and which one governs
+
+For the store an index belongs to, **that store's own policy text is authoritative**; the copy below is the versioned reference it is compared against. After delivery the two can drift — an edit here at a later version leaves an existing store behind, and the check reports divergence correctly and indefinitely.
+
+**Divergence is not a repair ticket.** This version rewrote the policy: the never-retire ratchet is superseded (see the supersession clause in the canonical text below). A store whose text predates that diverges *because its retention regime is the old one*. Mechanically overwriting that text would swap the store's retention rules without its owner deciding to — the kind of unrecorded, destructive change the new policy exists to prevent. Three onward paths, all lawful, and the store's owner picks:
+
+- **Adopt the split shape** — see *Adopting the split shape* below. That is the shape the current text is written for.
+- **Keep checking against the text you adopted.** The pre-supersession policy ships at `skills/agent-memory-compaction/templates/policy-pre-supersession.md`. Pass it with `-PolicyReferencePath` and the store reports clean exactly as it did before.
+- **Do nothing.** A diverged verdict is an honest report, not a failure. Nothing in this skill or its check obliges any store to migrate, and no release will start obliging it.
+
+Where a store's text has drifted for an ordinary reason — a typo, a half-finished write — repairing it to match the reference it was adopted from is still ordinary work, and any session already writing that store may do it.
 
 ## Policy text (canonical)
 
-<!-- policy-canonical-begin -->
-**COMPACTION POLICY FOR THIS INDEX — read this before removing or shortening anything below.**
+This is the text a store adopts. Under the split shape it lives in the store's policy file beside the index; a store that has not split keeps it as the index's own header. It is sized for a file of its own: a store that keeps it in-index pays its full length against the same budget as the content, which is the cost the split exists to remove.
 
-This file is a memory store's recall index: each pointer line names an entry and states what that entry teaches. Recall is triggered by what the pointer *says*, so cutting a pointer down to a bare title leaves the fact in its body and makes it unfindable. Preventing that loss is what this policy is for. It binds any agent or session that compacts, prunes, or rewrites this file, including a compaction the harness hands to an agent.
+<!-- policy-canonical-begin -->
+**COMPACTION POLICY FOR THIS STORE — read this before removing or shortening anything in the index.**
+
+A memory store's recall index is a file whose lines point at entry files. Each pointer line names an entry and states what that entry teaches. Recall is triggered by what the pointer *says*, so cutting a pointer down to a bare title leaves the fact in its body and makes it unfindable. Preventing that loss is what this policy is for. It binds any agent or session that compacts, prunes, or rewrites the index, including a compaction the harness hands to an agent.
+
+### This policy supersedes the never-retire ratchet
+
+An earlier version of this text held a **ratchet bound**: no sequence of compactions could ever remove non-obsolete lesson content, standing entries were retained indefinitely regardless of age, and only settled entries had any removal path at all. That rule is **superseded — replaced, not relaxed**. It made the store an archive, and it made the store's own budget unreachable: the protected floor grew monotonically past the size the index can actually load, so the tail stopped being recalled while the check still reported everything clean.
+
+Three rules replace it. They keep the store honest without keeping it forever:
+
+1. **No silent exits.** Every departure from passive recall — promotion, demotion to a cold archive, or outright removal — is recorded with its reason and its destination. An unrecorded removal is unauthorized, because nothing afterwards can tell a lawful removal from an unlawful one.
+2. **An exit is lawful only when its destination verifiably carries the lesson at landing time.** "Someone will write it up later" is not a destination. The destination is read and confirmed to carry the lesson at the moment of the exit, not assumed. Drift in that destination afterwards is accepted loss, not grounds for keeping the entry hot forever.
+3. **Destructive acts execute only behind an owner-present slate.** Exits, demotions, structural rewrites and body deletions are *proposed* by any session and *executed* only in an interactive sweep with the store's owner present. An unattended session may add entries and record proposals; it may not remove anything.
+
+The store is temporary working storage, not an archive. An entry is recent working state, in flight toward a permanent home, or overdue to leave.
 
 ### Rules a conforming compaction may never break
 
@@ -34,51 +61,134 @@ This file is a memory store's recall index: each pointer line names an entry and
 
 **R2 — no shared note over several subjects.** Several subjects may share a line — that is ordinary and encouraged — but each one carries its own hook. A single note placed before or after a run of links, with the subjects themselves left bare, belongs to none of them and is not a hook for any of them. Any separator may join subjects on a line; the hook is what sits with each subject, not the punctuation between them.
 
-**R3 — re-read immediately before writing.** This file is outside version control and many sessions write it, so a copy held in context can be hours stale. Re-read it from disk immediately before every write, and never compose a whole-file write from context. This rule reaches only a writer that reads first; a writer that never reads can still clobber this header, and nothing here prevents that.
+**R3 — re-read immediately before writing.** This file is outside version control and many sessions write it, so a copy held in context can be hours stale — and a copy that arrived through a truncated load is missing its tail entirely. Re-read it from disk immediately before every write, and never compose a whole-file write from context. This rule reaches only a writer that reads first; a writer that never reads can still clobber the file, and nothing here prevents that.
 
 ### What may be retired, and what may not
 
-*Settlement* is a property of one entry kind, not of the store:
+Every entry is temporary; no kind has tenure. *Settlement* no longer decides whether an entry may leave — its exit does.
 
-- **`project_` entries settle.** Once the work an entry tracks is closed or merged, its pointer may be **demoted** — moved to the settled section, its clause shortened to the durable lesson — but never deleted together with that lesson. The *settled section* is whichever section of this index collects finished work; if the index has none, create one and say what it holds.
-- **`reference_`, `feedback_` and `user_` entries have no settlement notion and are governed as standing.** They are retained indefinitely at full hook quality, regardless of age and regardless of whether an issue they happen to mention is closed. Their subject is a lesson, not a task, and a lesson does not close. Nothing here authorizes retiring one for being old, for being long, or for carrying a closed issue number in its text.
+- **The critical class stays until its lesson has landed.** A lesson is critical when its loss would be expensive, or when its recurrence would be invisible without it. (A lesson that catches an otherwise-silent failure is the canonical example, not the definition.) A critical entry stays in the index until its lesson verifiably lives in a permanent home; demotion counts as leaving. Critical entries are dispositioned first at every sweep and are never deferred twice.
+- **Ordinary lessons are self-healing.** An ordinary lesson removed without being promoted re-earns its place if its problem recurs. That bounded loss is accepted doctrine, not a defect: it is what keeps the index inside a budget a reader actually loads. This is the one thing the superseded ratchet forbade and this policy permits — and it is permitted only through a recorded exit, never through quiet trimming.
+- **`project_` entries settle.** Once the work an entry tracks is closed or merged, its pointer may be **demoted** — moved to the settled section, its clause shortened to the durable lesson. The *settled section* is whichever section of the index collects finished work; if the index has none, create one and say what it holds.
+- **`reference_`, `feedback_` and `user_` entries do not settle.** A lesson does not close, and age alone never authorizes retiring one — nor does length, nor a closed issue number in its text. But not-settling is not tenure: a standing entry leaves by **promotion** to a permanent home, or, where no home has been decided, by demotion booked honestly as accepted recall loss.
 
-**The ratchet bound: no sequence of applications of this policy removes non-obsolete lesson content from the index.** Removing a pointer is authorized only when either (a) its lesson survives elsewhere in the index and the removal names where, or (b) that lesson is *obsolete* — it describes behavior, tooling, or a surface that no longer exists — and the removal states those grounds. Demote before deleting. Repeated application therefore reaches a fixed point that still carries every non-obsolete lesson, so the index cannot be driven toward only-unfinished-work.
+**Trimming is still never a size-reduction move.** Whatever a compaction is under pressure to do, it may not meet a size mandate by cutting hooks, merging subjects under one note, or shortening a pointer to a bare title. Those destroy the recall property the index exists for and leave no trace that they did.
 
-**Where the grounds go.** The store keeps no history, so a justification stated only in a session transcript disappears. Any removal under (a) or (b) appends one line to a `## Retired` section at the end of this index: the entry name, the date, and either where its lesson survives or why it is obsolete. Without that line the removal is unauthorized, because nothing afterwards can tell a lawful removal from an unlawful one. That record is lesson content and is itself subject to the ratchet bound.
+### Exits
+
+**Where the record goes.** The store keeps no history, so a justification stated only in a session transcript disappears. Every exit appends one line to a `## Retired` section at the end of the index, or to the store's own exit record where it keeps one: the entry name, the date, the disposition, the reason, and the destination. That record is lesson content and is itself governed by this policy.
+
+**Dispositions.** An entry leaves by **promotion** (its lesson lands in a permanent home — a repository, a durable instruction file, a versioned document), by **demotion** (moved to a cold archive, booked as accepted recall loss, never called retention), or by **removal** (it no longer earns a place, and the store self-heals if its problem recurs). Promotion is the primary outflow; the other two are exception paths, each booked honestly for what it is.
+
+**Deferral expires.** An entry held hot at a sweep is *deferred*, not tenured. A deferral comes back at the next sweep. Nothing can be parked as keep-hot forever, and a critical entry may not be deferred twice.
 
 ### The authorized size-reduction moves
 
-1. **Demote a settled `project_` entry** — move its pointer into the settled section and shorten the clause to its durable lesson, dropping status, PR and commit particulars.
-2. **Merge settled `project_` pointers onto one line**, each subject keeping its own hook (R2).
-3. **Deduplicate** — where two entries carry the same lesson, fold the distinct content into one, remove the other's pointer, and name the survivor.
-4. **Remove an obsolete entry**, pointer and body together, stating the grounds.
+1. **Promote and remove** — the lesson lands in a permanent home, the landing is confirmed by reading that home, the exit is recorded, and the pointer goes.
+2. **Demote to the cold archive** — the pointer moves out of passive recall, recorded as accepted recall loss.
+3. **Demote a settled `project_` entry** — move its pointer into the settled section and shorten the clause to its durable lesson, dropping status, PR and commit particulars.
+4. **Merge settled `project_` pointers onto one line**, each subject keeping its own hook (R2).
+5. **Deduplicate** — where two entries carry the same lesson, fold the distinct content into one, remove the other's pointer, and name the survivor.
+6. **Remove an obsolete entry**, pointer and body together, stating the grounds.
 
-Repairing a pointer that arrives without a hook — reading the entry and writing one — is always permitted and is not a size-reduction move. Beyond that repair, the list above is the whole authorization: if a size mandate cannot be met by those four moves, report the shortfall plainly and stop. Do not meet it by breaking R1, R2, or the ratchet bound.
+Repairing a pointer that arrives without a hook — reading the entry and writing one — is always permitted and is not a size-reduction move. Beyond that repair, the list above is the whole authorization, and every move on it that removes a pointer is a destructive act: it needs its exit record and an owner-present slate. If a size mandate cannot be met by these moves at a slate, report the shortfall plainly and stop.
 
-### Checking this file
+### The size budget
+
+The index is loaded in full at the start of a session, and a load past the harness's limit is truncated silently. So the index is held to a budget, and the budget is a formula, never a hand-picked number:
 
 ```text
-pwsh <agent-orchestra>/skills/agent-memory-compaction/scripts/Test-MemoryIndexPolicy.ps1 -IndexPath <this file>
+budget = fraction * the freshest recorded limit observation
+```
+
+Both inputs are recorded in this store's own values, with attribution: who observed the limit, by what method, and on what date. No phase substitutes an absolute for the formula. The limit is an external surface — observed, not documented, and free to change without notice — which is why the budget is pinned to a *dated* observation and why an observation that has gone stale is called out rather than trusted quietly. The default staleness bound is 30 days; a store may record its own.
+
+**The counting rule.** Sizes are counted in **characters**: the file decoded as UTF-8, every CRLF and lone CR normalized to a single LF, then the length of the resulting text in UTF-16 code units. A character outside the Basic Multilingual Plane — most emoji — counts as two under that rule. The rule is stated so that a measurement reproduces from the file on disk; it is not a claim that the harness counts identically, and closing that gap is what re-observing the limit is for.
+
+A stale observation is reported, not treated as a defect: the number may still be right, and guessing a fresher one would be worse than saying how old this one is.
+
+### Where these rules live
+
+This policy governs compaction, and it reaches a session only if that session reads it. So a store places the rules in three parts, and skipping one leaves a real gap rather than a tidier file:
+
+1. **A stanza in the index**, above its first section heading, carrying R1–R3 in operative form plus a pointer to where this text lives. That is what a writer who never opens the policy file still reads.
+2. **This policy text beside the index**, together with that store's own values — the budget fraction, the staleness bound, and the dated limit observations. Compaction, sweeps and exits are governed here.
+3. **The admission rule, in whatever instruction file every session already loads** — for a Claude Code store, the user-global `CLAUDE.md`. That is where an entry is required to state its recall trigger and its exit plan at the moment it is written. Neither this text nor the check can reach that surface. A store that places the first two limbs and skips the third has a governed outflow and an ungoverned inflow, and will notice.
+
+A store that keeps this text as the index's own header rather than splitting it out is putting limbs 1 and 2 in one file. That is still lawful and still supported; it simply pays this text's full length against the same budget as the content.
+
+### Checking the index
+
+```text
+pwsh <agent-orchestra>/skills/agent-memory-compaction/scripts/Test-MemoryIndexPolicy.ps1 -IndexPath <the index>
 ```
 
 `<agent-orchestra>` is a clone of the agent-orchestra repository, or its installed plugin copy under `~/.claude/plugins/cache/agent-orchestra/agent-orchestra/<version>/`. If this store's policy text was adapted from the shipped original, keep the adapted reference copy **outside** that cache — plugin updates install into a new per-version directory and leave an adapted copy behind — and pass it with `-PolicyReferencePath <your copy>`.
 
-The check reports three axes: whether this header is present and textually complete against the reference copy; the count of linked subjects carrying no recall hook; and the count of unattributed shared notes. Expected output on a conforming index:
+The check reports four axes: whether this store's policy text is where it should be and textually complete against the reference copy; the size of the index against its budget; the count of linked subjects carrying no recall hook; and the count of unattributed shared notes. Expected output on a conforming split store:
 
 ```text
 RESULT: clean
-header: present, complete
+policy: split - stanza and policy file both match the reference
+size: 4,804 of 19,982 characters (budget = 0.80 of the 24,978-character limit observed 2026-08-06)
 subjects_without_hook: 0
 unattributed_shared_notes: 0
 ```
 
-Exit 0 means clean. Exit 1 means defects, and each offending subject is printed on its own line. Exit 2 means the check refused: it did not recognize this file's structure, could not parse every link it found, found no entry matching the entry-kind vocabulary, or could not read the reference copy — in each case it reports no counts rather than return a plausible wrong verdict. Exit 3 means the invocation itself was wrong, such as an index path that does not exist.
+The size axis is **data-driven**: it is evaluated only for a store that records budget inputs, and it reports `not evaluated` for a store that records none. A store that records inputs the check cannot use — no observation, a malformed one, or one counted in some other unit — gets `could not verify` naming the cause, on that axis alone, with the other three still counted.
 
-Both count axes are syntactic proxies for questions that are really about meaning, and each has known escapes: novel filler evades the hook axis, a pointer whose words are absent from the filename passes it while saying nothing, and the shared-note axis recognizes a note only when it leads or trails a run of subjects that carry no clauses of their own. It is a floor, not a judge.
+Exit 0 means clean. Exit 1 means defects, and each offending subject is printed on its own line. Exit 2 means the check refused: it did not recognize the index's structure, could not parse every link it found, found no entry matching the entry-kind vocabulary, or could not read the reference copy or this store's policy file — in each case it reports no counts rather than return a plausible wrong verdict. Exit 3 means the invocation itself was wrong, such as an index path that does not exist.
 
-**Any session that compacts, prunes, or repairs this index re-runs that check afterward and fixes what it reports.** The check has no trigger; it runs only when someone runs it.
+Both count axes are syntactic proxies for questions that are really about meaning, and each has known escapes: novel filler evades the hook axis, a pointer whose words are absent from the filename passes it while saying nothing, and the shared-note axis recognizes a note only when it leads or trails a run of subjects that carry no clauses of their own. The size axis is exact about the file and only as good as the limit observation behind it. It is a floor, not a judge.
+
+**Any session that compacts, prunes, or repairs the index re-runs that check afterward and fixes what it reports.** The check has no trigger; it runs only when someone runs it.
 <!-- policy-canonical-end -->
+
+## Hot-index stanza (canonical)
+
+Under the split shape the index itself carries this stanza — and only this stanza — above its first section heading. It is what a writer that never opens the policy file still reads, so it carries the three write rules in operative form plus a pointer to where the rest lives.
+
+<!-- stanza-canonical-begin -->
+**COMPACTION RULES FOR THIS INDEX — read before removing or shortening anything below.**
+
+Each pointer line names an entry and states what that entry teaches. Recall fires on what the pointer *says*, so a pointer cut down to a bare title leaves its lesson on disk and unfindable.
+
+- **R1 — every linked subject carries a recall hook.** Every link, not merely every line: a clause between that link and the next, or link text that itself states the lesson. Words that already appear in the target's filename are not a hook, and neither is filler ("see body", "more inside").
+- **R2 — no shared note over several subjects.** Subjects may share a line, but each carries its own hook. One note placed before or after a run of bare links belongs to none of them.
+- **R3 — re-read from disk immediately before every write.** This file sits outside version control, many sessions write it, and a loaded copy may have been silently truncated. Never compose a whole-file write from context.
+
+The full policy — what may be retired, how an exit is recorded, and this store's own budget — lives in the policy file named on the marker line above this stanza. Read it before any compaction, sweep, or removal.
+<!-- stanza-canonical-end -->
+
+## Adopting the split shape
+
+Splitting moves the policy text out of the index and leaves the budget to the content. It is three limbs, and a store needs all three:
+
+1. **The stanza, in the index.** Copy the canonical stanza above into the top of the index — above its first section heading — wrapped in these two markers, with the policy file's path on the opening one:
+
+   ```text
+   <!-- memory-policy-stanza-begin: POLICY.md -->
+   ...the canonical stanza text...
+   <!-- memory-policy-stanza-end -->
+   ```
+
+   The path is relative to the index's own directory. It is an instance value and sits on the marker line, outside the compared text, so naming a different file never reads as a divergence.
+
+2. **The policy file, beside the index.** Create the file the marker names. It carries the canonical policy text between `<!-- policy-canonical-begin -->` and `<!-- policy-canonical-end -->`, and this store's own values between `<!-- store-values-begin -->` and `<!-- store-values-end -->` — outside the canonical region, so per-store numbers never read as policy drift:
+
+   ```text
+   <!-- store-values-begin -->
+   budget_fraction: 0.80
+   staleness_bound_days: 30
+   limit_observation: 2026-08-06 | 24978 | characters | truncation-boundary test (agent-orchestra#1015 review round 3)
+   <!-- store-values-end -->
+   ```
+
+   `limit_observation` is `date | value | unit | method`, and the line repeats: re-observing the limit **appends** a row and the latest date governs, so nothing already recorded is rewritten. `budget_fraction` and `staleness_bound_days` are optional; the defaults are 0.80 and 30 days.
+
+3. **The admission rule, where the writing sessions read.** The stanza and the policy file govern *compaction*. What governs *admission* is whatever instruction file every session already loads — for a Claude Code store, the user-global `CLAUDE.md`. That is where an entry is required to state its recall trigger and its exit plan. Neither this skill nor its check can reach that file; a store that skips this limb has a governed outflow and an ungoverned inflow, and will notice.
+
+Until the policy file exists the store is **half-migrated**: the check names that state specifically, as a defect rather than a refusal, and distinguishes it from a policy file that exists and cannot be read.
 
 ## Adapting this to your store (not part of the compared text)
 
@@ -86,13 +196,25 @@ The canonical text above is written for a store whose entry filenames carry the 
 
 If your store names its entries differently, adapt before adopting:
 
-- Map the four kinds onto whatever kinds your store actually has. The load-bearing distinction is not the prefix — it is **which kinds have a settlement notion** (a task that can close) and which are **standing** (a lesson that cannot). Rewrite the two bullets under *What may be retired, and what may not* to name your kinds, and keep the affirmative statement for the standing ones: silence about a kind is what authorizes a hostile-literal reader to retire it.
+- Map the four kinds onto whatever kinds your store actually has. The load-bearing distinction is not the prefix — it is **which kinds settle** (a task that can close) and which are **standing** (a lesson that cannot). Rewrite the bullets under *What may be retired, and what may not* to name your kinds, and keep the affirmative statement for the standing ones: silence about a kind is what authorizes a hostile-literal reader to retire it.
 - **Write each kind as a backticked identifier ending in an underscore** — `` `task_` ``, not `task-` or plain `task`. That is not decoration: it is the declaration the check reads to learn your store's vocabulary, and a kind written any other way is invisible to it. A policy whose kinds are all written some other way names no kinds at all, and the check refuses rather than guessing.
-- Keep the ratchet bound and R1–R3 verbatim. They do not depend on the taxonomy.
-- **Keep your adapted copy outside the plugin cache.** The check defaults its reference to the `SKILL.md` beside it, which lives in a per-version install directory; the next plugin update creates a new directory with the pristine text and silently orphans your adaptation. Save the adapted copy somewhere durable and pass `-PolicyReferencePath` — and put that same invocation in your store's header, so whoever reads the header runs the right comparison.
-- The check reads the entry-kind vocabulary from your index's own header when it can find one there, and falls back to the reference copy otherwise. It refuses to report counts when no linked entry matches any kind the policy names. That refusal is the signal that this adaptation has not been done — it is not a bug, and the fix is to adapt the text, not to ignore the exit code.
+- Keep R1–R3 and the three replacement rules verbatim. They do not depend on the taxonomy.
+- **Keep your adapted copy outside the plugin cache.** The check defaults its reference to the `SKILL.md` beside it, which lives in a per-version install directory; the next plugin update creates a new directory with the pristine text and silently orphans your adaptation. Save the adapted copy somewhere durable and pass `-PolicyReferencePath` — and put that same invocation in your store's stanza or header, so whoever reads it runs the right comparison.
+- The check reads the entry-kind vocabulary from **your store's own policy text** — the policy file under the split shape, the index's header otherwise — and falls back to the reference copy when it finds none there. It refuses to report counts when no linked entry matches any kind the policy names. That refusal is the signal that this adaptation has not been done — it is not a bug, and the fix is to adapt the text, not to ignore the exit code.
 
-This section is deliberately excluded from the header-completeness comparison, so an adapted store and this copy can still match on the text that matters. The exclusion is by construction: the comparison spans only the region between the `policy-canonical-begin` and `policy-canonical-end` markers above, and this section sits outside it.
+This section is deliberately excluded from the policy comparison, so an adapted store and this copy can still match on the text that matters. The exclusion is by construction: the comparison spans only the region between the `policy-canonical-begin` and `policy-canonical-end` markers above, and this section sits outside it.
+
+## Stores that have not split
+
+A store still carrying the full policy as its index header keeps working, and keeps being supported. Checked against this version's reference it reports its policy text as **present but diverged**, because this version rewrote that text — the divergence is real and the report says what it is and what the options are. The size axis reads `not evaluated` for such a store: there is nowhere in that shape to record budget inputs, and an axis that fired anyway would be migration pressure rather than a measurement.
+
+To keep a clean verdict without changing anything, check against the preserved pre-supersession text:
+
+```text
+pwsh <agent-orchestra>/skills/agent-memory-compaction/scripts/Test-MemoryIndexPolicy.ps1 -IndexPath <the index> -PolicyReferencePath <agent-orchestra>/skills/agent-memory-compaction/templates/policy-pre-supersession.md
+```
+
+That file ships with the plugin and is the exact text this skill carried before the supersession, so a store that adopted it reports `RESULT: clean` unchanged. It is reference data, not a second supported policy: nothing in the check looks for it, and a new store should adopt the current text instead.
 
 ## Running the check
 
@@ -102,7 +224,7 @@ The check lives beside this file:
 pwsh skills/agent-memory-compaction/scripts/Test-MemoryIndexPolicy.ps1 -IndexPath <index>
 ```
 
-`-PolicyReferencePath` defaults to this `SKILL.md`; pass it explicitly to compare a header against a different or adapted reference copy. `-Json` emits the same report as a single JSON object on every terminal path, including refusals and usage errors.
+`-PolicyReferencePath` defaults to this `SKILL.md`; pass it explicitly to compare against a different or adapted reference copy. It supplies both compared texts — the canonical policy and the canonical stanza. `-Json` emits the same report as a single JSON object on every terminal path, including refusals and usage errors. Those three parameters are the whole surface, unchanged by the split.
 
 The check reads; it never writes. It has no trigger and no schedule — nothing invokes it but a person or a session that chooses to.
 
