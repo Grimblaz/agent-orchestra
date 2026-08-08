@@ -1,4 +1,9 @@
-<!-- markdownlint-disable-file MD041 -->
+<!-- markdownlint-disable-file MD001 MD041 -->
+<!-- MD001 (heading-increment) fires where the archived text jumps from `#` to `###`. That
+     heading sits inside the policy-canonical-begin/end region below - the exact text every
+     pre-supersession store is compared against byte-for-byte (-ceq). Editing it would change
+     what that comparison means, which is the outcome this file exists to prevent, so the rule
+     is disabled at the file level rather than the heading being "fixed". -->
 
 # Pre-supersession compaction policy (agent-orchestra 3.13.2 and earlier)
 

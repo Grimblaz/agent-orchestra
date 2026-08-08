@@ -291,6 +291,24 @@ function Get-MIPMarkedRegion {
     }
 }
 
+function Test-MIPRegionDuplicated {
+    <#
+        .SYNOPSIS
+        True when a marked region's BeginCount or EndCount is anything other than exactly one -
+        the caller-side half of Get-MIPMarkedRegion's own documented contract (see its
+        BeginCount doc): "a caller that cares about being governed by the right one must check."
+
+        Get-MIPMarkedRegion silently governs by the FIRST region when there are two, which is
+        fail-open for exactly the callers that treat a match as proof the text is conforming: a
+        copied example left above the live policy, or a second region appended on a version
+        upgrade without deleting the first, both read as the single well-formed region the
+        function found and report clean over whatever the second region actually says.
+    #>
+    param($Region)
+
+    return ($Region.BeginCount -ne 1 -or $Region.EndCount -ne 1)
+}
+
 function Get-MIPKindPrefixes {
     param([string]$Text)
 
@@ -573,15 +591,24 @@ function Get-MIPStoreValues {
             }
             'staleness_bound_days' {
                 $parsedDays = 0
-                if (-not [int]::TryParse($value, [ref]$parsedDays) -or $parsedDays -le 0) {
+                # Invariant culture, matching budget_fraction above and Format-MIPCount: this is
+                # a shipped data format and must read the same on every machine. The ambient
+                # culture's default NumberStyles for a two-arg TryParse differs from a signed
+                # ASCII '+' on cultures whose PositiveSign is not plain '+' (several RTL-mark
+                # cultures), so a well-formed '+30' parsed here but not in InvariantCulture.
+                if (-not [int]::TryParse($value, [System.Globalization.NumberStyles]::Integer, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$parsedDays) -or $parsedDays -le 0) {
                     $errors.Add("staleness_bound_days must be a positive whole number of days; found '$value'")
                 }
                 else { $staleness = $parsedDays }
             }
             'limit_observation' {
                 $fields = @($value -split '\|' | ForEach-Object { $_.Trim() })
-                if ($fields.Count -lt 3) {
-                    $errors.Add("limit_observation must read 'date | value | unit | method'; found '$value'")
+                # Four fields, and the fourth non-blank: 'date | value | unit' with no method, or
+                # with a blank one, was accepted despite the format this same error message
+                # states - an unattributed observation could then govern the budget while never
+                # surfacing in the default text report (Method only reaches -Json).
+                if ($fields.Count -lt 4 -or [string]::IsNullOrWhiteSpace(($fields[3..($fields.Count - 1)] -join ' | '))) {
+                    $errors.Add("limit_observation must read 'date | value | unit | method' with a non-blank method; found '$value'")
                     continue
                 }
                 $observedOn = [datetime]::MinValue
@@ -598,7 +625,7 @@ function Get-MIPStoreValues {
                     continue
                 }
                 $observedValue = 0
-                if (-not [int]::TryParse($fields[1], [ref]$observedValue) -or $observedValue -le 0) {
+                if (-not [int]::TryParse($fields[1], [System.Globalization.NumberStyles]::Integer, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$observedValue) -or $observedValue -le 0) {
                     $errors.Add("limit_observation value must be a positive whole number; found '$($fields[1])'")
                     continue
                 }
@@ -612,7 +639,7 @@ function Get-MIPStoreValues {
                         ObservedOn = $observedOn
                         Value      = $observedValue
                         Unit       = $fields[2]
-                        Method     = if ($fields.Count -ge 4) { ($fields[3..($fields.Count - 1)] -join ' | ') } else { '' }
+                        Method     = ($fields[3..($fields.Count - 1)] -join ' | ')
                     })
             }
             default {
@@ -749,10 +776,27 @@ function Invoke-MemoryIndexPolicyCheck {
 
     # A present-but-unreadable file (locked by another writer, permissions) is a refusal, not a
     # defect verdict - the store is written by many sessions, so a transient lock is expected.
+    #
+    # Read ONCE. The policy/hook/shared-note axes and the size axis used to come from two
+    # separate ReadAllLines/ReadAllText syscalls against the same path - fine on a single-writer
+    # file, but this store is explicitly multi-writer (SKILL.md: "outside version control, many
+    # sessions write it") and compact-then-recheck is the designed workflow. A write landing
+    # between the two reads could combine a conforming old index with a smaller new one into a
+    # clean verdict neither snapshot alone would produce. StringReader.ReadLine() has the same
+    # line-splitting semantics as File.ReadAllLines() (both stop before a trailing terminator's
+    # empty final line), so this reproduces the prior $indexLines exactly from one read.
     $indexResolved = (Resolve-Path -LiteralPath $IndexPath).Path
     try {
-        $indexLines = @([System.IO.File]::ReadAllLines($indexResolved))
-        $indexCharacters = Measure-MIPCharacters -Text ([System.IO.File]::ReadAllText($indexResolved))
+        $indexRaw = [System.IO.File]::ReadAllText($indexResolved)
+        $indexCharacters = Measure-MIPCharacters -Text $indexRaw
+        $indexLinesList = [System.Collections.Generic.List[string]]::new()
+        $reader = [System.IO.StringReader]::new($indexRaw)
+        try {
+            $line = $reader.ReadLine()
+            while ($null -ne $line) { $indexLinesList.Add($line); $line = $reader.ReadLine() }
+        }
+        finally { $reader.Dispose() }
+        $indexLines = @($indexLinesList)
     }
     catch { return New-MIPRefusal -IndexPath $IndexPath -Reason 'index could not be read' -Detail @($_.Exception.Message) }
     try { $refLines = @([System.IO.File]::ReadAllLines((Resolve-Path -LiteralPath $PolicyReferencePath).Path)) }
@@ -763,6 +807,11 @@ function Invoke-MemoryIndexPolicyCheck {
     if (-not $canonicalRegion.Found -or $canonicalRegion.Block.Count -eq 0) {
         return New-MIPRefusal -IndexPath $IndexPath -Reason 'policy reference copy is malformed' -Detail @(
             "expected '$script:CanonicalBeginMarker' and '$script:CanonicalEndMarker' around a non-empty policy text",
+            "in: $PolicyReferencePath")
+    }
+    if (Test-MIPRegionDuplicated -Region $canonicalRegion) {
+        return New-MIPRefusal -IndexPath $IndexPath -Reason 'policy reference copy is malformed' -Detail @(
+            "carries $($canonicalRegion.BeginCount) '$script:CanonicalBeginMarker' and $($canonicalRegion.EndCount) '$script:CanonicalEndMarker' marker(s); exactly one of each is expected, so which text governs is ambiguous",
             "in: $PolicyReferencePath")
     }
     $canonicalBlock = @($canonicalRegion.Block)
@@ -786,6 +835,9 @@ function Invoke-MemoryIndexPolicyCheck {
     $stanzaReferenceProblem = ''
     if (-not $stanzaRegion.Found -or $canonicalStanzaBlock.Count -eq 0) {
         $stanzaReferenceProblem = "expected '$script:StanzaCanonicalBeginMarker' and '$script:StanzaCanonicalEndMarker' around a non-empty stanza"
+    }
+    elseif (Test-MIPRegionDuplicated -Region $stanzaRegion) {
+        $stanzaReferenceProblem = "carries $($stanzaRegion.BeginCount) '$script:StanzaCanonicalBeginMarker' and $($stanzaRegion.EndCount) '$script:StanzaCanonicalEndMarker' marker(s); exactly one of each is expected, so which stanza governs is ambiguous"
     }
     elseif (@($canonicalStanzaBlock | Where-Object { $_ -match '^##\s' }).Count -gt 0) {
         $stanzaReferenceProblem = 'the canonical stanza contains a "## " section heading, and the stanza sits above the index''s first section heading, so that would truncate the header region'
@@ -962,6 +1014,16 @@ function Invoke-MemoryIndexPolicyCheck {
             if (-not $storePolicyRegion.Found -or $storePolicyRegion.Block.Count -eq 0) {
                 return New-MIPRefusal -IndexPath $IndexPath -Reason "this store's policy file is malformed" -Detail @(
                     "expected '$script:CanonicalBeginMarker' and '$script:CanonicalEndMarker' around a non-empty policy text",
+                    "in: $policyFilePath")
+            }
+            # The one site of the three where this was fail-OPEN rather than fail-closed: a
+            # copied example left above the live policy, or a stale block from a version upgrade
+            # left beside the current one, both silently govern by the first match and can read
+            # clean while a second, conflicting policy sits in the file that is supposed to
+            # govern the store.
+            if (Test-MIPRegionDuplicated -Region $storePolicyRegion) {
+                return New-MIPRefusal -IndexPath $IndexPath -Reason "this store's policy file is malformed" -Detail @(
+                    "carries $($storePolicyRegion.BeginCount) '$script:CanonicalBeginMarker' and $($storePolicyRegion.EndCount) '$script:CanonicalEndMarker' marker(s); exactly one of each is expected, so which policy governs is ambiguous",
                     "in: $policyFilePath")
             }
             $storePolicyBlock = @($storePolicyRegion.Block)

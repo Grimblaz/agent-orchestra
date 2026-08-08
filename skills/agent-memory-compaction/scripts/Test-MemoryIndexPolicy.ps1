@@ -30,9 +30,14 @@
 
       - the index, the reference copy, or a split store's policy file cannot be read, or
         something that is not a file sits where the policy file should be
-      - the reference copy is missing its canonical-policy or canonical-stanza markers, or
-        either block contains a section heading (which would make the index-side header
-        boundary ambiguous)
+      - the reference copy is missing its canonical-policy markers, or either block contains a
+        section heading (which would make the index-side header boundary ambiguous); the
+        canonical-stanza markers are required only when the store being checked declares the
+        split shape, so a stanza-less reference copy (the preserved pre-supersession text, for
+        example) still judges a legacy store cleanly
+      - the reference copy or a split store's policy file carries more than one canonical-policy
+        region, or the reference copy carries more than one canonical-stanza region - exactly
+        one of each is expected, so two makes it ambiguous which text governs
       - a split store's policy file is missing its canonical-policy markers
       - the index declares the split shape with a stanza that is never closed above the first
         section heading, is empty, names no policy file, or names a path that cannot resolve to

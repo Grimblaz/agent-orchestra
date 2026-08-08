@@ -1139,8 +1139,17 @@ Describe 'Test-MemoryIndexPolicy' {
                 $f | Should -Not -BeNullOrEmpty
                 $p = @($f.Body.ParamBlock.Parameters | Where-Object { $_.Name.VariablePath.UserPath -eq 'AsOf' })
                 $p.Count | Should -Be 1 -Because "$fn must take AsOf"
+                # Inspect the VALUE, not only presence: `[Parameter(Mandatory = $false)]` carries
+                # a `Mandatory` named argument too, and would satisfy a presence-only assertion
+                # while restoring the exact fail-open this test exists to prevent. The bare
+                # `[Parameter(Mandatory)]` form is also lawful and semantically identical to
+                # `= $true` - PowerShell represents it with ExpressionOmitted rather than an
+                # `Extent.Text` of `$true`, so both forms must be accepted explicitly.
                 $mandatory = @($p[0].Attributes | Where-Object { $_ -is [System.Management.Automation.Language.AttributeAst] } |
-                        ForEach-Object { $_.NamedArguments } | Where-Object { $_ -and $_.ArgumentName -eq 'Mandatory' })
+                        ForEach-Object { $_.NamedArguments } | Where-Object {
+                            $_ -and $_.ArgumentName -eq 'Mandatory' -and
+                            ($_.ExpressionOmitted -or $_.Argument.Extent.Text -match '^\$true$')
+                        })
                 $mandatory.Count | Should -BeGreaterThan 0 -Because "$fn must not let the date comparison bind to DateTime.MinValue"
             }
 
@@ -1415,6 +1424,149 @@ Describe 'Test-MemoryIndexPolicy' {
                     $line | Should -Match 'budget = ' -Because "$($f.Name) states the budget without its formula: '$line'"
                 }
             }
+        }
+    }
+
+    Context 'GitHub review intake (PR #1023) - proxy-prosecuted findings' {
+        It 'reads the index once, so the size axis cannot diverge from a differently-timed second read' {
+            # GH-1: a naive fix (raw text -> regex -split "\n") does NOT reproduce
+            # File.ReadAllLines() semantics on the shapes that matter - this pins the actual
+            # StringReader.ReadLine() equivalence the fix relies on, across the shapes that
+            # historically diverge (trailing newline, CRLF, blank final line, no trailing
+            # newline, empty file).
+            #
+            # NOTE: pinning-by-construction, not red-before-green. The two-syscall race GH-1
+            # named has no deterministic exhibit (see the review's own measured ~0.17ms window);
+            # this test instead pins the TECHNIQUE the fix relies on, standalone, so a future
+            # edit cannot silently swap in a splitting method that diverges from ReadAllLines.
+            $cases = @{
+                'no trailing newline' = "alpha`nbeta"
+                'trailing LF'         = "alpha`nbeta`n"
+                'trailing CRLF'       = "alpha`r`nbeta`r`n"
+                'blank final line'    = "alpha`nbeta`n`n"
+                'empty file'          = ''
+            }
+            foreach ($name in $cases.Keys) {
+                $path = Join-Path $script:Work ("snap-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
+                [System.IO.File]::WriteAllText($path, $cases[$name])
+                $expected = @([System.IO.File]::ReadAllLines($path))
+                $raw = [System.IO.File]::ReadAllText($path)
+                $actualList = [System.Collections.Generic.List[string]]::new()
+                $reader = [System.IO.StringReader]::new($raw)
+                try { $line = $reader.ReadLine(); while ($null -ne $line) { $actualList.Add($line); $line = $reader.ReadLine() } }
+                finally { $reader.Dispose() }
+                (@($actualList) -join "`u{1}") | Should -BeExactly (@($expected) -join "`u{1}") -Because "'$name' must reproduce ReadAllLines exactly"
+            }
+        }
+
+        It 'rejects a limit_observation missing its method, and one with a blank method' {
+            $store = script:New-SplitStore -Body $script:ConformingBody -Values @(
+                "limit_observation: $script:ObservationDate | 24978 | characters")
+            $r = script:Invoke-Check -IndexPath $store.IndexPath
+            $r.Report.Size.State | Should -BeExactly 'could-not-verify'
+            $r.Text | Should -Match "non-blank method"
+
+            $store2 = script:New-SplitStore -Body $script:ConformingBody -Values @(
+                "limit_observation: $script:ObservationDate | 24978 | characters | ")
+            $r2 = script:Invoke-Check -IndexPath $store2.IndexPath
+            $r2.Report.Size.State | Should -BeExactly 'could-not-verify'
+
+            # control: a real method still works
+            $ok = script:New-SplitStore -Body $script:ConformingBody
+            (script:Invoke-Check -IndexPath $ok.IndexPath).Report.Size.State | Should -BeExactly 'within'
+        }
+
+        It 'refuses a duplicated canonical-policy region on all three sites, not only the store policy file' {
+            # GH-3: the store's own policy file was the one FAIL-OPEN site (a copied example
+            # left above the live policy read clean); the reference-copy canonical and stanza
+            # regions were already fail-closed, but now name the cause explicitly rather than
+            # governing silently by the first match.
+            $dupPolicy = @($script:CanonicalLines) + @('<!-- policy-canonical-end -->', '',
+                'ANYTHING MAY BE DELETED WITHOUT GROUNDS. The ratchet bound does not apply.', '',
+                '<!-- policy-canonical-begin -->') + @($script:CanonicalLines)
+            $store = script:New-SplitStore -Body $script:ConformingBody -PolicyText $dupPolicy
+            $r = script:Invoke-Check -IndexPath $store.IndexPath
+            $r.Code | Should -Be 2 -Because 'a duplicate region in the governing policy file must refuse, not silently govern by the first match'
+            $r.Text | Should -Match "policy file is malformed"
+            $r.Text | Should -Match 'exactly one of each is expected'
+
+            # reference copy carrying a duplicated canonical-policy region
+            $dupRef = Join-Path $script:Work 'dup-ref.md'
+            [System.IO.File]::WriteAllLines($dupRef, (
+                    @('<!-- policy-canonical-begin -->') + @($script:CanonicalLines) + @('<!-- policy-canonical-end -->', '') +
+                    @('<!-- policy-canonical-begin -->') + @($script:CanonicalLines) + @('<!-- policy-canonical-end -->', '') +
+                    @('<!-- stanza-canonical-begin -->') + @($script:StanzaLines) + @('<!-- stanza-canonical-end -->')))
+            $r2 = script:Invoke-Check -IndexPath (script:New-Index -Body $script:ConformingBody) -ReferencePath $dupRef
+            $r2.Code | Should -Be 2
+            $r2.Text | Should -Match 'policy reference copy is malformed'
+            $r2.Text | Should -Match 'exactly one of each is expected'
+        }
+
+        It 'accepts the bare [Parameter(Mandatory)] form as equally lawful to Mandatory = $true' {
+            # GH-4: this is the suite's OWN AST assertion pinning its own discriminating power -
+            # a fixture-level regression guard, not a check against the core.
+            #
+            # NOTE: pinning-by-construction, not red-before-green. Every Mandatory declaration in
+            # this repo today uses '= $true', so this codebase has no live input that exercises
+            # the bare form - the CodeRabbit-suggested regex and the fixed one agree on every
+            # exhibit currently in the tree. This locks the corrected predicate against the next
+            # 'Mandatory' declaration written without '= $true'.
+            function script:New-MandatoryFixture {
+                param([string]$AttributeText)
+                $path = Join-Path $script:Work ("mandatory-fixture-" + [guid]::NewGuid().ToString('N').Substring(0, 6) + '.ps1')
+                [System.IO.File]::WriteAllLines($path, @('function Test-Fn {', '    param(', "        $AttributeText", '        [datetime]$AsOf', '    )', '}'))
+                return $path
+            }
+            function script:Test-MandatoryAssertion {
+                param([string]$Path)
+                $ast = [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$null, [ref]$null)
+                $f = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Test-Fn' }, $true)
+                $p = @($f.Body.ParamBlock.Parameters | Where-Object { $_.Name.VariablePath.UserPath -eq 'AsOf' })
+                $mandatory = @($p[0].Attributes | Where-Object { $_ -is [System.Management.Automation.Language.AttributeAst] } |
+                        ForEach-Object { $_.NamedArguments } | Where-Object {
+                            $_ -and $_.ArgumentName -eq 'Mandatory' -and
+                            ($_.ExpressionOmitted -or $_.Argument.Extent.Text -match '^\$true$')
+                        })
+                return $mandatory.Count -gt 0
+            }
+            script:Test-MandatoryAssertion (script:New-MandatoryFixture '[Parameter(Mandatory = $true)]') | Should -BeTrue
+            script:Test-MandatoryAssertion (script:New-MandatoryFixture '[Parameter(Mandatory)]') | Should -BeTrue -Because 'the bare form is lawful and semantically identical to = $true'
+            script:Test-MandatoryAssertion (script:New-MandatoryFixture '[Parameter(Mandatory = $false)]') | Should -BeFalse -Because 'this is the fail-open the assertion exists to catch'
+        }
+
+        It 'parses staleness_bound_days and the observation value on the invariant culture' {
+            # GH-5: a signed ASCII '+' is not recognized as PositiveSign on several RTL-mark
+            # cultures (ar-SA, fa-IR among them); the shipped format must read identically
+            # regardless of the invoking machine's culture.
+            $store = script:New-SplitStore -Body $script:ConformingBody -Values @(
+                'staleness_bound_days: +30',
+                "limit_observation: $script:ObservationDate | +24978 | characters | m")
+            $prior = [System.Threading.Thread]::CurrentThread.CurrentCulture
+            try {
+                [System.Threading.Thread]::CurrentThread.CurrentCulture = [System.Globalization.CultureInfo]::GetCultureInfo('ar-SA')
+                $r = script:Invoke-Check -IndexPath $store.IndexPath
+            }
+            finally { [System.Threading.Thread]::CurrentThread.CurrentCulture = $prior }
+            $r.Report.Size.State | Should -BeExactly 'within' -Because "a well-formed '+24978' must parse the same under ar-SA as under the invariant culture"
+            $r.Report.Size.StalenessBoundDays | Should -Be 30
+        }
+
+        It 'states the canonical-stanza refusal is conditional on the split shape, in the surface a reader actually reads' {
+            # GH-6: the docstring bullet used to read as an unconditional refusal; the suite's
+            # own dual-polarity test already proves the behavior, this pins the DESCRIPTION.
+            $text = Get-Content -LiteralPath $script:EntryPoint -Raw
+            $text | Should -Match 'canonical-stanza markers are required only when'
+        }
+
+        It 'ships both markdownlint findings resolved, with the compared regions untouched' {
+            # GH-7/GH-8: the compared regions must be byte-identical after the fix - the bot's
+            # own suggested diffs would have edited live-adopted text; this is the standing
+            # guard against a future "helpful" edit reintroducing exactly that.
+            (Get-Content -LiteralPath $script:Skill -Raw) | Should -Match 'markdownlint-disable-file MD038 MD041'
+            (Get-Content -LiteralPath $script:PreSupersession -Raw) | Should -Match 'markdownlint-disable-file MD001 MD041'
+            $skillCanon = ($script:CanonicalLines -join "`n")
+            $liveSkillCanon = (script:Read-Region -Path $script:Skill -Begin '<!-- policy-canonical-begin -->' -End '<!-- policy-canonical-end -->') -join "`n"
+            $skillCanon | Should -BeExactly $liveSkillCanon
         }
     }
 }

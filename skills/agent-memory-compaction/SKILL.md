@@ -3,7 +3,12 @@ name: agent-memory-compaction
 description: "Compaction policy for an agent memory store's recall index: the rules a compaction may not break, how an entry leaves, the size budget the index is held to, and a re-runnable check. Use when compacting, pruning, or repairing a memory index. DO NOT USE FOR: individual memory entries; session-state or handoff markers (use session-memory-contract); repository docs (use documentation-finalization)."
 ---
 
-<!-- markdownlint-disable-file MD041 -->
+<!-- markdownlint-disable-file MD038 MD041 -->
+<!-- MD038 (no-space-in-code) fires on the `## ` code span inside the canonical policy region
+     below. The space is the pinned rendering of the `^##\s` pattern the check actually matches
+     (core:788) and is not a formatting slip; moving it outside the backticks would edit text
+     every adopted store is compared against byte-for-byte (-ceq), so this is disabled at the
+     file level rather than "fixed" in the region. -->
 
 ## When to Use
 
