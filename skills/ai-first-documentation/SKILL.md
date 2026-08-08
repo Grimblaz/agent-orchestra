@@ -36,6 +36,8 @@ The context window is the scarce resource. Performance degrades as it fills, so 
 
 Minimal does not mean short for its own sake: the criterion is signal density plus behavioral sufficiency, not raw line count.
 
+For the model-generation dimension of this principle — separating load-bearing contracts from Claude-4-era behavioral coaching when auditing imperative-guardrail density — see `Documents/Design/context-engineering-claude-5.md`.
+
 ## The Placement Model
 
 Route each piece of guidance to its cheapest sufficient home:

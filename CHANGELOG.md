@@ -4,6 +4,12 @@ All notable changes to agent-orchestra will be documented in this file.
 
 ## [Unreleased]
 
+## [3.13.2] — 2026-08-08
+
+### Added
+
+- Landed Documents/Design/context-engineering-claude-5.md (the #933 assessment) as an in-repo record carrying the settled sequencing, and added discoverability pointers to it from skills/skill-creator (prescription budget at authoring time), skills/ai-first-documentation (guardrail-density audits), and Documents/Design/agent-body-architecture.md (effort re-tune guidance).
+
 ## [3.13.1] — 2026-08-05
 
 ### Changed
