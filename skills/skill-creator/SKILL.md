@@ -137,6 +137,10 @@ Before finalizing a skill's `description:` field, verify:
 
 ## Writing Guidelines
 
+### Prescription Budget (Claude 5)
+
+Before adding imperative guardrails to a skill — MUST/NEVER lists, step-by-step behavioral coaching, forbidden-command enumerations — read `Documents/Design/context-engineering-claude-5.md`: prescription written for older models degrades Claude 5 output. Keep contracts exact (schemas, marker grammars, enum literals, gate definitions); trim coaching the model no longer needs.
+
 ### Description Field (Critical for Discovery)
 
 The description determines when the skill appears in suggestions.
