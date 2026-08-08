@@ -25,7 +25,7 @@ This keeps prompts concise while preserving depth when needed.
 | Skill | Purpose | Status |
 | ----- | ------- | ------ |
 | `adversarial-review` | Evidence-first prosecution and defense methodology for review workflows | ✅ Included |
-| `agent-memory-compaction` | Lossless-compaction policy for an agent memory store's recall index: the rules a compaction may not break, what may and may not be retired, and a re-runnable check | ✅ Included |
+| `agent-memory-compaction` | Compaction policy for an agent memory store's recall index: the rules a compaction may not break, how an entry leaves, the size budget the index is held to, and a re-runnable four-axis check | ✅ Included |
 | `ai-first-documentation` | Research-backed standards for documentation in AI-first codebases: context-file architecture (CLAUDE.md, skills, subagents, rules), multi-agent interop, and project-doc organization, with a tiered audit rubric. Use when authoring or auditing CLAUDE.md/AGENTS.md, deciding where guidance belongs, or running a documentation gap analysis. DO NOT USE FOR: post-implementation doc updates (use documentation-finalization) or reference sidecar setup (use project-references). | ✅ Included |
 | `bdd-scenarios` | Structured Given/When/Then scenario authoring with ID traceability and CE Gate coverage gap detection | ✅ Included |
 | `brainstorming` | Structured Socratic questioning for exploring ideas and solutions | ✅ Included |
