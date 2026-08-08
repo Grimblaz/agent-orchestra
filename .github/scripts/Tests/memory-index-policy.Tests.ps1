@@ -857,9 +857,16 @@ Describe 'Test-MemoryIndexPolicy' {
         }
 
         It 'calls an unusable policy-file declaration malformed, not half-migrated' {
-            # Three declarations that cannot name a file beside the index. Each must be told
+            # Declarations that cannot name a file beside the index, each of which must be told
             # apart from a store that simply has not created its policy file yet.
-            foreach ($bad in @('..\..\outside\POLICY.md', 'C:\Windows\win.ini', '/etc/passwd')) {
+            #
+            # The list is platform-scoped because "unusable" is. A Windows drive-qualified path
+            # is a perfectly ordinary RELATIVE filename on POSIX - backslashes are just
+            # characters there - so asserting it refuses everywhere asserts something false, and
+            # the Linux runner said so.
+            $unusable = @('../../outside/POLICY.md', '/etc/passwd')
+            if ($IsWindows) { $unusable += @('..\..\outside\POLICY.md', 'C:\Windows\win.ini') }
+            foreach ($bad in $unusable) {
                 $store = script:New-SplitStore -Body $script:ConformingBody -MarkerPath $bad -OmitPolicyFile
                 $r = script:Invoke-Check -IndexPath $store.IndexPath
                 $r.Code | Should -Be 2 -Because "'$bad' cannot name a file beside the index"
