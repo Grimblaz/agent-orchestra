@@ -870,14 +870,18 @@ Describe 'Test-MemoryIndexPolicy' {
             (script:Invoke-Check -IndexPath $ok.IndexPath).Code | Should -Be 1
         }
 
-        It 'reports policy text left in the header region beside the stanza' {
-            # Migration residue: a store that "split" without removing what it was splitting out.
+        It 'reads policy text left ABOVE the stanza as an undeclared split, not a split store' {
+            # Under the positional rule this store never declared the split - its first
+            # non-blank line is policy text - so it is judged as the legacy store it looks
+            # like, and diverges on the header axis. Residue left BELOW the declaration is the
+            # migration-residue case, covered in the post-fix defense context for both the
+            # header region and the body.
             $store = script:New-SplitStore -Body $script:ConformingBody
             $lines = @($script:LegacyCanonicalLines) + @('') + @([System.IO.File]::ReadAllLines($store.IndexPath))
             [System.IO.File]::WriteAllLines($store.IndexPath, $lines)
             $r = script:Invoke-Check -IndexPath $store.IndexPath
+            $r.Report.StoreShape | Should -BeExactly 'legacy'
             $r.Code | Should -Be 1
-            $r.Text | Should -Match 'still carries policy text in its header region, outside the stanza'
         }
 
         It 'refuses nested links instead of throwing on a negative substring length' {
@@ -1114,7 +1118,7 @@ Describe 'Test-MemoryIndexPolicy' {
             [System.IO.File]::WriteAllLines($store.PolicyPath, $spliced)
             $r = script:Invoke-Check -IndexPath $store.IndexPath
             $r.Report.Size.State | Should -BeExactly 'could-not-verify'
-            $r.Text | Should -Match 'exactly one of each is expected'
+            $r.Text | Should -Match 'exactly one of each, in that order, is expected'
             $r.Code | Should -Be 1
         }
 
@@ -1175,6 +1179,102 @@ Describe 'Test-MemoryIndexPolicy' {
             $r.Code | Should -Be 2
             $r.Text | Should -Match 'must be written in lower case'
             $r.Text | Should -Not -Match 'names no policy file'
+        }
+    }
+
+    Context 'post-fix defense - the declaration is a position, not a heuristic' {
+        # Round 3 of the same defect. Scoping to the header region, then column 0, then fenced
+        # -code tracking each left quoted text able to answer the shape question - and the fence
+        # tracker broke it in the other direction too. The rule is now positional, and these
+        # cases are the ones that defeated each earlier attempt.
+        It 'is not fooled by any way of quoting the shipped recipe' {
+            $quotes = @{
+                'four-backtick fence around a ```text block' = @('````markdown', '```text',
+                    '<!-- memory-policy-stanza-begin: POLICY.md -->', '<!-- memory-policy-stanza-end -->', '```', '````')
+                'tilde fence'                                = @('~~~text', '<!-- memory-policy-stanza-begin: POLICY.md -->', '~~~')
+                'unclosed fence'                             = @('```text', '<!-- memory-policy-stanza-begin: POLICY.md -->')
+                'no fence at all'                            = @('Reminder:', '<!-- memory-policy-stanza-begin: POLICY.md -->')
+                'indented'                                   = @('   <!-- memory-policy-stanza-begin: POLICY.md -->')
+            }
+            foreach ($k in $quotes.Keys) {
+                $header = @($script:CanonicalLines) + @('', 'Migration recipe, for later:', '') + @($quotes[$k])
+                $r = script:Invoke-Check -IndexPath (script:New-Index -Body $script:ConformingBody -Header $header)
+                $r.Report.StoreShape | Should -BeExactly 'legacy' -Because "quoting via $k must not declare the split shape"
+                $r.Text | Should -Not -Match 'half-migrated' -Because "quoting via $k must not misclassify the store"
+            }
+        }
+
+        It 'still reads a real stanza as split when the index also carries fenced prose' {
+            # A standing regression guard rather than a red for the fix: the fence tracker's
+            # other failure direction - an unclosed fence hiding a REAL stanza and silently
+            # switching the size axis off - is unreachable under the positional rule, because
+            # nothing can precede the declaration. This asserts it stays unreachable.
+            $store = script:New-SplitStore -Body (@('```text', 'an unclosed fence in the body') + $script:ConformingBody)
+            $r = script:Invoke-Check -IndexPath $store.IndexPath
+            $r.Report.StoreShape | Should -BeExactly 'split'
+            $r.Report.Size.State | Should -BeExactly 'within' -Because 'the size axis must not go silently dark'
+        }
+
+        It 'accepts blank lines before the declaration and nothing else' {
+            $store = script:New-SplitStore -Body $script:ConformingBody
+            $lines = @([System.IO.File]::ReadAllLines($store.IndexPath))
+            [System.IO.File]::WriteAllLines($store.IndexPath, (@('', '  ', '') + $lines))
+            (script:Invoke-Check -IndexPath $store.IndexPath).Report.StoreShape | Should -BeExactly 'split'
+
+            [System.IO.File]::WriteAllLines($store.IndexPath, (@('# My memory index', '') + $lines))
+            (script:Invoke-Check -IndexPath $store.IndexPath).Report.StoreShape | Should -BeExactly 'legacy' -Because 'the declaration is the FIRST non-blank line'
+        }
+
+        It 'does not call a store quoting one policy line migration residue' {
+            # A one-line threshold failed four lawful split stores, including one carrying the
+            # shipped check command - which the live index carries today, and which chunk 3 has
+            # to migrate. A store citing its policy is not a store that still contains it.
+            $cited = @($script:CanonicalLines | Where-Object { $_.Trim().Length -ge 30 } | Select-Object -First 2)
+            $cited.Count | Should -Be 2
+            $store = script:New-SplitStore -Body (@($cited[0], '') + $script:ConformingBody)
+            $r = script:Invoke-Check -IndexPath $store.IndexPath
+            $r.Text | Should -Match 'RESULT: clean'
+            $r.Code | Should -Be 0
+        }
+
+        It 'still reports a run of policy lines as residue, above or below the heading' {
+            foreach ($where in @('header', 'body')) {
+                $store = if ($where -eq 'body') {
+                    script:New-SplitStore -Body (@($script:LegacyCanonicalLines) + @('') + $script:ConformingBody)
+                }
+                else {
+                    $s = script:New-SplitStore -Body $script:ConformingBody
+                    $l = @([System.IO.File]::ReadAllLines($s.IndexPath))
+                    $at = [array]::IndexOf($l, '<!-- memory-policy-stanza-end -->')
+                    [System.IO.File]::WriteAllLines($s.IndexPath, (@($l[0..$at]) + @('') + @($script:LegacyCanonicalLines) + @($l[($at + 1)..($l.Count - 1)])))
+                    $s
+                }
+                $r = script:Invoke-Check -IndexPath $store.IndexPath
+                $r.Code | Should -Be 1 -Because "a retained policy in the $where must still be reported"
+                $r.Text | Should -Match 'still carries policy text'
+            }
+        }
+
+        It 'reports a stray closing values marker instead of dropping the whole record' {
+            # Checking the count after the not-declared return left the record vanishing
+            # silently - the very outcome the count guard exists to prevent.
+            # A stray END *before* the BEGIN with no closing marker after it: the region reads
+            # as never declared, so a count check placed after that early return never runs.
+            $store = script:New-SplitStore -Body $script:ConformingBody
+            $policy = @([System.IO.File]::ReadAllLines($store.PolicyPath) | Where-Object { $_ -ne '<!-- store-values-end -->' })
+            $at = [array]::IndexOf($policy, '<!-- store-values-begin -->')
+            $spliced = @($policy[0..($at - 1)]) + @('<!-- store-values-end -->') + @($policy[$at..($policy.Count - 1)])
+            [System.IO.File]::WriteAllLines($store.PolicyPath, $spliced)
+            $r = script:Invoke-Check -IndexPath $store.IndexPath
+            $r.Report.Size.State | Should -BeExactly 'could-not-verify'
+            $r.Text | Should -Match 'exactly one of each, in that order, is expected'
+        }
+
+        It 'documents the positional rule on the surface a store owner reads' {
+            $skill = Get-Content -LiteralPath $script:Skill -Raw
+            $skill | Should -Match "first non-blank line"
+            # ...and no longer claims the superseded rules are what makes quoting safe
+            $skill | Should -Not -Match 'looks for the stanza \*only\* in that region'
         }
     }
 

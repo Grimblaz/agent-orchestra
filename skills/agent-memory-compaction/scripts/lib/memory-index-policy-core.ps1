@@ -83,6 +83,11 @@ $script:DefaultStalenessBoundDays = 30
 # Only lines long enough to be distinctive count, so a stray code fence cannot answer yes.
 $script:PresenceProbeMinLength = 30
 
+# How many distinctive policy lines a split store's index may still carry before the check
+# calls it migration residue rather than a store quoting its own policy. A documented proxy;
+# see the residue scan for why a one-line threshold failed lawful stores.
+$script:ResidueLineFloor = 3
+
 # Closed set of generic filler. Text that reduces to one of these is not a hook, wherever it
 # sits - in a clause or in the link text itself.
 $script:FillerPhrases = @(
@@ -351,27 +356,36 @@ function Get-MIPStoreStanza {
     #>
     param([string[]]$Lines, [int]$HeaderLineCount)
 
-    # Three bounds, and each closes a way that quoted text answered the shape question:
-    # the header region (scope), column 0 (the anchored patterns), and fenced-code state.
-    # The last one is not belt-and-braces: this skill's own adoption instructions print the
-    # marker at column 0 inside a ```text fence, precisely so a store owner can copy it - so a
-    # store that pastes those instructions into its own header as a note reproduces the exact
-    # bytes of a real declaration. Inside a fence is quoting; outside it is declaring.
+    # THE DECLARATION IS THE INDEX'S FIRST NON-BLANK LINE. Nowhere else counts.
+    #
+    # This is the third rule tried, and the first that is decidable. Scoping the search to the
+    # header region left a store that pasted the migration recipe into its own header being
+    # read as split. Adding "at column 0" did not help, because the shipped recipe IS at column
+    # 0 so that it can be copied. Adding fenced-code tracking did not close it either: quoting
+    # a fenced block requires a longer outer fence, whose inner delimiter toggles a naive
+    # state machine straight back off - and an unclosed fence in the header then hid a REAL
+    # stanza, silently turning the size axis off for a store that had done everything right.
+    #
+    # Every one of those attempts was a heuristic for "is this line quoted?", and markdown does
+    # not let that question be answered cheaply or safely. Position does. A store cannot quote
+    # something at the first line of a file without it BEING the first line of the file, so
+    # there is no spoofing surface left, no fence parser to get wrong, and one sentence to
+    # document. HeaderLineCount is retained only to bound the search for the closing marker.
     $bound = [Math]::Min($HeaderLineCount, $Lines.Count)
     $beginIdx = -1
     $policyPath = ''
     $wellFormedBegin = $false
     $casingOnly = $false
-    $inFence = $false
     for ($i = 0; $i -lt $bound; $i++) {
         $line = $Lines[$i].TrimEnd()
-        if ($line -match '^\s*(```|~~~)') { $inFence = -not $inFence; continue }
-        if ($inFence) { continue }
-        if ($line -notmatch $script:StoreStanzaLooseBeginPattern) { continue }
-        $beginIdx = $i
-        $m = [regex]::Match($line, $script:StoreStanzaBeginPattern)
-        if ($m.Success) { $wellFormedBegin = $true; $policyPath = $m.Groups['path'].Value.Trim() }
-        else { $casingOnly = ($line -cnotmatch $script:StoreStanzaLooseBeginPattern) }
+        if ($line.Trim() -eq '') { continue }
+        # The first non-blank line either declares the split shape or the store is not split.
+        if ($line -match $script:StoreStanzaLooseBeginPattern) {
+            $beginIdx = $i
+            $m = [regex]::Match($line, $script:StoreStanzaBeginPattern)
+            if ($m.Success) { $wellFormedBegin = $true; $policyPath = $m.Groups['path'].Value.Trim() }
+            else { $casingOnly = ($line -cnotmatch $script:StoreStanzaLooseBeginPattern) }
+        }
         break
     }
     if ($beginIdx -lt 0) {
@@ -389,11 +403,8 @@ function Get-MIPStoreStanza {
     }
 
     $endIdx = -1
-    $inFence = $false
     for ($i = $beginIdx + 1; $i -lt $bound; $i++) {
-        $line = $Lines[$i].TrimEnd()
-        if ($line -match '^\s*(```|~~~)') { $inFence = -not $inFence; continue }
-        if (-not $inFence -and $line -eq $script:StoreStanzaEndMarker) { $endIdx = $i; break }
+        if ($Lines[$i].TrimEnd() -eq $script:StoreStanzaEndMarker) { $endIdx = $i; break }
     }
     if ($endIdx -lt 0) {
         return [pscustomobject]@{
@@ -491,7 +502,21 @@ function Get-MIPStoreValues {
     )
 
     $region = Get-MIPMarkedRegion -Lines $Lines -BeginMarker $script:StoreValuesBeginMarker -EndMarker $script:StoreValuesEndMarker
-    if (-not $region.MarkersPresent) {
+    # Declared twice is not the same as declared once, and this function would otherwise take
+    # the first region and never say the second exists. BOTH markers are counted - guarding
+    # only the opening one left the other half of the same defect live, since one stray closing
+    # marker truncates the region and every row appended after it silently vanishes.
+    #
+    # The count is checked BEFORE the not-declared return, which is a third arrangement of the
+    # same defect: a stray closing marker that leaves the region unclosed short-circuits to
+    # "records nothing at all" and the whole record disappears without a word.
+    # Exactly one of each marker, in order, is the only shape that reads as a values record.
+    # Anything else is reported. The distinction that matters is markers ABSENT (this store
+    # records nothing - a true statement) versus markers PRESENT BUT WRONG (this store tried to
+    # record something and the check cannot tell what - never a true statement about nothing).
+    $markersAppear = ($region.BeginCount -gt 0 -or $region.EndCount -gt 0)
+    $wellFormedRegion = ($region.MarkersPresent -and $region.BeginCount -eq 1 -and $region.EndCount -eq 1)
+    if (-not $markersAppear) {
         return [pscustomobject]@{ Present = $false; Fraction = $null; StalenessBoundDays = $null; Observations = @(); Errors = @() }
     }
 
@@ -501,13 +526,8 @@ function Get-MIPStoreValues {
     $errors = [System.Collections.Generic.List[string]]::new()
     $seenScalar = @{}
 
-    # Declared twice is not the same as declared once: this function would silently take the
-    # first region and never say the second exists.
-    # Both markers are counted. Guarding only the opening one left the other half of the same
-    # defect live: one stray closing marker truncates the region at the wrong line, and every
-    # row appended after it - which is how this format is meant to grow - silently vanishes.
-    if ($region.BeginCount -gt 1 -or $region.EndCount -gt 1) {
-        $errors.Add("the policy file carries $($region.BeginCount) '$script:StoreValuesBeginMarker' and $($region.EndCount) '$script:StoreValuesEndMarker' marker(s); exactly one of each is expected, so which values apply is ambiguous")
+    if (-not $wellFormedRegion) {
+        $errors.Add("the policy file carries $($region.BeginCount) '$script:StoreValuesBeginMarker' and $($region.EndCount) '$script:StoreValuesEndMarker' marker(s); exactly one of each, in that order, is expected, so which values apply is ambiguous")
     }
 
     foreach ($raw in $region.Block) {
@@ -859,15 +879,23 @@ function Invoke-MemoryIndexPolicyCheck {
         # exactly like one that did - silently, until the size axis eventually catches it,
         # which is never for a store with room to spare.
         #
-        # The scan covers the WHOLE index, not just the header region: an earlier revision
-        # checked only above the first heading, so the identical un-removed text one heading
-        # lower read clean. That is the same header-region-only mistake, one line down.
+        # The scan covers the WHOLE index, not just the header region: checking only above the
+        # first heading let the identical un-removed text one heading lower read clean.
+        #
+        # It takes a RUN, not a line, and that floor is load-bearing rather than cautious. An
+        # index lawfully quotes its own policy - the check invocation, a rule it is citing in a
+        # pointer clause, the grounds sentence under a Retired heading - and the live store this
+        # was measured against carries the shipped check command verbatim today. A one-line
+        # threshold failed four lawful stores, including the one chunk 3 has to migrate. A store
+        # that quotes a sentence is citing its policy; a store carrying a run of them still has
+        # the policy in the file. A documented proxy, like NoteWordFloor above.
         $probeLines = @($canonicalBlock | Where-Object { $_.Trim().Length -ge $script:PresenceProbeMinLength })
         $stanzaLineNumbers = @($stanza.BeginIndex..$stanza.EndIndex)
         $residueLines = @(for ($i = 0; $i -lt $indexLines.Count; $i++) {
                 if ($stanzaLineNumbers -contains $i) { continue }
                 if ($probeLines -ccontains $indexLines[$i].TrimEnd()) { $i }
             })
+        if ($residueLines.Count -lt $script:ResidueLineFloor) { $residueLines = @() }
         $residue = @($residueLines | ForEach-Object { $indexLines[$_].TrimEnd() })
         $residueAllInHeader = ($residue.Count -gt 0 -and @($residueLines | Where-Object { $_ -ge $firstSectionIdx }).Count -eq 0)
 

@@ -184,9 +184,11 @@ Copy the canonical stanza above into the top of the index — above its first se
 <!-- memory-policy-stanza-end -->
 ```
 
-**Both marker lines start at column 0, and both sit above the index's first section heading.** Neither rule is decoration. The check looks for the stanza *only* in that region and *only* at column 0, so that an index which quotes these instructions — in a note to self, inside a code fence — does not thereby change what shape the check reads it as. Indent the marker, or write it below the first heading, and the store reads as unsplit.
+**The opening marker must be the index's first non-blank line**, at column 0, with the closing marker above the index's first section heading. That is the whole rule for declaring the split shape, and its bluntness is the point: an index cannot *quote* something at its own first line without that line being its first line. So a store may reproduce these instructions anywhere in itself — as a note, inside a fence, verbatim — and the check still reads the shape the store actually has. Anything that is not the first non-blank line is quoted text, whatever it says.
 
-The path is relative to the index's own directory and must resolve to a file beside it. It is an instance value and sits on the marker line, outside the compared text, so naming a different file never reads as a divergence. Under the split shape the header region carries the stanza and nothing else: policy text left beside it is migration residue, and the check says so.
+A gentler rule was tried and does not work. Searching the header region, then requiring column 0, then tracking fenced-code state each left a way for quoted text to answer the question — and the fence tracker went wrong in both directions at once, since quoting a fenced block needs a longer outer fence whose inner delimiter looks like a close, and an unclosed fence hid a *real* stanza and silently switched the size axis off for a store that had done everything right. Position is decidable; "is this line quoted?" is not.
+
+The path is relative to the index's own directory and must resolve to a file beside it. It is an instance value and sits on the marker line, outside the compared text, so naming a different file never reads as a divergence. Under the split shape the index carries the stanza and not the policy: a **run** of policy lines left behind anywhere in it is reported as migration residue. A sentence or two is not — an index quoting its own check command or citing a rule in a pointer clause is doing something ordinary, and a threshold that failed those would fail the very stores this exists to migrate.
 
 ### Limb 2 — the policy file, beside the index
 
