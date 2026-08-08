@@ -74,6 +74,11 @@ $script:SizeAxisUnit = 'characters'
 $script:DefaultBudgetFraction = 0.80
 $script:DefaultStalenessBoundDays = 30
 
+# Keys a later release may add to a store's values that this one has never heard of. Reserved
+# now, in the release that owns the record format, because a store outlives the plugin version
+# that wrote it and a format with no growth path forces the next release to change the format.
+$script:ForwardCompatKeyPrefix = 'x-'
+
 # --- policy-presence probe ----------------------------------------------------------------
 # Presence asks one question: does this index carry a policy header at all, as opposed to
 # none? It is answered by overlap with the reference text, scoped to the header region, and
@@ -517,13 +522,14 @@ function Get-MIPStoreValues {
     $markersAppear = ($region.BeginCount -gt 0 -or $region.EndCount -gt 0)
     $wellFormedRegion = ($region.MarkersPresent -and $region.BeginCount -eq 1 -and $region.EndCount -eq 1)
     if (-not $markersAppear) {
-        return [pscustomobject]@{ Present = $false; Fraction = $null; StalenessBoundDays = $null; Observations = @(); Errors = @() }
+        return [pscustomobject]@{ Present = $false; Fraction = $null; StalenessBoundDays = $null; Observations = @(); Errors = @(); IgnoredKeys = @() }
     }
 
     $fraction = $null
     $staleness = $null
     $observations = [System.Collections.Generic.List[object]]::new()
     $errors = [System.Collections.Generic.List[string]]::new()
+    $ignored = [System.Collections.Generic.List[string]]::new()
     $seenScalar = @{}
 
     if (-not $wellFormedRegion) {
@@ -542,7 +548,10 @@ function Get-MIPStoreValues {
         # 'limit_observation' is the one key designed to repeat - that is the append path. A
         # repeated scalar is a contradiction, and taking the last one silently is how a budget
         # moves by a factor of eight without a word.
-        if ($key -ne 'limit_observation') {
+        # 'limit_observation' repeats by design; forward-compatibility keys are exempt because
+        # this version cannot know whether a later one means them to repeat, and it ignores
+        # them either way - erroring on a duplicate of something we discard says nothing true.
+        if ($key -ne 'limit_observation' -and -not $key.StartsWith($script:ForwardCompatKeyPrefix, [System.StringComparison]::Ordinal)) {
             if ($seenScalar.ContainsKey($key)) {
                 $errors.Add("'$key' is recorded more than once; it is not a repeatable key, so which value applies is ambiguous")
                 continue
@@ -606,7 +615,18 @@ function Get-MIPStoreValues {
                         Method     = if ($fields.Count -ge 4) { ($fields[3..($fields.Count - 1)] -join ' | ') } else { '' }
                     })
             }
-            default { $errors.Add("unrecognized key '$key'") }
+            default {
+                # Forward compatibility, deliberately namespaced rather than blanket-tolerant.
+                # A later release needs somewhere to record things this version has never heard
+                # of - a sweep date, a ledger pointer - and stores outlive plugin versions,
+                # which install into per-version directories and accumulate. Blanket tolerance
+                # would buy that at the cost of silently ignoring 'budget_fracton: 0.5' and
+                # applying the default, which is the partially-understood record this parser
+                # exists to refuse. The prefix keeps both: unknown-but-declared-forward is
+                # ignored and reported, unknown-and-undeclared is still an error.
+                if ($key.StartsWith($script:ForwardCompatKeyPrefix, [System.StringComparison]::Ordinal)) { $ignored.Add($key) }
+                else { $errors.Add("unrecognized key '$key'") }
+            }
         }
     }
 
@@ -616,6 +636,7 @@ function Get-MIPStoreValues {
         StalenessBoundDays = $staleness
         Observations       = @($observations)
         Errors             = @($errors)
+        IgnoredKeys        = @($ignored)
     }
 }
 
@@ -646,9 +667,13 @@ function Get-MIPSizeAxis {
         StalenessBoundDays = $null
         ObservationAgeDays = $null
         Stale              = $false
+        IgnoredKeys        = @()
     }
 
     if ($null -eq $StoreValues -or -not $StoreValues.Present) { return [pscustomobject]$axis }
+    # Ignored is not the same as unnoticed: a key this version discards is reported, so a store
+    # written by a later release can see which of its record this checker did not understand.
+    $axis.IgnoredKeys = @($StoreValues.IgnoredKeys)
 
     if ($StoreValues.Errors.Count -gt 0) {
         $axis.State = 'could-not-verify'
@@ -1199,6 +1224,7 @@ function Format-MemoryIndexPolicyReport {
                     staleness_bound_days = $Report.Size.StalenessBoundDays
                     observation_age_days = $Report.Size.ObservationAgeDays
                     stale                = $Report.Size.Stale
+                    ignored_keys         = @($Report.Size.IgnoredKeys)
                 }
                 $payload['subjects_without_hook'] = $Report.SubjectsWithoutHook
                 $payload['unattributed_shared_notes'] = $Report.UnattributedSharedNotes
@@ -1230,6 +1256,9 @@ function Format-MemoryIndexPolicyReport {
     if ($Report.HeaderDivergence -ne '') { $lines.Add("  $($Report.HeaderDivergence)") }
     foreach ($e in $Report.PolicyExplanation) { $lines.Add("  $e") }
     $lines.Add("size: $(Format-MIPSizeLine -Size $Report.Size)")
+    if (@($Report.Size.IgnoredKeys).Count -gt 0) {
+        $lines.Add("  note: this version does not understand $(@($Report.Size.IgnoredKeys).Count) forward-compatibility key(s) and ignored them: " + (@($Report.Size.IgnoredKeys) -join ', '))
+    }
     $lines.Add("subjects_without_hook: $($Report.SubjectsWithoutHook)")
     $lines.Add("unattributed_shared_notes: $($Report.UnattributedSharedNotes)")
     $lines.Add('')

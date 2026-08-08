@@ -1285,6 +1285,75 @@ Describe 'Test-MemoryIndexPolicy' {
         }
     }
 
+    Context 'owner rulings on the two open questions (2026-08-08)' {
+        It 'lets a split store record no budget inputs at all and stay clean' {
+            # Owner ruling: the values block is OPTIONAL, and the easy opt-out is the point.
+            # The budget is a fraction of an OBSERVED limit, and that observation belongs to the
+            # installation; a store with no size problem has no reason to run a
+            # truncation-boundary test, and a mandatory block would push it toward copying this
+            # skill's example number - one installation's measurement wearing another's name.
+            # Pinned so a later reader does not "fix" it as a defect.
+            $store = script:New-SplitStore -Body $script:ConformingBody -OmitValuesBlock
+            $r = script:Invoke-Check -IndexPath $store.IndexPath
+            $r.Report.StoreShape | Should -BeExactly 'split'
+            $r.Report.HeaderComplete | Should -BeTrue
+            $r.Report.Size.State | Should -BeExactly 'not-evaluated'
+            $r.Text | Should -Match 'RESULT: clean'
+            $r.Code | Should -Be 0
+        }
+
+        It 'documents that opt-out on the surface a store owner reads' {
+            (Get-Content -LiteralPath $script:Skill -Raw) | Should -Match 'values block is optional too'
+        }
+
+        It 'ignores a forward-compatibility key and says it did, without refusing' {
+            # Owner ruling: reserve a growth path now, in the release that owns the format.
+            # Stores outlive plugin versions - the cache holds one directory per version - so a
+            # key chunk 2 adds must not make an older checker report a defect on a fine store.
+            $values = @(
+                'budget_fraction: 0.80',
+                "limit_observation: $script:ObservationDate | 24978 | characters | truncation-boundary test",
+                'x-last-swept: 2026-09-01',
+                'x-ledger: LEDGER.md')
+            $store = script:New-SplitStore -Body $script:ConformingBody -Values $values
+            $r = script:Invoke-Check -IndexPath $store.IndexPath
+            $r.Report.Size.State | Should -BeExactly 'within'
+            $r.Text | Should -Match 'RESULT: clean'
+            $r.Code | Should -Be 0
+            # ignored, but never silently
+            $r.Text | Should -Match 'does not understand 2 forward-compatibility key\(s\)'
+            $r.Text | Should -Match 'x-last-swept, x-ledger'
+            @((script:Invoke-Check -IndexPath $store.IndexPath -AsJson).Text | ConvertFrom-Json).size.ignored_keys |
+                Should -Contain 'x-last-swept'
+        }
+
+        It 'still refuses an unrecognized key that is not declared forward-compatible' {
+            # The polarity that keeps the growth path from becoming blanket tolerance: a typo
+            # in known-key space must not be waved through to a default.
+            $values = @(
+                'budget_fracton: 0.50',
+                "limit_observation: $script:ObservationDate | 24978 | characters | truncation-boundary test")
+            $store = script:New-SplitStore -Body $script:ConformingBody -Values $values
+            $r = script:Invoke-Check -IndexPath $store.IndexPath
+            $r.Report.Size.State | Should -BeExactly 'could-not-verify'
+            $r.Text | Should -Match "unrecognized key 'budget_fracton'"
+            $r.Code | Should -Be 1
+        }
+
+        It 'does not let a forward-compatibility key silently replace a real one' {
+            # 'x-budget_fraction' must not be read as budget_fraction, and repeating an ignored
+            # key must not error about a value nothing uses.
+            $values = @(
+                'x-budget_fraction: 0.10', 'x-note: a', 'x-note: b',
+                "limit_observation: $script:ObservationDate | 24978 | characters | truncation-boundary test")
+            $store = script:New-SplitStore -Body $script:ConformingBody -Values $values
+            $r = script:Invoke-Check -IndexPath $store.IndexPath
+            $r.Report.Size.Fraction | Should -Be 0.80 -Because 'the shipped default must still apply'
+            $r.Report.Size.Budget | Should -Be $script:ExpectedBudget
+            $r.Code | Should -Be 0
+        }
+    }
+
     Context 'the shipped surfaces describe what the check actually does' {
         It 'keeps the documented parameter surface exactly, and keeps -Policy and -Index unambiguous' {
             $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:EntryPoint, [ref]$null, [ref]$null)
