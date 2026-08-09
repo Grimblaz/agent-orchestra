@@ -233,10 +233,15 @@ and the previous one unrepresentable: it targets by **numeric REST comment id**,
 mis-targeting under one failure class and states the rule plainly — *never `--edit-last`; always
 targeted by numeric REST comment id*. Reach for the primitive before hand-composing transport.
 
-**`Find-OrUpsertComment` is not a safe default, and carries both hazards.** It targets by marker
-**substring** using `-like`, which
-`skills/session-memory-contract/references/handoff-markers.md` records as able to *"cause an entirely
-wrong comment to be selected as the target for a write"*. And its `-Body` parameter **replaces the
+**`Find-OrUpsertComment` is not a safe default.** Its selection hazard is **closed** as of #1031
+(plugin 3.16.1): it used to target by marker **substring** using `-like "*$Marker*"`, which
+`skills/session-memory-contract/references/handoff-markers.md` recorded as able to *"cause an
+entirely wrong comment to be selected as the target for a write"*; selection is now line-1-exact
+through `Test-CommentBodyMarkerLine1` (`.github/scripts/lib/marker-line1-selector.ps1`). This
+paragraph described that hazard as live until #1039 corrected it — #1031's own sweep of stale
+surfaces reached four design documents, three docstrings and a test comment, and missed this one,
+which is the file the write-path guidance actually routes readers to. The **write** hazard is
+unchanged and is why the sentence below still stands: its `-Body` parameter **replaces the
 existing body verbatim on the PATCH path** — it never re-reads and merges — so pointing it at a
 marker comment a helper has appended to reproduces the destroy-server-side-appends trap in the
 section above. The #922 incident that destroyed 16 blocks was exactly a marker-targeted upsert.

@@ -1,6 +1,33 @@
 #Requires -Version 7.0
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 
+# ---------------------------------------------------------------------------
+# FIXTURE MOVE (issue #1031, parent #1011 AC2 close arm).
+#
+# Find-OrUpsertComment now selects the comment whose FIRST LINE is exactly the
+# marker, instead of any comment containing the marker anywhere. TEN fixtures
+# in this file, across SIX `It` blocks, put the marker at column 0 of line 1
+# but with TRAILING PROSE on that same line (at 1cc08df: lines 104, 105, 106,
+# 129, 144, 207, 220, 233, 238, 243); one more put it alone on line 2 (line
+# 159). They were written that way as convenient filler, not to state a
+# requirement — no test in this repository ever asserted that a marker with
+# trailing content must be selectable, and no production composer emits that
+# shape (all fourteen live call sites put the bare marker on line 1; verified
+# by executing each composer, and by a live-corpus probe of every marker this
+# function writes across issues and pull requests 1..1037 — 282 of 283
+# occurrences are line-1-exact and the one exception is the defect itself,
+# issue #782's plan comment quoting a marker in prose). The probe command and
+# its full output are recorded in this issue's completion account, on issue
+# #1031; the numbers above are a summary of that record, not a fresh claim.
+#
+# Rather than weaken the new rule to keep them green, the fixtures moved. Each
+# is listed at its Context below with what changed. The one test that ASSERTED
+# the old rule by name — 'matches markers via substring containment, not
+# whole-line equality' — was not re-fixtured but REPLACED, because its claim is
+# the behaviour #1031 removed; editing its fixture while keeping its title
+# would have left a test asserting the opposite of what ships.
+# ---------------------------------------------------------------------------
+
 Describe 'Find-OrUpsertComment' {
     BeforeAll {
         $script:LibPath = Join-Path $PSScriptRoot '../lib/find-or-upsert-comment.ps1'
@@ -99,11 +126,15 @@ Describe 'Find-OrUpsertComment' {
     }
 
     Context 'PR comment - multiple matches (data error path)' {
+        # FIXTURE MOVE (#1031): the three bodies were
+        # '<!-- frame-credit-ledger-123 --> first|second|third' — marker on
+        # line 1 with trailing prose. Moved to marker-on-its-own-line-1. The
+        # duplicate/earliest-id behaviour under test is unchanged.
         It 'PATCHes the earliest match and emits stderr warning naming duplicates' {
             $script:mockComments = @(
-                @{ id = 100; body = '<!-- frame-credit-ledger-123 --> first' },
-                @{ id = 200; body = '<!-- frame-credit-ledger-123 --> second' },
-                @{ id = 300; body = '<!-- frame-credit-ledger-123 --> third' }
+                @{ id = 100; body = "<!-- frame-credit-ledger-123 -->`nfirst" },
+                @{ id = 200; body = "<!-- frame-credit-ledger-123 -->`nsecond" },
+                @{ id = 300; body = "<!-- frame-credit-ledger-123 -->`nthird" }
             )
             $stderr = $null
             $url = Find-OrUpsertComment -Type pr -Number 123 -Marker '<!-- frame-credit-ledger-123 -->' -Body 'new' 2>&1 | Tee-Object -Variable stderr | Out-Null
@@ -124,9 +155,10 @@ Describe 'Find-OrUpsertComment' {
     }
 
     Context 'Issue comment - one match' {
+        # FIXTURE MOVE (#1031): body was '<!-- plan-issue-429 --> existing'.
         It 'PATCHes the issue comment when one marker match exists' {
             $script:mockComments = @(
-                @{ id = 555; body = '<!-- plan-issue-429 --> existing' }
+                @{ id = 555; body = "<!-- plan-issue-429 -->`nexisting" }
             )
             $url = Find-OrUpsertComment -Type issue -Number 429 -Marker '<!-- plan-issue-429 -->' -Body 'updated'
             $script:lastPatchArgs | Should -Not -BeNullOrEmpty
@@ -141,7 +173,9 @@ Describe 'Find-OrUpsertComment' {
             $url | Should -BeNullOrEmpty
         }
         It 'returns null when gh PATCH fails' {
-            $script:mockComments = @(@{ id = 1; body = '<!-- m --> old' })
+            # FIXTURE MOVE (#1031): body was '<!-- m --> old'. It must still
+            # SELECT for this test to reach the PATCH path at all.
+            $script:mockComments = @(@{ id = 1; body = "<!-- m -->`nold" })
             $script:simulateFailure = 'patch'
             $url = Find-OrUpsertComment -Type pr -Number 123 -Marker '<!-- m -->' -Body 'b'
             $url | Should -BeNullOrEmpty
@@ -154,12 +188,25 @@ Describe 'Find-OrUpsertComment' {
     }
 
     Context 'Marker matching' {
-        It 'matches markers via substring containment, not whole-line equality' {
+        # REPLACED, not re-fixtured (#1031). This Context previously held
+        # 'matches markers via substring containment, not whole-line
+        # equality', whose fixture was
+        #   "header line`n<!-- ... -->`nbody after"
+        # and which asserted a PATCH happened. That is precisely the
+        # behaviour #1031 removed: a marker below line 1 is now a quotation,
+        # not a target. Keeping the title and moving the fixture would have
+        # left a test whose name asserts the opposite of what ships, so the
+        # claim was inverted instead. The full population is covered in
+        # marker-line1-selection.Tests.ps1, which — unlike this file — runs in
+        # CI (this one is quarantined `unclassified` under issue #993).
+        It 'requires the marker to be the comment first line, not merely contained in it' {
             $script:mockComments = @(
                 @{ id = 42; body = "header line`n<!-- frame-credit-ledger-123 -->`nbody after" }
             )
             $url = Find-OrUpsertComment -Type pr -Number 123 -Marker '<!-- frame-credit-ledger-123 -->' -Body 'new'
-            $script:lastPatchArgs | Should -Not -BeNullOrEmpty
+            $script:lastPatchArgs | Should -BeNullOrEmpty `
+                -Because 'a marker on line 3 is a mention; patching it would replace an unrelated comment body'
+            $script:lastPostArgs | Should -Not -BeNullOrEmpty
         }
     }
 
@@ -199,12 +246,20 @@ Describe 'Find-OrUpsertComment' {
     }
 
     Context 'GraphQL node ID handling' {
+        # FIXTURE MOVE (#1031): all four bodies in this Context were
+        # '<!-- frame-credit-ledger-484 --> old body|first|second|third' —
+        # marker on line 1 with trailing prose. Moved to
+        # marker-on-its-own-line-1. The REST-id extraction and ordering
+        # behaviour under test is unchanged. The move matters for the
+        # 'falls back to POST' case in particular: under the new rule that
+        # body would no longer select AT ALL, so the test would have gone on
+        # passing while testing nothing — a POST for the wrong reason.
         It 'extracts numeric REST id from comment url when id is a GraphQL node id (IC_kwDO...)' {
             $script:mockComments = @(
                 @{
                     id   = 'IC_kwDOQkYn5M8AAAABA91Ixg'
                     url  = 'https://github.com/Grimblaz/agent-orchestra/issues/484#issuecomment-4359801030'
-                    body = '<!-- frame-credit-ledger-484 --> old body'
+                    body = "<!-- frame-credit-ledger-484 -->`nold body"
                 }
             )
             $url = Find-OrUpsertComment -Type pr -Number 484 -Marker '<!-- frame-credit-ledger-484 -->' -Body 'new body'
@@ -217,7 +272,7 @@ Describe 'Find-OrUpsertComment' {
             $script:mockComments = @(
                 @{
                     id   = 'IC_kwDOQkYn5M8AAAABA91Ixg'
-                    body = '<!-- frame-credit-ledger-484 --> old body'
+                    body = "<!-- frame-credit-ledger-484 -->`nold body"
                 }
             )
             $url = Find-OrUpsertComment -Type pr -Number 484 -Marker '<!-- frame-credit-ledger-484 -->' -Body 'new body'
@@ -230,17 +285,17 @@ Describe 'Find-OrUpsertComment' {
                 @{
                     id   = 'IC_kwDO111'
                     url  = 'https://github.com/Grimblaz/agent-orchestra/issues/484#issuecomment-300'
-                    body = '<!-- frame-credit-ledger-484 --> third'
+                    body = "<!-- frame-credit-ledger-484 -->`nthird"
                 },
                 @{
                     id   = 'IC_kwDO222'
                     url  = 'https://github.com/Grimblaz/agent-orchestra/issues/484#issuecomment-100'
-                    body = '<!-- frame-credit-ledger-484 --> first'
+                    body = "<!-- frame-credit-ledger-484 -->`nfirst"
                 },
                 @{
                     id   = 'IC_kwDO333'
                     url  = 'https://github.com/Grimblaz/agent-orchestra/issues/484#issuecomment-200'
-                    body = '<!-- frame-credit-ledger-484 --> second'
+                    body = "<!-- frame-credit-ledger-484 -->`nsecond"
                 }
             )
             $url = Find-OrUpsertComment -Type pr -Number 484 -Marker '<!-- frame-credit-ledger-484 -->' -Body 'new'

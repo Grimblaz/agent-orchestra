@@ -1724,9 +1724,30 @@ function Resolve-GoalRunControlReturn {
             # same clobber is already reachable unguarded from the
             # per-iteration halt emit in goal-run-predicate-core.ps1 -- but the
             # writer-side selector is the real fix and is out of scope here.
-            # See Documents/Design/marker-reader-inventory.md
-            # "## Comment-selector class (Find-OrUpsertComment and the `-like`
-            # cluster)", which scopes that replacement to the s5 slice of #885.
+            #
+            # UPDATE (#1031, chunk 1 of #1011): the writer-side fix has LANDED.
+            # Find-OrUpsertComment now selects only a comment whose first line
+            # is exactly the marker (Test-CommentBodyMarkerLine1,
+            # lib/marker-line1-selector.ps1), so the "selected and PATCHed away
+            # there" clobber described above is closed at the writer, for this
+            # marker family and every other one that function writes. The
+            # paragraph above is kept rather than deleted because it records
+            # why THIS reader was anchored, which is still the reason it is
+            # anchored. What is no longer true is its closing sentence about
+            # the real fix being out of scope and pending -- it is in the tree.
+            #
+            # RESIDUAL, stated so a later reader does not conclude the two
+            # sides now agree: this reader is still WIDER than that writer.
+            # Get-GRSMarkerWholeLinePattern matches a whole line ANYWHERE in
+            # the body; the writer requires the marker to be line 1 exactly,
+            # so a marker alone on its own line inside a fenced block matches
+            # here and not there. The direction is deliberate and safe -- an
+            # over-selecting reader refuses loudly (Clear-GoalRunStageMarker
+            # returns marker-ambiguous and deletes nothing, surfaced by
+            # Invoke-GoalRunRestart as restarted-partial-marker-clear-failed),
+            # where before #1031 that same state ended in a silent PATCH over
+            # the quoting comment. See lib/marker-line1-selector.ps1
+            # .DESCRIPTION for the full record (#1031, review finding M1).
             $haltMarkerPattern = Get-GRSMarkerWholeLinePattern -Marker $haltMarker
             $existingMatches = @($existingComments | Where-Object { $_.body -and ($_.body -match $haltMarkerPattern) })
 

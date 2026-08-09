@@ -16,9 +16,29 @@ edits, no review-judgment PR-surface emission work.**
   and compares against an expected count or threshold.
 - **splice-writer** — reads, then writes back a modified body (concatenate,
   replace-in-place, or insert-before-cursor).
-- **comment-selector** — selects a whole GitHub comment out of a set by
-  wildcard/substring containment (`-like`, `Find-OrUpsertComment`'s matcher),
-  as opposed to matching a byte position inside one already-fetched body.
+- **comment-selector** — selects a whole GitHub comment out of a set, as
+  opposed to matching a byte position inside one already-fetched body.
+  Historically this meant wildcard/substring containment (`-like`), which is
+  why the class exists as a separate one from block-selector: Part C's regex
+  anchoring cannot reach it. **Issue #1031 changed the three selectors that
+  reach a comment `Find-OrUpsertComment` writes** — that function itself and
+  its two behavioural mirrors — to a line-1-exact match
+  (`Test-CommentBodyMarkerLine1`, `.github/scripts/lib/marker-line1-selector.ps1`).
+  The remaining rows in this class are still substring-based; see the
+  comment-selector table below for which is which.
+
+  **The table below is narrower than this definition, and knowingly so.** It
+  enumerates only `-like` sites. Widening the class to "selects a whole
+  comment out of a set" brings in every `.Contains`-over-comment-bodies
+  selector too — `phase-containment-emission-check-core.ps1`,
+  `phase-containment-cost-core.ps1`, `brief-review-migration-core.ps1` — and
+  the whole-line comment finders in `marker-transport-core.ps1` and
+  `goal-run-stage-core.ps1`. None of those is listed yet. Two of them are
+  deliberately not candidates for narrowing: the `.Contains` sites are
+  presence gates and counters whose `$true` branch is the fail-loud one, so
+  the polarity rule below forbids narrowing them. The rest are simply not
+  enumerated, and re-deriving the membership of the widened class is
+  outstanding work, not an omission this table should be read as denying.
 
 **Polarity rule (load-bearing):** never narrow a presence-gate whose `$true`
 branch is the fail-loud path (the path that keeps the check honest/loud,
@@ -335,10 +355,15 @@ anchoring a regex inside an already-selected body. Sites:
 
 | Site | Pattern | Notes |
 | --- | --- | --- |
-| `.github/scripts/lib/find-or-upsert-comment.ps1:130` | `$_.body -like "*$Marker*"` | The mechanism named in the plan (M7): author-blind, matches a marker mentioned anywhere in ordinary prose, including a comment posted *before* the real target (earliest-REST-id tie-break at `:153-156` actively prefers the wrong comment in that case). This is the site s5's find-only, line-anchored selector (net-new glue, not a Part-C regex fix) is scoped to replace for the persistence-burst helper's own targeting — out of s1/s6 scope, in scope for s5. |
-| `frame-credit-ledger-core.ps1:945,987,2757,2828,2837` | `-like "*$token*"` (various tokens) | See per-family tables above; all wildcard-wrapped full-literal or prefix-literal matches. |
-| `Get-FCLOriginContext.ps1:329` | `-like "*$marker*"` | See frame-credit-ledger-{PR} table. |
-| `cost-fcl-helpers.ps1:470` | `-like "*$degradedMarker*"` | See cost-pattern-data table. |
+> **Citation note (#1031).** The line numbers in the three RESOLVED rows below are anchored to the state of the tree **after** that change landed. They were re-derived from the post-change files rather than carried over, because this table's own two removed rows (further down) were removed for citing lines that had drifted — and a citation written before the same commit's insertions shift it is stale on arrival. Prefer the named symbols over the numbers when they disagree.
+
+| `.github/scripts/lib/find-or-upsert-comment.ps1` &mdash; the `Test-CommentBodyMarkerLine1` filter inside `Find-OrUpsertComment` | **RESOLVED (#1031)** — was `$_.body -like "*$Marker*"`, now `Test-CommentBodyMarkerLine1` | The mechanism named in the plan (M7): author-blind, it matched a marker mentioned anywhere in ordinary prose, including a comment posted *before* the real target — the earliest-REST-id tie-break (the `Sort-Object -Property RestId` step and its duplicate warning) actively preferred the wrong comment in that case. Closed by issue #1031 (chunk 1 of #1011, parent AC2): selection is now line-1-exact via the shared predicate in `lib/marker-line1-selector.ps1`. A start-of-line or whole-line anchor was **not** sufficient — either would still select a marker alone on its own line inside a fenced block, the shape this repository's own plan bodies produce. Rationale, and the live exposure it closed (issue #782's plan comment), are in that file's `.DESCRIPTION` — which also records that the writer is now a strict **subset** of the whole-line readers, not converged with them. The `s5` slice of **#885** that previously owned this replacement is discharged for this site; #885 remains open for its other sites. |
+| `.github/scripts/lib/cost-baseline-harvest.ps1` &mdash; the filter inside `Get-CostBaselineHarvestCompositeComment` | **RESOLVED (#1031)** — was `-like "*$marker*"`, now `Test-CommentBodyMarkerLine1` | Must select the same comment `Find-OrUpsertComment` PATCHes, and says so in its own docstring (the M6 paragraph in `Get-CostBaselineHarvestCompositeComment`, and the file `.NOTES` header). Now shares that function's single predicate rather than restating the rule, so the **filter** equivalence is structural. Read it narrowly: authorization is still per-site, and the two sites do not agree — see that docstring. |
+| `.github/scripts/lib/cost-session-render.ps1` &mdash; `Get-CSRPriorDegradedComment`, called from `Invoke-CostSessionRender` | **RESOLVED (#1031)** — was an inline `-like "*$degradedMarker*"`, now a named function over `Test-CommentBodyMarkerLine1` | Declared no equivalence, but mirrored the behaviour and — unlike the two above — decides **whether the caller writes at all**. Anchoring the writer alone would have turned a quoted decoy into a spurious brand-new "telemetry recovered" comment, since the writer POSTs on zero matches. Moved in lockstep for that reason, and extracted from an inline `Where-Object` into a named function so the rule can actually be run against a body set — while inline it was unreachable by any hermetic test, and reverting it left the whole repository green. |
+| `frame-credit-ledger-core.ps1` &mdash; the `-like "*$token*"` reads (`Test-ReviewSentinelPresent` and the completion/credit-input selectors) | `-like "*$token*"` (various tokens) | See per-family tables above; all wildcard-wrapped full-literal or prefix-literal matches. Out of #1031 scope: none of these tokens is a family `Find-OrUpsertComment` writes. |
+| `goal-contract-validate-core.ps1` &mdash; the filter inside `Get-GCPinnedCommentBody` | `-like "*$Marker*"` | Read-only, never routes through the write path, refuses on ambiguity, and its default marker (`plan-issue-{ID}`) is not a family `Find-OrUpsertComment` writes. Considered and left unchanged by #1031. |
+| ~~`Get-FCLOriginContext.ps1:329`~~ | — | **Stale row, removed (#1031).** That file contains no `-like` marker selector; the cited line does not exist as described. |
+| ~~`cost-fcl-helpers.ps1:470`~~ | — | **Stale row, removed (#1031).** `:470` is not a selector; the degraded marker is *composed* there (now `:510`, `Compose-FCLDegradedCostComment`). The live selector for that family was `cost-session-render.ps1:470`, now its own row above. |
 
 ## `$keyAnchor` — an internal-field anchor idiom, not a marker family (context only)
 

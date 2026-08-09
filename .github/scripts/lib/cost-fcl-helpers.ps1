@@ -499,11 +499,15 @@ function script:Compose-FCLDegradedCostComment {
     $inv = [System.Globalization.CultureInfo]::InvariantCulture
     $generatedAt = [System.DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ', $inv)
 
-    # Distinct discovery marker (own hidden comment line) so Find-OrUpsertComment
-    # substring lookup identifies THIS standalone degraded comment across re-runs
-    # without colliding with the bare '<!-- cost-pattern-data' substring that is
-    # always embedded inside the main frame-credit-ledger-{Pr} comment (Format-
-    # CostPatternYaml unconditionally emits that literal, even for empty walks).
+    # Distinct discovery marker, emitted as this body's FIRST LINE so
+    # Find-OrUpsertComment identifies THIS standalone degraded comment across
+    # re-runs. As of issue #1031 that lookup is line-1-exact, not a substring
+    # scan, so the original collision this distinct name guarded against --
+    # the bare '<!-- cost-pattern-data' literal that Format-CostPatternYaml
+    # unconditionally embeds mid-body inside the main frame-credit-ledger-{Pr}
+    # comment -- is now impossible by construction rather than merely avoided.
+    # The distinct name is kept anyway: every other reader of these bodies is
+    # still a raw-text scan, and line 1 is now load-bearing here.
     # Kept on its own line (not appended to the YAML open tag) because
     # Get-CostPatternDataFromComment extraction regex requires a newline
     # directly after 'cost-pattern-data' with nothing else on that line.
