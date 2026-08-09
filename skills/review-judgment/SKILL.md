@@ -343,7 +343,7 @@ When this pass sustained findings the existing record does not account for, **am
 | `/orchestra:review`, `-lite`, `-judge` (local review) | a `Close-out record amendment:` line in the **judgment payload the command returns**, immediately after the `judge-rulings` block and beside the disposition-gate outcome. It is the parent's own line, appended to the payload — it does not alter the judge output the command returns unchanged. |
 | `/goal-run` | the Stage 3 report; on a halt, the typed halt report's own body |
 
-Report one outcome per judge pass, and state how many passes fired. The outcomes partition — exactly one applies:
+**Report one outcome per resolved issue, per judge pass** — not one per pass. Route 1's "more than one: evaluate each separately" means a single pass can resolve to several issues (a PR closing more than one), and each gets its own applies-only check and its own outcome; a pass that touched three issues reports three outcome lines, one per issue id, even when they differ — `amended` on one and `not-applicable` on another is the ordinary shape, not a conflict to resolve into a single line. State how many passes fired and, within each pass, how many issues it resolved. The outcomes partition per issue — exactly one applies to each:
 
 - `amended` — naming what it added, and naming the held issue when it differed from the PR's.
 - `no-new-findings` — the record already accounts for every finding this pass sustained.

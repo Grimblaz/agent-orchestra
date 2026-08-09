@@ -769,7 +769,7 @@ Describe 'open-for-work surface (issue #974)' {
             # it tells a reader the record is OWED; it is carved out when it
             # only tells a reader how an existing record is later amended.
             #
-            # The list grew from three to eight in #1039, when the amendment
+            # The list grew from three to thirteen in #1039, when the amendment
             # rule moved to a lane-neutral home and every lane's entry
             # document had to name it. A longer hand-list is a longer thing
             # to go stale, so the two checks below make the list itself
@@ -827,7 +827,7 @@ Describe 'open-for-work surface (issue #974)' {
             # all the way through. If one starts telling a reader WHEN the
             # record is owed, it belongs in AC5's set and must satisfy the
             # assertions below -- not sit exempt while stating half the rule.
-            # Discriminating on the delivered tree: all eight state neither
+            # Discriminating on the delivered tree: all thirteen state neither
             # moment and all six non-exempt surfaces state both, so the split
             # is clean and moving any file across it reddens one side or the
             # other.
@@ -835,10 +835,10 @@ Describe 'open-for-work surface (issue #974)' {
                 $exempt = (& $script:ReadRepoFile $rel) -replace "`r`n?", "`n"
                 $exempt | Should -Not -Match '(?i)before the PR-creation action' `
                     -Because "$rel is exempted as amendment-only, so it must not also state when the record is owed; move it out of the exemption list instead"
-                # `(?!-)` not `\b`: the hyphen in "close-out" IS a word
+                # `(?![-\w])` not `\b`: the hyphen in "close-out" IS a word
                 # boundary, so `before the close\b` matched "before the
                 # close-out record is amended" -- a false red on the exact
-                # vocabulary all eleven exempt surfaces are written in. The
+                # vocabulary all thirteen exempt surfaces are written in. The
                 # positive arm below deliberately uses the same shape, so the
                 # two arms can no longer disagree about what "before the
                 # close" means (a surface writing "before the closeout"
@@ -965,6 +965,16 @@ Describe 'open-for-work surface (issue #974)' {
                 -Because 'the sole home of the amend-in-place procedure must name the write route by comment id; without it the executor hand-composes transport and the repo''s own trap catalogue shows both natural picks mis-target'
             $amendment | Should -Match '(?i)re-read that comment''s live body immediately before writing' `
                 -Because 'the record accumulates appended lines, so a body composed from an earlier read silently drops whatever landed in between'
+
+            # External review, PR #1041 CodeRabbit: route 1 can resolve to
+            # several issues ("more than one: evaluate each separately"), and
+            # the outcome-reporting rule said "one outcome per judge pass" --
+            # undefined for a pass that touched three issues with three
+            # different outcomes. Pinned per-issue rather than per-pass.
+            $amendment | Should -Match '(?i)one outcome per resolved issue,\s*per judge pass' `
+                -Because 'a pass resolving to several issues (route 1''s more-than-one case) must report one outcome per issue, not one blended or arbitrarily-chosen line per pass'
+            $amendment | Should -Match '(?i)amended.{0,40}on one and.{0,20}not-applicable.{0,20}on another' `
+                -Because 'mixed outcomes across issues in the same pass must be named as the ordinary shape, not left for a reader to reconcile into a single line'
             $amendment | Should -Match '(?i)--edit-last' `
                 -Because 'naming the forbidden shortcut is what stops it being rediscovered as the obvious one; a transport section that lists only the right answer does not survive an executor who already knows the wrong one'
         }
@@ -988,10 +998,26 @@ Describe 'open-for-work surface (issue #974)' {
 
                 # The paragraph runs from its bolded label (command files) or
                 # its bullet (agent bodies) to the next blank-line-separated
-                # block that starts a new label, bullet, or heading.
+                # block that starts a new label, bullet, or heading. No `|\z`
+                # fallback, deliberately (external review, PR #1041 CodeRabbit):
+                # a paragraph not followed by one of those four block openers
+                # -- ordinary prose after it, or the paragraph sitting last in
+                # the file -- took that arm, and $para then held the rest of
+                # the document, which is the exact whole-document match this
+                # extraction exists to prevent (the fourth instance of the
+                # class this file's own comments already record, found a
+                # fifth time in the assertion written to close the fourth).
+                # Prefer failing to delimit over over-capturing: an
+                # undelimitable paragraph reds through the non-empty guard
+                # below rather than silently widening. Same discipline as the
+                # $trustModel scoper's rejected end-of-document fallback.
+                # The third alternative is also dropped: `\*\*Close-out record
+                # amendment` already matches everything
+                # `\*\*Close-out record amendment\*\*` matches, and regex
+                # alternation is ordered, so it was unreachable.
                 $para = [regex]::Match(
                     $entry,
-                    '(?ms)^(?:\*\*Close-out record amendment|-\s+`skills/review-judgment/SKILL\.md § Close-Out Record Amendment`|\*\*Close-out record amendment\*\*).*?(?=\n\n(?:\*\*|#|-\s|\d+\.\s)|\z)'
+                    '(?ms)^(?:\*\*Close-out record amendment|-\s+`skills/review-judgment/SKILL\.md § Close-Out Record Amendment`).*?(?=\n\n(?:\*\*|#|-\s|\d+\.\s))'
                 ).Value
 
                 $para | Should -Not -BeNullOrEmpty `
@@ -1021,7 +1047,7 @@ Describe 'open-for-work surface (issue #974)' {
                 }
             }
 
-            # The pointer must land somewhere. Two of the five lanes route
+            # The pointer must land somewhere. Two of the six lanes route
             # their outcome to Response Summary item 5, so that item existing
             # and still being the amendment's slot is part of those lanes'
             # coverage, not a separate file's business.
