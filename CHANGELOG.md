@@ -4,6 +4,12 @@ All notable changes to agent-orchestra will be documented in this file.
 
 ## [Unreleased]
 
+## [3.15.1] — 2026-08-09
+
+### Changed
+
+First consolidated promotion tranche from the memory-store redesign (#1015 chunk 3, #1019): thirty maintainer lessons given a permanent home in two versioned repository reference files. This lands the destination only — the corresponding store exits are recorded and executed at the owner slate after this ships, so nothing has yet left the store. `skills/terminal-hygiene/references/powershell-traps.md` covers PowerShell language, .NET interop, regex and the sharded Pester runner; `skills/safe-operations/references/git-and-gh-traps.md` covers git state claims, `gh` write paths, worktrees and this repository's own scripts. Both are linked from their parent skill.
+
 ## [3.15.0] — 2026-08-08
 
 ### Added

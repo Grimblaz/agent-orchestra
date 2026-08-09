@@ -1,13 +1,13 @@
 ---
 name: safe-operations
-description: "Safe file-operation and issue-creation protocol for Agent Orchestra. Use when choosing workspace tools, avoiding unsafe file writes, or creating GitHub issues under the workflow rules. DO NOT USE FOR: application-level debugging or replacing agent judgment on whether work is in scope."
+description: "Safe file-operation, issue-creation, and git/gh state-claim protocol for Agent Orchestra. Use when choosing workspace tools, avoiding unsafe file writes, creating GitHub issues under the workflow rules, reporting CI state, claiming a test failure is pre-existing, writing to a GitHub comment or PR body, acting on a cleanup detector's output, or bumping the plugin version. DO NOT USE FOR: application-level debugging or replacing agent judgment on whether work is in scope."
 ---
 
 # Safe Operations Instructions
 
 ## Purpose
 
-Establish safe, consistent rules for file operations and issue creation across all agents in this workflow. These rules prevent silent file corruption and ensure GitHub issues are always properly labeled.
+Establish safe, consistent rules for file operations, issue creation, and the git/`gh`/worktree operations agents use to inspect and change repository state. These rules prevent silent file corruption, ensure GitHub issues are always properly labeled, and keep state claims and destructive cleanup honest.
 
 ---
 
@@ -356,8 +356,15 @@ The other subsections here govern the mechanics and placement of filing — prio
 
 The known-versus-unknown split is not decoration: it is the direct input to the open-for-work routing beat, which classifies each open unknown by whether it could change what is being built. A filing that is honest about what it does not know is worth more than one that papers over it with a confident solution sketch.
 
+## Section 3: git, `gh`, worktree and repo-script traps
+
+[`references/git-and-gh-traps.md`](references/git-and-gh-traps.md) collects the traps in the tools this repository uses to inspect state and to write to GitHub. Like the PowerShell traps, they produce a confident, wrong answer rather than an error: a green check table for a commit you have moved past, a "pre-existing failure" verdict structurally unable to detect the defect it was asked about, a successful `PATCH` that destroys content nobody notices is gone.
+
+Read it before reporting CI state, before claiming a failure is pre-existing, before writing to a GitHub comment body, and before trusting a cleanup detector's silence. The write-path entries are directly in this skill's scope: a `PATCH` from a local file clobbers server-side appends, `-f body=@-` can post the literal string `@-`, and `--edit-last` targets the last comment posted rather than the one intended.
+
 ## Gotchas
 
 | Trigger                                 | Gotcha                                                             | Fix                                                                                                   |
 | --------------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
 | Editing workspace files from PowerShell | Silent encoding or line-ending corruption slips into tracked files | Use the designated file tools for content changes and keep terminal writes for move/delete cases only |
+| Writing a GitHub body from a file       | `-f` is `--raw-field` and never expands `@`, so `-f body=@-` posts the literal `@-`; a local-file `PATCH` destroys server-side appends | Use `--field`/`-F`, feeding the file via a Bash stdin redirect (`--field body=@- < file`) or `-F body=@file` from any shell; re-read the live body before patching, and verify the result rather than the exit code |

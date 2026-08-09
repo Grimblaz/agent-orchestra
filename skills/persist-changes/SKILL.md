@@ -111,6 +111,30 @@ Acquire the following before calling the helper (these involve git I/O and must 
 
 Pass all inputs. Capture the output struct.
 
+**Invocation form is load-bearing.** This file defines a function; it does not execute one. Dot-source
+it, then call the function. Resolve the path from the repository root rather than the caller's current
+directory — a subagent or command launch can start anywhere, and a shell `cd` does not persist between
+tool calls:
+
+```powershell
+$repoRoot = (git rev-parse --show-toplevel)
+. (Join-Path $repoRoot 'skills/persist-changes/scripts/Resolve-PersistDecision.ps1')
+$decision = Resolve-PersistDecision -Inputs $inputs
+```
+
+Invoking the script with `&` instead runs it and returns `$null` — the function is never defined and
+no decision is produced. What happens next depends on strict mode, and neither branch is safe:
+
+- Under `Set-StrictMode -Version Latest`, reading any field of that `$null` throws
+  `PropertyNotFoundException` (measured) — including inside an `if (-not $decision.commit)` guard.
+- Without strict mode, every field reads falsy, so a guard silently takes its negative branch.
+
+So check the result explicitly and fail closed:
+
+```powershell
+if ($null -eq $decision) { throw 'Resolve-PersistDecision returned no decision - dot-source the script, do not invoke it with &' }
+```
+
 ### Step 3: If `commit=false`
 
 Surface the `refuse_reason` loudly and stop. Do not attempt any git operations. Return the reason to the caller for routing.
