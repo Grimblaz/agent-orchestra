@@ -1,6 +1,6 @@
 ---
 name: agent-memory-compaction
-description: "Compaction policy for an agent memory store's recall index: the rules a compaction may not break, how an entry leaves, the size budget the index is held to, and a re-runnable check. Use when compacting, pruning, or repairing a memory index. DO NOT USE FOR: individual memory entries; session-state or handoff markers (use session-memory-contract); repository docs (use documentation-finalization)."
+description: "Compaction policy for an agent memory store's recall index, plus the sweep it runs on: the rules a compaction may not break, how an entry leaves and where that exit is recorded, the slate procedure and its dispositions, the size budget the index is held to, and a re-runnable check. Use when compacting, pruning, or repairing a memory index, or when running or preparing a sweep of a store. DO NOT USE FOR: individual memory entries; session-state or handoff markers (use session-memory-contract); repository docs (use documentation-finalization)."
 ---
 
 <!-- markdownlint-disable-file MD038 MD041 -->
@@ -16,6 +16,7 @@ description: "Compaction policy for an agent memory store's recall index: the ru
 - An index's policy text is missing, partial, or has drifted from the text below and needs restoring.
 - A store is being moved to the split shape — a compact stanza in the index, the full policy and the store's own values beside it.
 - Someone wants to check an index against the policy without changing it.
+- A **sweep** is being run, or prepared: the owner-present slate where entries are dispositioned, exits are recorded, deferrals expire, and the store's destinations are measured. See *The sweep, and the records it writes* below.
 
 Not this skill: `session-memory-contract` owns durable session state and cross-session handoff markers. This skill owns one file — a memory store's recall index — what may be removed from it, and how big it is allowed to be.
 
@@ -209,6 +210,20 @@ limit_observation: 2026-08-06 | 24978 | characters | truncation-boundary test (a
 
 `limit_observation` is `date | value | unit | method`, and it is the one key that repeats: re-observing the limit **appends** a row and the latest date governs, so nothing already recorded is rewritten. `budget_fraction` and `staleness_bound_days` are optional; the defaults are 0.80 and 30 days.
 
+Add one more section to that file, **outside** both marked regions, so a session arriving for a sweep can find the machinery by following a path rather than inferring a directory:
+
+```markdown
+## Sweep machinery (not part of the compared text)
+
+Sweeps of this store follow `skills/agent-memory-compaction/references/sweep-procedure.md` in the
+agent-orchestra plugin. Its records live beside this file: `LEDGER.md` (exits and proposals),
+`SLATE.md` (critical flags, deferrals, landings in flight), and `ARCHIVE.md` (demoted pointers,
+created at the first demotion). Their shapes are defined in
+`skills/agent-memory-compaction/references/store-records.md`.
+```
+
+Text outside the canonical and values regions is not compared, so this costs the store nothing on the policy axis. A store that split before this machinery shipped has no such section; its first sweep writes one, which is step 0 of the procedure.
+
 **The whole values block is optional too, and that is a decision rather than an oversight.** A store may split for the policy hygiene alone — the text out of the index, one place to adapt it — and record no budget inputs at all. It then reads `size: not evaluated` and stays clean on the other three axes. The reason is not indulgence: the budget is a fraction of *an observed limit*, and that observation belongs to the installation, not to this skill. A store with no size problem has no reason to run a truncation-boundary test, and making the block mandatory would push it toward copying the number out of the example above — one installation's measurement wearing another's name, which is precisely the hand-picked absolute the formula rule exists to forbid. Record budget inputs when the budget is a problem you actually have.
 
 **Keys this version does not know**, written with an `x-` prefix, are ignored and reported rather than refused — a store outlives the plugin version that wrote it, so a later release needs somewhere to record a sweep date or a ledger pointer without breaking an older checker reading the same file. Any *other* unrecognized key is still an error, because that is what a typo looks like, and a budget quietly computed from a record the checker only half understood is the failure this parser exists to prevent.
@@ -252,6 +267,24 @@ pwsh <agent-orchestra>/skills/agent-memory-compaction/scripts/Test-MemoryIndexPo
 
 That file ships with the plugin and is the exact text this skill carried before the supersession, so a store that adopted it reports `RESULT: clean` unchanged. It is reference data, not a second supported policy: nothing in the check looks for it, and a new store should adopt the current text instead.
 
+## The sweep, and the records it writes
+
+The policy governs what a compaction may not break and how big the index is allowed to be. What it does *not* say, on its own, is how the store actually gets smaller: that happens at a **sweep** — the owner-present slate the third replacement rule requires before anything destructive executes. Two documents carry it:
+
+- [`skills/agent-memory-compaction/references/sweep-procedure.md`](references/sweep-procedure.md) — when a sweep is due, what an unattended session may and may not do, and the eight steps, 0 through 7: write the store-side pointer, enumerate the corpus from disk, take the first things first, disposition, check staleness, measure the exit destinations, reconcile the partition, record the sweep.
+- [`skills/agent-memory-compaction/references/store-records.md`](references/store-records.md) — the three files a sweep writes and reads. `LEDGER.md` holds every disposition a slate executed or a session proposed, plus the sweep's own records; `SLATE.md` holds critical flags, deferrals and landings in flight; `ARCHIVE.md` is the cold archive a demotion moves a pointer into. None of the three is loaded at session start, which is what keeps the record of what left from being charged against the budget of what stays.
+
+Four read-only instruments sit beside the check and make the procedure's checks and gates produce artifacts rather than assertions:
+
+```text
+pwsh skills/agent-memory-compaction/scripts/Get-MemorySweepInventory.ps1 -IndexPath <index> -OutputPath <artifact>
+pwsh skills/agent-memory-compaction/scripts/Test-MemorySweepDisposition.ps1 -Gate <deferral|exit|admission|reconcile> -IndexPath <index> ...
+pwsh skills/agent-memory-compaction/scripts/Test-MemorySweepPartition.ps1 -InventoryPath <artifact> -IndexPath <index>
+pwsh skills/agent-memory-compaction/scripts/Measure-MemorySurface.ps1 -Path <destination>
+```
+
+The procedural checks live in the procedure rather than in the check itself, deliberately: at the population sizes these stores actually reach, a person following a written step catches what a fourth axis would, and the check stays a thing with four axes and three parameters that anyone can reason about. `.github/scripts/Tests/memory-sweep-procedure.Tests.ps1` exercises the procedure against a committed fixture store, so its demonstrations are re-runnable rather than narrated once.
+
 ## Running the check
 
 The check lives beside this file:
@@ -265,3 +298,16 @@ pwsh skills/agent-memory-compaction/scripts/Test-MemoryIndexPolicy.ps1 -IndexPat
 The check reads; it never writes. It has no trigger and no schedule — nothing invokes it but a person or a session that chooses to.
 
 Its regression suite is `.github/scripts/Tests/memory-index-policy.Tests.ps1`, which exercises each axis against modified copies — the property that keeps the axes able to fail.
+
+## Gotchas
+
+Landmines in this skill's own surfaces. Each has gone off at least once.
+
+- **Any edit inside a compared region re-diverges every adopted store.** The comparison is whole-block and case-sensitive (`-ceq`), so a typo fix in the canonical policy or stanza text makes every store that adopted the previous wording report as diverged — correctly, and indefinitely. Edit compared text deliberately or not at all; text outside the two marked regions costs nothing.
+- **A `## ` heading inside a compared region makes the check refuse — for every store.** New canonical prose uses `###` or deeper. There is no margin here: the refusal is global, not per-store.
+- **A bare marker line inside compared text truncates the region of every store that copies it.** A line that *is* `<!-- policy-canonical-end -->` ends the block when the store's own file is read back. Describing a marker is fine; a line consisting only of one is not.
+- **The stanza is recognized by position, not by content.** It must be the index's first non-blank line, at column 0. That bluntness is deliberate — "is this line quoted?" has no decidable answer, and every gentler rule tried let quoted text change the shape the check read.
+- **A store's own policy file cannot double as its reference copy.** A reference copy supplies *both* compared texts; a policy file carries the canonical policy region and never the stanza one, so using it as the reference checks legacy stores fine and refuses every split store.
+- **The values region is append-only, and rewriting it destroys state invisibly.** The check keeps no history, so a store measured for months reads `not evaluated` after one tidy regeneration and nothing reports that anything was lost. Re-observing appends a row; the freshest date governs.
+- **A single `x-` key written into a values-less store flips it from clean to exit 1.** The region's presence is keyed on its markers, not on its contents, so a region holding only forward-compatibility keys records budget inputs the check cannot use — `could not verify`, a defect, on a store that had lawfully opted out of measurement. Write to the values region only when it already exists, or carry a `limit_observation` in the same write.
+- **`templates/policy-pre-supersession.md` is not editable reference prose.** It is the exact pre-supersession text that backs the `-PolicyReferencePath` guarantee for never-adapted legacy stores. An edit there silently breaks a shipped promise no suite re-proves.
