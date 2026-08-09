@@ -214,6 +214,7 @@ After the persist attempt, the orchestrator assembles a Response Summary with al
 2. **Commit SHA(s) applied** — from `git rev-parse HEAD` after the commit step.
 3. **Push ref/result** — `{headRemote}/{branch}` if push succeeded, or the `not_pushed_reason` + `manual_instruction` if push was skipped, or `attempted-and-failed: {stderr} (exit {code})` if `git push` executed and returned non-zero.
 4. **Explicit not-pushed list** — when accepted findings were not pushed, list each one with its reason. This includes the distinct **"nothing to push (all deferred/rejected/escalated)"** state when zero findings were accepted.
+5. **Close-out record amendment outcome** — amended, not-applicable (naming which precondition failed: no issue resolved from the PR, no affirmation record, or no existing record), or skipped with its reason, carrying the `⚠️ close-out record amendment skipped — {reason}` literal when skipped. Required because that step is **advisory** and never halts the loop, so this summary is its only accountability channel; without the item a skipped amendment disappears into a summary that still satisfies every other requirement here (`skills/code-review-intake/references/response-loop-completion.md` step 6).
 
 The `not_pushed_reason` enum is defined in `skills/persist-changes/SKILL.md`:
 

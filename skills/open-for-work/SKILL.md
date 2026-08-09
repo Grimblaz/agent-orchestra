@@ -1,6 +1,6 @@
 ---
 name: open-for-work
-description: The operating methodology for opening a filed standalone issue for work — the trivial floor, the worth-it doors, beat 1 alignment with its affirmation gate and durable affirmation record, beat 2 routing, and the two outputs (a brief on the routine arm, a continuation into design on the novel arm). Use when `/open {issue}` is invoked, when a `/plan` pre-flight finds an affirmed framing record, or when resuming an issue that already carries one. Activation is by those explicit surfaces only — a bare pickup ("let's work on #123") deliberately does not enter this flow. DO NOT USE FOR: chunk sub-issues of a designed parent (they inherit authority source (a) — author the brief directly per plan-authoring § Brief plan variant), issue close-out mechanics, with or without a PR (use post-pr-review), or the adversarial review of the artifact this flow produces (use adversarial-review with the `design-challenge` adapter).
+description: The operating methodology for opening a filed standalone issue for work — the trivial floor, the worth-it doors, beat 1 alignment with its affirmation gate and durable affirmation record, beat 2 routing, and the two outputs (a brief on the routine arm, a continuation into design on the novel arm). Use when `/open {issue}` is invoked, when a `/plan` pre-flight finds an affirmed framing record, or when resuming an issue that already carries one. Activation is by those explicit surfaces only — a bare pickup ("let's work on #123") deliberately does not enter this flow. DO NOT USE FOR: chunk sub-issues of a designed parent (they inherit authority source (a) — author the brief directly per plan-authoring § Brief plan variant), the close-out record's shape and lawfulness lookup (use post-pr-review § 9) or the two moments at which it is owed (use plan-authoring § The close-out obligation on an affirmation-record issue) — though this skill's own § Close-out is the stated reader for the close-time backstop, so close-out work is not off-limits here, or the adversarial review of the artifact this flow produces (use adversarial-review with the `design-challenge` adapter).
 ---
 
 # Open for work
@@ -354,7 +354,16 @@ The review runs **once**, after beat 2's artifact exists and before the worktree
 
 ## Close-out
 
-When the issue closes, the conversation's owner writes the close-out record on the issue: one line per sustained finding, a dead-premises note, and the beat-2 re-route count. The obligation and its exact shape live at the close-time surface that already runs at that moment — `skills/post-pr-review/SKILL.md` § 9. Close-Out Record (Issues Opened For Work). This flow adds no ledger-emission machinery of its own.
+The conversation's owner writes the close-out record on the issue: one line per sustained finding, a dead-premises note, and the beat-2 re-route count. Its exact shape lives at `skills/post-pr-review/SKILL.md` § 9. Close-Out Record (Issues Opened For Work). This flow adds no ledger-emission machinery of its own.
+
+**Two firing moments, and this flow produces issues that hit each of them.** The obligation is **advisory** — nothing blocks a PR, a merge, or a close on it, and nothing re-checks it after the run ends.
+
+1. **Pre-PR, on a run that will open a pull request** — the record is written **before the PR-creation action**. The run meets this on the brief it is dispatched against (`skills/plan-authoring/SKILL.md` § The close-out obligation on an affirmation-record issue), which is where the obligation is stated for that population.
+2. **Close-time backstop, whenever moment 1 did not already produce the record** — the record is written **before the close**, by the conversation closing the issue. That is this section's own reader. Keyed on whether the record exists, not on whether a pull request does: an issue this flow opened that closes **without a pull request** is one instance, and an issue auto-closed by a closing keyword in *someone else's* PR — a designed parent closed by one of its own chunk PRs — is another that moment 1 never reached. The post-merge checklist's stated trigger arrives after the close, so it covers neither on its own.
+
+Both moments carry the same lifecycle rules the brief states: a pre-PR record is **provisional until the PR merges**, a second PR **amends the existing record rather than posting a new one**, and a record is **amended when late findings are sustained** at `skills/code-review-intake/SKILL.md` § Response Loop Completion.
+
+**Why it binds: the run ends at the close** — afterwards no conversation is left to write anything. It is *not* that a closed issue becomes unfindable; a number-keyed read reaches it either way. See § 9 for that correction and the one scope limit that survives it.
 
 ## Related Guidance
 
