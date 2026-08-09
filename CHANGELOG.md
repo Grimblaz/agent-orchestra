@@ -4,6 +4,17 @@ All notable changes to agent-orchestra will be documented in this file.
 
 ## [Unreleased]
 
+## [3.16.0] — 2026-08-09
+
+### Changed
+
+The close-out record's obligation moved to where the run that owes it actually reads it (#1028, chunk 1 of #1013). It had lived only on the post-merge checklist, whose reader arrives after the issue has already closed; measured across the six closed issues that owed a record, one landed before the close, three landed after it, and **two were never written at all**. It now rides the brief's `## 6. Evidence obligations` — the artifact every one of those six was dispatched against — as an **advisory** obligation, never a blocking gate, with **two firing moments**: before the PR-creation action on a run that opens a pull request, and before the close on one that does not. Three lifecycle rules travel with it: a pre-PR record is provisional until the merge, a second PR amends the existing record rather than posting a new one, and late sustained findings amend it at `code-review-intake` § Response Loop Completion, which gains that step.
+
+### Fixed
+
+- **The ordering rule stated a reason that was false.** It said the record must precede the close so a reader can still find the issue; that step's own lookup is number-keyed and state-blind, so a late record is exactly as reachable as an on-time one. The real basis — the run ends at the close, after which nobody writes anything — replaces it, together with the one limit that does survive: a closed issue ages out of time-windowed sweeps.
+- **Both decision-register rows asserting auto-close suffices are now scoped**, not just the one previously known. The second uses different vocabulary and sits in a file that never uses the word "close-out" at all, which is why earlier passes missed it. The closing keyword itself is unchanged.
+
 ## [3.15.0] — 2026-08-08
 
 ### Added
