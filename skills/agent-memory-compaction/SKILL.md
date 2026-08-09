@@ -271,13 +271,14 @@ That file ships with the plugin and is the exact text this skill carried before 
 
 The policy governs what a compaction may not break and how big the index is allowed to be. What it does *not* say, on its own, is how the store actually gets smaller: that happens at a **sweep** — the owner-present slate the third replacement rule requires before anything destructive executes. Two documents carry it:
 
-- [`skills/agent-memory-compaction/references/sweep-procedure.md`](references/sweep-procedure.md) — when a sweep is due, what an unattended session may and may not do, and the seven steps: write the store-side pointer, enumerate the corpus from disk, take critical entries first, disposition, check staleness, measure the exit destinations, reconcile the partition.
-- [`skills/agent-memory-compaction/references/store-records.md`](references/store-records.md) — the three files a sweep writes and reads. `LEDGER.md` holds exit records and proposals; `SLATE.md` holds critical flags, deferrals and landings in flight; `ARCHIVE.md` is the cold archive a demotion moves a pointer into. None of the three is loaded at session start, which is what keeps the record of what left from being charged against the budget of what stays.
+- [`skills/agent-memory-compaction/references/sweep-procedure.md`](references/sweep-procedure.md) — when a sweep is due, what an unattended session may and may not do, and the eight steps, 0 through 7: write the store-side pointer, enumerate the corpus from disk, take the first things first, disposition, check staleness, measure the exit destinations, reconcile the partition, record the sweep.
+- [`skills/agent-memory-compaction/references/store-records.md`](references/store-records.md) — the three files a sweep writes and reads. `LEDGER.md` holds every disposition a slate executed or a session proposed, plus the sweep's own records; `SLATE.md` holds critical flags, deferrals and landings in flight; `ARCHIVE.md` is the cold archive a demotion moves a pointer into. None of the three is loaded at session start, which is what keeps the record of what left from being charged against the budget of what stays.
 
-Three read-only instruments sit beside the check and make the procedure's three checks produce artifacts rather than assertions:
+Four read-only instruments sit beside the check and make the procedure's checks and gates produce artifacts rather than assertions:
 
 ```text
 pwsh skills/agent-memory-compaction/scripts/Get-MemorySweepInventory.ps1 -IndexPath <index> -OutputPath <artifact>
+pwsh skills/agent-memory-compaction/scripts/Test-MemorySweepDisposition.ps1 -Gate <deferral|exit|admission|reconcile> -IndexPath <index> ...
 pwsh skills/agent-memory-compaction/scripts/Test-MemorySweepPartition.ps1 -InventoryPath <artifact> -IndexPath <index>
 pwsh skills/agent-memory-compaction/scripts/Measure-MemorySurface.ps1 -Path <destination>
 ```

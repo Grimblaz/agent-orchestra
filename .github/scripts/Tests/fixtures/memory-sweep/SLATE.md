@@ -17,4 +17,3 @@ to be assessed rather than quietly treat them as ordinary.
 2026-07-22 | reference_tail_zeta@2026-07-22 | critical | no | ordinary
 2026-06-30 | reference_critical_orphan@2026-06-30 | critical | yes | its loss would be expensive and its recurrence invisible
 2026-07-05 | reference_interrupted_eta@2026-07-05 | critical | no | ordinary
-<!-- memory-slate-end -->

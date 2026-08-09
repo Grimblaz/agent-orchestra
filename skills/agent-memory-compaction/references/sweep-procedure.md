@@ -11,11 +11,19 @@ the sweep makes about itself:
 
 ```text
 pwsh skills/agent-memory-compaction/scripts/Get-MemorySweepInventory.ps1 -IndexPath <index> -OutputPath <artifact>
+pwsh skills/agent-memory-compaction/scripts/Test-MemorySweepDisposition.ps1 -Gate <gate> -IndexPath <index> ...
 pwsh skills/agent-memory-compaction/scripts/Test-MemorySweepPartition.ps1 -InventoryPath <artifact> -IndexPath <index>
 pwsh skills/agent-memory-compaction/scripts/Measure-MemorySurface.ps1 -Path <a destination>
 ```
 
 None of them writes to the store. They read, and they report; the sweep writes.
+
+`Test-MemorySweepDisposition.ps1` is the one to notice, because its absence was a real defect. Every
+rule in step 3 — the second-deferral block, the landing verification, the grandfathering scope, the
+reconciliation read — is applied by that script, by name, at the step that needs it. A rule that
+exists only as prose is a rule each session re-derives by hand, and an earlier revision of this
+machinery implemented all four in a library and exposed none of them: what the tests demonstrated was
+that a function returned false, not that the procedure blocked anything.
 
 ## When a sweep is due
 
@@ -70,10 +78,20 @@ created at the first demotion). Their shapes are defined in
 `skills/agent-memory-compaction/references/store-records.md`.
 ```
 
-A store adopting the split shape after this machinery shipped writes that section at adoption, as the
-third part of Limb 2. A store that split earlier has no such section, which is why writing it is this
-step and not a footnote in the adoption instructions: the machinery has to reach the stores that
-already exist, and their first sweep is the only moment it can.
+There are three store generations, and all three are reachable:
+
+- **Adopting the split after this machinery shipped** — the section is written at adoption, as the
+  third part of Limb 2.
+- **Split under an earlier version** — no such section exists, and this step writes it. That is why
+  it is a step and not a footnote in the adoption instructions: the machinery has to reach the stores
+  that already exist, and their first sweep is the only moment it can.
+- **Never split at all** — the store keeps the whole policy as its index header and has no `POLICY.md`
+  to add a section to. This is a lawful, supported shape, and it is the shape the store this
+  machinery was written for is in today. Such a store **adopts the split shape first**, following
+  *Adopting the split shape* in the skill, and then this step writes the section into the policy file
+  that adoption creates. Splitting is itself a structural rewrite of the index, so it is a
+  destructive act and happens at the same owner-present slate as the sweep — not before it and not
+  unattended.
 
 ## Step 1 — enumerate the corpus, from disk
 
@@ -104,20 +122,43 @@ Keep the artifact. Step 6 reads it back.
 
 The inventory folds `SLATE.md` into the enumeration and orders the corpus:
 
-1. **Incomplete dispositions** — an `executed` ledger record whose act is not reflected in the store
-   (the pointer is still there, or the archive line is not). Something was interrupted between the
-   record and the act. Neither re-executing nor dropping it is safe to do silently, so it goes to the
-   owner first, before anything new is decided.
+1. **Incomplete dispositions** — an exit in force whose act is not reflected in the store (the pointer
+   is still there, or the archive line is not). Something was interrupted between the record and the
+   act. Neither re-executing nor dropping it is safe to do silently, so it goes to the owner first,
+   before anything new is decided.
 2. **Critical entries**, every one of them, before any other disposition is taken. The policy says
    critical entries are dispositioned first at every sweep, and "first" is not a preference about
    ordering — it is what stops a slate from spending its owner's attention on the easy two-thirds and
    deferring the expensive third for the fourth time.
-3. **Expired deferrals** — a `deferral` row whose `until` date has passed.
-4. **Unassessed entries** — no `critical` row on either polarity. Assess before dispositioning.
+3. **Unassessed entries** — no `critical` row on either polarity. Nobody has looked, and no gate will
+   disposition one, so this is the question to answer before any other question about it. It sits
+   ahead of expired deferrals deliberately: labelling such an entry by its deferral state would tell
+   a reader the one thing that is not the next thing to do about it.
+4. **Expired deferrals** — a `deferral` row whose `until` date has passed.
 5. Everything else.
 
 A critical entry sitting in an orphan body, or last in file order, is still in group 2. The ordering
 comes from the slate state and the two populations, never from where a line happens to sit.
+
+An orphan body whose life carries an **exit in force** is not surfaced at all: it has already left,
+and its body simply has not been deleted — body deletion being a separate owner-approved act. This is
+read from the ledger, which is the only file that says an entry has left.
+
+**Where the reconciliation read happens.** For any entry whose history is in doubt — an orphan body,
+a name that appears in the ledger, an entry the owner is unsure about — ask the reconcile gate:
+
+```text
+pwsh skills/agent-memory-compaction/scripts/Test-MemorySweepDisposition.ps1 -Gate reconcile -IndexPath <index> -EntryPath <entry body>
+```
+
+It answers `exited`, `not-exited`, or **`undecidable`**. Undecidable is not a shrug and not a
+half-answer: it means the entry records no admitted date, so which life it is cannot be established,
+and the sweep cannot know whether an exit recorded under that name was about this entry or a previous
+one. **An undecidable entry is dispositioned by the owner explicitly, or it is left hot.** It is never
+dispositioned on the assumption that the record found under its name was about it — that inference is
+the artifact-presence reasoning the whole life-key design exists to prevent. On a store whose
+admission rule has not yet landed, *every* entry answers undecidable, which is why the first sweep of
+such a store is an owner-present conversation rather than a mechanical pass.
 
 ## Step 3 — disposition
 
@@ -133,14 +174,23 @@ authorized size-reduction moves — see the mapping below for why five did not.
 
 | Disposition | Exit? | What it means | Records written |
 | --- | --- | --- | --- |
-| `promote` | yes | the lesson lands in a permanent home outside the store | ledger `executed`; `presence: exited` |
-| `demote` | yes | the pointer moves to `ARCHIVE.md`, booked as accepted recall loss | ledger `executed`; `presence: exited`; archive line |
-| `keep-hot-with-expiry` | no | the entry stays, deferred with an expiry date | ledger `executed`; `deferral: N` with `until` |
-| `remove-fails-admission` | yes | the entry fails the store's admission rule | ledger `executed`; `presence: exited` |
-| `evaporate-on-close` | yes | a `project_` entry whose work has closed, residue generalized first | ledger `executed`; `presence: exited` |
-| `settle-in-place` | **no** | a settled `project_` pointer moves to the settled section | none — see below |
-| `dedupe-into` | yes | the lesson is folded into a surviving entry, which becomes the destination | ledger `executed`; `presence: exited` |
-| `remove-obsolete` | yes | the behavior, tooling or surface the entry describes no longer exists | ledger `executed`; `presence: exited` |
+| `promote` | yes | the lesson lands in a permanent home outside the store | ledger `executed` |
+| `demote` | yes | the pointer moves to `ARCHIVE.md`, booked as accepted recall loss | ledger `executed`; archive line |
+| `keep-hot-with-expiry` | **no** | the entry stays, deferred with an expiry date | ledger `executed`; `deferral: N` with `until` |
+| `remove-fails-admission` | yes | the entry fails the store's admission rule | ledger `executed` |
+| `evaporate-on-close` | yes | a `project_` entry whose work has closed, residue generalized first | ledger `executed` |
+| `settle-in-place` | **no** | a settled `project_` pointer moves to the settled section | ledger `executed` — an act, not an exit |
+| `dedupe-into` | yes | the lesson is folded into a surviving entry, which becomes the destination | ledger `executed` |
+| `remove-obsolete` | yes | the behavior, tooling or surface the entry describes no longer exists | ledger `executed` |
+| `restore` | **no** | a demoted pointer comes back to the index; supersedes that life's exit | ledger `executed`; archive line removed |
+
+Two further records the sweep writes about itself rather than about an entry, keyed on the reserved
+identities `sweep@<date>` and `ledger@<date>`: `sweep-complete` (step 7) and `ledger-compaction`.
+An entry may not use either reserved name.
+
+The ledger therefore holds more than exits — it is the history of what the slate did, and only the
+exit dispositions are read as departures. "Exit record" names its most important contents, not all of
+them.
 
 ### The covering mapping
 
@@ -194,6 +244,12 @@ entry's subject to be gone from the world, not merely out of fashion.
 
 Two have sharp edges that the middle column cannot carry:
 
+Both are applied by the gate script, not by eye:
+
+```text
+pwsh skills/agent-memory-compaction/scripts/Test-MemorySweepDisposition.ps1 -Gate admission -IndexPath <index> -Identity <life key> -AdmissionRuleLandedOn <yyyy-MM-dd>
+```
+
 **`remove-fails-admission` applies only to entries admitted under the admission rule.** That rule
 lands in the instruction file every session loads (Limb 3), and every entry admitted before it landed
 predates it by definition. An unscoped reading condemns the entire existing corpus at the first sweep,
@@ -208,13 +264,25 @@ that residue is written as a `reference_` entry with its own hook, admitted with
 the evaporating record's destination field names it. Skipping the residue step is how a store loses
 its most durable lessons at exactly the moment they stop being attached to live work.
 
-### Landing verification, for every exit of a critical entry
+### The exit gate
 
-An exit is lawful only when its destination verifiably carries the lesson at landing time. For a
-**critical** entry this gate applies to **every** disposition that removes it from the index —
-promotion, demotion, deduplication, obsolescence removal, admission removal alike. The policy is
-explicit that demotion counts as leaving, and a critical lesson demoted to a cold archive nobody loads
-is exactly as gone as one deleted.
+```text
+pwsh skills/agent-memory-compaction/scripts/Test-MemorySweepDisposition.ps1 -Gate exit -IndexPath <index>     -Identity <life key> -Disposition <disposition>     -DestinationPath <the destination> -LessonProbe '<a sentence the lesson must contain>' [-DestinationLanded]
+```
+
+**An exit is lawful only when its destination verifiably carries the lesson at landing time — every
+exit, not only a critical entry's.** That is the canonical policy's second replacement rule, stated
+without qualification, and the gate reads the destination file and decides for itself rather than
+taking the sweep's word for it. An earlier revision enforced this for critical entries only, so the
+shipped prose and the shipped gate said different things about every ordinary promotion.
+
+For a **critical** entry the destination must additionally have **landed**, and that requirement
+applies to **every** disposition that removes it from the index — promotion, demotion, deduplication,
+obsolescence removal, admission removal alike. The policy is explicit that demotion counts as leaving,
+and a critical lesson demoted to a cold archive nobody loads is exactly as gone as one deleted.
+
+The gate also refuses to disposition an entry nobody has assessed for the critical class. "Nobody has
+looked" is not "ordinary", and it is not a state an exit may be taken from.
 
 **Landed, for a repository destination, means merged to the default branch** — or the named equivalent
 for a destination that has no branches. Reading a feature branch and finding the lesson there is not a
@@ -230,13 +298,20 @@ offer a critical entry on the store's own owner-paced promotion route.
 
 ### Deferral, and the second-deferral block
 
+```text
+pwsh skills/agent-memory-compaction/scripts/Test-MemorySweepDisposition.ps1 -Gate deferral -IndexPath <index> -Identity <life key>
+```
+
 `keep-hot-with-expiry` appends a `deferral` row with a count one higher than the last and an `until`
 date. There is no indefinite form. An expired deferral re-enters the slate in group 3 of step 2, so a
 deferral is a delay and never a parking space.
 
-**A critical entry may not be deferred a second time.** The sweep blocks the attempt: no second
+**A critical entry may not be deferred a second time.** The gate blocks the attempt: no second
 `deferral` row is written, and a `proposed` record carrying the refusal reason is appended in its
-place so the attempt is visible rather than merely absent. The lawful moves for a once-deferred
+place so the attempt is visible rather than merely absent. **An unassessed entry may not be deferred
+either** — the same rule the exit gate applies, for the same reason: an entry nobody has assessed
+could be critical, and reading absence as "not critical" here alone would make the never-twice rule
+escapable by simply never looking. The lawful moves for a once-deferred
 critical entry are to land it, to initiate a landing and take the in-flight state, or to disposition it
 now — the three the amendment exists to keep available.
 
@@ -285,6 +360,22 @@ be able to say "this destination is filling up," and a number with no unit, no d
 cannot say it — nor can a hand count that nobody else can reproduce. The instrument validates a record
 as well as producing one (`-Validate`), so a malformed one is caught where it is written.
 
+**Where it is recorded.** In the store's own values region, beside the index measurement it is
+comparable with, under the reserved growth prefix so an older checker ignores it and says it did:
+
+```text
+x-destination_observation: 2026-08-08 | 2534 | characters | ~/.claude/CLAUDE.md | Measure-MemorySurface.ps1 (...)
+```
+
+The key repeats, one row per observation, freshest governing — the same discipline `limit_observation`
+carries, and the only one available given the write bounds below. The surface is written
+home-relative, because a series keyed on one machine's home directory is incomparable the moment the
+store is read anywhere else, and comparing a series is the whole point.
+
+A store with **no values region** does not gain one for this — see the write bounds below. It records
+the measurement's absence instead: a `proposed` ledger record saying the surface was measured and this
+store has opted out of recording it.
+
 ## Step 6 — the partition check
 
 ```text
@@ -315,8 +406,21 @@ said so.
 
 ## Step 7 — record the sweep
 
-Append the sweep's own closing record to `LEDGER.md`, and mark as `reconciled` the records this sweep
-read back and confirmed.
+Append the sweep's own closing record to `LEDGER.md`. It has a shape, and it is one the grammar
+accepts — an earlier revision mandated this step while leaving every plausible encoding of it
+malformed, which failed step 6's partition check for a sweep that had lost nothing:
+
+```text
+2026-08-08 | executed | sweep-complete | sweep@2026-08-08 | 41 subjects walked, 3 exits, 1 deferral | LEDGER.md
+```
+
+`sweep` is a reserved identity name, so this record can never collide with an entry's.
+
+Then mark as `reconciled` the records this sweep read back and confirmed — by **appending** a row
+with the same identity and disposition and status `reconciled`, never by editing the earlier row. A
+record's effective status is the status of its latest row, which is what makes the retention bound
+reachable at all: without that reading, an `executed` record stays executed forever and nothing is
+ever eligible for compaction.
 
 If — and only if — the store already has a `store-values` region, append the sweep's date to it:
 
@@ -353,13 +457,13 @@ records no budget inputs records its sweep dates in `LEDGER.md` and nowhere else
 ## What a completed sweep leaves behind
 
 - An index whose every departure since the enumeration has a record.
-- `LEDGER.md` carrying one `executed` record per exit, the proposals a session raised, and this
-  sweep's closing record.
+- `LEDGER.md` carrying one `executed` record per disposition taken, the proposals a session raised,
+  and this sweep's `sweep-complete` record.
 - `SLATE.md` carrying the assessments, deferrals and landings this sweep decided.
 - `ARCHIVE.md`, if anything was demoted — created at that moment if it did not exist.
 - A partition report accounting for every subject the sweep started from.
-- A destination measurement per governed surface, and either a fresh limit observation or a recorded
-  deferral of one.
+- A destination measurement per governed surface, recorded in the values region or its absence
+  recorded in the ledger; and either a fresh limit observation or a recorded deferral of one.
 
 A sweep that cannot finish stops and says so. It does not leave the store half-dispositioned without a
 record of where it stopped: the ledger's `executed`-record-before-act ordering means the interruption

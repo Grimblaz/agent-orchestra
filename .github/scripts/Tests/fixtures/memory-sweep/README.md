@@ -17,7 +17,7 @@ Assembled layout:
 | --- | --- |
 | `MEMORY.md` | the canonical stanza + `index-body.md` |
 | `POLICY.md` | `store-values.txt` + the sweep-machinery section + the canonical policy region |
-| `LEDGER.md`, `SLATE.md` | copied verbatim |
+| `LEDGER.md`, `SLATE.md` | copied verbatim — each carries an **opening marker only**, with records running to end of file, which is what lets an append be a real append |
 | entry bodies | `entries/*.md`, copied to the store root |
 | `ARCHIVE.md` | absent — a store that has never demoted anything has none |
 
@@ -41,7 +41,13 @@ come out negative.
 | `reference_ordinary_alpha` | carries a **proposed** removal in the ledger while staying in the index, so a reader that took a proposal for an exit would call it gone |
 
 `SLATE.md` deliberately carries **no** `critical` row for `reference_reused_name` or
-`reference_legacy_unknown`: absent is *unassessed*, not *ordinary*.
+`reference_legacy_unknown`: absent is *unassessed*, not *ordinary*, and no gate will disposition an
+unassessed entry.
+
+The fixture's orphan carries a `critical` row dated **2026-06-30**, before either pinned sweep date.
+That is deliberate too: an orphan accounts as still-an-orphan only when *this* sweep assessed it, so
+the baseline store legitimately has one un-dispositioned orphan, and appending a same-day assessment
+row is what flips it to accounted. Both polarities are exercised.
 
 The store's admission rule is treated as having landed on **2026-06-01**; the suite passes that date
 explicitly. The two pinned sweep dates are **2026-08-08** (sweep 1) and **2026-09-15** (sweep 2,
@@ -54,5 +60,9 @@ because time moved.
 pwsh -NoProfile -Command "Invoke-Pester -Path .github/scripts/Tests/memory-sweep-procedure.Tests.ps1 -Output Detailed"
 ```
 
-Nothing here touches any real store. The suite asserts that it depends on no path outside the
-repository, and that none of the three instruments writes to the store it reads.
+Nothing here touches any real store. The suite asserts that none of the shipped sweep files
+references the owner's live store or reads a path under the home directory, and that no instrument
+writes to the store it reads. That check is a **syntactic sweep over the shipped files**, not a proof:
+a dependency introduced through a variable it cannot resolve statically would pass it. It is stated
+that way here because an earlier revision of this file claimed the stronger property while the check
+covered two literal spellings over two files.

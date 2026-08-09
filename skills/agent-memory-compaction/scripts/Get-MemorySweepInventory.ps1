@@ -89,7 +89,13 @@ if (-not [string]::IsNullOrWhiteSpace($OutputPath)) {
     if (-not [string]::IsNullOrWhiteSpace($parent) -and -not (Test-Path -LiteralPath $parent)) {
         New-Item -ItemType Directory -Path $parent -Force | Out-Null
     }
-    [System.IO.File]::WriteAllText($OutputPath, $json)
+    # Resolved against the PowerShell location, not the process CWD. The .NET static file APIs
+    # resolve a relative path against the process working directory, which a caller that has
+    # Set-Location'd in-process has not changed - so the artifact lands in one directory while
+    # every Test-Path beside it looks in another.
+    $absoluteOutput = if ([System.IO.Path]::IsPathRooted($OutputPath)) { $OutputPath }
+    else { Join-Path (Get-Location -PSProvider FileSystem).ProviderPath $OutputPath }
+    [System.IO.File]::WriteAllText($absoluteOutput, $json)
 }
 
 Write-Output $json

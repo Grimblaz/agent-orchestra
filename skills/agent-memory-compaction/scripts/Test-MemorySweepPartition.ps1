@@ -66,6 +66,9 @@ param(
     [string]$SlatePath,
 
     [Parameter()]
+    [datetime]$AsOf = [datetime]::Today,
+
+    [Parameter()]
     [switch]$Json
 )
 
@@ -81,8 +84,24 @@ foreach ($required in @(@{ p = $InventoryPath; what = 'enumeration artifact' }, 
     }
 }
 
-$inventory = [System.IO.File]::ReadAllText($InventoryPath) | ConvertFrom-Json
-$report = Test-MSPartition -Inventory $inventory -IndexPath $IndexPath -LedgerPath $LedgerPath -ArchivePath $ArchivePath -SlatePath $SlatePath
+# Resolved against the PowerShell location for the same reason the inventory writer resolves its
+# output path: the .NET reader would otherwise look in the process CWD.
+$absoluteInventory = (Resolve-Path -LiteralPath $InventoryPath).ProviderPath
+$inventory = $null
+try { $inventory = [System.IO.File]::ReadAllText($absoluteInventory) | ConvertFrom-Json }
+catch { $inventory = $null }
+
+# "Your input was not an enumeration artifact" and "something left recall without a record" are
+# different answers and must not share an exit code. Without this the second one is what a caller
+# sees when it passes the wrong file, which is the loudest possible way to be wrong.
+foreach ($required in @('subjects', 'enumerated_on', 'source')) {
+    if ($null -eq $inventory -or $inventory.PSObject.Properties.Name -notcontains $required) {
+        Write-Output "RESULT: usage-error`nreason: '$InventoryPath' is not an enumeration artifact - it does not carry '$required'. Produce one with Get-MemorySweepInventory.ps1 -OutputPath."
+        exit 3
+    }
+}
+
+$report = Test-MSPartition -Inventory $inventory -IndexPath $IndexPath -LedgerPath $LedgerPath -ArchivePath $ArchivePath -SlatePath $SlatePath -AsOf $AsOf
 
 if ($Json) {
     Write-Output ($report | ConvertTo-Json -Depth 6)
@@ -94,8 +113,7 @@ else {
     $lines.Add("accounted: $(@($report.accounted).Count)")
     $lines.Add("unaccounted: $(@($report.unaccounted).Count)")
     foreach ($u in @($report.unaccounted)) { $lines.Add("  - $($u.identity) [$($u.population)] - $($u.why)") }
-    foreach ($m in @($report.ledger_malformed)) { $lines.Add("  - unreadable ledger record: $m") }
-    foreach ($m in @($report.slate_malformed)) { $lines.Add("  - unreadable slate row: $m") }
+    foreach ($m in @($report.record_problems)) { $lines.Add("  - $m") }
     Write-Output ($lines -join "`n")
 }
 
