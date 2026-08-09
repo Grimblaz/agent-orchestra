@@ -31,6 +31,10 @@ Adopt the resolved Code-Conductor body inline. Process this invocation as `revie
 
 This command completes the full response loop: accepted fixes are applied by specialists, committed, and pushed to the existing PR branch — or a loud not-pushed reason is surfaced when push is not possible (detached HEAD, default branch, fork without write access, non-fast-forward conflict, or Commit-Policy opt-out). See `skills/code-review-intake/SKILL.md § Response Loop Completion` and `skills/persist-changes/SKILL.md` for the terminal-step executor contract.
 
+**Close-out record amendment**:
+
+As soon as each judge pass's emission is in hand — the main pass and the post-fix pass alike, and before the disposition gate below — load `skills/review-judgment/SKILL.md § Close-Out Record Amendment` and run that step as the owning parent. That section is the rule's single home on every lane; nothing on this path restates it. Resolve the issue from the active issue id when this run holds one, otherwise from `gh pr view $PR_NUMBER --json closingIssuesReferences`. The step is advisory and never halts the loop; its outcome per judge pass is carried into Response Summary item 5 (`skills/validation-methodology/references/review-reconciliation.md § Response Commit & Push`), which is this lane's named accountability channel.
+
 **Post-judgment disposition gate**:
 
 This path does not run a separate gate step here. `skills/code-review-intake/SKILL.md § Response Loop Completion` loads `skills/code-review-intake/references/response-loop-completion.md`, whose step 1 is the sole executor of the Post-Judge Disposition Gate (`skills/review-judgment/SKILL.md § Post-Judge Disposition Gate`) on this path: it fires once per judge pass (main and post-fix), persists `<!-- review-dispositions-{PR} -->` then `<!-- engagement-record-review-{PR} -->`, and fires even on zero-sustained passes. AC-refs: AC1, AC2, AC10.

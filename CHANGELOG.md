@@ -4,6 +4,16 @@ All notable changes to agent-orchestra will be documented in this file.
 
 ## [Unreleased]
 
+## [3.17.0] — 2026-08-09
+
+### Changed
+
+**The close-out record's amendment trigger moved to a firing point every review lane reaches** (#1039, chunk 2 of #1013). 3.16.0 named the GitHub-intake terminal sequence — `code-review-intake` § Response Loop Completion — as the amendment's firing surface. Three lanes run a judge and can sustain findings after a record exists, and two of them never load that surface: the local-review lane (`/orchestra:review`, `-lite`, `-judge`), which is the lane carrying this repository's chunk work, and the Conductor local-review lane. On those lanes a record written at the pre-PR moment had no documented trigger to amend it, which is 3.16.0's own falsifier firing — the failure was moved, not closed. PR #1033's review sustained 25 findings after the point that record would have been written.
+
+The rule now has one home, `review-judgment` § Close-Out Record Amendment, named from each lane's own entry document (`commands/orchestra-review.md`, `-lite`, `-judge`, `commands/review-github.md`, and Code-Conductor's Review Reconciliation Loop). It fires **at each judge pass's own emission** — where the record's per-finding item is produced — before the Post-Judge Disposition Gate and before fixes, and on every pass including the post-fix one, which by construction carries a run's latest findings. Its executor is the **owning parent workflow, never the judge subagent**, per Code-Review-Response's scope boundary and adversarial-independence #552 D11; it resolves the issue from the active issue id the parent already holds, falling back to `gh pr view --json closingIssuesReferences` on a PR target. The step stays **advisory** — it never halts a loop or a run, a skip stays loud, and every lane names where its outcome is reported. The GitHub lane's step 6 survives as a hand-off that carries the outcome into Response Summary item 5 and restates none of the rule; a second statement would be the two-triggers-to-keep-in-sync drift the move removes.
+
+Unchanged, deliberately: the two moments at which a record is *written*, the population the obligation binds, § 9's lawfulness lookup, and the declined close-out detector.
+
 ## [3.16.0] — 2026-08-09
 
 ### Changed

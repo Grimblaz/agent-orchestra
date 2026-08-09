@@ -20,6 +20,10 @@ The `lite` adapter runs the full prosecution, defense, and judge pipeline as one
 
 Read `skills/adversarial-review/platforms/claude.md` and follow its parent-side dispatcher checklist as a thin caller with adapter `lite`. Pass the resolved review target, diff, linked issue or plan context, prior review ledger, and active issue id if available as the pre-dispatch context. Return the Markdown score summary and the `judge-rulings` block unchanged so downstream callers can consume the judge verdict in the same payload.
 
+**Close-out record amendment**:
+
+As soon as the judge pass's emission is in hand — and before the disposition gate below — load `skills/review-judgment/SKILL.md § Close-Out Record Amendment` and run that step as the owning parent. Resolve the issue from the active issue id passed above, or from `gh pr view {PR} --json closingIssuesReferences` when the review target is a pull request. The step is advisory and never halts this run; report its outcome per judge pass as a `Close-out record amendment:` line in the returned review report — that line is this lane's named accountability channel.
+
 **Post-judgment disposition gate**:
 
 After the full prosecution → defense → judgment pipeline completes, load `skills/review-judgment/SKILL.md § Post-Judge Disposition Gate` and run the disposition pass over judge-sustained findings. Follow the same steps as `/orchestra:review-judge` Post-judgment disposition gate: stable-key derivation, same-decision-resume check, per-finding gate classification, L0 token emission, and atomic marker persistence (`<!-- review-dispositions-{PR} -->` then `<!-- engagement-record-review-{PR} -->`).

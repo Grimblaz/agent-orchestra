@@ -630,6 +630,22 @@ Describe 'open-for-work surface (issue #974)' {
             $script:SkillsIndex = & $script:ReadRepoFile 'skills/README.md'
             $script:OpenCommand = & $script:ReadRepoFile 'commands/open.md'
             $script:ResponseLoop = & $script:ReadRepoFile 'skills/code-review-intake/references/response-loop-completion.md'
+            $script:ReviewJudgment = & $script:ReadRepoFile 'skills/review-judgment/SKILL.md'
+
+            # Every lane that runs a judge, keyed by the entry document a
+            # reader of that lane actually opens. This map is the AC1/AC2/AC3
+            # property in executable form: reach is a lane's own entry
+            # document naming the home, not a file some later hop happens to
+            # open. `/orchestra:review-prosecute` and `-defend` are absent
+            # deliberately -- both stop before judge, so no pass on them can
+            # sustain a finding.
+            $script:JudgeLanes = @{
+                'local review (/orchestra:review)'       = 'commands/orchestra-review.md'
+                'local review (/orchestra:review-lite)'  = 'commands/orchestra-review-lite.md'
+                'local review (/orchestra:review-judge)' = 'commands/orchestra-review-judge.md'
+                'GitHub intake (/review-github)'         = 'commands/review-github.md'
+                'Conductor local review'                 = 'agents/Code-Conductor.agent.md'
+            }
 
             # The obligation's home, extracted so an assertion cannot be
             # satisfied by text elsewhere in a 790-line file.
@@ -742,15 +758,57 @@ Describe 'open-for-work surface (issue #974)' {
             # apply to them. Membership rule: a surface is in AC5's set when
             # it tells a reader the record is OWED; it is carved out when it
             # only tells a reader how an existing record is later amended.
-            $lifecycleOnly = @(
+            #
+            # The list grew from three to eight in #1039, when the amendment
+            # rule moved to a lane-neutral home and every lane's entry
+            # document had to name it. A longer hand-list is a longer thing
+            # to go stale, so the two checks below make the list itself
+            # falsifiable in both directions the brief named -- an entry that
+            # no longer belongs, and an entry quietly absorbing text it was
+            # never exempted for.
+            $amendmentOnly = @(
+                'skills/review-judgment/SKILL.md',
                 'skills/code-review-intake/SKILL.md',
                 'skills/code-review-intake/references/response-loop-completion.md',
-                'skills/validation-methodology/references/review-reconciliation.md'
+                'skills/validation-methodology/references/review-reconciliation.md',
+                'commands/orchestra-review.md',
+                'commands/orchestra-review-lite.md',
+                'commands/orchestra-review-judge.md',
+                'commands/review-github.md'
             )
+
+            $candidateRels = @($candidates | ForEach-Object {
+                    ($_.FullName.Substring($script:RepoRoot.Length).TrimStart('\', '/')) -replace '\\', '/'
+                })
+
+            # OUTBOUND staleness: an exemption for a path the scan no longer
+            # reaches is dead text that reads as live coverage. Renaming,
+            # deleting, or emptying an exempted surface reddens here rather
+            # than silently shrinking the checked set.
+            foreach ($rel in $amendmentOnly) {
+                $candidateRels | Should -Contain $rel `
+                    -Because "$rel is exempted from AC5 but the discovery scan no longer finds it; a carve-out for a surface that no longer mentions the record exempts nothing and hides that the set shrank"
+            }
+
+            # INBOUND half-in guard: an exempted surface must be amendment-only
+            # all the way through. If one starts telling a reader WHEN the
+            # record is owed, it belongs in AC5's set and must satisfy the
+            # assertions below -- not sit exempt while stating half the rule.
+            # Discriminating on the delivered tree: all eight state neither
+            # moment and all six non-exempt surfaces state both, so the split
+            # is clean and moving any file across it reddens one side or the
+            # other.
+            foreach ($rel in $amendmentOnly) {
+                $exempt = (Get-Content -LiteralPath (Join-Path $script:RepoRoot $rel) -Raw) -replace "`r`n?", "`n"
+                $exempt | Should -Not -Match '(?i)before the PR-creation action' `
+                    -Because "$rel is exempted as amendment-only, so it must not also state when the record is owed; move it out of the exemption list instead"
+                $exempt | Should -Not -Match '(?i)before the close\b' `
+                    -Because "$rel is exempted as amendment-only, so it must not also state the close-time backstop; move it out of the exemption list instead"
+            }
 
             foreach ($file in $candidates) {
                 $rel = ($file.FullName.Substring($script:RepoRoot.Length).TrimStart('\', '/')) -replace '\\', '/'
-                if ($lifecycleOnly -contains $rel) { continue }
+                if ($amendmentOnly -contains $rel) { continue }
 
                 $text = (Get-Content -LiteralPath $file.FullName -Raw) -replace "`r`n?", "`n"
                 $text | Should -Match '(?i)before the PR-creation action' `
@@ -765,43 +823,118 @@ Describe 'open-for-work surface (issue #974)' {
                 -Because 'a pre-PR record describes a run that has not landed'
             $script:CloseOutHome | Should -Match '(?i)amends the existing record rather than posting a new one' `
                 -Because 'two records on one issue leave no way to tell which is current'
-            $script:CloseOutHome | Should -Match '(?i)Response Loop Completion' `
-                -Because 'an amendment rule with no firing surface reproduces the defect it was written to close'
+            # #1039 retired the 'Response Loop Completion' pin and replaced
+            # it with the pin below. The retirement has a reason, stated
+            # rather than silent: that surface is the GitHub-intake lane's
+            # terminal sequence, so pinning it here asserted the amendment
+            # rule lives somewhere two of the three judge-running lanes never
+            # load. The property the pin exists for -- the obligation's home
+            # names a firing surface -- is not weakened; it is re-established
+            # against the lane-neutral home on the next line.
+            $script:CloseOutHome | Should -Match '(?i)review-judgment/SKILL\.md.{0,80}Close-Out Record Amendment' `
+                -Because 'an amendment rule with no firing surface reproduces the defect it was written to close, and a firing surface only one lane loads reproduces it one level down'
         }
 
         It 'AC6 - the named firing surface actually carries the amendment step' {
-            # SCOPED to step 6's own body, not matched against the whole
-            # document (external review, PR #1033 F6, post-fix round 2
-            # M-A/M-B/M-C). A whole-document match on this file has already
-            # burned this suite twice -- see the CloseOutHome and Step9
-            # scopers above, and #995 round-1 M17 -- and a third instance
-            # was found here: every un-scoped assertion this It ever had
-            # stayed green through inverting "Advisory ... never halts the
-            # loop" to "Blocking ... halts the loop until resolved", because
-            # the guarded phrase was chosen to avoid line 24's unrelated
-            # "never halts the loop" occurrence rather than scoped away from
-            # it. Scoping releases that constraint, so the assertions below
-            # can read the polarity-bearing text directly.
-            $step6 = [regex]::Match(
-                $script:ResponseLoop,
-                '(?ms)^6\.\s+\*\*Close-out record amendment.*?(?=^\d+\.\s+\*\*|\z)'
-            ).Value
-            $step6 | Should -Not -BeNullOrEmpty `
-                -Because 'step 6 must exist and have a body to assert against'
+            # SCOPED to the amendment section's own body, not matched against
+            # the whole document (external review, PR #1033 F6, post-fix
+            # round 2 M-A/M-B/M-C). A whole-document match has already burned
+            # this suite three times -- see the CloseOutHome and Step9
+            # scopers above, #995 round-1 M17, and the step-6 instance this
+            # scoper replaces, where every un-scoped assertion stayed green
+            # through inverting "Advisory ... never halts the loop" to
+            # "Blocking ... halts the loop until resolved".
+            #
+            # Terminator is `^##\s` -- exactly two hashes then whitespace, so
+            # the section's own `###` children stay inside the span while the
+            # next h2 ends it. Demoting that next h2 to `###` would run the
+            # span past the section, so the over-run assertion below closes
+            # the same hole the CloseOutHome scoper's `^#{1,5}\s` closes for
+            # its own extraction.
+            $amendment = [regex]::Match(
+                $script:ReviewJudgment,
+                '(?ms)^## Close-Out Record Amendment[^\n]*\n(?<body>.*?)(?=^##\s|\z)'
+            ).Groups['body'].Value
+
+            $amendment | Should -Not -BeNullOrEmpty `
+                -Because 'the amendment section must exist and have a body to assert against'
+            $amendment | Should -Not -Match '(?i)stable_finding_key' `
+                -Because 'the extract must stop at the next h2; reaching the disposition gate''s body means the scoper over-ran and every assertion below is unscoped again'
 
             # \s+ throughout, not a literal space: a newline inserted mid-
             # phrase by ordinary markdown reflow does not cross '.' without
             # (?s), and does not match a literal space either -- both were
             # demonstrated to false-red an earlier, literal-space version of
             # these same anchors.
-            $step6 | Should -Match '(?i)never\s+halts\s+the\s+loop' `
-                -Because 'the advisory, never-halts property is the whole reason this step cannot become a silent blocking gate; unlike a bare-phrase match, this cannot be satisfied by line 24''s unrelated occurrence once scoped to step 6'
-            $step6 | Should -Match '(?i)amend\s+that\s+record\s+in\s+place' `
+            $amendment | Should -Match '(?i)never\s+halts\s+the\s+loop' `
+                -Because 'the advisory, never-halts property is the whole reason this step cannot become a silent blocking gate'
+            $amendment | Should -Match '(?i)amend\s+that\s+record\s+in\s+place' `
                 -Because 'posting a second record is the failure mode this step exists to prevent'
-            $step6 | Should -Match ([regex]::Escape('⚠️ close-out record amendment skipped — {reason}')) `
-                -Because 'the loud literal, glyph and all, is what makes a skipped amendment visible rather than silent -- this repository already pins this document''s other two loud literals the same way, verbatim with glyph, in code-conductor-inline-commands.Tests.ps1'
-            $step6 | Should -Match '(?i)closingIssuesReferences' `
-                -Because 'this loop is otherwise entirely PR-keyed; without issue resolution the amendment has no issue to check or amend'
+            $amendment | Should -Match ([regex]::Escape('⚠️ close-out record amendment skipped — {reason}')) `
+                -Because 'the loud literal, glyph and all, is what makes a skipped amendment visible rather than silent -- this repository already pins this document''s sibling loud literals the same way, verbatim with glyph, in code-conductor-inline-commands.Tests.ps1'
+            $amendment | Should -Match '(?i)closingIssuesReferences' `
+                -Because 'the GitHub-intake lane is entirely PR-keyed; without a PR-side issue-resolution route the amendment has no issue to check or amend there'
+
+            # Added in #1039. The three above travelled from step 6; these
+            # pin what the move itself is for and what it must not become.
+            # Anchored to the ordered list's FIRST item, not to the phrase
+            # anywhere in the section. The unanchored version stayed green
+            # through gutting route 1 outright, because the section's own
+            # prose quotes "active issue id if available" a few lines away --
+            # the same adjacent-occurrence class that burned the step-6
+            # assertions, found here by mutation before this shape landed.
+            # Ordinal position is the property: a PR-keyed route tried first
+            # takes its visible-skip branch on every PR-less local-lane run.
+            $amendment | Should -Match '(?ms)^1\.\s+\*\*The active issue id the parent already holds' `
+                -Because 'a route keyed only on the PR takes its visible-skip branch on every PR-less local-lane run -- present, loud, and discharging nothing, which is the defect being closed wearing the fix''s clothes'
+            $amendment | Should -Match '(?i)never the judge subagent' `
+                -Because 'Code-Review-Response''s scope boundary and #552 D11 place this durable write with the orchestrating parent, so naming the judge as executor is a step nothing is authorised to run'
+            $amendment | Should -Match '(?i)does not already account for' `
+                -Because 'the record has no dedupe key by design, so a step firing on every judge pass must bound its amendment by what the record already carries'
+        }
+
+        It 'AC6 - the amendment rule has one home, and every judge-running lane names it' {
+            # AC1/AC2/AC3 in executable form. Reach is a lane's OWN entry
+            # document naming the home -- a file some later hop eventually
+            # opens is not a section a lane names, and that distinction is
+            # the whole defect #1039 closed.
+            foreach ($lane in $script:JudgeLanes.GetEnumerator()) {
+                $entry = & $script:ReadRepoFile $lane.Value
+                $entry | Should -Match '(?i)review-judgment/SKILL\.md.{0,120}Close-Out Record Amendment' `
+                    -Because "the $($lane.Key) lane runs a judge and can sustain findings after a record exists; its entry document ($($lane.Value)) must name the amendment's home or that lane has no documented trigger"
+
+                # The step is advisory, so its report is the only trace it
+                # leaves. A lane that names the home but no channel lets a
+                # skip vanish into an otherwise complete report -- present,
+                # loud, and unaccounted for.
+                $entry | Should -Match '(?i)(Response Summary item 5|returned review report)' `
+                    -Because "the $($lane.Key) lane must name positively where the amendment outcome is reported; producing no summary today is not the same as owing no slot"
+            }
+
+            # The pointer must land somewhere. Two of the five lanes route
+            # their outcome to Response Summary item 5, so that item existing
+            # and still being the amendment's slot is part of those lanes'
+            # coverage, not a separate file's business.
+            $summary = & $script:ReadRepoFile 'skills/validation-methodology/references/review-reconciliation.md'
+            $summary | Should -Match '(?ms)^5\.\s+\*\*Close-out record amendment outcome' `
+                -Because 'two lanes name Response Summary item 5 as their accountability channel; if that item is renamed or dropped, those pointers dangle and a skipped amendment has nowhere to surface'
+
+            # The other half of "move, not add". The rule was NOT duplicated
+            # into the lane that used to hold it: step 6 now hands off an
+            # outcome and states no procedure of its own. Keyed on the two
+            # procedure details a restatement would drag back with it.
+            $step6 = [regex]::Match(
+                $script:ResponseLoop,
+                '(?ms)^6\.\s+\*\*Close-out record amendment.*?(?=^\d+\.\s+\*\*|\z)'
+            ).Value
+            $step6 | Should -Not -BeNullOrEmpty `
+                -Because 'the GitHub lane still reports the outcome, so the step survives as a hand-off even though the rule moved'
+            $step6 | Should -Match '(?i)review-judgment/SKILL\.md.{0,80}Close-Out Record Amendment' `
+                -Because 'a hand-off that does not name what it hands off from is an orphan'
+            $step6 | Should -Not -Match '(?i)closingIssuesReferences' `
+                -Because 'two statements of one trigger is option 2 shipped under option 1''s name -- the drift class this move removed'
+            $step6 | Should -Not -Match ([regex]::Escape('⚠️ close-out record amendment skipped — {reason}')) `
+                -Because 'the loud literal belongs to the rule''s single home; a second copy here is a second thing to keep in sync'
         }
 
         It 'AC7 - the index routing pointer lands on a surface that states both moments' {
