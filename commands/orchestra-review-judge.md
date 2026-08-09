@@ -25,7 +25,7 @@ Read `skills/adversarial-review/platforms/claude.md` and follow its parent-side 
 
 **Close-out record amendment**:
 
-After the judge emits the `<!-- review-judge-produced-{PR} -->` sentinel and the judge-rulings comment, and before the disposition gate below, load `skills/review-judgment/SKILL.md § Close-Out Record Amendment` and run that step as the owning parent. A standalone judge re-run is a judge pass of its own, so this step fires here too. Resolve the issue from the active issue id passed above, or from `gh pr view {PR} --json closingIssuesReferences` when the review target is a pull request. The step is advisory and never halts this run; report its outcome as a `Close-out record amendment:` line in the returned review report — that line is this lane's named accountability channel.
+As soon as each judge pass's emission is in hand — and before the disposition gate below — load `skills/review-judgment/SKILL.md § Close-Out Record Amendment` and run that step as the owning parent. A standalone judge re-run is a judge pass of its own, so this step fires here too. That section owns the trigger, the issue-resolution route, the write transport, and the outcome set; this command restates none of it and adds only the two facts it alone holds: the active issue id passed as pre-dispatch context above is what that section's route 2 reads, and its outcome is reported here as a `Close-out record amendment:` line appended to the returned judgment payload, immediately after the `judge-rulings` block. That line is this lane's named accountability channel.
 
 **Post-judgment disposition gate**:
 

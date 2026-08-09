@@ -33,7 +33,7 @@ This command completes the full response loop: accepted fixes are applied by spe
 
 **Close-out record amendment**:
 
-As soon as each judge pass's emission is in hand — the main pass and the post-fix pass alike, and before the disposition gate below — load `skills/review-judgment/SKILL.md § Close-Out Record Amendment` and run that step as the owning parent. That section is the rule's single home on every lane; nothing on this path restates it. Resolve the issue from the active issue id when this run holds one, otherwise from `gh pr view $PR_NUMBER --json closingIssuesReferences`. The step is advisory and never halts the loop; its outcome per judge pass is carried into Response Summary item 5 (`skills/validation-methodology/references/review-reconciliation.md § Response Commit & Push`), which is this lane's named accountability channel.
+As soon as each judge pass's emission is in hand — the main pass and the post-fix pass alike, and **before** that pass reaches the Post-Judge Disposition Gate (which on this path runs inside `skills/code-review-intake/references/response-loop-completion.md` step 1, not in the section below) — load `skills/review-judgment/SKILL.md § Close-Out Record Amendment` and run that step as the owning parent. That section is the rule's single home on every lane, and it owns the trigger, the issue-resolution route, the write transport, and the outcome set; this command restates none of it. Its outcome per judge pass is carried into Response Summary item 5 (`skills/validation-methodology/references/review-reconciliation.md § Response Commit & Push`), which is this lane's named accountability channel.
 
 **Post-judgment disposition gate**:
 

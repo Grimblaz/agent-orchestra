@@ -201,6 +201,9 @@ After the persist attempt completes, the executor assembles a Response Summary c
    - The `not_pushed_reason` value + `manual_instruction` text if push was skipped.
    - `attempted-and-failed: {stderr} (exit {code})` if `git push` executed but returned non-zero — surface loudly; do not claim success.
 4. **Explicit not-pushed list** — when any accepted findings were NOT pushed, list each one with its `not_pushed_reason`. This includes the distinct "nothing to push (all deferred/rejected/escalated)" state when zero findings were accepted and `not_pushed_reason='nothing-to-push'`.
+5. **Close-out record amendment outcome, one per judge pass this run reached** — one of `amended`, `no-new-findings`, `not-applicable`, `no-issue-resolved`, or `skipped`, carrying the `⚠️ close-out record amendment skipped — {reason}` literal on the last two. State how many passes fired. That step is **advisory** and never halts the run, so this summary is its only trace on this path; without the item a skipped amendment disappears into a summary that satisfies every other requirement here. The step itself — trigger, moment, executor, transport, and outcome set — lives at `skills/review-judgment/SKILL.md` § Close-Out Record Amendment; this item reports its outcome and restates none of it.
+
+The canonical shape is `skills/validation-methodology/references/review-reconciliation.md` § Response Commit & Push. This list must carry the same item count; a four-item copy beside the persist call is how item 5 goes missing at the one moment it is being reported.
 
 ## Validation
 

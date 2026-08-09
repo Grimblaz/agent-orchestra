@@ -388,7 +388,7 @@ Load and follow these references:
 - `skills/validation-methodology/references/review-state-persistence.md`
 - `skills/validation-methodology/references/post-judgment-routing.md`
 - `skills/code-review-intake/references/express-lane.md`
-- `skills/review-judgment/SKILL.md § Close-Out Record Amendment` — run that step as the owning parent once each judge pass's emission is in hand, before the disposition gate and before fix routing. That section is the rule's single home on every lane; this loop restates none of it. Its outcome per judge pass goes into Response Summary item 5.
+- `skills/review-judgment/SKILL.md § Close-Out Record Amendment` — run that step as the owning parent once each judge pass's emission is in hand (the main pass, the post-fix pass, and any standalone judge re-run), before the disposition gate and before fix routing. That section is the rule's single home on every lane and owns the trigger, the issue-resolution route, the write transport, and the outcome set; this loop restates none of it. Report its outcome per judge pass into **Response Summary item 5 on the existing-PR path**, and into the **Close-out record amendment row of the PR-body pipeline-metrics block on the new-PR path** — Step 4's `gh pr create` path fires no `persist-changes` and assembles no Response Summary, so item 5 does not exist there.
 
 Code-Conductor keeps only the orchestration boundary here: enter the correct review mode, apply express-lane routing only where the contract allows it, route post-judgment and post-fix outcomes, preserve any required calibration side effects, enforce the Review Completion Gate before PR creation, and proceed to the CE Gate in the documented sequence.
 
