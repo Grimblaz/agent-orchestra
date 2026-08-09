@@ -21,7 +21,7 @@ After all judgment states reach terminal, the GitHub-intake response loop comple
 
    Skip findings with `disposition: escalate`; only `disposition: incorporate` entries proceed to fix routing.
 
-   A failed post of either marker never halts the loop — emit the corresponding loud literal and continue, carrying it into the Response Summary (step 6):
+   A failed post of either marker never halts the loop — emit the corresponding loud literal and continue, carrying it into the Response Summary (step 7):
 
    - `⚠️ review-dispositions-{PR} not posted — {reason}`
    - `⚠️ engagement-record-review-{PR} not posted — {reason}`
@@ -29,7 +29,8 @@ After all judgment states reach terminal, the GitHub-intake response loop comple
 3. **Post-fix targeted prosecution pass** — when triggered per the R2 conditions (see `skills/validation-methodology/references/review-reconciliation.md § Post-Fix Targeted Prosecution Pass`). This pass's defense → judge cycle re-enters step 1's Post-Judge Disposition Gate — see step 1 above.
 4. **CE Gate** — run the CE Gate when a customer surface is affected (see `agents/Code-Conductor.agent.md § Customer Experience Gate`).
 5. **Persist changes** — fire `skills/persist-changes/SKILL.md` as the terminal step (see `### Response Commit & Push` in `skills/validation-methodology/references/review-reconciliation.md` for the SSOT contract). The executor commits fix files and pushes to the PR's head remote, or surfaces a loud not-pushed reason.
-6. **Response Summary** — assemble and return the Response Summary per the shape in `skills/validation-methodology/references/review-reconciliation.md § Response Commit & Push`.
+6. **Close-out record amendment (advisory)** — this step is the named firing surface for the close-out record's amendment rule (`skills/plan-authoring/SKILL.md` § The close-out obligation on an affirmation-record issue). **Applies only** when the issue carries an open-for-work affirmation record **and** a close-out record was already written; **does not apply otherwise**, and this step never manufactures a first record. When this pass sustained findings the existing record does not account for, **amend that record in place** — do not post a second one, which would read as two close-outs with no way to tell which is current. This exists because an unamended record is *present* and therefore reads as discharged, making it harder to notice than a missing one. **Advisory**: a skipped or failed amendment never halts the loop — say so in the Response Summary rather than stalling.
+7. **Response Summary** — assemble and return the Response Summary per the shape in `skills/validation-methodology/references/review-reconciliation.md § Response Commit & Push`.
 
 This step sequence is what makes a bare `/review-github` complete the full response loop — accepted fixes are applied, committed, and pushed to the existing PR branch without requiring an additional user instruction.
 

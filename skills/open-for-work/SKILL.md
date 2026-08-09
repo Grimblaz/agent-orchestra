@@ -354,7 +354,16 @@ The review runs **once**, after beat 2's artifact exists and before the worktree
 
 ## Close-out
 
-When the issue closes, the conversation's owner writes the close-out record on the issue: one line per sustained finding, a dead-premises note, and the beat-2 re-route count. The obligation and its exact shape live at the close-time surface that already runs at that moment — `skills/post-pr-review/SKILL.md` § 9. Close-Out Record (Issues Opened For Work). This flow adds no ledger-emission machinery of its own.
+The conversation's owner writes the close-out record on the issue: one line per sustained finding, a dead-premises note, and the beat-2 re-route count. Its exact shape lives at `skills/post-pr-review/SKILL.md` § 9. Close-Out Record (Issues Opened For Work). This flow adds no ledger-emission machinery of its own.
+
+**Two firing moments, and this flow produces issues that hit each of them.** The obligation is **advisory** — nothing blocks a PR, a merge, or a close on it, and nothing re-checks it after the run ends.
+
+1. **Pre-PR, on a run that will open a pull request** — the record is written **before the PR-creation action**. The run meets this on the brief it is dispatched against (`skills/plan-authoring/SKILL.md` § The close-out obligation on an affirmation-record issue), which is where the obligation is stated for that population.
+2. **Close-time backstop, on a run that will not** — an issue this flow opened and that closes **without a pull request** gets the record written **before the close**, by the conversation closing it. That is this section's own reader: moment 1 cannot reach a close that never creates a PR, and the post-merge checklist's stated trigger arrives after the close, so neither one covers this case on its own.
+
+Both moments carry the same lifecycle rules the brief states: a pre-PR record is **provisional until the PR merges**, a second PR **amends the existing record rather than posting a new one**, and a record is **amended when late findings are sustained** at `skills/code-review-intake/SKILL.md` § Response Loop Completion.
+
+**Why it binds: the run ends at the close** — afterwards no conversation is left to write anything. It is *not* that a closed issue becomes unfindable; a number-keyed read reaches it either way. See § 9 for that correction and the one scope limit that survives it.
 
 ## Related Guidance
 

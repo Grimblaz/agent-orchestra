@@ -28,6 +28,17 @@
          issues that ran this flow, pointing at the existing ledger rather
          than re-emitting it.
 
+      5. (issue #1028) The close-out obligation reaches the run that owes
+         it: stated on the brief before the PR-creation action and marked
+         advisory, backstopped at close time for a PR-less run, resting on
+         the run-ends basis rather than the falsified findability one,
+         scoped in EVERY register row that asserts auto-close suffices,
+         naming the same two moments on every surface that states it,
+         carrying its lifecycle rules where it is stated, and firing its
+         amendment on the surface it names. The read set widens past the
+         skills tree for this -- the doctrine document and the decision
+         register are surfaces this suite never opened before.
+
     The affirmation gate's register entries and its skill-side rule block
     are pinned by engagement-gate-non-overridability.Tests.ps1, which owns
     the bounded-clause contract for every registered gate.
@@ -560,6 +571,169 @@ Describe 'open-for-work surface (issue #974)' {
             $completion = [regex]::Match($script:PostPrText, '(?ms)^## Completion\s*\n(?<body>.*?)(?=^## |\z)')
             $completion.Success | Should -BeTrue
             $completion.Groups['body'].Value | Should -Match '(?i)close-out record'
+        }
+    }
+
+    Context 'the close-out obligation reaches the run that owes it (issue #1028)' {
+
+        # One It per pinned property of AC1-AC7, so a regression in any one
+        # of them reddens on its own. A single aggregate assertion would go
+        # red for the whole deliverable and establish nothing about which
+        # property broke.
+        #
+        # The read set is deliberately WIDER than the skills tree. Before
+        # this Context the suite never opened the doctrine document or the
+        # decision register, so the doctrine could contradict the skill and
+        # every assertion here would still pass -- that read-set gap is the
+        # defect this Context exists to close, not an incidental detail.
+
+        BeforeAll {
+            $script:PostPr = & $script:ReadRepoFile 'skills/post-pr-review/SKILL.md'
+            $script:OfwSkill = & $script:ReadRepoFile 'skills/open-for-work/SKILL.md'
+            $script:OfwDoctrine = & $script:ReadRepoFile 'Documents/Design/open-for-work.md'
+            $script:PlanAuthoring = & $script:ReadRepoFile 'skills/plan-authoring/SKILL.md'
+            $script:SessionHooks = & $script:ReadRepoFile 'Documents/Design/session-hooks.md'
+            $script:SkillsIndex = & $script:ReadRepoFile 'skills/README.md'
+            $script:OpenCommand = & $script:ReadRepoFile 'commands/open.md'
+            $script:ResponseLoop = & $script:ReadRepoFile 'skills/code-review-intake/references/response-loop-completion.md'
+
+            # The obligation's home, extracted so an assertion cannot be
+            # satisfied by text elsewhere in a 790-line file.
+            $script:CloseOutHome = [regex]::Match(
+                $script:PlanAuthoring,
+                '(?ms)^#### The close-out obligation on an affirmation-record issue[^\n]*\n(?<body>.*?)(?=^#{2,4}\s|\z)'
+            ).Groups['body'].Value
+
+            $script:Step9 = [regex]::Match(
+                $script:PostPr,
+                '(?ms)^### 9\.\s*Close-Out Record[^\n]*\n(?<body>.*?)(?=^#{2,3}\s|\z)'
+            ).Groups['body'].Value
+        }
+
+        It 'AC1 - the obligation is stated on the brief, before the PR-creation action, and as advisory' {
+            $script:CloseOutHome | Should -Not -BeNullOrEmpty `
+                -Because 'the brief is the artifact every failing run was dispatched against; without this section the obligation reaches none of them'
+            $script:CloseOutHome | Should -Match '(?i)before the PR-creation action' `
+                -Because 'a moment stated after the PR is created is read too late to act on'
+            $script:CloseOutHome | Should -Match '(?i)advisory obligation, not a blocking gate' `
+                -Because 'D2a decided advisory; leaving the force unstated lets a blocking gate satisfy every other property'
+            $script:CloseOutHome | Should -Match '(?i)does not apply otherwise' `
+                -Because 'relocating the statement must not widen the population the obligation binds'
+        }
+
+        It 'AC2 - the close-time backstop is stated where a PR-less run meets it' {
+            $closeOut = [regex]::Match(
+                $script:OfwSkill,
+                '(?ms)^## Close-out\s*\n(?<body>.*?)(?=^## |\z)'
+            ).Groups['body'].Value
+
+            $closeOut | Should -Not -BeNullOrEmpty
+            $closeOut | Should -Match '(?i)before the close' `
+                -Because 'the PR-less reader is this section, and the post-merge checklist arrives after the close by construction'
+            $closeOut | Should -Match '(?i)without a pull request' `
+                -Because 'the backstop exists for exactly the population a pre-PR moment cannot reach'
+        }
+
+        It 'AC3 - the ordering rule gives the run-ends basis, drops the falsified one, and states its limit' {
+            $script:Step9 | Should -Match '(?i)the run ends at the close' `
+                -Because 'that is the basis that actually holds'
+            $script:Step9 | Should -Not -Match '(?i)so the record lands on an issue a reader can still find it on' `
+                -Because 'the findability rationale is falsified at the grain this step itself reads'
+            $script:Step9 | Should -Match '(?i)ages? out of time-windowed sweeps' `
+                -Because 'without the surviving limit a reader over-learns the correction into "ordering never matters"'
+        }
+
+        It 'AC4 - every register row asserting auto-close suffices is scoped, not just the known one' {
+            # Reads EVERY row that makes the assertion. The register never
+            # uses the phrase "close-out" at all, and its second row uses
+            # different vocabulary from its first -- a check keyed on one
+            # row, or on this repository's usual vocabulary, misses it.
+            $rows = @(
+                $script:SessionHooks -split "`n" | Where-Object {
+                    $_ -match '(?i)auto-close is sufficient' -or $_ -match '(?i)Summary comment on issue'
+                }
+            )
+
+            $rows.Count | Should -BeGreaterOrEqual 2 `
+                -Because 'the register carries two such rows; finding fewer means the probe stopped reading early'
+
+            foreach ($row in $rows) {
+                $row | Should -Match '(?i)affirmation record' `
+                    -Because "this register row asserts auto-close suffices and must name the population it does not cover: $row"
+            }
+        }
+
+        It 'AC5 - every surface stating the obligation names the same two moments' {
+            $surfaces = @{
+                'skills/plan-authoring/SKILL.md'  = $script:PlanAuthoring
+                'skills/post-pr-review/SKILL.md'  = $script:PostPr
+                'skills/open-for-work/SKILL.md'   = $script:OfwSkill
+                'Documents/Design/open-for-work.md' = $script:OfwDoctrine
+                'Documents/Design/session-hooks.md' = $script:SessionHooks
+                'commands/open.md'                = $script:OpenCommand
+            }
+
+            foreach ($path in $surfaces.Keys) {
+                $surfaces[$path] | Should -Match '(?i)before the PR-creation action' `
+                    -Because "$path states the close-out obligation and must name the pre-PR moment"
+                $surfaces[$path] | Should -Match '(?i)before the close' `
+                    -Because "$path states the close-out obligation and must name the close-time backstop"
+            }
+        }
+
+        It 'AC6 - the record lifecycle rules are readable where the obligation is stated' {
+            $script:CloseOutHome | Should -Match '(?i)provisional until the PR merges' `
+                -Because 'a pre-PR record describes a run that has not landed'
+            $script:CloseOutHome | Should -Match '(?i)amends the existing record rather than posting a new one' `
+                -Because 'two records on one issue leave no way to tell which is current'
+            $script:CloseOutHome | Should -Match '(?i)Response Loop Completion' `
+                -Because 'an amendment rule with no firing surface reproduces the defect it was written to close'
+        }
+
+        It 'AC6 - the named firing surface actually carries the amendment step' {
+            # The rule names code-review-intake's terminal sequence. If that
+            # sequence does not run the amendment, the failure has been
+            # moved rather than closed.
+            $script:ResponseLoop | Should -Match '(?i)close-out record amendment' `
+                -Because 'the named surface must actually fire when late findings are sustained'
+            $script:ResponseLoop | Should -Match '(?i)amend that record in place' `
+                -Because 'posting a second record is the failure mode this step exists to prevent'
+        }
+
+        It 'AC7 - the index routing pointer lands on a surface that states both moments' {
+            # Follows the pointer rather than pattern-matching the row. An
+            # earlier version of this assertion required the row to mention
+            # plan-authoring -- which the PRE-CHANGE row already did, for an
+            # unrelated topic in the same cell. It passed against the
+            # untouched tree and so proved nothing.
+            $rows = @($script:SkillsIndex -split "`n" | Where-Object { $_ -match '(?i)close-out' })
+            $rows.Count | Should -BeGreaterOrEqual 1 `
+                -Because 'the index routes close-out mechanics somewhere and that pointer is what a reader follows'
+
+            # Only the close-out clause, not the whole cell: the same cell
+            # routes other topics, and a skill named for one of those would
+            # otherwise satisfy this without the close-out reader landing
+            # anywhere useful.
+            $joined = $rows -join ' '
+            $clause = $joined.Substring($joined.IndexOf('close-out', [System.StringComparison]::OrdinalIgnoreCase))
+
+            $targets = @{
+                'post-pr-review' = 'skills/post-pr-review/SKILL.md'
+                'plan-authoring' = 'skills/plan-authoring/SKILL.md'
+                'open-for-work'  = 'skills/open-for-work/SKILL.md'
+            }
+
+            $named = @($targets.Keys | Where-Object { $clause -match [regex]::Escape($_) })
+            $named.Count | Should -BeGreaterOrEqual 1 `
+                -Because 'the close-out routing clause must name a destination'
+
+            $landed = @($named | Where-Object {
+                    $text = & $script:ReadRepoFile $targets[$_]
+                    ($text -match '(?i)before the PR-creation action') -and ($text -match '(?i)before the close')
+                })
+
+            $landed.Count | Should -BeGreaterOrEqual 1 `
+                -Because "a reader following this pointer must land on a surface stating both moments; it routes to: $($named -join ', ')"
         }
     }
 }

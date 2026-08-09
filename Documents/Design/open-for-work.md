@@ -118,11 +118,22 @@ A brief produced by this flow takes the same review a chunk brief takes — the 
 
 ### The close-out habit
 
-When the issue closes, the conversation's owner writes the close-out record on the issue. The instruction lives on the surface that already runs at that moment — `skills/post-pr-review/SKILL.md` § 9. Close-Out Record (Issues Opened For Work) — so an agent walking the close-time checklist reaches it without being pointed here first; it applies only to issues that carry an affirmation record. Three things:
+The conversation's owner writes the close-out record on the issue. It applies only to issues that carry an affirmation record. Three things:
 
 - **One line per sustained finding** — where it was introduced, where it was catchable, where it was caught (the phase-containment ledger's grain; emission mechanics ride #951/#940/#944, this flow adds none).
 - **A dead-premises note** — which filed premises were falsified during the flow and amended in place, so the next reader does not resurrect them.
 - **The beat-2 re-route count** — how many times the escape hatch re-ran the routing (zero is the common, and reportable, case).
+
+**Where the instruction lives, and why it moved** (#1013). It used to live only on the close-time checklist — `skills/post-pr-review/SKILL.md` § 9 — on the reasoning that an agent walking that checklist reaches it without being pointed here first. Measured across the six closed issues that owed a record, that did not hold: one landed before the close, three landed after it, and **two were never written at all**. The checklist's stated trigger is post-merge, so its reader arrives when the issue has already closed; and the instruction reachable at PR time sat in a lane none of the failing runs used. The obligation is now stated on the **brief** — `skills/plan-authoring/SKILL.md` § The close-out obligation on an affirmation-record issue — because the brief is what every run reads whichever lane it runs, and all six of those issues carried one. § 9 still owns the record's shape.
+
+**Two firing moments**, because a pre-PR rule cannot reach a close that never opens a PR:
+
+1. **Pre-PR, on a run that will open a pull request** — written before the PR-creation action.
+2. **Close-time backstop, on a run that will not** — written before the close, by the conversation closing the issue. #990 is the live instance: closed by hand, no commit, no PR.
+
+The obligation is **advisory**, deliberately. **A detector was considered and declined** — not on a count argument, which this issue's own amendment falsified, but because a blocking gate is that declined mechanism under another name. The standing counter-argument is preserved rather than buried: a documentation clause has nothing re-checking the property once a run ends, so detection reverts to the incidental discovery that let two of six go missing. The revisit trigger is the first falsifier firing.
+
+**Why it binds: the run ends at the close.** Not, as the rule used to say, because a closed issue cannot be found — a number-keyed read reaches a late record exactly as well as an on-time one. What a close *does* cost is presence in **time-windowed sweeps**, which is how the original loss stayed invisible. Do not over-learn the correction into "ordering never matters."
 
 ## The affirmation record
 

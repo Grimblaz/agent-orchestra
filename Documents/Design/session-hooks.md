@@ -28,7 +28,7 @@ Era values: Hook | Instruction | Skill | Plugin hook | Auto-resolve (business-lo
 | D2 | Confirmation model | Agent-mediated via `vscode/askQuestions` | `PreToolUse` is the only hook with `permissionDecision: "ask"` but does not fit the trigger pattern; agent-mediated confirmation is functionally equivalent | Hook |
 | D3 | Janitor retirement | Remove entirely; absorb all capabilities | Mechanical work moved to hook; judgment work absorbed by existing pipeline stages | Hook |
 | D4 | Implementation language | PowerShell (`.ps1`) | Cross-platform via `pwsh`; supports both parameterized invocation and hook-triggered flow | Hook |
-| D5 | Issue closure | `Closes #N` in PR body | GitHub auto-close is sufficient — no summary comment needed | Hook |
+| D5 | Issue closure | `Closes #N` in PR body | GitHub auto-close is sufficient for an ordinary issue — no summary comment needed. **Scoped by #1013**: an issue carrying an open-for-work affirmation record still owes a close-out record, written before the PR-creation action (or before the close on a PR-less run) — `skills/plan-authoring/SKILL.md` § The close-out obligation on an affirmation-record issue, shape at `skills/post-pr-review/SKILL.md` § 9. The keyword itself stays | Hook |
 | D6 | Knowledge capture | Dropped | Pipeline already produces durable artifacts (design in issue body, `Documents/Design/` file, PR description); rare novel insights are left as manual developer actions | Hook |
 | D7 | Hook portability | `WORKFLOW_TEMPLATE_ROOT` env var | Explicit and transparent; works across all repos; no dynamic resolution needed; hook-era unset behavior: fail with a clear actionable error, not silent no-op (see D9 for instruction-era behavior) | Hook |
 | D8 | Hook retirement | Retire `SessionStart` hook entirely | Hook fires unreliably across different repos (works in some, silently fails in others at the OS/IDE level regardless of configuration); instruction files via `chat.instructionsFilesLocations` are more reliable and simpler to maintain | Instruction |
@@ -84,7 +84,7 @@ Full adversarial-review trail, incident detail, and stress-test findings live on
 | Delete branches (local + remote) | `post-merge-cleanup.ps1` |
 | Switch to main + git pull | `post-merge-cleanup.ps1` |
 | Close GitHub issue | `Closes #N` in PR body (automated by Code-Conductor) |
-| Summary comment on issue | Dropped (PR description is the durable record) |
+| Summary comment on issue | Dropped for an ordinary issue (PR description is the durable record). **Scoped by #1013**: an issue carrying an open-for-work affirmation record still owes a close-out record at the two moments in `skills/plan-authoring/SKILL.md` § The close-out obligation on an affirmation-record issue |
 | Tech debt issue closure | Code-Conductor adds `Closes #tech-debt-N` to PR body |
 | Knowledge capture (ADRs) | Dropped (pipeline artifacts suffice) |
 | Remove obsolete files | Already handled by Code-Smith / Refactor-Specialist |

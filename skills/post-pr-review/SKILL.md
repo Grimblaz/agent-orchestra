@@ -20,6 +20,8 @@ Or use the strategic assessment section only (Step 6) **before merging** to eval
 
 **Step 9 (Close-Out Record) is not gated on a merged PR.** It fires whenever an issue that was opened for work is about to be closed, including an issue closed without a pull request. Do not read the merged-PR trigger above as a reason to skip it.
 
+**And on a run that will open a pull request, the record is owed earlier than this document is read at all** — before the PR-creation action, stated on the brief that run is dispatched against (`skills/plan-authoring/SKILL.md` § The close-out obligation on an affirmation-record issue). Step 9 owns the record's shape at both moments; it is not the only place the obligation is stated, and by the time a reader arrives here through the post-merge trigger above, moment 1 has already passed.
+
 Be clear about who reaches it on that path, because no dispatcher does: the post-merge checklist is invoked by Code-Conductor's cleanup path, which presupposes a PR. For a PR-less close the reader is the **conversation closing the issue**, routed here by `skills/open-for-work/SKILL.md` § Resuming an issue already opened for work (`complete` state). That is a documented reader, not an automated one — nothing fires Step 9 on its own, so an issue closed by hand outside any conversation will not get a close-out record unless someone runs this step deliberately.
 
 > **Note for plugin-only users**: Step 6 (Strategic Assessment) is available without cloning — it's pure analysis using GitHub tools.
@@ -232,7 +234,16 @@ if ((Test-Path 'Documents/Planning/sequence.yaml') -and (Test-Path '.github/scri
 2. **A dead-premises note** — which filed premises beat 1's grounding falsified and amended in place, so the next reader does not resurrect them.
 3. **The beat-2 re-route count** — how many times the escape hatch re-ran the routing. Zero is the common case and is reportable. **The count is what the run observed, not an arithmetic on comment counts.** Records-minus-one is a cross-check that legitimately disagrees in three directions: a record voided by a later edit still evidences a re-route that happened, a re-affirmation with an unchanged what-statement can append nothing at all, and a retried write can append twice for one re-route. Report the observed count, note how many affirmation records the issue carries and how many are lawful, and when those disagree say so and why.
 
-Write it **before** marking the issue closed (`## Completion` below), so the record lands on an issue a reader can still find it on.
+**When to write it — two moments, and the second is not a fallback for the first.**
+
+1. **Before the PR-creation action**, on a run that will open a pull request. That run meets this obligation earlier than this step: it is stated on the brief the run is dispatched against, at `skills/plan-authoring/SKILL.md` § The close-out obligation on an affirmation-record issue. This step owns the record's shape; that section owns when the obligation is read.
+2. **Before the close** (`## Completion` below), on a run that will not — an issue closed by hand with no pull request. Moment 1 structurally cannot reach that close, and it is a real case rather than a hypothetical one, so this backstop is stated alongside it rather than left implied.
+
+**Why it binds: the run ends at the close.** Afterwards there is no conversation left to write anything — which is how two of the six issues that owed a record got none at all.
+
+**It is not, as this step used to say, that a closed issue cannot be found.** That reason was false at the grain this step itself reads: the lookup above is number-keyed and state-blind, so a record written a minute *after* the close sits on the issue exactly as reachably as one written a minute before.
+
+**The limit that does hold — do not over-read the correction into "ordering never matters."** A closed issue stays reachable by a number-keyed read and **ages out of time-windowed sweeps**: this repository's portfolio render and its rolling-history ledger both scan closed issues through a `closed:>=` / `closed:>` search window. A late record is not lost, but it can fall outside a sweep that goes looking for it by date.
 
 ## Validation Checklist
 
@@ -285,7 +296,7 @@ git push origin main
 
 Once all checklist items are verified:
 
-- Write the close-out record if the issue was opened for work (Step 9) — this happens **before** the close, not after
+- Write the close-out record if the issue was opened for work (Step 9) — this happens **before** the close, not after, and on a run that opened a pull request it was already owed **before the PR-creation action**; if it is not there by now, it is late, so write it and say so
 - Mark the original issue as closed
 - Remove any temporary resources
 - Archive any temporary documentation
