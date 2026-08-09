@@ -4,6 +4,12 @@ All notable changes to agent-orchestra will be documented in this file.
 
 ## [Unreleased]
 
+## [3.15.0] — 2026-08-08
+
+### Added
+
+Memory-store sweep machinery (#1018): the ledger, slate-state and cold-archive record shapes, and the executable sweep procedure with its five-plus-three disposition vocabulary, critical-first ordering, deferral expiry and three procedural checks. Three read-only instruments ship beside the policy check; the checker itself is unchanged at four axes and three parameters.
+
 ## [3.14.1] — 2026-08-08
 
 ### Changed
