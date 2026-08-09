@@ -57,7 +57,7 @@ Every artifact the review pipeline leaves that carries finding-level content is 
 
 An account held only in the session transcript, in a scratch file, or in a working-tree path does not satisfy the durability obligation above: a later reader on a different machine, after the worktree is deleted, must still be able to retrieve it.
 
-Write it with the shared primitive — never a hand-composed `gh issue comment`, for the same reason every other registered family is written this way:
+Write it with the shared primitive — never a hand-composed `gh issue comment`, for the same reason every other registered family is written this way. **What that rule buys is a single audited writer — not protection from `updated_at` advancement**; the primitive's own transport performs the identical whole-body PATCH. That is worth knowing here in particular, because this family is `upsert-in-place`: revising an account from `adversarial_review_ran: false` to `true` re-writes the whole comment and advances the timestamp of every family sitting beside it. See `skills/session-memory-contract/references/handoff-markers.md` § What the write-path rule buys. Invoke it like this:
 
 ```bash
 pwsh skills/session-memory-contract/scripts/persist-marker.ps1 -Family completion-account -TargetSurface issue -Owner {owner} -Repo {repo} -Number {ID} -Marker '<!-- completion-account-{ID} -->' -BodyFile .tmp/completion-account-{ID}.md

@@ -134,11 +134,25 @@ function Get-CoLocatedMarkerFamily {
         review). The first repair run guarded exactly one family while its own
         docstring stated the general principle "repairing one marker must not
         void another". Nine comments were PATCHed, and their `updated_at` moved
-        on families the guard had never heard of: three `plan-issue`, two
+        on families the guard had never heard of: two `plan-issue`, two
         `review-judge-produced`, `adversarial-pipeline-atomic-471` and
-        `design-phase-complete-784`. `plan-issue` is registered `upsert-in-place`
+        `design-phase-complete-784` — six occurrences, not seven.
+        (CORRECTED per issue #1011's grounding correction, carried here by
+        issue #1032. This read "three `plan-issue`" until then. The dropped
+        third was never a marker: comment 5014166928 on #884 carries a
+        backticked PROSE MENTION of plan-issue-871 mid-sentence, and the
+        family regex below was not line-anchored, so it reported the mention
+        as a family. Over-reporting is the right failure direction for a
+        disclosure preflight — but it made the damage inventory wrong.)
+        `plan-issue` is registered `upsert-in-place`
         with `persist-marker.ps1` named as its ONLY documented write path
         (SMC-01), and this script used a hand-composed `gh api -X PATCH`.
+        Note what that rule does and does not buy: a single audited writer,
+        NOT protection from `updated_at` advancement. `persist-marker.ps1`'s
+        own transport performs the identical whole-body PATCH, so routing this
+        repair through it would have advanced exactly the same fields. See
+        skills/session-memory-contract/references/handoff-markers.md
+        section "What the write-path rule buys".
 
         A hardcoded family list would have failed the same way the first one
         did — it can only know the families its author thought of — so this

@@ -4,6 +4,21 @@ All notable changes to agent-orchestra will be documented in this file.
 
 ## [Unreleased]
 
+## [3.18.0] — 2026-08-09
+
+### Changed
+
+**The whole-body-write acceptance now lives where a writer reads, not only on the issue that decided it** (#1032, chunk 2 and final chunk of designed parent #1011). #1011 concluded a *reasoned acceptance* of the hazard that replacing a GitHub comment's whole body advances `updated_at` on every marker family co-located on that comment — `updated_at` never moves backwards, and the API offers no `If-Match`/`ETag` to make the write conditional. The reasoning, the reader census it rests on, and the condition that would revoke it existed only in #1011's issue body, so a writer at a marker-writing surface could not reach any of it.
+
+`skills/session-memory-contract/references/handoff-markers.md` § What the write-path rule buys is now the single home for all three. It states what the per-family write-path rule actually delivers — **a single audited writer, not protection from `updated_at` advancement**, since `persist-marker.ps1`'s own transport performs the identical whole-body PATCH — and carries the reader census, the acceptance with its evidence, and the revocation condition.
+
+**The exclusivity rule now says what it is for, at every surface that both instructs a writer how to write a marker comment and states the rule.** That entry-point set was derived from the tree rather than asserted: the intersection of files under `agents/`, `skills/` and `commands/` naming the marker-write primitive with files stating the rule under a markup-tolerant, four-phrasing sweep — **15 files**, all of which now carry the qualification. Deliberately left unqualified: **8 files / 14 statement lines** outside that set — the two CI suites that assert the literal, the CHANGELOG, three design records, and the two scripts whose own prose already discusses the hazard directly. This is partial coverage by a stated rule, not completeness: a reader landing on one of those 14 still concludes the rule is absolute.
+
+### Fixed
+
+- The phase-containment ledger's record of the #944 repair yielded a falsified count and a falsified consequence, and did so at three loci — the prose, the family table, and `repair-phase-containment-regions.ps1`'s own docstring, which the brief had not identified. All three now record **two** PATCHed `plan-issue` comments rather than three (the dropped third was a backticked prose mention of `plan-issue-871` that an unanchored family regex reported as a marker) and **six** affected occurrences rather than seven, and state that on those two artifacts the affected check was **unreachable** rather than "bounded rather than realised" — nothing was damaged (#1032, carrying #1011's grounding correction).
+- Corrected an inherited claim both #1011 and #1032's brief relied on: of the two CI suites said to assert the unqualified rule persists, only **one** runs. `.github/scripts/Tests/persist-marker-wrapper.Tests.ps1` — which also carries the M30 proximity guard — is quarantined out of CI in `ci-quarantine.json` (`class: unclassified`, tracked on #993), so it never executes on a pull request. The record now says so, and says to re-derive suite selection rather than trusting a file's presence on disk (#1032).
+
 ## [3.17.0] — 2026-08-09
 
 ### Changed

@@ -108,7 +108,7 @@ The record is what makes authority source (b) checkable rather than asserted. Fi
 
 ***2a — the registered form (what new records use).*** The comment carries a marker of the `open-for-work-affirmed-{ID}` family, where `{ID}` is the issue number. *(Rendered inert here — delimiters stripped, per `skills/session-memory-contract/references/handoff-markers.md` § Writing about markers safely — because a delimited literal in prose is live to the raw-text scanners that read real comments.)* The placeholder is `{ID}`, not `{N}`, everywhere the family is named: the catalog drift guard recognises only `-{ID}` and `-{PR}` and silently skips any other token.
 
-Write it through the repository's marker-write primitive, which is the **only** documented write path for this family:
+Write it through the repository's marker-write primitive, which is the **only** documented write path for this family. **What that rule buys is a single audited writer — not protection from `updated_at` advancement**; the primitive's own transport performs the identical whole-body PATCH, so a co-located family's timestamp advances either way. That matters here more than anywhere else, because property 3 below voids *this* family's records on exactly that field — see `skills/session-memory-contract/references/handoff-markers.md` § What the write-path rule buys. Invoke it like this:
 
 ```powershell
 # Compose the marker as a runtime value; never write the delimited literal
