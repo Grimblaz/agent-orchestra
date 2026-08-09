@@ -14,6 +14,11 @@ The close-out record's obligation moved to where the run that owes it actually r
 
 - **The ordering rule stated a reason that was false.** It said the record must precede the close so a reader can still find the issue; that step's own lookup is number-keyed and state-blind, so a late record is exactly as reachable as an on-time one. The real basis — the run ends at the close, after which nobody writes anything — replaces it, together with the one limit that does survive: a closed issue ages out of time-windowed sweeps.
 - **Both decision-register rows asserting auto-close suffices are now scoped**, not just the one previously known. The second uses different vocabulary and sits in a file that never uses the word "close-out" at all, which is why earlier passes missed it. The closing keyword itself is unchanged.
+## [3.15.1] — 2026-08-09
+
+### Changed
+
+First consolidated promotion tranche from the memory-store redesign (#1015 chunk 3, #1019): thirty maintainer lessons given a permanent home in two versioned repository reference files. This lands the destination only — the corresponding store exits are recorded and executed at the owner slate after this ships, so nothing has yet left the store. `skills/terminal-hygiene/references/powershell-traps.md` covers PowerShell language, .NET interop, regex and the sharded Pester runner; `skills/safe-operations/references/git-and-gh-traps.md` covers git state claims, `gh` write paths, worktrees and this repository's own scripts. Both are linked from their parent skill.
 
 ## [3.15.0] — 2026-08-08
 
