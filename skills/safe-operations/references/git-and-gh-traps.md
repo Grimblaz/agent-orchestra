@@ -7,7 +7,11 @@ have moved past, a "pre-existing failure" verdict that cannot detect the defect 
 a successful `PATCH` that destroys content nobody will notice is gone.
 
 Read this before reporting CI state, before claiming a failure is pre-existing, before writing to a
-GitHub comment body, and before trusting a cleanup detector's silence.
+GitHub comment body, before trusting a cleanup detector's silence, before running a script across the
+Bash/PowerShell boundary, and before bumping the plugin version.
+
+Three sections, in order: establishing what is true about a branch; writing to GitHub; and
+worktrees, paths and this repository's own scripts.
 
 ## Establishing what is true about a branch
 
@@ -21,18 +25,34 @@ commits survives the stash untouched.
 exoneration but is structurally incapable of detecting a defect that was already committed. There is
 no error — just a false negative.
 
-**Fix.** Bisect per commit against the real merge-base, materializing each tree with `git archive` so
-no working-tree state can contaminate it:
+**Fix.** Bisect per commit against the real merge-base. Materialize each tree **outside the
+repository root**, and give it a `.git` of its own:
 
 ```bash
+OUT=/some/path/outside/the/repo/bisect
 for c in <merge-base> <commit1> <commit2> <HEAD>; do
-  rm -rf .tmp/bisect && mkdir -p .tmp/bisect
-  git archive $c | tar -x -C .tmp/bisect
-  (cd .tmp/bisect && <run the suite>)
+  rm -rf "$OUT" && mkdir -p "$OUT"
+  git archive $c | tar -x -C "$OUT"
+  (cd "$OUT" && git init -q && <run the suite>)
 done
 ```
 
+**Both of those matter, and getting them wrong is the trap inside the fix.** `git archive` output
+carries no `.git`, so git discovery walks *upward*. Extract into `.tmp/bisect` inside the repo and
+every `git rev-parse HEAD`, `git status` and `git branch --show-current` the suite runs reports the
+**working tree's** state, identically at all four commits — so any git-state-dependent assertion is
+evaluated against the un-bisected tree and the loop produces exactly the confident-wrong verdict this
+section exists to prevent. In this repository 14 files under `.github/scripts/Tests/` invoke such
+commands.
+
+The cheapest correct alternative, when the commit is a real ref, is a throwaway worktree:
+`git worktree add --detach <path outside the repo> <commit>`, which gives a genuine checkout whose
+`git rev-parse HEAD` resolves to the commit you meant.
+
 Any "pre-existing" or "unrelated" claim needs a merge-base comparison, never a stash.
+
+`skills/terminal-hygiene/SKILL.md` § Pester Scope states this rule in one line for suite baselines
+specifically; this section is the general form and the reasoning behind it.
 
 **Seen in:** PR #917. A failure was declared pre-existing on a stash check and filed as its own
 issue; bisect showed `origin/main` green at 29/29 and the branch's own commit red at 28/1. The
@@ -108,7 +128,13 @@ never explained by it. Look at `pester`, `frame-enforce` and `release-gate` for 
 
 **Latent risk, separate from the noise.** The workflow's actual purpose is to fire on or after
 2026-08-31 to surface the Copilot retire-or-keep decision. Because GitHub cannot load the file, it
-will never fire. If that review matters, the file has to load before that date.
+will never fire. Tracked: **#844** owns the YAML parse failure, **#970** owns the retirement deadline.
+
+**Scope.** This entry is specific to this repository. If you are reading it from an installed plugin
+copy in another repository, neither `copilot-sunset-review.yml` nor the named real blockers
+(`pester`, `frame-enforce`, `release-gate`) exist there, and nothing here licenses dismissing a red
+check you actually have. Re-derive the recognition procedure — path-as-name fallback, `event` not
+matching the declared triggers, zero jobs — rather than inheriting the verdict.
 
 **Evidence:** five-plus consecutive red runs from 2026-08-01 (`7f6baa7`, `d5f9611`, `18a28ba`,
 `c43d81d`, `033ed99`), identical on `main`.
@@ -136,7 +162,7 @@ Or emit the append *after* the patch. A locally composed body is safe only for a
 has touched.
 
 **Seen in:** #922 — amending the `design-phase-complete-922` marker to record an amendment destroyed
-**16 phase-containment blocks**. It was caught only because a separate check reported
+the phase-containment blocks that had been appended to it after the original write. It was caught only because a separate check reported
 `GAP -- sustained=16 blocks=11`, and recovered by re-running the original emission script.
 
 **Adjacent accounting gotcha.** `phase-containment-emission-check.ps1` reads a single
@@ -144,28 +170,45 @@ has touched.
 only one and produces a false GAP on a legitimately complete ledger. It is warn-only; verify by
 listing `finding_key` values rather than trusting the count.
 
-### `-f body=@-` can post the literal string `@-`
+### `-f` and `-F` are different flags, and only `-F` reads files
 
-**Trap.** Two independent footguns in one call shape:
+**Trap.** `-f` is **not** the short form of `--field`. From `gh api --help` (gh 2.80.0):
 
-1. `-f body=@"$SOME_VAR/path/file.md"` — a quoted, variable-interpolated `@filename` — does not
-   reliably trigger `gh`'s file-read shorthand. It can send the literal path string as the body.
-2. Even the stdin form is flag-sensitive: `gh api ... -f body=@- < file` using the **short** `-f`
-   can post the literal two-character string `@-` as the body, although `-f` and `--field` are
-   documented as aliases.
+```text
+-F, --field key=value       Add a typed parameter in key=value format
+-f, --raw-field key=value   Add a string parameter in key=value format
+```
 
-**Why it's silent.** Both calls succeed and post *something*. Exit code 0 tells you nothing.
+and, of `-F/--field` only:
 
-**Fix.** Always use the long `--field` with a stdin redirect, and never interpolate a variable path
-inside `@"..."`:
+> if the value starts with `@`, the rest of the value is interpreted as a filename to read the value
+> from. Pass `-` to read from standard input.
+
+So `-f body=@-` does not *sometimes* post the literal two characters `@-` — it **always** does,
+deterministically and by design, because `--raw-field` performs no `@` expansion at all. Likewise
+`-f body=@/path/to/file.md` always posts the literal path string, whether or not the path was
+interpolated from a variable and whether or not it was quoted.
+
+**Why it's silent.** The call succeeds and posts *something*. Exit code 0 tells you nothing, and the
+posted body is a plausible-looking short string rather than an error.
+
+**Fix.** Use `-F` / `--field` for anything carrying file content, and verify the result:
 
 ```bash
 gh api -X PATCH repos/{owner}/{repo}/issues/comments/{id} --field body=@- < "$SOME_VAR/path/file.md"
 gh api repos/{owner}/{repo}/pulls/{pr}/comments/{id}/replies --field body=@- < reply.md
 ```
 
+`-F body=@file` is the same flag in short form and is equally correct. Reach for `-f`/`--raw-field`
+only when you genuinely want the literal string, including a literal leading `@`.
+
 Verify after **any** write carrying file content — re-fetch the body, or inspect the POST response's
 own `.body`, and check it against the intended content rather than the exit code.
+
+**A correction worth carrying.** This entry previously said `-f` and `--field` were "documented as
+aliases" and blamed quoting and variable interpolation for the first failure. Both are wrong, and the
+error was load-bearing in the unsafe direction: a reader who kept `-f` and merely stopped
+interpolating would still corrupt every body they wrote. The flag is the whole cause.
 
 **Seen in:** #886 (corrupted a live issue-comment body) and PR #971 (posted a body that was literally
 `@-`; caught in the same turn only because the POST response was inspected).
@@ -179,8 +222,22 @@ silently overwrites the *sibling*.
 
 **Why it's silent.** The edit succeeds against a comment. Just the wrong one.
 
-**Fix.** Prefer `Find-OrUpsertComment` (`.github/scripts/lib/find-or-upsert-comment.ps1`), which
-targets by marker substring. To edit a specific comment by id:
+**Fix — for marker-family comments, use the primitive that owns this.**
+`skills/session-memory-contract/scripts/persist-marker.ps1` exists precisely to make both this trap
+and the previous one unrepresentable: it targets by **numeric REST comment id**, never `--edit-last`.
+`Documents/Design/marker-write-primitive.md` files `--edit-last` clobbering and substring
+mis-targeting under one failure class and states the rule plainly — *never `--edit-last`; always
+targeted by numeric REST comment id*. Reach for the primitive before hand-composing transport.
+
+**`Find-OrUpsertComment` is not a safe default, and carries both hazards.** It targets by marker
+**substring** using `-like`, which
+`skills/session-memory-contract/references/handoff-markers.md` records as able to *"cause an entirely
+wrong comment to be selected as the target for a write"*. And its `-Body` parameter **replaces the
+existing body verbatim on the PATCH path** — it never re-reads and merges — so pointing it at a
+marker comment a helper has appended to reproduces the destroy-server-side-appends trap in the
+section above. The #922 incident that destroyed 16 blocks was exactly a marker-targeted upsert.
+
+If you are hand-writing the call anyway, target by id:
 
 ```bash
 gh api -X PATCH repos/{owner}/{repo}/issues/comments/{comment_id} -F body=@file --jq '.id'
@@ -188,25 +245,37 @@ gh api -X PATCH repos/{owner}/{repo}/issues/comments/{comment_id} -F body=@file 
 
 Two Git Bash quirks travel with it: omit the leading slash from the endpoint (`repos/...`, not
 `/repos/...`) or MSYS rewrites it into a filesystem path; and `-F body=@file` reads the file as the
-field value. Capture each comment's id from the returned `#issuecomment-{id}` URL at post time so it
-can be targeted later.
+field value (see the flag section above — `-f` would post the literal string). Capture each comment's
+id from the returned `#issuecomment-{id}` URL at post time so it can be targeted later.
 
-### Round-tripping a body through `gh ... view > file` mojibakes it
+### Round-tripping a body through `gh ... view > file` can mojibake it
 
-**Trap.** On Windows, `gh pr view N --json body --jq '.body' > file` OEM-re-encodes non-ASCII
-characters on the way out, and a subsequent `gh pr edit N --body-file file` writes that corrupted
-text back as the durable body.
+**Trap.** On the toolchain PR #829 was written on, `gh pr view N --json body --jq '.body' > file`
+OEM-re-encoded non-ASCII characters on the way out, and a subsequent
+`gh pr edit N --body-file file` wrote that corrupted text back as the durable body. One round-trip
+turned `—`, `§`, `…` and `→` into strings like `Γò¼├┤Γö£├ºΓö£Γòó`; a second double-corrupted it.
 
 The corruption is on the **output** side. The input side reads file bytes faithfully, so a freshly
 authored file posts cleanly.
 
-**Fix.** Never round-trip. Rebuild the body from a clean source and post it with `--body-file`.
-Verify by reading back through PowerShell with `[Console]::OutputEncoding` pinned to UTF-8 first, and
-grep for mojibake byte patterns. Bot-appended sections are regenerable, so dropping a corrupted one
-is acceptable.
+**Scope, because it is version-dependent.** This does **not** reproduce on gh 2.80.0 / pwsh 7.6.3 as
+of 2026-08. Five shapes were re-run against a body carrying seven em dashes — Git Bash `>` redirect
+(the shell originally named), `gh api` redirect, pwsh `>` at default encoding, and pwsh with
+`[Console]::OutputEncoding` pinned to `ibm437` and to `850` — and all five recovered all seven em
+dashes with zero mojibake bytes. Treat the prohibition as toolchain-conditional, not a law: verify on
+yours before relying on either polarity. The #829 observation is not thereby falsified; it is
+undated, which is the defect.
 
-**Seen in:** PR #829 — one round-trip turned `—`, `§`, `…` and `→` into strings like
-`Γò¼├┤Γö£├ºΓö£Γòó`; a second round-trip double-corrupted it.
+**Fix.** Prefer not to round-trip: rebuild the body from a clean source and post it with
+`--body-file`. Where you must, verify by reading back through PowerShell with
+`[Console]::OutputEncoding` pinned to UTF-8 first, and grep for the mojibake byte patterns
+`Γ`, `╬`, `├`, `┬`.
+
+**On dropping corrupted sections.** Sourcery and CodeRabbit *summary* comments are regenerable, so
+dropping a corrupted one of those costs nothing. That is the whole warrant, and it does not
+generalize: bot-appended content in another repository may be a coverage delta, a deploy-preview URL,
+a signed-CLA record or a compliance attestation, none of which regenerate. Establish that a
+particular section regenerates before discarding it.
 
 ### Verifying a posted body from PowerShell needs a join first
 
@@ -237,6 +306,10 @@ Equal counts plus a zero mojibake count is real evidence. If staying in PowerShe
 parent session's real shell pwd, still pinned at the session's launch directory if the parent has
 been navigating with `git -C <path>` or absolute paths. Worse, an explicit `cd` in a Bash call does
 not persist: the harness resets the shell's cwd after each invocation.
+
+**Owner: [`skills/subagent-env-handshake/SKILL.md`](../../subagent-env-handshake/SKILL.md).** That
+skill defines the handshake contract this trap breaks and already carries the sibling CWD hazards; if
+you are constructing a dispatch, read it rather than relying on finding this entry.
 
 **Consequence.** Subagent shells with a strict Step 0 environment handshake correctly detect the
 mismatch and halt with `environment-divergence`. The silence is upstream — nothing warns the
@@ -280,11 +353,29 @@ real, phantom path.
 `hub-artifact-paths-coverage.Tests.ps1` fails with `uncategorized: 1` on a change that looks correct
 in every other respect. The failure names nothing about apostrophes.
 
-**Fix.** Find the offending prose and reword it apostrophe-free — comment-only, never touching
-genuine string literals, hashtable indexers or here-string delimiters. Grep with:
+**Fix.** Find the offending prose and reword it apostrophe-free, never touching genuine string
+literals or hashtable indexers. **Prose inside a here-string body counts** — the regex scans raw file
+text with no awareness of what quoting construct it is inside, so a contraction between `@'` and `'@`
+is exactly as dangerous as one in a `#` comment. Only the here-string *delimiters* are safe.
+
+Grep with:
 
 ```bash
 grep -noE "[a-zA-Z0-9]+'[a-zA-Z]+" <file>
+```
+
+**Diagnose before you guess.** The grep lists *candidate* apostrophes; it cannot say which one
+desynced, which is why fixing by grep alone takes two or three rounds. Dot-source the audit script's
+own functions and print the uncategorized family text — that shows the garbled span directly,
+starting right after the last legitimately paired literal and ending at the stray apostrophe:
+
+```powershell
+. { . .github/scripts/audit-hub-artifact-paths.ps1 -InputFile 'CLAUDE.md' } *> $null
+$yamlPath = Join-Path (Get-Location).Path 'Documents/Design/hub-artifact-paths-classification.yml'
+$familyKeys = @(Get-ClassificationFamilyKeys -YamlPath $yamlPath)
+$inventory = Build-Inventory -FilePaths (Get-ScopeFiles -Root (Get-Location).Path)
+@($inventory | ForEach-Object { $_.path_family } | Sort-Object -Unique) |
+  Where-Object { -not (Test-FamilyMatchesYaml -PathFamily $_ -FamilyKeys $familyKeys) }
 ```
 
 The `0-9` matters: a digit immediately before the apostrophe (`goal-run-halt-core.ps1's`) is a real
@@ -337,6 +428,11 @@ inside it. Verify with a child-script invocation, never `-File`.
 
 ### Bump the version with the script, as the last commit
 
+**Owner: [`skills/plugin-release-hygiene/SKILL.md`](../../plugin-release-hygiene/SKILL.md).** It
+carries the authoritative occurrence count, the patch/minor/major classification rules and the
+guardrail hook. Go there first; what follows is the operational residue that skill does not state,
+kept here because it is where a session hits it.
+
 **Trap.** Hand-editing any one of the version-string occurrences — across `plugin.json`,
 `.claude-plugin/plugin.json`, both marketplace manifests and the `README.md` badge — leaves the repo
 release-blocked. The next `bump-version.ps1` invocation aborts with "Version drift detected" before
@@ -384,32 +480,53 @@ Do not paste the hook's own emitted `pwsh '<path>' -SiblingWorktrees @(…)` blo
 the same defect. When handing such a command to a person, fence it as `powershell`, not `bash`: a
 bash fence gets a Run button that mangles `@(…)`.
 
-### Squash-merge defeats the cleanup detector's ancestry test
+### Squash-merge makes ancestry the wrong test
 
 **Trap.** `git cherry` marks every commit on a squash-merged branch `+` — N commits collapse into one
-new SHA, so no patch-id survives. Auto-resolve is therefore effectively dead for any multi-commit
-branch, and everything ages into manual review. That part is fail-safe.
+new SHA, so no patch-id survives. So does `git merge-base --is-ancestor`: a squash-merged branch is
+never an ancestor of the branch it merged into. Any "is this merged?" check built on either signal
+answers **no** for work that shipped.
 
-The silent part is the **detector**: its current-branch, no-upstream arm gates on a merge-base
-ancestry test, which squash-merge always fails, so a squash-merged `claude/*` worktree is dropped
-without being surfaced and an **empty cleanup block** is emitted — even though the cleanup script,
-given the same worktree, evaluates it correctly.
-
-`feature/issue-*` worktrees are dropped by a second, unrelated mechanism: a merged-but-still-present
-worktree is never prunable, so it takes the `@{u}` upstream probe; `fetch --prune` has deleted the
-remote-tracking ref, so the probe exits 128, the upstream variable becomes null, and control falls
-past the upstream-deleted arm into a no-upstream arm whose prefix list is `claude/` only. No match,
-silent `continue`.
-
-**Fix.** After any squash-merge, do not read an empty detector block as "nothing to clean". Check it
-yourself — tree-identical means fully merged:
+**Fix.** Use tree equivalence, not ancestry — tree-identical means fully merged:
 
 ```bash
 git diff --quiet <branch> origin/main
 ```
 
-Then invoke the script directly with the explicit parameters. `git cherry` is useless for this
-decision.
+**Live signals on one squash-merged branch:**
+
+```text
+git merge-base --is-ancestor <branch> origin/main  -> NO   (squash merge)
+git diff --quiet <branch> origin/main              -> YES  (tree-identical = fully merged)
+git cherry origin/main <branch>                    -> 20 false "unique" commits
+```
+
+**What the detector does today.** Issue #922 removed the ancestry pre-filter that used to gate the
+current-branch, no-upstream arm. Per `skills/session-startup/SKILL.md`, a current `claude/*`
+no-upstream branch is now a candidate on **branch shape alone** — prefix and upstream state — and
+candidates are routed through the removal-eligibility check, with eligible and unverifiable ones
+surfaced. **Deliberate silence is reserved for definitively-live work.** So an empty cleanup block is
+normally a real answer, not a dropped candidate.
+
+An earlier revision of this entry said the opposite — that a squash-merged `claude/*` worktree is
+silently dropped and an empty block emitted. That was a *bug report* (#922), and it described
+behavior the fix removed. It was promoted here as current behavior, which would have sent operators
+hand-checking a detector that now handles this case. That revision also described a second drop path
+for `feature/issue-*` worktrees via a failing `@{u}` probe; it is not restated here because it could
+not be confirmed against the current detector, which routes both prefixes through the shared
+eligibility primitive and reports unverifiable candidates for manual review rather than dropping
+them. If you hit a silently-missing candidate, that is a detector bug to file, not a documented
+behavior to work around.
+
+**Before deleting anything, four signals, not one.** Tree equivalence alone is not sufficient
+authority to delete a branch. The standard is: a merged PR whose `headRefName` matches, the parent
+issue closed, the work present on `main` as its squash commit, and the remote branch already gone.
+And `git branch -D` is reflog-recoverable **only if you capture the SHA first** — do that before,
+not after.
+
+**Cleanup is opt-in and stays opt-in.** The detector only reports; nothing is removed unless the user
+confirms. Nothing in this entry authorizes an agent to skip that confirmation, and "check it
+yourself" means gather the four signals for the user's decision, not act on one of them.
 
 **Live signals on one squash-merged branch:**
 

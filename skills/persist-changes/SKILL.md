@@ -111,6 +111,17 @@ Acquire the following before calling the helper (these involve git I/O and must 
 
 Pass all inputs. Capture the output struct.
 
+**Invocation form is load-bearing.** This file defines a function; it does not execute one. Dot-source
+it, then call the function:
+
+```powershell
+. ./skills/persist-changes/scripts/Resolve-PersistDecision.ps1
+$decision = Resolve-PersistDecision -Inputs $inputs
+```
+
+Invoking the script with `&` returns `$null` silently, so the decision struct reads as all-empty
+rather than erroring — every field falsy, which is not a safe default for a guard.
+
 ### Step 3: If `commit=false`
 
 Surface the `refuse_reason` loudly and stop. Do not attempt any git operations. Return the reason to the caller for routing.

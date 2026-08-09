@@ -37,7 +37,8 @@ written to catch the bug.
 claims to check, use the `-c` form. Reserve `-eq` for comparisons where case genuinely does not
 matter, and say so.
 
-**Seen in:** #986. This repository has now shipped this defect twice.
+**Seen in:** #986. This repository has now shipped this defect twice — once here and once in its
+Pester form, which is the next entry. Same root, different surface.
 
 ### `Should -Be` is case-insensitive too
 
@@ -115,9 +116,10 @@ collection idiom before anything else.
 **Seen in:** #951 / #963. A probe asserting `ParseStatus -eq 'ok'` would have passed twice; what
 caught it was a probe asserting concrete counts.
 
-### A pipeline on the right of an `[ordered]@{}` member drops entries
+### `[ordered]@{}` with integer keys: the indexer is positional, not a key lookup
 
-**Trap.** A bare pipeline as a hashtable-literal member value mis-parses:
+**Trap.** `[ordered]@{}` produces an `OrderedDictionary`, whose `int` indexer selects **by position**,
+not by key. With integer keys the two readings collide silently:
 
 ```powershell
 $h = [ordered]@{
@@ -127,17 +129,32 @@ $h = [ordered]@{
 }
 ```
 
-Iterating `$h.Keys` afterwards yields only keys 1 and 2 — key 3 is gone entirely — and the element
-counts for the surviving keys are wrong too.
+Measured on pwsh 7.6.3:
 
-**Why it's silent.** No error, no warning. It surfaced only because a downstream guard asserted a
-known key was present (`throw "key $k is not in the sustained set"`). Without that guard the run
-would have emitted a ledger missing a third of its data.
+```text
+$h[1]           -> count=13     <- position 1, i.e. key 2's value
+$h[2]           -> count=15     <- position 2, i.e. key 3's value
+$h[3]           -> NULL         <- position 3 is out of range
+$h[[object]1]   -> count=22     <- key lookup, correct
+GetEnumerator() -> 1:22  2:13  3:15   <- correct
+```
 
-**Fix.** Assign the pipeline result to a variable first, or parenthesize the sub-expression. Never
-put a bare pipeline on the right of a hashtable-literal member. When a literal builds a collection of
-known size, assert the size immediately after construction — that assertion is what turns a silent
-drop into a loud one.
+**Why it's silent.** Every key is present and every value is intact — `$h.Count` is 3 and iterating
+`GetEnumerator()` gives 22/13/15. Only the indexed reads are wrong, off by one, with a `$null` at the
+end instead of an error. A guard that iterates passes; a guard that indexes gets shifted data and a
+null tail. A `Hashtable` from a plain `@{}` has a key-based indexer, so the identical code with the
+cast removed behaves correctly — which makes the `[ordered]` cast, not the pipeline, load-bearing.
+
+**Fix.** With integer keys, never index an `OrderedDictionary` with a bare `int`. Cast the key
+(`$h[[object]$k]`), or iterate `GetEnumerator()`, or use string keys where the ambiguity cannot arise.
+When a literal builds a collection of known size, assert the size immediately after construction.
+
+**A correction worth carrying.** This entry previously claimed the pipeline on the right-hand side
+mis-parsed and dropped key 3 entirely. It does not: the literal evaluates correctly. That reading —
+and a later "off-by-one value shift" reading — were both artifacts of probing with the positional
+indexer. Two independent review passes reproduced the wrong symptom before a third isolated the
+indexer. If you are diagnosing a collection that looks short, check how you are *reading* it before
+concluding it was built wrong.
 
 ### Joining two regex match sets on `.Index` desyncs
 
@@ -232,10 +249,18 @@ value**. A cast, a `-join`, or a null-coalescing default in the comparison colla
 
 ### An optional `[ref]` parameter may not carry a default
 
-**Trap.** This throws `ParameterBindingArgumentTransformationException` on **every** call, including
-calls that omit the argument entirely, because PowerShell evaluates the default expression through
-the same type-transformation pipeline as an explicit argument and `$null` cannot transform to
-`[ref]`:
+**Trap.** This throws `ParameterBindingArgumentTransformationException` on exactly the calls that
+**omit** the argument — the ones the default exists to serve — because PowerShell evaluates the
+default expression through the same type-transformation pipeline as an explicit argument, and `$null`
+cannot transform to `[ref]`. Calls that supply the argument bind fine, which is why the break lands
+on the pre-existing caller a refactor never touched:
+
+```text
+A()                        -> THROWS      (default evaluated)
+A -Other 'y'               -> THROWS      (default evaluated)
+A -R ([ref]$v)             -> ok
+A -R ([ref]$v) -Other 'y'  -> ok
+```
 
 ```powershell
 param(
@@ -280,14 +305,20 @@ on #977:
 3. **`-join` over a captured array is lossy on a lone CR.** PowerShell's output splitter treats a
    bare CR as a line terminator, so the join re-emits it as a real newline — fabricating structure
    that was not in the source. On #977 this synthesized a bogus `## Acceptance Criteria` header.
-   CRLF is unaffected.
+   CRLF fabricates no structure, because the break was already there — but the CR byte does not
+   survive the round trip either (it is consumed as part of the terminator), so a byte-comparison or
+   a `\r\n`-seeking check after a capture will still be wrong.
 
 **Why it's silent.** Both AC helpers documented *"returns empty on any failure (missing gh…)"* and
 were wrong about exactly that word for months.
 
 **Testing note.** A shim that exists and exits non-zero is a *failing* command, not an *unavailable*
 one. To exercise unavailability, **replace** `$env:PATH` with an empty directory (do not prepend) and
-assert `Get-Command <cmd>` is false.
+assert `Get-Command <cmd>` is false — then **restore it in a `finally`**. `$env:PATH` is
+process-scoped and the sharded runner gives each test file its own `pwsh`, so an unrestored
+replacement silently breaks every later test in that container that shells out to `git`, `gh` or
+`pwsh`. This is the same restore-bug class as the `SetEnvironmentVariable` entry below, and the same
+rule applies: assert existence separately from value.
 
 **Related: console encoding.** On Windows `[Console]::OutputEncoding` defaults to the OEM codepage,
 so UTF-8 subprocess stdout is decoded with the wrong table. Measured on #968: 12 non-ASCII characters
@@ -295,6 +326,8 @@ became 36 and every em dash was lost, with no error. Pin the encoding and restor
 `skills/naming-register-policy/scripts/newcomer-audit.ps1` has the correct shape.
 
 **Seen in:** #977 / PR #982, #968.
+
+**Fuller treatment.** [`skills/review-judgment/references/multiline-capture-audit.md`](../../review-judgment/references/multiline-capture-audit.md) is the audit of this class across the repository, from the same issue (#977). Read it before changing a capture site; this entry is the summary, that file is the survey.
 
 ## Escaping, parsing, and self-inflicted wounds
 
@@ -358,58 +391,77 @@ escapes while the edit written into the test file used only one. Two checks in t
 disagreed — one said all five platform gates were flagged, the other said exempt. A disagreement
 between two checks is signal to chase, not a reason to trust the preferred one.
 
-### `pwsh -File` parses `<` in an argument as redirection
+### `pwsh -File` exit 64 is an unresolvable script path, not an angle bracket
 
-**Trap.** Passing an argument containing `<` — an HTML-comment marker, for instance — to
-`pwsh -NoProfile -File script.ps1 -Marker '<!-- ... -->'` fails with **exit 64** and a full `pwsh`
-usage dump. `pwsh`'s own argument parser sees the redirection operator before the script runs.
-Quoting does not help, and it happens from both the Bash and PowerShell tools.
+**Trap.** `pwsh -NoProfile -File <script> <args>` exits **64** with a full `pwsh` usage dump when it
+cannot resolve the script path. The usage dump names nothing about paths, so the cause is easy to
+misattribute to whatever looked unusual in the arguments.
 
-**Fix.** Call the script directly in an existing session with the call operator, which avoids the
-`-File` re-parse:
+The most common way to hit it on Windows is a POSIX-looking path: `pwsh` resolves `/tmp/x.ps1` to
+`C:\tmp\x.ps1`, which is **not** where Git Bash's `/tmp` points — see
+[§ `/tmp` is not the same directory in Bash and in pwsh on Windows](../../safe-operations/references/git-and-gh-traps.md)
+in the git/gh reference, which is the same divergence from the other side.
+
+Measured on pwsh 7.6.3:
+
+```text
+pwsh -NoProfile -File C:/real/probe.ps1 -Marker '<!-- x -->'   -> exit 0, marker bound
+pwsh -NoProfile -File /tmp/probe.ps1    -Marker 'plain'        -> exit 64 + usage dump
+pwsh -NoProfile -File C:/nope/gone.ps1  -Marker 'plain'        -> exit 64 + usage dump
+```
+
+The third line carries no angle bracket at all and still exits 64; the first carries one and
+succeeds.
+
+**A correction worth carrying.** This entry previously attributed exit 64 to `pwsh`'s argument parser
+treating `<` as redirection, and prescribed the call operator to avoid the `-File` re-parse. Eleven
+invocation shapes across both shells were re-run during review and **none** reproduced it; the
+remedy worked only because calling in-session sidesteps path resolution too. The original incident
+recorded a wrong script path and an exit 64 in the same breath, and the angle bracket got the blame.
+When a failure and an unusual-looking input coincide, vary the input before naming it the cause.
+
+**Fix.** Check the path resolves as `pwsh` will resolve it. Where you are already in a session,
+calling directly is simplest and avoids the question:
 
 ```powershell
 & ./path/script.ps1 -Marker '<!-- ... -->'
 ```
 
-The same shape matters for array arguments: `pwsh -File script.ps1 -Items @('a','b')` lets the
-calling shell expand the literal into separate argv entries, of which `-File` binds only the first.
+**Array arguments are a separate, real trap.** `pwsh -File script.ps1 -Items @('a','b')` lets the
+calling shell expand the literal into separate argv entries, of which `-File` binds only the first —
+the rest spill onto the next positional parameter. Full treatment, with the live case that bit,
+is in [§ `post-merge-cleanup.ps1` must run from the primary checkout](../../safe-operations/references/git-and-gh-traps.md).
 
 **Adjacent.** `Resolve-PersistDecision.ps1` is a function-definition file: dot-source it, then call
 `Resolve-PersistDecision -Inputs $hash`. Invoking it with `&` silently returns `$null`, so the
-decision struct reads as all-empty rather than erroring.
+decision struct reads as all-empty rather than erroring. (`skills/persist-changes/SKILL.md` §
+Executor Contract says "call" it without naming the invocation form.)
 
 ## The sharded Pester runner
 
-### `fail=N` is not a count of failing tests
+**Owner: [`Documents/Design/test-suite-baseline-948.md`](../../../Documents/Design/test-suite-baseline-948.md).**
+That record already carries the runner's failure-count arithmetic (`fail=13` is 7 failing assertions
+across 6 files plus 6 per-file phantoms), why the reconciliation is not applied blind, and why
+`crash-worker.Tests.ps1` and `zero-tests.Tests.ps1` are fixtures rather than failures. Read it for
+the counting trap; it is the fuller and more careful treatment, and
+`skills/terminal-hygiene/SKILL.md` § Pester Scope already points there.
 
-**Trap.** `.github/scripts/lib/pester-sharded-core.ps1` sets `$failed = $r.FailedCount` and then
-adds one per failing *container*:
+What follows is what that record does **not** cover.
 
-```powershell
-foreach ($c in @($r.Containers)) { if ([string]$c.Result -eq 'Failed') { $failed++ } }
-```
+### Read the right `TOTAL:` line — the runner is re-entrant
 
-A test file is one container, so every file with at least one failing test contributes
-`(failing assertions) + 1`. The comment says this catches discovery errors — a `throw` in a test file
-makes `Container.Result = 'Failed'` — but it fires on ordinary assertion failures too.
+**Trap.** `run-pester-sharded.Tests.ps1` is
+itself a suite file that drives `Invoke-PesterSharded` against temp fixtures — **16** call sites, of
+which `-DeterminismCheck` is the 5th, with eleven more after it. A plain full-suite run therefore
+prints **17** `TOTAL:` lines, only one of which is the real run.
 
-**Why it's silent.** `TOTAL: pass=N fail=M` reads exactly like a test count. On #948, "13 failures"
-was reported from `fail=13`; the truth was **7 failing assertions across 6 files** (7 + 6 phantoms).
-A whole floor-satisfiability argument and falsifier list were then written in the wrong unit,
-internally consistent with the bug. A review pass caught it, not the author.
+Anchor on the run attribution, not on position: the real run is the one whose line reads
+`run=outer`, and whose `files=N/N` equals the test-directory count. Nested fixture runs report
+`run=nested(depth=1)`. `Determinism check: PASSED` and the min-count `WARNING` are emitted by those
+nested fixtures on every plain run, so grepping for either as evidence is guaranteed-green.
 
-**Fix.** For a real count, strip ANSI and count lines beginning with the failure marker, excluding
-the runner's own fixtures (`crash-worker`, `zero-tests`). Sanity-check:
-`real + (failing file count) == reported fail`. For per-test identity, re-run the file solo — eight
-concurrent workers splice each other's lines mid-string.
-
-**Also.** The runner is **re-entrant**: `run-pester-sharded.Tests.ps1` is itself a suite file that
-drives `Invoke-PesterSharded` five times against temp fixtures, the last with `-DeterminismCheck`
-running the sharded pass twice. A plain full-suite run therefore prints about seven `TOTAL:` lines,
-only one of which is the real run. `Determinism check: PASSED` and the min-count `WARNING` are
-emitted by those nested fixtures on every plain run, so grepping for them as evidence is
-guaranteed-green.
+A wait-loop keyed on the first `TOTAL:` line to appear will fire on a nested fixture's, minutes
+before the real run finishes — that has happened.
 
 **And.** `ExitCode=1` with `TotalFailed=0` occurs in **four** situations — path unresolved, zero
 discovered, the `MinTestCount` floor, and a `-DeterminismCheck` flip returning run 1's totals. The
@@ -428,9 +480,25 @@ real-git allowlist runs sequentially but still per-process). Mocks cannot leak b
 filing for #948, "mock leakage under full-suite ordering" survived into the issue *as evidence*.
 
 **Fix.** Check what actually ran the suite. If it was `run-pester-sharded.ps1`, look for causes that
-survive process isolation. The live one is **8-way parallel contention**: the #948 failures showed
-real `gh: unexpected error connecting to api.github.com` — tests reaching the network, rate-limited
-under concurrency, passing when run alone. Tag such a claim `sample-inferred` per doctrine amendment
+survive process isolation — and check the suspicious output is not *planted* before theorising about
+the environment.
+
+**The `gh: unexpected error connecting to api.github.com` cluster is fixture text, not the network.**
+It is hard-coded via `New-P4GhStub -StderrText` at `marker-transport-core.Tests.ps1:220,364,375,385`,
+`persist-marker-core.Tests.ps1:172`, `persist-marker-wrapper.Tests.ps1:318` and
+`persist-marker.Tests.ps1:114`. It appears in runs that exit 0. An earlier revision of this entry
+read that string as evidence of real network contention under `-ThrottleLimit 8` and prescribed
+looking there; that diagnosis was corrected in #948 and the correction is the reason this paragraph
+exists. Do not re-investigate it from scratch, and do not respond to it with a mechanism — lowering
+throttle or adding retries would be aimed at a phantom.
+
+Where you do form an environment-shaped hypothesis, tag it `sample-inferred` per doctrine amendment
 A2 and do not let it set a mechanism.
+
+**Cross-reference.** `Documents/Design/test-suite-baseline-948.md` § The previously reported
+network-touching failure class records the same class from the other side: across two full runs the
+live-network failures did not appear, and it is logged as **not reproduced** rather than absent —
+because intermittency is exactly what two runs cannot exclude. Read the two together: that record
+says the class did not fire; this entry says the string you are most likely to see is planted.
 
 **Seen in:** #948, #818.

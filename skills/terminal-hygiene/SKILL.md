@@ -23,7 +23,7 @@ These rules supplement, not replace, any agent-specific terminal guidance such a
 
 [`references/powershell-traps.md`](references/powershell-traps.md) collects the language-level and runner-level traps that have cost this repository real time. They share one property: **they do not throw** — they return a wrong shape, a wrong count, or a green verdict. Read it before writing a verification script, a guard, or a test whose purpose is to detect something, since most of the file is a way for such a check to report success while checking nothing.
 
-Highest-frequency entries: `-eq` and `Should -Be` are case-insensitive (so an "identical text" criterion implemented with either cannot fail); `return ,$array` plus a caller's `@()` collapses to one element; `??` does not guard an absent property under StrictMode; and the sharded runner's `fail=N` is not a count of failing tests.
+Highest-frequency entries: `-eq` and `Should -Be` are case-insensitive (so an "identical text" criterion implemented with either cannot detect a case-only difference — the exact divergence such a criterion is usually written to catch); `return ,$array` plus a caller's `@()` collapses to one element; `??` does not guard an absent property under StrictMode; and the sharded runner's `fail=N` is not a count of failing tests.
 
 ## Pester Scope
 
