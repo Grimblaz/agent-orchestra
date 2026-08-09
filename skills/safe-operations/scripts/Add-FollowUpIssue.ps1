@@ -195,6 +195,16 @@ function Add-FollowUpIssue {
         # session that omits THE RECORD WRITE (the honest-omission case), not
         # one that omits the presentation. DETECTION of a missing record, not
         # PREVENTION of a bypass.
+        #
+        # Narrower still: the detected class is a session that omits the record
+        # write WHILE STAMPING A RULING-ASSERTING VALUE. Domain membership is
+        # decided by this self-attested stamp, so a session that omits the
+        # record write and stamps 'direct-request' is OUT OF DOMAIN -- the
+        # reconciliation procedure stops before looking, and that same session
+        # reads clean under one changed enum value. A known, unclosed boundary,
+        # not a solved one. This comment and safe-operations SKILL.md section
+        # 2e ("The trust bound, stated exactly") both state this bound and a
+        # reader may land on either, so they must be amended together.
         [Parameter(Mandatory=$true)]
         [ValidateSet('gate-approved', 'gate-modified', 'queue-consumed', 'direct-request', 'pre-gate-legacy')]
         [string]$FilingProvenance,
