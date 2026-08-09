@@ -4,6 +4,13 @@ All notable changes to agent-orchestra will be documented in this file.
 
 ## [Unreleased]
 
+## [3.14.3] — 2026-08-08
+
+### Fixed
+
+- **The procedure returned its first `located` verdict.** Filing #1030 reconciles against ruling record `followup-cf84c15934336579` on PR #1027 — the first time in this contract's history that step 6's match path has executed at all, and the first end-to-end proof that a `gate-approved` stamp is checkable against a real ruling record rather than a staged equivalent. The census in section 2e is updated to 2026-08-09 (52 provenance-stamped filings; 15 out of domain; 31 unsupported; 1 located) and now distinguishes the pre-2026-08-09 "never located, ever" state from the post-first-execution state, so the passage cannot read as a clean bill of health.
+- **The narrowed trust bound is now stated on all three surfaces that carry it** — section 2e, `Add-FollowUpIssue.ps1`'s ValidateSet comment, and `Documents/Design/safe-operations.md` — after external review caught that this change had narrowed only the first. Both prose surfaces carry an explicit must-be-amended-together note.
+
 ## [3.14.2] — 2026-08-08
 
 ### Fixed
