@@ -4,6 +4,14 @@ All notable changes to agent-orchestra will be documented in this file.
 
 ## [Unreleased]
 
+## [3.14.2] — 2026-08-08
+
+### Fixed
+
+- **safe-operations section 2e — the reconciliation procedure, executed for the first time.** Running it over all 49 provenance-stamped filings reproduced the section's own stated counts exactly (34 ruling-asserting; 29 unsupported; the 5 not-reconcilable being precisely #858, #862, #864, #865, #992). Two corrections followed from the run:
+  - Step 5's false-`unsupported` defense enumerated five transport failure paths and mandated a `gh` exit-code probe. It missed a sixth: **caller error**. A mis-invoked reader returns the same bare empty set while `gh` exits 0, so the probe reports the surface readable and every filing reads `unsupported`. Step 5 now names the two concrete mistakes (`-Number` not `-IssueNumber`; objects carrying `.Body`, not strings), warns against wrapping the call in `try`/`catch`, and requires a **positive control** against a known record-bearing surface before any `unsupported` verdict in a batch is trusted.
+  - The trust bound named a detected class wider than what is detected. It now states the exact class: a session that omits the record write **while stamping a ruling-asserting value**. Domain membership is decided by a self-attested stamp, so a session that omits the record write and stamps `direct-request` is out of domain, not caught by a weaker verdict — meaning #1011, the exhibit this contract was written around, reads clean under one changed enum value. Recorded as a known, unclosed boundary with the live corpus figures, so an empty domain is not mistaken for a checked corpus.
+
 ## [3.14.1] — 2026-08-08
 
 ### Changed
