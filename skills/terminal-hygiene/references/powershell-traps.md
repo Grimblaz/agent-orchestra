@@ -1,0 +1,436 @@
+# PowerShell and Pester traps
+
+Language-level and runner-level traps that have each cost this repository real time, and that share
+one property: **they do not throw.** They return a wrong shape, a wrong count, or a green verdict.
+A trap that errors teaches itself; these do not, which is why they are written down.
+
+Read this before writing a verification script, a guard, or a test whose *purpose* is to detect
+something. Most of what follows is a way for such a check to report success while checking nothing.
+
+Scope: this file is about the PowerShell language, .NET interop from PowerShell, regex in
+PowerShell, and the Pester runner. Git and `gh` CLI traps live in
+[`skills/safe-operations/references/git-and-gh-traps.md`](../../safe-operations/references/git-and-gh-traps.md).
+
+## Comparison and matching
+
+### `-eq`, `-ne`, `-contains` and `-like` are case-insensitive
+
+**Trap.** PowerShell string comparison ignores case by default. `@('Foo') -contains 'foo'` is
+`$true`. The case-sensitive forms are `-ceq`, `-cne`, `-ccontains`, `-cnotcontains`, `-clike`.
+
+**Why it's silent.** A criterion phrased "identical", "matching", "unchanged" or "verbatim",
+implemented with `-eq`, does not test text. On #986 a memory-index check compared a policy header
+against its shipped reference with `-eq` and reported `present, complete` for a header whose first
+line had been lowercased.
+
+Worse, it defeats its own control. The script that planted a case-only mutation to prove the guard
+could fail wrote:
+
+```powershell
+if ($Content -eq $live) { throw "mutation did not change the file" }
+```
+
+and threw — because the mutated content compared equal to the original. The bug defeated the control
+written to catch the bug.
+
+**Fix.** Whenever the words *identical*, *matching*, *unchanged* or *verbatim* describe what the code
+claims to check, use the `-c` form. Reserve `-eq` for comparisons where case genuinely does not
+matter, and say so.
+
+**Seen in:** #986. This repository has now shipped this defect twice.
+
+### `Should -Be` is case-insensitive too
+
+**Trap.** Pester's `Should -Be` ignores case; `Should -BeExactly` does not.
+
+**Why it's silent.** On #908 two tests literally named *"preserves case"* and *"preserves the drive
+case"* passed against an implementation that lowercased the drive letter. On Windows the filesystem
+is also case-insensitive, so the defect broke neither the test nor the local runtime lookup — it
+only bites on a case-sensitive filesystem, or when the derived string is compared as a string rather
+than used as a path.
+
+**Fix.** Use `-BeExactly` for any assertion whose purpose is casing, or whose expected value names a
+real path, identifier or slug. And run every new test against the *pre-fix* code: a test that stays
+green before the fix is either testing unchanged behavior — name which — or it is vacuous.
+
+**Seen in:** #908. Converting the string assertions to `-BeExactly` took the pre-fix red count from
+7 of 14 to 11 of 14. Four tests had been asserting nothing they claimed to assert.
+
+### `-like` is a wildcard operator, not a contains
+
+**Trap.** `-like "*$anchor*"` treats several characters in the anchor as syntax:
+
+| In the anchor | What `-like` does |
+| --- | --- |
+| `[Name]` | character class — one char from `{N,a,m,e}`, so `Verified by: [Name]` never matches itself |
+| `(which tests?)` | `?` matches any single character, loosening the check |
+| a backtick | escapes the next character, silently swallowing it |
+| `*` | matches anything |
+
+Two traps travel with it. `Has $x 'A1' + [char]0x2013 + 'A5'` does **not** concatenate — PowerShell
+parses `+` as further arguments to the command, so the needle binds to just `A1`. And en dash
+(`–`, U+2013), em dash (`—`, U+2014) and hyphen are three different characters; an anchor copied
+out of prose fails against text using another one.
+
+**Fix.** Use an ordinal `Contains`:
+
+```powershell
+function Has { param([string]$Hay, [string]$Needle) $Hay.Contains($Needle, [System.StringComparison]::Ordinal) }
+```
+
+Build concatenated needles into a variable first, or parenthesize. Match dashes with `[–—]`, or
+build the exact character with `[char]0x2014`.
+
+**Seen in:** #939 — four false reds and one silently loosened check in a single verification script.
+The loosened one was an anti-deletion assertion, which is exactly where a false green matters.
+
+## Collections and shapes
+
+### `return ,$array` plus a caller's `@()` yields one element
+
+**Trap.** `return ,$arr` wraps an array in an outer one-element array so the pipeline will not
+unroll it. That is correct **only** when the caller assigns directly (`$x = Get-Thing`). `@()` does
+not flatten the nesting, so a caller writing `@(Get-Thing ...)` ends up holding a single element that
+*is* the array.
+
+**Why it's silent.** Nothing throws; collections are simply the wrong shape and count. Three
+instances in one session:
+
+- `$surfaces -contains 'brief-review'` was always `$false`; `"$surfaces"` rendered as
+  `System.Object[]`, which was the only tell.
+- A ledger head was built with one `finding_id` line holding 29 space-joined ids. It parsed cleanly
+  as **one** upheld finding against 29 blocks; `ParseStatus` was `ok` and only the count was wrong.
+- `@(Get-PhaseContainmentBlock ... | Where-Object { $_ -is [string] })` emitted the inner array as
+  one object, `$_ -is [string]` was false for it, and all 29 blocks were filtered away — a
+  verification guard reporting success on a corpus it had never looked at.
+
+**Fix.** Use the comma form only to preserve an empty array for a caller that assigns directly. If
+callers write `@(...)`, drop the comma. Never pipe a comma-returning function through a
+type-filtering `Where-Object`.
+
+**Diagnostic.** Call the function on inputs of 1, 2, 5 and 29 items and print `.Count`. A constant
+`1` across all four is the signature. When two callers of one function disagree, compare their
+collection idiom before anything else.
+
+**Seen in:** #951 / #963. A probe asserting `ParseStatus -eq 'ok'` would have passed twice; what
+caught it was a probe asserting concrete counts.
+
+### A pipeline on the right of an `[ordered]@{}` member drops entries
+
+**Trap.** A bare pipeline as a hashtable-literal member value mis-parses:
+
+```powershell
+$h = [ordered]@{
+    1 = 1..22 | ForEach-Object { "M$_" }
+    2 = 1..13 | ForEach-Object { "M$_" }
+    3 = 1..15 | ForEach-Object { "M$_" }
+}
+```
+
+Iterating `$h.Keys` afterwards yields only keys 1 and 2 — key 3 is gone entirely — and the element
+counts for the surviving keys are wrong too.
+
+**Why it's silent.** No error, no warning. It surfaced only because a downstream guard asserted a
+known key was present (`throw "key $k is not in the sustained set"`). Without that guard the run
+would have emitted a ledger missing a third of its data.
+
+**Fix.** Assign the pipeline result to a variable first, or parenthesize the sub-expression. Never
+put a bare pipeline on the right of a hashtable-literal member. When a literal builds a collection of
+known size, assert the size immediately after construction — that assertion is what turns a silent
+drop into a loud one.
+
+### Joining two regex match sets on `.Index` desyncs
+
+**Trap.** Splitting one combined regex into two `[regex]::Matches` passes and joining the results on
+`.Index` fails when either pattern ends in a greedy `\s*$`: the longer pattern consumes into the
+whitespace between items, so its scan resumes one character further along. The indices never collide
+again after the first item.
+
+**Why it's silent.** It is correct under the common case and wrong under the others:
+
+```text
+LF, 0-1 blank lines between entries   -> correct
+LF, >=2 blank lines                   -> N1=sustained N2=NULL N3=NULL
+CRLF, >=1 blank line                  -> N1=sustained N2=NULL N3=NULL
+```
+
+Index trace: the id-only match sat at `N2@85`, the coupled match at `N2@86` — a one-character
+desync.
+
+**Fix.** Use **one** regex with the optional half as a non-capturing group, then test
+`Groups[N].Success`:
+
+```powershell
+'(?m)^\s*-\s+finding_id\s*:\s*(\S+)\s*$(?:\s*^\s*judge_ruling\s*:\s*(\S+)\s*$)?'
+```
+
+Do not try to correct the index arithmetic — any index join stays hostage to the trailing `\s*`.
+
+**Meta-lesson.** The code comment asserting *"Both regexes start matching at the same position, so
+their .Index values line up"* was false, and asserting it is what stops a reader checking it. When a
+fix rests on an invariant, the test carries it, not the comment.
+
+**Seen in:** #963, `Get-BRMJudgeRulingsFindingIds`.
+
+## Null, absence, and StrictMode
+
+### `??` does not guard an absent property under StrictMode
+
+**Trap.** Under `Set-StrictMode -Version Latest`, reading an **absent** property throws
+`PropertyNotFoundException` before `??` can coalesce. So `[long]($u.input_tokens ?? 0)` defends only
+the present-but-null case while reading as if it handled both.
+
+Writing `?? 0` is itself the tell that the field was expected to be optional — and the correct guard
+for optionality is a presence check:
+
+```powershell
+if ($Usage.PSObject.Properties.Match($Name).Count -eq 0) { return 0L }
+```
+
+**Why it's silent.** It is not silent — it is total. With `$ErrorActionPreference = 'Stop'` at a
+script entry point, the non-terminating error becomes terminating and produces `EXIT=1,
+STDOUT_BYTES=0` across a whole directory: one nonconforming input destroys the report for every good
+one. The silence is in the *review*, where `?? 0` reads as fully defended.
+
+**Fix.** Test presence with `.PSObject.Properties.Match()`. Add a per-file `try`/`catch` around the
+reader so one bad input cannot cost the whole batch.
+
+**Review lens that caught it:** the function guarded every *other* optional property with
+`.PSObject.Properties.Match()`, and these four accesses were the only unguarded ones. An
+inconsistency in defensive style within one function is a finding, not a nit. A corpus survey of
+1,837 transcripts and 106,272 usage rows found zero missing fields, and the judge still sustained at
+HIGH: latency is not safety when the blast radius is the whole run.
+
+**Seen in:** #975.
+
+### `SetEnvironmentVariable($name, $null)` does not remove the variable
+
+**Trap.** `$null` binds to the method's `[string]` parameter as `''`, so the variable survives,
+defined and empty. Measured on PowerShell 7.6.3:
+
+```text
+after seed                : exists=True   value=[seed]
+after $null               : exists=True   value=[]      <- still there
+after [NullString]::Value : exists=False                <- actually removed
+```
+
+**Why it's silent.** The regression test had the same blind spot: it compared
+`[string]$after | Should -Be ([string]$before)`, and `[string]$null` equals `[string]''`. The cast
+added "for safety" is exactly what hid the bug. Five prosecution passes, defense and judge all read
+the line and none saw it. It surfaced only when the same restore pattern was applied to `GIT_DIR`,
+where an empty value fails loudly (`fatal: not a git repository: ''`) and took ten tests down at
+once.
+
+**Fix.** Use `[Environment]::SetEnvironmentVariable($name, [NullString]::Value)`, or
+`Remove-Item Env:\NAME`.
+
+**Generalizable rule.** When a test asserts state was *restored*, assert **existence separately from
+value**. A cast, a `-join`, or a null-coalescing default in the comparison collapses "absent" and
+"empty" into one.
+
+**Seen in:** #958.
+
+### An optional `[ref]` parameter may not carry a default
+
+**Trap.** This throws `ParameterBindingArgumentTransformationException` on **every** call, including
+calls that omit the argument entirely, because PowerShell evaluates the default expression through
+the same type-transformation pipeline as an explicit argument and `$null` cannot transform to
+`[ref]`:
+
+```powershell
+param(
+    [AllowNull()][ref]$ReasonCode = $null
+)
+```
+
+**Fix.** Declare no default at all. Omitted arguments then bind to the CLR default directly:
+
+```powershell
+param(
+    [ref]$ReasonCode
+)
+```
+
+**Why it still belongs here.** It is loud — but it breaks the *pre-existing, unmodified* caller that
+the refactor was supposed to leave untouched, which is not where anyone looks first.
+
+**Seen in:** extracting `Test-CostContributionRateUnavailable` into
+`.github/scripts/lib/cost-attribution.ps1`.
+
+## Capturing native command output
+
+### Three traps in one line
+
+**Trap.** `$x = <native command> 2>$null` carries three distinct failure modes, all found together
+on #977:
+
+1. **`2>$null` does not catch a missing command.** It redirects the *process's* stderr. If the
+   command cannot be resolved at all, PowerShell's command lookup throws `CommandNotFoundException`
+   before any process starts — at the default `$ErrorActionPreference`, not only under `Stop` — and
+   the redirection has nothing to catch. Use
+   `try { $x = cmd ... 2>$null } catch { return @() }`.
+2. **`[string]$captured` joins with a space.** Casting an array to string joins on `$OFS`, which
+   defaults to a space, not a newline. Any later `(?m)^`-anchored regex silently stops matching.
+   Join on a real newline instead, or pipe through `Out-String`:
+
+   ```powershell
+   $text = $captured -join "`n"
+   ```
+
+3. **`-join` over a captured array is lossy on a lone CR.** PowerShell's output splitter treats a
+   bare CR as a line terminator, so the join re-emits it as a real newline — fabricating structure
+   that was not in the source. On #977 this synthesized a bogus `## Acceptance Criteria` header.
+   CRLF is unaffected.
+
+**Why it's silent.** Both AC helpers documented *"returns empty on any failure (missing gh…)"* and
+were wrong about exactly that word for months.
+
+**Testing note.** A shim that exists and exits non-zero is a *failing* command, not an *unavailable*
+one. To exercise unavailability, **replace** `$env:PATH` with an empty directory (do not prepend) and
+assert `Get-Command <cmd>` is false.
+
+**Related: console encoding.** On Windows `[Console]::OutputEncoding` defaults to the OEM codepage,
+so UTF-8 subprocess stdout is decoded with the wrong table. Measured on #968: 12 non-ASCII characters
+became 36 and every em dash was lost, with no error. Pin the encoding and restore it in a `finally` —
+`skills/naming-register-policy/scripts/newcomer-audit.ps1` has the correct shape.
+
+**Seen in:** #977 / PR #982, #968.
+
+## Escaping, parsing, and self-inflicted wounds
+
+### A literal hash-anglebracket ends comment-based help early
+
+**Trap.** PowerShell block comments do not nest. The two-character block-comment **close** sequence,
+written literally anywhere inside a help block, closes it immediately — everything after is parsed as
+code. This is hit by documenting the delimiter in the docstring that uses it.
+
+**Why it's silent.** The parse check used to verify the file was itself broken:
+
+```powershell
+[Parser]::ParseFile($p, [ref]$null, [ref]$e); if ($e -and $e.Count) { ... } else { 'PARSE OK' }
+```
+
+`[ref]$e` on a non-existent variable **throws**, so `$e` was never populated and the `else` branch
+ran unconditionally. The check printed `PARSE OK` for a file that does not parse, and the real
+`[ref]` error was in the same output and got read past.
+
+**Fix.** Spell the delimiters out in prose — "angle-bracket-hash to open, hash-angle-bracket to
+close" — rather than writing them literally. And bind the error sink explicitly:
+
+```powershell
+$tokens = $null; $errors = $null
+$null = [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $Path).Path, [ref]$tokens, [ref]$errors)
+if ($errors.Count) { $errors | ForEach-Object { "LINE $($_.Extent.StartLineNumber): $($_.Message)" } } else { "PARSE OK ($($tokens.Count) tokens)" }
+```
+
+**Seen in:** #969 / PR #988 — 807 tests went from passing to failing, and the downstream error
+pointed 30 lines below the real cause (`The '<' operator is reserved for future use`).
+
+### A literal dollar in a regex inside a double-quoted string needs two escapes
+
+**Trap.** Matching a literal `$` from a double-quoted string needs **both** escapes, and applying
+only one is easy:
+
+- backtick-dollar escapes **PowerShell string interpolation**, producing a string containing `$Is`;
+- backslash-dollar escapes the **regex metacharacter**, matching a literal `$`.
+
+You need `\` then backtick then `$`, so the string ends up containing `\$Is`. With only the
+interpolation escape, the regex sees `$` as an **end-of-line anchor**, and an alternation guarded by
+it can never match.
+
+**Why it's silent.** A negative lookahead built on the broken anchor always succeeds, so a platform
+exemption stops exempting and the guard flags everything it should have skipped — no error, just
+wrong results.
+
+**Fix.** Never verify a regex from the form typed into a probe. Extract the pattern from the file and
+expand it the way the runtime will:
+
+```powershell
+$line = (Get-Content $file | Select-String -SimpleMatch 'Select-String -Pattern').Line
+$pat  = [regex]::Match($line, '"(.+)"').Groups[1].Value
+$pat  = $ExecutionContext.InvokeCommand.ExpandString($pat)   # now test $pat
+```
+
+Then run it against the live tree and assert the expected flag/exempt split.
+
+**Seen in:** #948 / PR #955. The standalone probe passed 11 of 11 because the probe string used both
+escapes while the edit written into the test file used only one. Two checks in the same command
+disagreed — one said all five platform gates were flagged, the other said exempt. A disagreement
+between two checks is signal to chase, not a reason to trust the preferred one.
+
+### `pwsh -File` parses `<` in an argument as redirection
+
+**Trap.** Passing an argument containing `<` — an HTML-comment marker, for instance — to
+`pwsh -NoProfile -File script.ps1 -Marker '<!-- ... -->'` fails with **exit 64** and a full `pwsh`
+usage dump. `pwsh`'s own argument parser sees the redirection operator before the script runs.
+Quoting does not help, and it happens from both the Bash and PowerShell tools.
+
+**Fix.** Call the script directly in an existing session with the call operator, which avoids the
+`-File` re-parse:
+
+```powershell
+& ./path/script.ps1 -Marker '<!-- ... -->'
+```
+
+The same shape matters for array arguments: `pwsh -File script.ps1 -Items @('a','b')` lets the
+calling shell expand the literal into separate argv entries, of which `-File` binds only the first.
+
+**Adjacent.** `Resolve-PersistDecision.ps1` is a function-definition file: dot-source it, then call
+`Resolve-PersistDecision -Inputs $hash`. Invoking it with `&` silently returns `$null`, so the
+decision struct reads as all-empty rather than erroring.
+
+## The sharded Pester runner
+
+### `fail=N` is not a count of failing tests
+
+**Trap.** `.github/scripts/lib/pester-sharded-core.ps1` sets `$failed = $r.FailedCount` and then
+adds one per failing *container*:
+
+```powershell
+foreach ($c in @($r.Containers)) { if ([string]$c.Result -eq 'Failed') { $failed++ } }
+```
+
+A test file is one container, so every file with at least one failing test contributes
+`(failing assertions) + 1`. The comment says this catches discovery errors — a `throw` in a test file
+makes `Container.Result = 'Failed'` — but it fires on ordinary assertion failures too.
+
+**Why it's silent.** `TOTAL: pass=N fail=M` reads exactly like a test count. On #948, "13 failures"
+was reported from `fail=13`; the truth was **7 failing assertions across 6 files** (7 + 6 phantoms).
+A whole floor-satisfiability argument and falsifier list were then written in the wrong unit,
+internally consistent with the bug. A review pass caught it, not the author.
+
+**Fix.** For a real count, strip ANSI and count lines beginning with the failure marker, excluding
+the runner's own fixtures (`crash-worker`, `zero-tests`). Sanity-check:
+`real + (failing file count) == reported fail`. For per-test identity, re-run the file solo — eight
+concurrent workers splice each other's lines mid-string.
+
+**Also.** The runner is **re-entrant**: `run-pester-sharded.Tests.ps1` is itself a suite file that
+drives `Invoke-PesterSharded` five times against temp fixtures, the last with `-DeterminismCheck`
+running the sharded pass twice. A plain full-suite run therefore prints about seven `TOTAL:` lines,
+only one of which is the real run. `Determinism check: PASSED` and the min-count `WARNING` are
+emitted by those nested fixtures on every plain run, so grepping for them as evidence is
+guaranteed-green.
+
+**And.** `ExitCode=1` with `TotalFailed=0` occurs in **four** situations — path unresolved, zero
+discovered, the `MinTestCount` floor, and a `-DeterminismCheck` flip returning run 1's totals. The
+widely copied comment in `goal-contract-validate-core.ps1` says only three.
+
+**Seen in:** #948.
+
+### "Fails in the suite, passes alone" is not mock leakage here
+
+**Trap.** The reflex diagnosis for a full-suite-only failure is cross-file state leakage. Under this
+repository's runner that explanation is **structurally unavailable**: `pester-sharded-core.ps1` runs
+each `.Tests.ps1` in a separate `pwsh` process (`ForEach-Object -Parallel -ThrottleLimit 8`; a small
+real-git allowlist runs sequentially but still per-process). Mocks cannot leak between files.
+
+**Why it's silent.** The mislabeled explanation reads as benign — an artifact, not a defect. In the
+filing for #948, "mock leakage under full-suite ordering" survived into the issue *as evidence*.
+
+**Fix.** Check what actually ran the suite. If it was `run-pester-sharded.ps1`, look for causes that
+survive process isolation. The live one is **8-way parallel contention**: the #948 failures showed
+real `gh: unexpected error connecting to api.github.com` — tests reaching the network, rate-limited
+under concurrency, passing when run alone. Tag such a claim `sample-inferred` per doctrine amendment
+A2 and do not let it set a mechanism.
+
+**Seen in:** #948, #818.

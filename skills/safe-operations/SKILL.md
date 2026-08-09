@@ -356,8 +356,15 @@ The other subsections here govern the mechanics and placement of filing — prio
 
 The known-versus-unknown split is not decoration: it is the direct input to the open-for-work routing beat, which classifies each open unknown by whether it could change what is being built. A filing that is honest about what it does not know is worth more than one that papers over it with a confident solution sketch.
 
+## git, `gh`, worktree and repo-script traps
+
+[`references/git-and-gh-traps.md`](references/git-and-gh-traps.md) collects the traps in the tools this repository uses to inspect state and to write to GitHub. Like the PowerShell traps, they produce a confident, wrong answer rather than an error: a green check table for a commit you have moved past, a "pre-existing failure" verdict structurally unable to detect the defect it was asked about, a successful `PATCH` that destroys content nobody notices is gone.
+
+Read it before reporting CI state, before claiming a failure is pre-existing, before writing to a GitHub comment body, and before trusting a cleanup detector's silence. The write-path entries are directly in this skill's scope: a `PATCH` from a local file clobbers server-side appends, `-f body=@-` can post the literal string `@-`, and `--edit-last` targets the last comment posted rather than the one intended.
+
 ## Gotchas
 
 | Trigger                                 | Gotcha                                                             | Fix                                                                                                   |
 | --------------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
 | Editing workspace files from PowerShell | Silent encoding or line-ending corruption slips into tracked files | Use the designated file tools for content changes and keep terminal writes for move/delete cases only |
+| Writing a GitHub body from a file       | `-f body=@-` can post the literal `@-`; a local-file `PATCH` destroys server-side appends | Use long `--field body=@- < file`, re-read the live body before patching, and verify the result rather than the exit code |
