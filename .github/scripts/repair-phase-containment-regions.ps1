@@ -136,7 +136,7 @@ function Get-CoLocatedMarkerFamily {
         void another". Nine comments were PATCHed, and their `updated_at` moved
         on families the guard had never heard of. Running the disclosure
         function below over the nine bodies reports 16 (family, comment)
-        occurrences across 9 distinct families, on 8 of the 9 comments —
+        occurrences across 11 distinct family strings, on 8 of the 9 comments —
         including `judge-rulings` on four of them, plus `frame-spine`,
         `frame-slice`, `verification-evidence` and `coverage-manifest`.
         The full per-comment table and the inclusion rule it applies are in
