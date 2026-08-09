@@ -59,6 +59,15 @@ Describe 'Test-CommentBodyMarkerLine1 (marker-line1-selector.ps1)' {
         It 'accepts a CRLF body, which is what GitHub often returns' {
             Test-CommentBodyMarkerLine1 -Body "$script:M`r`nbody" -Marker $script:M | Should -BeTrue
         }
+        It 'is REFLEXIVE: a marker carrying trailing whitespace still matches the body that carries it (#1031 finding M4)' {
+            # Trimming only the body side made this false, and zero matches is
+            # the POST branch — so such a caller posted a fresh comment on
+            # every run, forever, silently.
+            Test-CommentBodyMarkerLine1 -Body "$script:M `nbody" -Marker "$script:M " | Should -BeTrue
+        }
+        It 'is reflexive for a marker with a trailing CR against a body without one' {
+            Test-CommentBodyMarkerLine1 -Body "$script:M`nbody" -Marker "$script:M`r" | Should -BeTrue
+        }
     }
 
     Context 'rejects — the marker is quoted rather than owned (the #1031 population)' {
@@ -93,6 +102,18 @@ Describe 'Test-CommentBodyMarkerLine1 (marker-line1-selector.ps1)' {
         It 'rejects an EMPTY marker rather than selecting every comment' {
             Test-CommentBodyMarkerLine1 -Body "anything`nat all" -Marker '' | Should -BeFalse
         }
+        It 'rejects a WHITESPACE-ONLY marker, which an IsNullOrEmpty guard would let through (#1031 finding M16)' {
+            # A whitespace-only marker passes IsNullOrEmpty and can then never
+            # match, because TrimEnd can never leave a line ending in
+            # whitespace — a silent never-selects, which becomes
+            # POST-a-new-comment one layer up. The mandatory [string] on
+            # Find-OrUpsertComment rejects '' but not '   ', and the two
+            # mirrors bind nothing at all.
+            Test-CommentBodyMarkerLine1 -Body "   `nbody" -Marker '   ' | Should -BeFalse
+        }
+        It 'rejects a whitespace-only BODY' {
+            Test-CommentBodyMarkerLine1 -Body "   `n  " -Marker $script:M | Should -BeFalse
+        }
         It 'compares ordinally, so a case difference does not match' {
             Test-CommentBodyMarkerLine1 -Body "<!-- FRAME-CREDIT-LEDGER-123 -->`nb" -Marker $script:M | Should -BeFalse
         }
@@ -114,8 +135,8 @@ Describe 'Find-OrUpsertComment target selection (issue #1031)' {
         $script:posted = $false
 
         function global:gh {
-            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
-            $joined = $Args -join ' '
+            param([Parameter(ValueFromRemainingArguments = $true)]$GhArgs)
+            $joined = $GhArgs -join ' '
             if ($joined -match 'issue view \d+ --json comments') {
                 $global:LASTEXITCODE = 0
                 return (@{ comments = $script:mockComments } | ConvertTo-Json -Depth 8)
@@ -191,7 +212,8 @@ Describe 'Selectors that must reach the same comment (issue #1031 AC-c)' {
         BeforeEach {
             $script:mockComments = @()
             function global:gh {
-                param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+                param([Parameter(ValueFromRemainingArguments = $true)]$GhArgs)
+                $null = $GhArgs
                 $global:LASTEXITCODE = 0
                 return (@{ comments = $script:mockComments } | ConvertTo-Json -Depth 8)
             }
@@ -212,6 +234,58 @@ Describe 'Selectors that must reach the same comment (issue #1031 AC-c)' {
     }
 
     Context 'cost-session-render prior-degraded read' {
+
+        # The behavioural pin (#1031 review finding M2). The resolvability
+        # test below proves only that the predicate LOADS; it never drove the
+        # selector, so reverting this mirror to the old unanchored match left
+        # every check in the repository green while both sibling selectors
+        # reddened. These cases run the real Get-CSRPriorDegradedComment --
+        # the shipped selector, the one Invoke-CostSessionRender calls --
+        # against a body set that includes the quotation shape, so reverting
+        # it reddens here.
+        #
+        # Why that selector is a named function at all: the retraction
+        # decision it feeds is additionally gated on the walker having found
+        # real cost events, and the walker runs behind a worker-runspace
+        # boundary, so no hermetic test could reach the rule while it was an
+        # inline Where-Object. See that function's .DESCRIPTION.
+        BeforeAll {
+            $script:DEG = '<!-- cost-pattern-data-degraded-794 -->'
+            $script:InvokeCSRSelect = {
+                param([string]$RenderLib, [string]$PriorBody)
+                $ps = [System.Management.Automation.PowerShell]::Create()
+                try {
+                    $ps.Runspace.SessionStateProxy.SetVariable('RenderLib', $RenderLib)
+                    $ps.Runspace.SessionStateProxy.SetVariable('PriorBody', $PriorBody)
+                    $null = $ps.AddScript(@'
+. $RenderLib
+$prior = @([pscustomobject]@{ body = $PriorBody; databaseId = 4001 })
+$hit = Get-CSRPriorDegradedComment -PriorComments $prior -DegradedMarker '<!-- cost-pattern-data-degraded-794 -->'
+if ($null -eq $hit) { 'none' } else { [string]$hit.databaseId }
+'@)
+                    $out = $ps.Invoke()
+                    return [string]($out | Select-Object -Last 1)
+                }
+                finally { $ps.Dispose() }
+            }
+        }
+
+        It 'DOES select a genuine degraded comment (control: without this the next case passes vacuously)' {
+            $body = "$script:DEG`n`n## Cost Pattern`n`ndegraded telemetry: no-transcript-found"
+            (& $script:InvokeCSRSelect $script:RenderLib $body) | Should -Be '4001'
+        }
+
+        It 'does NOT select a comment that only QUOTES the marker in prose -- reverting this mirror to the unanchored match reddens here' {
+            $body = "<!-- plan-issue-794 -->`n`nThe retraction keys off ``$script:DEG`` when events reappear."
+            (& $script:InvokeCSRSelect $script:RenderLib $body) | Should -Be 'none' `
+                -Because 'believing a stale degraded comment exists makes the anchored writer find none and POST a brand-new telemetry-recovered comment that nothing justifies'
+        }
+
+        It 'does NOT select an own-line quotation inside a fenced block' {
+            $body = "<!-- plan-issue-794 -->`n" + '```' + "`n$script:DEG`n" + '```'
+            (& $script:InvokeCSRSelect $script:RenderLib $body) | Should -Be 'none'
+        }
+
         It 'resolves the shared predicate from its own dot-source, so the read cannot die as a swallowed CommandNotFound' {
             # This read runs inside Invoke-CostSessionRender fail-open catch.
             # If the predicate is not loaded at dot-source time the exception

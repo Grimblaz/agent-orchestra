@@ -28,8 +28,11 @@
     harvest a no-op rather than throwing or blocking whatever invoked it.
 
     Dependencies (must already be dot-sourced by the caller — this file does
-    not dot-source them itself, matching cost-session-render.ps1
-    caller-owns-dependencies convention):
+    not dot-source the ones listed below itself, matching
+    cost-session-render.ps1 caller-owns-dependencies convention). ONE
+    EXCEPTION, dot-sourced by this file: lib/marker-line1-selector.ps1 — see
+    the issue #1031 NOTE further down for why that import is safe here where a
+    dependency on find-or-upsert-comment.ps1 was not. The list:
       - Get-CostRollingHistory        (cost-rolling-history.ps1)
       - Test-CostWalkerSessionTranscriptExists, Get-CostTranscriptSlug
                                        (cost-walker.ps1)
@@ -302,6 +305,16 @@ function script:Get-CostBaselineHarvestCompositeComment {
         paragraph asserts was true (both sides ran `-like "*$marker*"`) but
         was held together only by this cross-reference; now there is a single
         rule and no second copy to drift.
+
+        Read "one rule" narrowly: it scopes to the SELECTION FILTER and to
+        the REST-id tie-break, and to nothing else. AUTHORIZATION is still
+        per-site and the two sites do not agree — the M19 gate below runs
+        here and Find-OrUpsertComment has no authorship check at all, so any
+        account that can comment on the pull request can post a body whose
+        first line is exactly the resolved marker and be PATCHed by the
+        writer. That asymmetry predates issue #1031 and is unchanged by it;
+        it is stated here so the shared-predicate sentence above is not read
+        as a safety guarantee it does not make (#1031, review finding M15).
 
         M19 (issue #824 post-review fix), corrected by the post-fix cycle 2
         F1 fix: fail-closed authorship check on the composite comment. This

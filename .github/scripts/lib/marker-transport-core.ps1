@@ -432,9 +432,14 @@ function Find-CommentIdByExactMarker {
         given marker LINE-ANCHORED AND WHOLE (the entire line, modulo
         surrounding whitespace, must equal the marker exactly).
     .DESCRIPTION
-        Deliberately NOT Find-OrUpsertComment's -like substring match,
-        which would select a comment that merely quotes the marker in
-        prose (e.g. inside backticks mid-sentence). Ties (multiple genuine
+        Deliberately NOT a -like substring match, which would select a
+        comment that merely quotes the marker in prose (e.g. inside
+        backticks mid-sentence). This used to read "NOT Find-OrUpsertComment's
+        -like substring match"; as of issue #1031 that function no longer
+        does a substring match either -- it selects line-1-exact. The two are
+        still not the same rule, and this one is now the WIDER of the pair:
+        whole-line-anywhere accepts a marker alone on its own line inside a
+        fenced block, which line-1-exact rejects. Ties (multiple genuine
         line-anchored matches) resolve to the lowest REST id, mirroring
         Find-OrUpsertComment's own earliest-id convention. Id extraction
         reuses Get-RestCommentId (find-or-upsert-comment.ps1), assumed

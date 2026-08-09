@@ -43,10 +43,37 @@
     line 3, an indented marker, or a marker inside a fenced code block still
     read as a candidate -- the exact shadowing defect this anchor exists to
     close", and settled on line-1-exact. This predicate is the same rule, for
-    the write side, and it converges the writer onto what the already-diverged
-    readers do (goal-run-stage-core.ps1:244-286 and
-    migrate-brief-review-corpus.ps1:170-177), both of which noted that the
-    writer-side selector was the real fix.
+    the write side.
+
+    IT DOES NOT CONVERGE ON THE WHOLE-LINE READERS -- IT GOES STRICTLY
+    NARROWER, AND THAT DIRECTION IS DELIBERATE. Two readers had already
+    diverged from the old substring rule for markers this writer writes, and
+    both noted that the writer-side selector was the real fix:
+    goal-run-stage-core.ps1:244-286 (used at :503, :1738, :1971) and
+    migrate-brief-review-corpus.ps1:170-177 (and the same whole-line finder
+    reached through persist-phase-ledger-core.ps1:138). They match
+    `(?m)^\s*ESC\s*$` -- whole line, ANY line -- so they still accept a marker
+    alone on its own line inside a fenced block, which the section above
+    argues is exactly the shape that must not select. This predicate rejects
+    it. So the accept set of the WRITER is now a strict SUBSET of the accept
+    set of those READERS, where before this change it was a superset.
+
+    Why that inversion is the safe direction, and why no reader was narrowed
+    with it: an over-selecting READER refuses or reuses, loudly. An
+    over-selecting WRITER destroys. Concretely -- Clear-GoalRunStageMarker
+    (goal-run-stage-core.ps1:1971) reports `marker-ambiguous` and deletes
+    nothing when it sees more than one match, and Invoke-GoalRunRestart
+    surfaces that as `restarted-partial-marker-clear-failed`; before this
+    change the same quotation-only state ended in a silent PATCH over the
+    quoting comment instead. For the phase-containment-ledger family the
+    reader GATES the writer (persist-phase-ledger-core.ps1:777-783 only calls
+    the upserter when its own whole-line lookup found nothing), so a reader
+    that accepts more than the writer can only over-reuse an existing
+    comment, never route a write onto one the writer would have refused.
+    Narrowing those readers is therefore not required by this change, and is
+    not attempted by it. Recorded here rather than left implicit because the
+    divergence is real and a later reader must not conclude the two sides
+    agree (#1031, review finding M1).
 
     WHY ITS OWN FILE. It has exactly one job and no side effects at
     dot-source time, so any selector can import it without importing anything
@@ -92,8 +119,25 @@ function Test-CommentBodyMarkerLine1 {
         wider. Same reasoning, same conclusion as PF1/PF6 in
         completion-account-core.ps1.
 
-        Fails closed on a null or empty body and on a null or empty marker:
-        an empty marker must never select every comment in the list.
+        The marker is TrimEnd-ed too, not only the body line, so the
+        comparison is reflexive: a marker carrying a stray trailing space or
+        CR still matches the comment that carries it. Trimming only one side
+        made the predicate return false for Body == Marker, and since zero
+        matches is the POST branch in Find-OrUpsertComment, such a caller
+        would have posted a fresh comment on every run -- the unbounded
+        duplicate accretion class persist-marker-core.ps1:681-696 records.
+        No current caller could reach it (all interpolate literals), which is
+        why it was a latent defect rather than a live one (#1031, review
+        finding M4).
+
+        Fails closed on a null, empty or WHITESPACE-ONLY body or marker.
+        Whitespace-only is checked, not merely empty, because TrimEnd can
+        never leave a line ending in whitespace: a whitespace-only marker
+        would pass an IsNullOrEmpty guard and then match nothing, forever,
+        silently -- and silently-matches-nothing becomes POST-a-new-comment
+        one layer up. Find-OrUpsertComment binds Marker as a mandatory
+        [string], which rejects the empty string but NOT a whitespace-only
+        one, and the two mirrors bind nothing at all (#1031, finding M16).
     .PARAMETER Body
         The comment body to test. Null and empty are accepted and return
         false rather than throwing, because the shapes returned by
@@ -112,8 +156,8 @@ function Test-CommentBodyMarkerLine1 {
         [Parameter(Mandatory, Position = 1)][AllowNull()][AllowEmptyString()][string]$Marker
     )
 
-    if ([string]::IsNullOrEmpty($Body)) { return $false }
-    if ([string]::IsNullOrEmpty($Marker)) { return $false }
+    if ([string]::IsNullOrWhiteSpace($Body)) { return $false }
+    if ([string]::IsNullOrWhiteSpace($Marker)) { return $false }
 
     # Slice on either terminator: GitHub returns CRLF in comment bodies often
     # enough that IndexOf on LF alone would leave a trailing CR on line 1.
@@ -122,5 +166,5 @@ function Test-CommentBodyMarkerLine1 {
     $firstBreak = $Body.IndexOfAny([char[]]@("`n", "`r"))
     $firstLine = if ($firstBreak -lt 0) { $Body } else { $Body.Substring(0, $firstBreak) }
 
-    return $firstLine.TrimEnd().Equals($Marker, [System.StringComparison]::Ordinal)
+    return $firstLine.TrimEnd().Equals($Marker.TrimEnd(), [System.StringComparison]::Ordinal)
 }

@@ -35,10 +35,16 @@
 
 .PARAMETER Marker
     The HTML-comment marker used to recognise prior upsert output. It must be
-    the ENTIRE first line of the comment this function is meant to reach
-    (trailing whitespace on that line is immaterial; leading whitespace is
-    not). It is NOT a substring, a prefix, or a whole-line match anywhere in
-    the body.
+    the ENTIRE first line of the comment this function is meant to reach.
+    Leading whitespace on that line disqualifies a match; trailing whitespace
+    is immaterial on BOTH sides — the marker argument and the comment line are
+    each TrimEnd-ed before comparison, so the test is reflexive. It is NOT a
+    substring, a prefix, or a whole-line match anywhere in the body.
+
+    A whitespace-only marker is rejected outright rather than matching
+    nothing: this parameter is a mandatory [string], which rejects the empty
+    string but not a whitespace-only one, and matching-nothing becomes
+    posting-a-new-comment on the zero-match branch below.
 
     Issue #1031 (parent #1011 AC2) narrowed this from `-like "*$Marker*"`.
     Under the old rule a marker QUOTED IN PROSE — mid-line, inside backticks,
@@ -75,6 +81,14 @@
     any underlying gh call fails.
 #>
 
+# The line-1-exact selection predicate (issue #1031). Its own file, with no
+# side effects at dot-source time, so the two selectors that must reach the
+# SAME comment this one reaches can import it without importing
+# Find-OrUpsertComment (which shadows Pester mocks) or marker-transport-core
+# (which mutates [Console]::OutputEncoding process-wide). See that file's
+# .DESCRIPTION.
+. (Join-Path $PSScriptRoot 'marker-line1-selector.ps1')
+
 # ---------------------------------------------------------------------------
 # Helper: Get-RestCommentId
 # (issue #492 Step 5 — hoisted from inside Find-OrUpsertComment per plan D9)
@@ -91,13 +105,6 @@
 #     Find-OrUpsertComment first.
 #   - It can be tested independently via Get-Command and AST inspection.
 # ---------------------------------------------------------------------------
-# The line-1-exact selection predicate (issue #1031). Its own file, with no
-# side effects at dot-source time, so the two selectors that must reach the
-# SAME comment this one reaches can import it without importing
-# Find-OrUpsertComment (which shadows Pester mocks) or marker-transport-core
-# (which mutates [Console]::OutputEncoding process-wide). See that file's
-# .DESCRIPTION.
-. (Join-Path $PSScriptRoot 'marker-line1-selector.ps1')
 
 function Get-RestCommentId([object]$c) {
     if ($c.url -and ($c.url -match '#issuecomment-(\d+)$')) { return [long]$Matches[1] }
@@ -194,7 +201,7 @@ function Find-OrUpsertComment {
     # --- 2. Filter: the marker must be the comment's own line-1 payload. ---
     # Issue #1031 / parent #1011 AC2. Was `$_.body -like "*$Marker*"`, which
     # let a marker quoted anywhere in prose select a comment this function
-    # then destroyed by whole-body PATCH (:236-238). A line anchor would not
+    # then destroyed by the whole-body PATCH below. A line anchor would not
     # have been enough — see marker-line1-selector.ps1.
     $matchedComments = @($comments | Where-Object {
             $_.body -and (Test-CommentBodyMarkerLine1 -Body ([string]$_.body) -Marker $Marker)

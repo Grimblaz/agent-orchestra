@@ -93,6 +93,56 @@
 # marker predicate, dot-sourced here rather than by the caller.
 . (Join-Path $PSScriptRoot 'marker-line1-selector.ps1')
 
+function Get-CSRPriorDegradedComment {
+    <#
+    .SYNOPSIS
+        Selects the prior standalone degraded-telemetry comment from a set of
+        already-fetched comments, by the line-1-exact rule.
+    .DESCRIPTION
+        This is the selection half of the retraction decision inside
+        Invoke-CostSessionRender. It is a named, callable function rather than
+        an inline Where-Object for one reason: it has to be possible to run it
+        against a body set and see which comment it picks.
+
+        Issue #1031 review finding M2. The inline form could not be pinned:
+        the retraction decision it feeds is gated on the walker having found
+        real cost events, and the walker runs behind a worker-runspace
+        boundary, so no hermetic test could drive the selector. Reverting this
+        rule to the old unanchored match therefore left every check in the
+        repository green, while the two sibling selectors both reddened. A
+        selector that cannot be exercised cannot be defended.
+
+        WHY THIS SELECTOR MATTERS MORE THAN ITS SIBLINGS. It does not choose a
+        write target; it decides WHETHER the caller writes at all
+        (frame-credit-ledger.ps1 -> Find-OrUpsertComment), and that writer
+        POSTs a new comment when it finds no match. Left unanchored while the
+        writer was anchored, a marker merely QUOTED in some prose comment
+        makes this read believe a stale degraded comment exists, the anchored
+        writer finds none, and the run posts a brand-new comment asserting
+        "Telemetry recovered" that nothing justifies. No legitimate target is
+        ever lost on that path, so a criterion about losing targets cannot see
+        it. Same asymmetry class persist-marker-core.ps1:681-696 records as
+        producing unbounded duplicate accretion on every subsequent write.
+    .PARAMETER PriorComments
+        Already-fetched comment objects carrying at least `body`. Null is
+        accepted and yields $null.
+    .PARAMETER DegradedMarker
+        The resolved standalone degraded-telemetry marker for this pull request.
+    .OUTPUTS
+        The first matching comment object, or $null.
+    #>
+    [CmdletBinding()]
+    param(
+        [AllowNull()]$PriorComments,
+        [Parameter(Mandatory)][string]$DegradedMarker
+    )
+
+    if ($null -eq $PriorComments) { return $null }
+    return @($PriorComments | Where-Object {
+            Test-CommentBodyMarkerLine1 -Body ([string]$_.body) -Marker $DegradedMarker
+        }) | Select-Object -First 1
+}
+
 function Invoke-CostSessionRender {
     <#
     .SYNOPSIS
@@ -481,23 +531,14 @@ function Invoke-CostSessionRender {
         # IsOrchestrated check, but keys off real events being present rather than absent.
         # The actual Find-OrUpsertComment call is left to the caller (see file-level
         # .DESCRIPTION) — this function only decides + composes the body.
-        # Issue #1031 (parent #1011 AC2, criterion AC-b second half): this read
-        # decides WHETHER the caller writes at all, and the writer it feeds
-        # (frame-credit-ledger.ps1:1488 -> Find-OrUpsertComment) POSTs A NEW
-        # COMMENT when it finds no match. Left unanchored while the writer was
-        # anchored, a marker merely QUOTED in some prose comment would make
-        # this read believe a stale degraded comment exists, the anchored
-        # writer would find none, and the run would post a brand-new comment
-        # asserting "Telemetry recovered" that nothing justifies — a spurious
-        # comment on a path where no legitimate target was ever lost, so a
-        # criterion about losing targets structurally cannot see it. Same
-        # asymmetry class persist-marker-core.ps1:681-696 records as producing
-        # "unbounded duplicate accretion on every subsequent write".
-        # So it uses the SAME predicate the writer uses: line-1-exact, from
-        # marker-line1-selector.ps1.
-        $priorDegradedComment = if ($null -ne $PriorComments) {
-            @($PriorComments | Where-Object { Test-CommentBodyMarkerLine1 -Body ([string]$_.body) -Marker $degradedMarker }) | Select-Object -First 1
-        } else { $null }
+        # Issue #1031 (parent #1011 AC2, criterion AC-b second half): the
+        # selection rule, and why this one decides whether a write happens at
+        # all rather than which comment a write lands on, live in
+        # Get-CSRPriorDegradedComment at the top of this file. It is a named
+        # function precisely so the rule can be run against a body set and
+        # compared with the two sibling selectors — an inline Where-Object
+        # here could not be reached by any hermetic test (review finding M2).
+        $priorDegradedComment = Get-CSRPriorDegradedComment -PriorComments $PriorComments -DegradedMarker $degradedMarker
         if ($IsOrchestrated -and $null -ne $priorDegradedComment -and @($costEvents).Count -gt 0) {
             $shouldRetractDegraded = $true
             $retractDegradedBody = "$degradedMarker`n_Telemetry recovered — see the main cost-pattern-data comment above for current data._"

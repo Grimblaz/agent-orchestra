@@ -5,16 +5,20 @@
 # FIXTURE MOVE (issue #1031, parent #1011 AC2 close arm).
 #
 # Find-OrUpsertComment now selects the comment whose FIRST LINE is exactly the
-# marker, instead of any comment containing the marker anywhere. Seven fixtures
-# in this file put the marker at column 0 of line 1 but with TRAILING PROSE on
-# that same line, and one put it alone on line 2. They were written that way as
-# convenient filler, not to state a requirement — no test in this repository
-# ever asserted that a marker with trailing content must be selectable, and no
-# production composer emits that shape (all fourteen live call sites put the
-# bare marker on line 1; verified by executing each composer, and by a probe of
-# every marker this function writes across issues and pull requests 1..1037:
-# 282 of 283 live occurrences are line-1-exact and the one exception is the
-# defect itself — issue #782's plan comment quoting a marker in prose).
+# marker, instead of any comment containing the marker anywhere. TEN fixtures
+# in this file, across SIX `It` blocks, put the marker at column 0 of line 1
+# but with TRAILING PROSE on that same line (at 1cc08df: lines 104, 105, 106,
+# 129, 144, 207, 220, 233, 238, 243); one more put it alone on line 2 (line
+# 159). They were written that way as convenient filler, not to state a
+# requirement — no test in this repository ever asserted that a marker with
+# trailing content must be selectable, and no production composer emits that
+# shape (all fourteen live call sites put the bare marker on line 1; verified
+# by executing each composer, and by a live-corpus probe of every marker this
+# function writes across issues and pull requests 1..1037 — 282 of 283
+# occurrences are line-1-exact and the one exception is the defect itself,
+# issue #782's plan comment quoting a marker in prose). The probe command and
+# its full output are recorded in this issue's completion account, on issue
+# #1031; the numbers above are a summary of that record, not a fresh claim.
 #
 # Rather than weaken the new rule to keep them green, the fixtures moved. Each
 # is listed at its Context below with what changed. The one test that ASSERTED
