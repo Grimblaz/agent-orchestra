@@ -254,16 +254,29 @@ The entry delta is exactly the recovered population, and the veto delta is exact
 
 **Recorded as an accepted, unrecoverable cost, not as a clean run.** On 2026-08-05 the corpus repair PATCHed nine comments with a hand-composed `gh api -X PATCH`. `created_at` is untouched on all nine; `updated_at` moved from between 2026-06-29 and 2026-07-27 to 2026-08-05. **That cannot be restored** — a second PATCH would move it again, and reverting would also un-repair the 63 entries, so it is strictly worse on both axes.
 
-The repair script guarded exactly one marker family — the open-for-work affirmation record, which is void as an ordering witness once edited — while its own docstring stated the general principle that repairing one marker must not void another. **Six** other registered-family occurrences, across four families, were co-located on the nine comments and had their `updated_at` advanced without disclosure:
+The repair script guarded exactly one marker family — the open-for-work affirmation record, which is void as an ordering witness once edited — while its own docstring stated the general principle that repairing one marker must not void another. Every other family co-located on those nine comments had its `updated_at` advanced without disclosure.
 
-| Family | On |
-| --- | --- |
-| `plan-issue` | #471, #784 |
-| `review-judge-produced` | #853 (and its `-postfix` sibling) |
-| `adversarial-pipeline-atomic` | #471 |
-| `design-phase-complete` | #784 |
+**The inclusion rule this inventory applies, stated rather than left to be inferred.** A row is one **(family, comment) pair** reported by the repair script's own disclosure function, `Get-CoLocatedMarkerFamily`, run over each of the nine PATCHed bodies. Two exclusions, both deliberate: `phase-containment*`, because those blocks are what the repair owned and rewrote on purpose (the function excludes them itself); and the `plan-issue-871` hit on comment 5014166928, because it is a **prose mention**, not a marker — see the correction below. Nothing else is filtered. In particular this rule does **not** restrict to families in the `persist-marker.ps1` registry or the handoff-marker catalog, and it must not: the earlier version of this table counted `adversarial-pipeline-atomic`, which appears in neither, while omitting families that do appear in the catalog. Membership by instrument, uniformly applied.
 
-**Corrected 2026-08-09 (issue #1032, carrying issue #1011's grounding correction).** This entry originally recorded **three** PATCHed `plan-issue` comments and described the consequence as "bounded rather than realised". Both readings are falsified and are replaced above and below. The third entry — `#871 (via the #884 comment)` — was never a marker: comment 5014166928 on #884 carries a backticked **prose mention** of `plan-issue-871` mid-sentence, and `Get-CoLocatedMarkerFamily`'s regex was not line-anchored, so it reported the mention as a family. The real marker lives on #871 comment 5013077002, whose `updated_at` is still `2026-07-18T21:57:59Z` — untouched by the repair. Over-reporting is the correct failure direction for a disclosure preflight; it is the damage inventory that needed the correction. The occurrence count above moves from seven to six for the same reason.
+Under that rule: **16 (family, comment) occurrences across 9 distinct families, on 8 of the 9 comments.**
+
+| Comment | Issue | Families disclosed | Count |
+| --- | --- | --- | --- |
+| 4837695451 | #471 | `plan-issue-471`, `frame-spine`, `frame-slice`, `adversarial-pipeline-atomic-471` | 4 |
+| 4862082721 | #784 | `design-phase-complete-784` | 1 |
+| 4862276350 | #784 | `plan-issue-784`, `frame-spine`, `frame-slice`, `verification-evidence`, `coverage-manifest` | 5 |
+| 4882567383 | #810 | `judge-rulings` | 1 |
+| 4964854393 | #853 | `review-judge-produced-853`, `judge-rulings` | 2 |
+| 4965012156 | #853 | `review-judge-produced-853-postfix` | 1 |
+| 5011973828 | #880 | `judge-rulings` | 1 |
+| 5014166928 | #884 | `judge-rulings` (plus the excluded `plan-issue-871` prose mention) | 1 |
+| 5096544713 | #937 | — none — | 0 |
+
+**Corrected 2026-08-09 (issue #1032), on three separate points.** Recording all three, because the first correction alone left the entry still falsifiable by running the script's own instrument.
+
+1. **Carrying issue #1011's grounding correction: two PATCHed `plan-issue` comments, not three.** The dropped third — `#871 (via the #884 comment)` — was never a marker: comment 5014166928 on #884 carries a backticked **prose mention** of `plan-issue-871` mid-sentence, and the family regex is not line-anchored, so it reports the mention as a family. The real marker lives on #871 comment 5013077002, whose `updated_at` is still `2026-07-18T21:57:59Z` — untouched by the repair. Over-reporting is the correct failure direction for a disclosure preflight; it was the damage inventory that needed correcting. **That regex is unchanged and still unanchored** — this is a statement about a live behavior, not a fixed one, and anchoring it belongs to #994. Re-running the preflight today still reports the #884 mention.
+2. **The consequence was described as "bounded rather than realised". It is stronger than that: unreachable.** See below.
+3. **The inventory itself under-counted, and did so in a way its own tooling exposes.** The first correction removed `#871` from the `plan-issue` row and, with it, comment 5014166928 from the table entirely — but that comment carries a genuine `judge-rulings` block head on its own line and *was* PATCHed. Two further comments (5011973828 on #880, 4882567383 on #810) carried `judge-rulings` and appeared in no version of this table at all, and neither did `frame-spine`, `frame-slice`, `verification-evidence` or `coverage-manifest`. The figure went from a stated "seven registered **families**" — itself a unit error, since the original table had four rows — to "six occurrences" and now to **16 occurrences across 9 families** under the rule stated above. The unit changed twice; that is disclosed here rather than left for a reader to reconstruct.
 
 `plan-issue` is registered `upsert-in-place` with `persist-marker.ps1` named as its **only** documented write path (`SMC-01`) — a rule that buys a single audited writer and **not** protection from `updated_at` advancement, which is why routing this repair through the primitive would have advanced exactly the same fields (`skills/session-memory-contract/references/handoff-markers.md` § What the write-path rule buys). **What this costs a future reader:** `updated_at` on those nine is no longer evidence of when their content last changed. `skills/open-for-work/SKILL.md` § Resuming upgrades routing state on an artifact whose `updated_at` postdates the latest lawful record, and warns that the field "advances on any touch". **On these two artifacts the check is not weakened — it is unreachable.** Neither #471's nor #784's plan comment carries a `plan-variant` key at all, and neither issue carries any open-for-work affirmation record, so § Deciding the state stops at step 1 ("No lawful record") and never reaches the step-3 supersession check that reads `updated_at`. Nothing was damaged. The general point about future repairs stands unchanged.
 
