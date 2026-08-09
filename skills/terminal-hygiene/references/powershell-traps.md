@@ -1,8 +1,10 @@
 # PowerShell and Pester traps
 
-Language-level and runner-level traps that have each cost this repository real time, and that share
-one property: **they do not throw.** They return a wrong shape, a wrong count, or a green verdict.
-A trap that errors teaches itself; these do not, which is why they are written down.
+Language-level and runner-level traps that have each cost this repository real time. **Most of them
+do not throw** — they return a wrong shape, a wrong count, or a green verdict, and a trap that errors
+teaches itself while these do not. A few throw loudly and are here anyway, because they fire
+somewhere other than where you would look: on the caller a refactor never touched, or on a whole
+batch rather than the one bad input. Each entry says which it is.
 
 Read this before writing a verification script, a guard, or a test whose *purpose* is to detect
 something. Most of what follows is a way for such a check to report success while checking nothing.

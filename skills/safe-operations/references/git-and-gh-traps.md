@@ -25,29 +25,33 @@ commits survives the stash untouched.
 exoneration but is structurally incapable of detecting a defect that was already committed. There is
 no error — just a false negative.
 
-**Fix.** Bisect per commit against the real merge-base. Materialize each tree **outside the
-repository root**, and give it a `.git` of its own:
+**Fix.** Bisect per commit against the real merge-base, using a **detached worktree per commit**,
+created outside the repository root:
 
 ```bash
 OUT=/some/path/outside/the/repo/bisect
 for c in <merge-base> <commit1> <commit2> <HEAD>; do
-  rm -rf "$OUT" && mkdir -p "$OUT"
-  git archive $c | tar -x -C "$OUT"
-  (cd "$OUT" && git init -q && <run the suite>)
+  rm -rf "$OUT"
+  git worktree add --detach "$OUT" "$c"
+  (cd "$OUT" && <run the suite>)
+  git worktree remove --force "$OUT"
 done
 ```
 
-**Both of those matter, and getting them wrong is the trap inside the fix.** `git archive` output
-carries no `.git`, so git discovery walks *upward*. Extract into `.tmp/bisect` inside the repo and
-every `git rev-parse HEAD`, `git status` and `git branch --show-current` the suite runs reports the
-**working tree's** state, identically at all four commits — so any git-state-dependent assertion is
-evaluated against the un-bisected tree and the loop produces exactly the confident-wrong verdict this
-section exists to prevent. In this repository 14 files under `.github/scripts/Tests/` invoke such
-commands.
+**Why not `git archive`.** Its output carries no `.git`, so git discovery walks *upward*. Extract
+into `.tmp/bisect` inside the repo and every `git rev-parse HEAD`, `git status` and
+`git branch --show-current` the suite runs reports the **working tree's** state, identically at all
+four commits — so any git-state-dependent assertion is evaluated against the un-bisected tree, and
+the loop produces exactly the confident-wrong verdict this section exists to prevent. In this
+repository 14 files under `.github/scripts/Tests/` invoke such commands.
 
-The cheapest correct alternative, when the commit is a real ref, is a throwaway worktree:
-`git worktree add --detach <path outside the repo> <commit>`, which gives a genuine checkout whose
-`git rev-parse HEAD` resolves to the commit you meant.
+**And `git init` in the extract does not rescue it.** An extract plus `git init -q` is an *empty*
+repository: measured, `git rev-parse HEAD` exits 128 with `unknown revision`, and `git status`
+reports every extracted file as untracked (`?? …`). That trades a wrong answer for a failing one —
+still not the commit's real state. A `git archive` extract is only safe for checks that read files
+and never ask git anything.
+
+A detached worktree is a genuine checkout: `git rev-parse HEAD` resolves to the commit you meant.
 
 Any "pre-existing" or "unrelated" claim needs a merge-base comparison, never a stash.
 
