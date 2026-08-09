@@ -4,6 +4,34 @@ All notable changes to agent-orchestra will be documented in this file.
 
 ## [Unreleased]
 
+## [3.18.0] — 2026-08-09
+
+### Changed
+
+**The whole-body-write acceptance now lives where a writer reads, not only on the issue that decided it** (#1032, chunk 2 and final chunk of designed parent #1011). #1011 concluded a *reasoned acceptance* of the hazard that replacing a GitHub comment's whole body advances `updated_at` on every marker family co-located on that comment — `updated_at` never moves backwards, and the API offers no `If-Match`/`ETag` to make the write conditional. The reasoning, the reader census it rests on, and the condition that would revoke it existed only in #1011's issue body, so a writer at a marker-writing surface could not reach any of it.
+
+`skills/session-memory-contract/references/handoff-markers.md` § What the write-path rule buys is now the single home for all three. It states what the per-family write-path rule actually delivers — **a single audited writer, not protection from `updated_at` advancement**, since `persist-marker.ps1`'s own transport performs the identical whole-body PATCH — and carries the reader census, the acceptance with its evidence, and the revocation condition.
+
+**What the rule buys is stated per write shape, not uniformly.** The hazard is a property of the **write shape**, not of the primitive: an `upsert` family's write (`plan-issue`, `frame-slices`, `completion-account`) replaces the target comment's whole body and advances `updated_at` on every family beside it, while a `post-new` family's write (the other seven) POSTs a fresh comment and advances nothing. The § home carries that split as a table, and each qualified site states which case it is in.
+
+**The exclusivity rule now says what it is for, at every surface that both instructs a writer how to write a marker comment and states the rule.** That entry-point set was derived from the tree rather than asserted — the intersection of
+
+```bash
+git grep -lE "persist-(marker|phase-ledger)\.ps1" -- agents skills commands
+git grep -lniE "(only|sole)[*_ ]+documented[*_ ]+(write[*_ ]+)?path|only[*_ ]+sanctioned[*_ ]+writer|never[*_ ]+hand-author|never[*_ ]+a[*_ ]+hand-composed" -- ':!*/Tests/*' ':!CHANGELOG.md'
+```
+
+— giving **15 files**, all of which now carry the qualification (verified by an empty set-difference). The second pattern is markup-tolerant deliberately: the plain phrase misses `**only** documented`, which is how the single highest-leverage file in the set writes it.
+
+**Coverage is partial under a stated rule, and the numbers are given per commit because the remedy's own prose matches the sweep.** Statement-line population: **44 lines across 23 files at `61d05e7`**, **47 across 23** after this change — the delta is this change's own text, so a ratio measured on the post-change tree counts the remedy in its own denominator. Genuinely left unqualified: **5 files / 10 statement lines** — the two CI suites (assertions, not reader guidance), `.github/scripts/migrate-brief-review-corpus.ps1`, and two design records (`engagement-record-write-discipline.md`, `marker-write-primitive.md`). A reader landing on one of those 10 still concludes the rule is absolute, and that conclusion is false. Two further residual populations, stated rather than implied away: **six** procedural restatements sit inside qualified files (each carrying a reference to a section this change qualified, which is what the criterion permits), and the CI suites' failure messages actively instruct an editor to preserve the unqualified framing.
+
+### Fixed
+
+- The phase-containment ledger's record of the #944 repair yielded a falsified count and a falsified consequence, at three loci — the prose, the family table, and `repair-phase-containment-regions.ps1`'s own docstring, which the brief had not identified. It now carries **two** PATCHed `plan-issue` comments rather than three (the dropped third was a backticked prose mention of `plan-issue-871` that the unanchored family regex reports as a marker — a live behavior, stated in the present tense, whose anchoring belongs to #994), and states that on those artifacts the affected check was **unreachable** rather than "bounded rather than realised" — nothing was damaged (#1032, carrying #1011's grounding correction).
+- **The damage inventory itself under-counted, and the first correction made it worse.** Removing the `#871` prose mention removed its whole comment from the table, and with it a genuine `judge-rulings` occurrence; two further comments carrying `judge-rulings` had never appeared at all, and neither had `frame-spine`, `frame-slice`, `verification-evidence` or `coverage-manifest`. The inventory is now restated **by instrument under a stated inclusion rule** — one row per (family, comment) pair reported by the repair's own `Get-CoLocatedMarkerFamily`, excluding `phase-containment*` (which the repair owned) and the one prose mention — giving **16 occurrences across 11 distinct family strings on 8 of the 9 comments**, with the full per-comment table — the instrument dedupes only the exact string per body and applies no identifier normalization. The unit changed twice across the entry's life (families → occurrences → occurrences-by-instrument); that is disclosed in the entry rather than left for a reader to reconstruct (#1032).
+- Two figures inherited from #1011 are **expressly retired** rather than silently carried: "stated 21 times across 13 files" (reproduces under no phrasing at #1011's own named commit), and "thirteen registered-form records across eleven issues" — retired as an **error**, not staleness, since registered-form records have only ever spanned 9 issues and issue coverage only grows, making the pair unsatisfiable at every point in the corpus's history. The underlying defect is the attribution: a tree commit cannot pin a live-comment corpus. Corpus censuses now carry a date, never a SHA (#1032).
+- Corrected an inherited claim both #1011 and #1032's brief relied on: of the two CI suites said to assert the unqualified rule persists, only **one** runs. `.github/scripts/Tests/persist-marker-wrapper.Tests.ps1` — which also carries the M30 proximity guard — is quarantined out of CI in `ci-quarantine.json` (`class: unclassified`, tracked on #993), so it never executes on a pull request. The record now says so, and says to re-derive suite selection rather than trusting a file's presence on disk (#1032).
+
 ## [3.17.0] — 2026-08-09
 
 ### Changed

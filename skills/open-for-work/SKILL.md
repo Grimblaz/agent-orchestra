@@ -108,7 +108,7 @@ The record is what makes authority source (b) checkable rather than asserted. Fi
 
 ***2a — the registered form (what new records use).*** The comment carries a marker of the `open-for-work-affirmed-{ID}` family, where `{ID}` is the issue number. *(Rendered inert here — delimiters stripped, per `skills/session-memory-contract/references/handoff-markers.md` § Writing about markers safely — because a delimited literal in prose is live to the raw-text scanners that read real comments.)* The placeholder is `{ID}`, not `{N}`, everywhere the family is named: the catalog drift guard recognises only `-{ID}` and `-{PR}` and silently skips any other token.
 
-Write it through the repository's marker-write primitive, which is the **only** documented write path for this family:
+Write it through the repository's marker-write primitive, which is the **only** documented write path for this family. **What that rule buys is a single audited writer — not protection from `updated_at` advancement.** Read that precisely here, because this family's records are the ones property 3 below voids on exactly that field. This family is `post-new`: **the write you are about to make POSTs a new comment and advances nothing**, so creating a record is not itself the hazard. What can void a record is a *later* whole-body write — the create path's own read-back-failure repair PATCH (see the confirmation to watch for below), or any write that replaces a body this record shares. See `skills/session-memory-contract/references/handoff-markers.md` § What the write-path rule buys for the write-shape split and the reader census. Invoke it like this:
 
 ```powershell
 # Compose the marker as a runtime value; never write the delimited literal

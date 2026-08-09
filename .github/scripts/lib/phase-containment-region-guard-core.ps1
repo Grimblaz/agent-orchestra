@@ -208,6 +208,8 @@ function Format-MalformedRegionReport {
     $lines.Add('One entry per block — the parser builds one flat mapping per block and has no YAML-sequence handling, so a multi-entry sequence in a single block parses as one last-wins entry with a null `finding_key`.')
     $lines.Add('')
     $lines.Add('**The fix.** Write through `skills/session-memory-contract/scripts/persist-phase-ledger.ps1`, the documented write path, which emits the paired form and refuses a malformed payload. Every region this guard exists for was hand-authored around it (issue #944).')
+    $lines.Add('')
+    $lines.Add('**What that buys, stated so you do not over-read it.** A single audited writer — not protection from `updated_at` advancement. The helper replaces the target comment''s whole body, so it advances `updated_at` on that comment and on every marker family co-located with it, exactly as a hand-composed `gh api -X PATCH` would. That is an accepted cost, not an oversight; before you repair anything by hand, read `skills/session-memory-contract/references/handoff-markers.md` section "What the write-path rule buys", which names who derives meaning from that field and what a touch does to each of them.')
 
     return ($lines -join "`n")
 }
