@@ -41,10 +41,13 @@
     each TrimEnd-ed before comparison, so the test is reflexive. It is NOT a
     substring, a prefix, or a whole-line match anywhere in the body.
 
-    A whitespace-only marker is rejected outright rather than matching
-    nothing: this parameter is a mandatory [string], which rejects the empty
-    string but not a whitespace-only one, and matching-nothing becomes
-    posting-a-new-comment on the zero-match branch below.
+    A whitespace-only marker is refused at the top of the function, before
+    any gh call, and the function returns $null. That guard is load-bearing
+    rather than decorative: this parameter is a mandatory [string], which
+    rejects the empty string but lets a whitespace-only one straight through,
+    and the selection predicate then declines to match anything — which is
+    the zero-match branch, which POSTs. Without the guard a degenerate marker
+    produced a fresh comment on every run instead of a refusal.
 
     Issue #1031 (parent #1011 AC2) narrowed this from `-like "*$Marker*"`.
     Under the old rule a marker QUOTED IN PROSE — mid-line, inside backticks,
@@ -121,6 +124,19 @@ function Find-OrUpsertComment {
         [string]$Owner,
         [string]$Repo
     )
+
+    # Whitespace-only marker: refuse before any gh call (#1031, external
+    # review). The predicate correctly declines to SELECT on such a marker,
+    # but declining to select is the zero-match branch below, which POSTs a
+    # new comment -- so a degenerate marker would have produced a fresh
+    # comment on every run rather than a refusal. `[Parameter(Mandatory)]`
+    # on a [string] rejects '' at binding and lets '   ' straight through,
+    # so the binding is not the guard. Returns $null, matching the fail-open
+    # contract every other failure path here uses.
+    if ([string]::IsNullOrWhiteSpace($Marker)) {
+        [Console]::Error.WriteLine('Find-OrUpsertComment: -Marker is whitespace-only; refusing rather than posting a new comment.')
+        return $null
+    }
 
     # F2 fix (issue #878 review): when the caller explicitly supplies both
     # -Owner and -Repo, use them for every gh call below via -R "$owner/$repo"

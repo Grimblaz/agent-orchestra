@@ -191,6 +191,17 @@ Describe 'Find-OrUpsertComment target selection (issue #1031)' {
         $script:patchedId | Should -BeNullOrEmpty -Because 'a start-of-line anchor would still have selected this one'
     }
 
+    It 'REFUSES a whitespace-only marker instead of POSTing a new comment on every run (#1031, external review)' {
+        # The predicate declines to select on such a marker, and declining to
+        # select is the POST branch. The mandatory [string] rejects '' at
+        # binding and lets '   ' through, so the binding is not the guard.
+        $script:mockComments = @(@{ id = 900; body = "$script:PC`npayload" })
+        $url = Find-OrUpsertComment -Type issue -Number 782 -Marker '   ' -Body 'x' -Owner 'o' -Repo 'r' 2>$null
+        $url | Should -BeNullOrEmpty
+        $script:posted | Should -BeFalse -Because 'a degenerate marker must refuse, not accrete a new comment per run'
+        $script:patchedId | Should -BeNullOrEmpty
+    }
+
     It 'prefers the genuine target over an EARLIER quoting comment (the earliest-REST-id tie-break used to prefer the decoy)' {
         $script:mockComments = @(
             @{ id = 100; body = "<!-- plan-issue-9 -->`nsee ``$script:PC`` for the report" },
