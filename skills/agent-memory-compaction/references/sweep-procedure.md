@@ -170,7 +170,8 @@ promoting out of, which is a finding about the store rather than a successful sw
 ### The dispositions
 
 Five come from the parent design. Three more complete the cover over the canonical policy's six
-authorized size-reduction moves — see the mapping below for why five did not.
+authorized size-reduction moves — see the mapping below for why five did not. `restore` is the ninth,
+and it is the inverse of a demotion rather than a way out of the index.
 
 | Disposition | Exit? | What it means | Records written |
 | --- | --- | --- | --- |
@@ -234,17 +235,20 @@ the honest representation of nothing having left.
 
 ### Entry tests
 
-Each disposition applies only where its own test holds. For six of the eight the test is the middle
+Each disposition applies only where its own test holds. For most of them the test is the middle
 column of the table above, read as a condition rather than a description: `promote` needs a permanent
 home that carries the lesson *now*; `demote` needs a decision that accepting the recall loss is the
 right trade; `keep-hot-with-expiry` needs a reason the entry cannot be dispositioned yet and a date by
 which it can; `settle-in-place` needs a `project_` entry whose tracked work has closed; `dedupe-into`
 needs a surviving entry that demonstrably carries the same lesson; `remove-obsolete` needs the
-entry's subject to be gone from the world, not merely out of fashion.
+entry's subject to be gone from the world, not merely out of fashion; and `restore` needs an exit in
+force for that life and an archive line to move back — restoring an entry that never left is not a
+disposition, it is a mistake with a record attached.
 
 Two have sharp edges that the middle column cannot carry:
 
-Both are applied by the gate script, not by eye:
+Two have sharp edges the middle column cannot carry. The first of them is applied by the gate
+script rather than by eye:
 
 ```text
 pwsh skills/agent-memory-compaction/scripts/Test-MemorySweepDisposition.ps1 -Gate admission -IndexPath <index> -Identity <life key> -AdmissionRuleLandedOn <yyyy-MM-dd>
@@ -384,13 +388,27 @@ pwsh skills/agent-memory-compaction/scripts/Test-MemorySweepPartition.ps1 -Inven
 
 Every subject in step 1's recorded enumeration is accounted for in exactly one of three ways:
 
-- **still hot** — its pointer is in the post-sweep index;
-- **demoted** — its pointer is in `ARCHIVE.md`;
-- **exited with a record** — an `executed` ledger record carries its life key.
+- **still hot** — a pointer under its name is in the post-sweep index **and** that pointer's body
+  carries the same life key the enumeration recorded;
+- **demoted** — an exit in force records a `demote` for its life key, **corroborated** by an archive
+  line under its name;
+- **exited with a record** — an exit in force carries its life key.
 
-Anything else is unaccounted, and unaccounted is the report's whole output. A pointer that is in none
-of the three left recall without a record, which is the one thing the first replacement rule forbids
-outright.
+Every branch is decided on the **life key**, never on the bare name. An archive line alone accounts
+for nothing: a line left by a previous life of a reused name would otherwise cover a removal that had
+no record of its own, and the store's own self-healing doctrine guarantees names get reused.
+
+Anything else is unaccounted, and a pointer that is in none of the three left recall without a
+record — the one thing the first replacement rule forbids outright.
+
+**And there is a third answer.** Where the enumeration and the live entry are *both* life-unbound —
+neither records an admitted date — the life key is the bare name, so identity-keying and name-keying
+become the same operation and only one of them is trustworthy. Those subjects are reported as
+**unverifiable**, and the check exits 2: it declines to answer rather than return a plausible wrong
+one, the same posture the policy checker takes when it refuses. On a store whose admission rule has
+not landed — which is every real store today — that is most of the corpus, and it is the honest
+report. A demonstrated loss still outranks it: if something left without a record, that is the
+finding, whatever else could not be established.
 
 **The check reconciles the recorded enumeration against the post-sweep artifacts** — the index, the
 archive, and the ledger, each read from disk after the sweep. It does not reconcile the sweep's own

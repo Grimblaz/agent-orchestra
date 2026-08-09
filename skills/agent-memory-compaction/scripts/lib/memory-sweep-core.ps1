@@ -190,7 +190,15 @@ function Get-MSRecordLines {
     }
     $records = @()
     if ($at -lt $lines.Count - 1) {
-        $records = @($lines[($at + 1)..($lines.Count - 1)] | Where-Object { $_.Trim() -ne '' })
+        # Blank lines and whole-line HTML comments are skipped; everything else is a record. The
+        # comment exemption is narrow and deliberate: it lets a store annotate its own record file,
+        # and it means a closing marker left over from an earlier revision of this format is ignored
+        # rather than reported as a broken record. A '#'-prefixed line is NOT exempt - that was how
+        # one typed character used to erase an exit with the machinery still reporting clean.
+        $records = @($lines[($at + 1)..($lines.Count - 1)] | Where-Object {
+                $t = $_.Trim()
+                $t -ne '' -and -not ($t.StartsWith('<!--', [System.StringComparison]::Ordinal) -and $t.EndsWith('-->', [System.StringComparison]::Ordinal))
+            })
     }
     return [pscustomobject]@{ State = 'present'; Lines = $records; Why = '' }
 }
@@ -298,14 +306,27 @@ function Get-MSLedger {
     }
     $good = @($records | Where-Object { -not $_.Malformed })
 
+    # A status may advance and may not retreat. Without the ladder, appending a 'proposed' row - the
+    # ONE ledger write an unattended session is authorized to make - silently retracts a slate's
+    # executed exit and re-queues the entry that left.
+    $rank = @{ 'proposed' = 0; 'executed' = 1; 'reconciled' = 2 }
     $effective = Get-MSOrdinalMap
     foreach ($r in $good) {
         $key = "$($r.Identity)`0$($r.Disposition)"
-        if (-not $effective.ContainsKey($key) -or $r.Date -ge $effective[$key].Date) { $effective[$key] = $r }
+        if (-not $effective.ContainsKey($key)) { $effective[$key] = $r; continue }
+        $held = $effective[$key]
+        if ($rank[$r.Status] -lt $rank[$held.Status]) { continue }
+        # Ties break on FILE ORDER, not on date alone: the file is append-only and chronological, so
+        # the later row is the later act. A same-date tie decided by date goes to whichever side the
+        # comparison happens to favour.
+        if ($rank[$r.Status] -gt $rank[$held.Status] -or $r.Date -gt $held.Date -or ($r.Date -eq $held.Date -and $r.Number -gt $held.Number)) {
+            $effective[$key] = $r
+        }
     }
     $restored = Get-MSOrdinalMap
-    foreach ($r in @($good | Where-Object { $_.Disposition -ceq 'restore' -and $_.Status -ceq 'executed' })) {
-        if (-not $restored.ContainsKey($r.Identity) -or $r.Date -ge $restored[$r.Identity].Date) { $restored[$r.Identity] = $r }
+    foreach ($r in @($good | Where-Object { $_.Disposition -ceq 'restore' -and $_.Status -cne 'proposed' })) {
+        if (-not $restored.ContainsKey($r.Identity) -or $r.Date -gt $restored[$r.Identity].Date -or
+            ($r.Date -eq $restored[$r.Identity].Date -and $r.Number -gt $restored[$r.Identity].Number)) { $restored[$r.Identity] = $r }
     }
 
     # An exit is IN FORCE when its latest row is executed or reconciled and no later restore
@@ -315,7 +336,19 @@ function Get-MSLedger {
         $r = $effective[$key]
         if (-not $r.IsExit) { continue }
         if ($r.Status -ceq 'proposed') { continue }
-        if ($restored.ContainsKey($r.Identity) -and $restored[$r.Identity].Date -ge $r.Date) { continue }
+        # A restore undoes an exit only when it is LATER. On a same-date tie the later row in the
+        # append-only file wins, so a restore-then-disposition inside one slate - which step 2 sets
+        # up - leaves the disposition standing rather than reading a lawful exit as recall loss.
+        if ($restored.ContainsKey($r.Identity)) {
+            $u = $restored[$r.Identity]
+            if ($u.Date -gt $r.Date -or ($u.Date -eq $r.Date -and $u.Number -gt $r.Number)) { continue }
+        }
+        # Two exit dispositions for one life: the later one governs, decided by date then file order
+        # rather than by hashtable enumeration order.
+        if ($inForce.ContainsKey($r.Identity)) {
+            $held = $inForce[$r.Identity]
+            if ($r.Date -lt $held.Date -or ($r.Date -eq $held.Date -and $r.Number -lt $held.Number)) { continue }
+        }
         $inForce[$r.Identity] = $r
     }
 
@@ -591,6 +624,10 @@ function Get-MSCorpus {
     $nonEntries = [System.Collections.Generic.List[string]]::new()
 
     foreach ($s in $subjects) {
+        # A pointer at one of the store's own files is not a lesson. Excluded on this side as well as
+        # the orphan side: applied to one only, the store's own ledger became a permanently
+        # undisposable subject at every sweep.
+        if ($reserved.Contains($s.Name)) { $nonEntries.Add($s.Name); continue }
         $body = Join-Path $dir "$($s.Name).md"
         $facts = Get-MSEntryFacts -Path $body
         $entries.Add([pscustomobject]@{
@@ -699,6 +736,7 @@ function New-MSInventory {
         [string]$SlatePath,
         [string]$LedgerPath,
         [string]$ArchivePath,
+        [string[]]$ExcludeNames = @(),
         [Parameter(Mandatory = $true)][datetime]$AsOf)
 
     $resolvedIndex = (Resolve-Path -LiteralPath $IndexPath).Path
@@ -712,7 +750,7 @@ function New-MSInventory {
 
     $ledger = Get-MSLedger -Path $LedgerPath -AsOf $AsOf
     $slate = Get-MSSlateState -Path $SlatePath -AsOf $AsOf
-    $corpus = Get-MSCorpus -IndexPath $resolvedIndex
+    $corpus = Get-MSCorpus -IndexPath $resolvedIndex -ExcludeNames $ExcludeNames
     $archiveNames = @(Get-MSArchiveNames -Path $ArchivePath)
     $incomplete = @(Get-MSIncompleteDispositions -Ledger $ledger -Corpus $corpus -ArchiveNames $archiveNames)
     $incompleteIds = @($incomplete | ForEach-Object { $_.Identity })
@@ -834,11 +872,33 @@ function Test-MSPartition {
     $slate = Get-MSSlateState -Path $SlatePath -AsOf $AsOf
     $archived = [System.Collections.Generic.HashSet[string]]::new([string[]]@(Get-MSArchiveNames -Path $ArchivePath), [System.StringComparer]::OrdinalIgnoreCase)
 
-    $enumeratedOn = [datetime]::ParseExact($Inventory.enumerated_on, 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)
+    # TryParseExact, like every other date this file reads. The shape preflight in the entry point
+    # checks that the field is PRESENT; a present field that is not a date used to throw out of here
+    # at exit 1 - the code the contract assigns to "something was lost".
+    $enumeratedOn = [datetime]::MinValue
+    if (-not [datetime]::TryParseExact([string]$Inventory.enumerated_on, 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::None, [ref]$enumeratedOn)) {
+        return [pscustomobject]@{
+            index = $resolvedIndex; enumerated_on = $Inventory.enumerated_on; enumerated_from = $Inventory.source
+            subjects_checked = 0; accounted = @(); unaccounted = @(); unverifiable = @()
+            record_problems = @("the enumeration artifact's 'enumerated_on' is not a date in yyyy-MM-dd form: '$($Inventory.enumerated_on)'")
+            result = 'usage-error'
+        }
+    }
 
     $accounted = [System.Collections.Generic.List[object]]::new()
     $unaccounted = [System.Collections.Generic.List[object]]::new()
+    $unverifiable = [System.Collections.Generic.List[object]]::new()
     foreach ($subject in @($Inventory.subjects)) {
+        foreach ($field in @('name', 'identity', 'population')) {
+            if ($subject.PSObject.Properties.Name -notcontains $field) {
+                return [pscustomobject]@{
+                    index = $resolvedIndex; enumerated_on = $Inventory.enumerated_on; enumerated_from = $Inventory.source
+                    subjects_checked = 0; accounted = @(); unaccounted = @(); unverifiable = @()
+                    record_problems = @("the enumeration artifact carries a subject with no '$field'; it was not produced by Get-MemorySweepInventory.ps1")
+                    result = 'usage-error'
+                }
+            }
+        }
         $how = $null
         $why = $null
         if ($ledger.ExitsInForce.ContainsKey($subject.identity)) {
@@ -851,9 +911,27 @@ function Test-MSPartition {
         }
         elseif ($liveByName.ContainsKey($subject.name)) {
             $liveIdentity = $liveByName[$subject.name]
+            $liveUnknown = $liveIdentity.EndsWith("@$script:MSUnknownAdmission", [System.StringComparison]::Ordinal)
+            $enumeratedUnknown = ([string]$subject.identity).EndsWith("@$script:MSUnknownAdmission", [System.StringComparison]::Ordinal)
+            if ($enumeratedUnknown -and $liveUnknown) {
+                # Both sides are life-unbound, so the life key IS the bare name and identity-keying
+                # and name-keying are the same operation here. A pointer under this name is still in
+                # the index; whether it is THIS life or a successor that re-earned the slug cannot be
+                # established. Reported as UNVERIFIABLE, never as accounted: on a store whose
+                # admission rule has not landed - which is every real store today - answering
+                # "accounted" would be the name-keyed answer wearing the life-keyed answer's name,
+                # which is the defect this whole design exists to prevent.
+                $unverifiable.Add([pscustomobject]@{
+                        name       = $subject.name
+                        identity   = $subject.identity
+                        population = $subject.population
+                        why        = 'neither the enumeration nor the live entry records an admitted date, so whether the pointer under this name is still THIS life cannot be established'
+                    })
+                continue
+            }
             if ($liveIdentity -ceq $subject.identity) { $how = 'still-hot' }
-            elseif ($liveIdentity.EndsWith("@$script:MSUnknownAdmission", [System.StringComparison]::Ordinal)) {
-                $why = "a pointer for this name is still in the index, but its body records no admitted date, so whether THIS life is the one still hot cannot be decided"
+            elseif ($liveUnknown) {
+                $why = 'a pointer for this name is still in the index, but its body records no admitted date, so whether THIS life is the one still hot cannot be decided'
             }
             else {
                 $why = "the pointer for this name now belongs to a different life ($liveIdentity); this life left recall and no exit in force names it"
@@ -889,6 +967,14 @@ function Test-MSPartition {
         if ($pair.s.State -ceq 'duplicated') { $recordProblems.Add("$($pair.n): $($pair.s.StateWhy)") }
     }
 
+    # Three outcomes, not two. 'unverifiable' exists so this check can decline to answer instead of
+    # returning a plausible wrong one - the same posture the sibling policy checker takes when it
+    # refuses. A loss outranks it: if something demonstrably left without a record, that is the
+    # finding, whatever else could not be established.
+    $result = if (@($unaccounted).Count -gt 0 -or @($recordProblems).Count -gt 0) { 'unaccounted' }
+    elseif (@($unverifiable).Count -gt 0) { 'unverifiable' }
+    else { 'accounted' }
+
     return [pscustomobject]@{
         index            = $resolvedIndex
         enumerated_on    = $Inventory.enumerated_on
@@ -896,8 +982,9 @@ function Test-MSPartition {
         subjects_checked = @($Inventory.subjects).Count
         accounted        = @($accounted)
         unaccounted      = @($unaccounted)
+        unverifiable     = @($unverifiable)
         record_problems  = @($recordProblems)
-        result           = if (@($unaccounted).Count -eq 0 -and @($recordProblems).Count -eq 0) { 'accounted' } else { 'unaccounted' }
+        result           = $result
     }
 }
 
@@ -994,7 +1081,17 @@ function Test-MSExitAllowed {
     if ($known -cnotcontains $Disposition) {
         return [pscustomobject]@{ Allowed = $false; Why = "'$Disposition' is not a disposition the sweep procedure names; it is spelled exactly, in lower case, or it is not that disposition" }
     }
+    # The trust check comes BEFORE the non-exit shortcut. An earlier revision returned "allowed - this
+    # does not remove the entry from the index" for every non-exit disposition ahead of every other
+    # check, so this gate said yes to a keep-hot the deferral gate refused on the same store, and yes
+    # to ledger-compaction, which the authority table forbids an unattended session outright.
+    if (-not $SlateState.Trustworthy) {
+        return [pscustomobject]@{ Allowed = $false; Why = 'this store''s slate state carries rows this parser cannot read; repair the slate before dispositioning anything' }
+    }
     if ($script:MSExitDispositions -cnotcontains $Disposition) {
+        if ($script:MSSelfDispositions -ccontains $Disposition) {
+            return [pscustomobject]@{ Allowed = $false; Why = "'$Disposition' is a record the sweep writes about itself, not a disposition of an entry, and it is not this gate's to allow" }
+        }
         return [pscustomobject]@{ Allowed = $true; Why = "'$Disposition' does not remove the entry from the index" }
     }
     if (-not $SlateState.Trustworthy) {

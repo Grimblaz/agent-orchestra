@@ -55,9 +55,12 @@ Two consequences worth stating, because both were defects in an earlier revision
   no record in that file is read and the state is reported. The sibling policy checker already ships
   this guard for its own regions; a reader that silently took the first region could have the whole
   history of a store replaced by a copy-pasted example.
-- **Blank lines are skipped and nothing else is.** A line the parser cannot read becomes a *malformed
-  record* the next slate sees. An earlier revision skipped `#`-prefixed lines, which meant one typed
-  character in front of an exit record erased it while the machinery still reported clean — an
+- **Blank lines and whole-line HTML comments are skipped; nothing else is.** A line the parser cannot
+  read becomes a *malformed record* the next slate sees. The comment exemption is narrow and exists
+  for two reasons: it lets a store annotate its own record file, and it means a closing marker left
+  by an earlier revision of this format is ignored rather than reported as a broken record. A
+  `#`-prefixed line is **not** exempt — an earlier revision skipped those, which meant one typed
+  character in front of an exit record erased it while the machinery still reported clean: an
   in-place unrecord, in the file whose whole purpose is that nothing leaves without a trace.
 
 ## Entry identity — the life key
@@ -380,6 +383,11 @@ after this chunk lands is an edit to the parent's chunk boundary, not a local de
    as a deferral (A-C37).
 8. **The cold archive** — `ARCHIVE.md`, index pointer format unchanged, loaded on demand, created at
    the first demotion (A-C36), corroborating a demotion whose ledger record is what accounts for it.
-9. **The destination measurement** — `x-destination_observation` in the store's values region,
+   An archive line alone accounts for nothing, because it carries no life key.
+9. **The partition verdict** — three outcomes, not two: `accounted`, `unaccounted`, and
+   **`unverifiable`** for a subject whose life key cannot be established on either side. Chunk 3's
+   first sweep of a store with no admitted dates will read `unverifiable` for most of its corpus, and
+   that is the correct report rather than a defect to work around.
+10. **The destination measurement** — `x-destination_observation` in the store's values region,
    `date | value | unit | surface | method`, surface written home-relative, repeating with the freshest
    governing, and never written into a store that has no values region.

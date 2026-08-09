@@ -85,11 +85,13 @@
 
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)]
+    # Not Mandatory - see Get-MemorySweepInventory.ps1: a mandatory parameter prompts, and an
+    # unattended sweep blocks on the prompt instead of reporting.
+    [Parameter()]
     [ValidateSet('deferral', 'exit', 'admission', 'reconcile')]
     [string]$Gate,
 
-    [Parameter(Mandatory = $true)]
+    [Parameter()]
     [string]$IndexPath,
 
     [Parameter()]
@@ -138,6 +140,8 @@ function script:Fail-Usage {
     exit 3
 }
 
+if ([string]::IsNullOrWhiteSpace($Gate)) { script:Fail-Usage 'supply -Gate: deferral, exit, admission, or reconcile' }
+if ([string]::IsNullOrWhiteSpace($IndexPath)) { script:Fail-Usage "-IndexPath is required; it names the store's index file" }
 if (-not (Test-Path -LiteralPath $IndexPath -PathType Leaf)) { script:Fail-Usage "no index file at '$IndexPath'" }
 $resolvedIndex = (Resolve-Path -LiteralPath $IndexPath).Path
 $dir = Split-Path -Parent $resolvedIndex

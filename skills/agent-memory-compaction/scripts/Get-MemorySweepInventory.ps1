@@ -52,7 +52,9 @@
 
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)]
+    # Not Mandatory: a mandatory parameter turns an omitted argument into a console PROMPT, and an
+    # unattended sweep blocks on it rather than failing. Missing input is a reported usage error.
+    [Parameter()]
     [string]$IndexPath,
 
     [Parameter()]
@@ -76,6 +78,10 @@ $ErrorActionPreference = 'Stop'
 
 . (Join-Path $PSScriptRoot 'lib' 'memory-sweep-core.ps1')
 
+if ([string]::IsNullOrWhiteSpace($IndexPath)) {
+    Write-Output "RESULT: usage-error`nreason: -IndexPath is required; it names the store's index file"
+    exit 3
+}
 if (-not (Test-Path -LiteralPath $IndexPath -PathType Leaf)) {
     Write-Output "RESULT: usage-error`nreason: no index file at '$IndexPath'"
     exit 3

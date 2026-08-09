@@ -1,0 +1,4 @@
+RESULT: refused
+gate: deferral
+identity: reference_critical_delta@2026-07-10
+why: a critical entry may not be deferred twice; this one already carries deferral 1. Land it, initiate a landing and take the in-flight state, or disposition it now.

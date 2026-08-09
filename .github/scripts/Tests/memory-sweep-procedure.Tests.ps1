@@ -773,9 +773,14 @@ Describe 'memory store sweep procedure' {
                 '2026-08-08 | reference_critical_orphan@2026-06-30 | critical | yes | re-assessed at this sweep')
 
             $partition = Test-MSPartition -Inventory $inv -IndexPath $store.Index -AsOf $script:Sweep1
-            $partition.result | Should -BeExactly 'accounted'
+            @($partition.unaccounted) | Should -BeNullOrEmpty -Because 'nothing left recall without a record'
             @($partition.accounted | Where-Object { $_.name -ceq 'reference_obsolete_gamma' })[0].how | Should -BeExactly 'demoted'
             @($partition.accounted | Where-Object { $_.name -ceq 'reference_dupe_source' })[0].how | Should -BeExactly 'exited-with-record'
+            # The fixture deliberately carries one life-unbound entry, so the store's overall verdict
+            # is 'unverifiable' rather than 'accounted' - the check declining to answer about the one
+            # subject whose life it cannot establish, while still answering about every other.
+            $partition.result | Should -BeExactly 'unverifiable'
+            @($partition.unverifiable | ForEach-Object { $_.name }) | Should -Be @('reference_legacy_unknown')
         }
 
         It 'accounts an orphan only when THIS sweep assessed it [M9]' {
@@ -1102,6 +1107,218 @@ Describe 'memory store sweep procedure' {
             $core | Should -Not -Match '\$script:PointerLinePattern\b(?![^\n]*MSPointer)' -Because 'the sibling''s private pattern is re-declared, not borrowed'
             $core | Should -Match 'MSPointerLinePattern'
             $core | Should -Match 'Set-StrictMode -Version Latest'
+        }
+    }
+
+    Context 'the shipped entry points, executed end to end [P1]' {
+        # The post-fix review's critical finding: the M10 remediation was pinned by a SUBSTRING
+        # SEARCH over the gate script. Disconnecting the shipped gate and leaving the function name
+        # in a comment left all 86 tests green - the same defect M10 named, one level down. These
+        # cases invoke each entry point with the call operator, so parameter binding, the gate call
+        # and the exit code are all on the path. In-process per the repo's script-safety contract:
+        # no child pwsh is spawned.
+        BeforeAll {
+            $script:E = script:New-FixtureStore
+            $script:Inv = Join-Path $script:Work ('entry-' + [guid]::NewGuid().ToString('N').Substring(0, 8) + '.json')
+            $script:GateScript = Join-Path $script:SkillDir 'scripts/Test-MemorySweepDisposition.ps1'
+            $script:InvScript = Join-Path $script:SkillDir 'scripts/Get-MemorySweepInventory.ps1'
+            $script:PartScript = Join-Path $script:SkillDir 'scripts/Test-MemorySweepPartition.ps1'
+            $script:MeasScript = Join-Path $script:SkillDir 'scripts/Measure-MemorySurface.ps1'
+        }
+
+        It 'writes an enumeration artifact and exits 0' {
+            $out = & $script:InvScript -IndexPath $script:E.Index -OutputPath $script:Inv -AsOf $script:Sweep1
+            $LASTEXITCODE | Should -Be 0
+            Test-Path -LiteralPath $script:Inv | Should -BeTrue
+            ($out | Out-String) | Should -Match '"source":\s*"disk"'
+        }
+
+        It 'refuses a second deferral of a critical entry, through the shipped gate, at exit 1' {
+            script:Add-SlateRow -Path $script:E.Slate -Rows @(
+                '2026-08-08 | reference_critical_delta@2026-07-10 | deferral | 1 | until 2026-09-07 - first deferral')
+            $out = & $script:GateScript -Gate deferral -IndexPath $script:E.Index -Identity 'reference_critical_delta@2026-07-10' -AsOf $script:Sweep2
+            $LASTEXITCODE | Should -Be 1 -Because 'the gate must refuse, and the refusal must reach the caller as an exit code'
+            ($out | Out-String) | Should -Match 'RESULT: refused'
+            ($out | Out-String) | Should -Match 'may not be deferred twice'
+        }
+
+        It 'allows a first deferral of an assessed ordinary entry, at exit 0' {
+            $out = & $script:GateScript -Gate deferral -IndexPath $script:E.Index -Identity 'reference_ordinary_alpha@2026-06-14' -AsOf $script:Sweep1
+            $LASTEXITCODE | Should -Be 0
+            ($out | Out-String) | Should -Match 'RESULT: allowed'
+        }
+
+        It 'refuses an unlanded critical exit through the shipped gate, and allows a landed one' {
+            $destination = Join-Path $script:E.Dir 'gate-destination.md'
+            $probe = 'A marker head that is not self-closed is dropped in silence.'
+            [System.IO.File]::WriteAllText($destination, "# home`n$probe`n")
+
+            & $script:GateScript -Gate exit -IndexPath $script:E.Index -Identity 'reference_critical_delta@2026-07-10' `
+                -Disposition promote -DestinationPath $destination -LessonProbe $probe -AsOf $script:Sweep1 | Out-Null
+            $LASTEXITCODE | Should -Be 1 -Because 'the destination carries the lesson but has not landed'
+
+            & $script:GateScript -Gate exit -IndexPath $script:E.Index -Identity 'reference_critical_delta@2026-07-10' `
+                -Disposition promote -DestinationPath $destination -LessonProbe $probe -DestinationLanded -AsOf $script:Sweep1 | Out-Null
+            $LASTEXITCODE | Should -Be 0
+        }
+
+        It 'grandfathers a pre-rule entry through the shipped gate' {
+            & $script:GateScript -Gate admission -IndexPath $script:E.Index -Identity 'feedback_prerule_epsilon@2026-05-02' -AdmissionRuleLandedOn $script:AdmissionRuleLanded | Out-Null
+            $LASTEXITCODE | Should -Be 1
+            & $script:GateScript -Gate admission -IndexPath $script:E.Index -Identity 'reference_critical_delta@2026-07-10' -AdmissionRuleLandedOn $script:AdmissionRuleLanded | Out-Null
+            $LASTEXITCODE | Should -Be 0
+        }
+
+        It 'answers the reconcile gate three ways through the shipped entry point' {
+            $out = & $script:GateScript -Gate reconcile -IndexPath $script:E.Index -EntryPath (Join-Path $script:E.Dir 'reference_reused_name.md') -AsOf $script:Sweep1
+            ($out | Out-String) | Should -Match 'verdict: not-exited'
+            $LASTEXITCODE | Should -Be 0
+
+            $out = & $script:GateScript -Gate reconcile -IndexPath $script:E.Index -EntryPath (Join-Path $script:E.Dir 'reference_legacy_unknown.md') -AsOf $script:Sweep1
+            ($out | Out-String) | Should -Match 'verdict: undecidable'
+            $LASTEXITCODE | Should -Be 1 -Because 'undecidable is not a pass'
+        }
+
+        It 'reports a usage error rather than prompting when a required argument is omitted [P10]' {
+            foreach ($s in @($script:InvScript, $script:PartScript, $script:GateScript, $script:MeasScript)) {
+                $out = & $s
+                $LASTEXITCODE | Should -Be 3 -Because "$(Split-Path -Leaf $s) must report, not prompt"
+                ($out | Out-String) | Should -Match 'RESULT: usage-error'
+            }
+        }
+
+        It 'separates a bad artifact from a detected loss, by exit code [P5]' {
+            $bad = Join-Path $script:Work ('bad-' + [guid]::NewGuid().ToString('N').Substring(0, 8) + '.json')
+            [System.IO.File]::WriteAllText($bad, '{"subjects":[],"enumerated_on":"not-a-date","source":"disk"}')
+            & $script:PartScript -InventoryPath $bad -IndexPath $script:E.Index -AsOf $script:Sweep1 | Out-Null
+            $LASTEXITCODE | Should -Be 3 -Because 'a date-shaped field that is not a date is a usage error, not a loss'
+
+            [System.IO.File]::WriteAllText($bad, '{"subjects":[{"nope":1}],"enumerated_on":"2026-08-08","source":"disk"}')
+            & $script:PartScript -InventoryPath $bad -IndexPath $script:E.Index -AsOf $script:Sweep1 | Out-Null
+            $LASTEXITCODE | Should -Be 3
+        }
+
+        It 'measures and validates through the shipped instrument' {
+            $target = Join-Path $script:E.Dir 'measure-me.md'
+            [System.IO.File]::WriteAllText($target, "abc`n")
+            $out = & $script:MeasScript -Path $target -AsOf $script:Sweep1
+            $LASTEXITCODE | Should -Be 0
+            ($out | Out-String) | Should -Match 'x-destination_observation:'
+            & $script:MeasScript -Validate '2026-08-08 | 4 | bytes | ~/x.md | m' | Out-Null
+            $LASTEXITCODE | Should -Be 1
+        }
+    }
+
+    Context 'the post-fix findings [P2-P16]' {
+        It 'declines to answer rather than claiming accounted on a store with no admitted dates [P2]' {
+            # The population that is 100% of every real store today. Both sides of the comparison are
+            # life-unbound, so identity-keying and name-keying are the same operation - and the
+            # honest answer is that presence cannot be established, not that it was verified.
+            $store = script:New-FixtureStore
+            foreach ($f in @(Get-ChildItem -LiteralPath $store.Dir -Filter '*.md' -File)) {
+                if ($f.Name -in @('MEMORY.md', 'POLICY.md', 'LEDGER.md', 'SLATE.md')) { continue }
+                $stripped = @([System.IO.File]::ReadAllLines($f.FullName) | Where-Object { $_ -notmatch '^\s*admitted:' })
+                [System.IO.File]::WriteAllLines($f.FullName, $stripped)
+            }
+            $inv = New-MSInventory -IndexPath $store.Index -AsOf $script:Sweep1
+            @($inv.subjects | Where-Object { $_.identity -notmatch '@unknown$' }) | Should -BeNullOrEmpty
+
+            # life 1 leaves with no record; the slug is re-earned by a different lesson
+            $body = Join-Path $store.Dir 'reference_ordinary_alpha.md'
+            [System.IO.File]::WriteAllLines($body, @('---', 'name: reference-ordinary-alpha', 'metadata:', '  node_type: memory', '---', '', 'An unrelated life-2 lesson.'))
+
+            $p = Test-MSPartition -Inventory $inv -IndexPath $store.Index -AsOf $script:Sweep1
+            @($p.accounted | Where-Object { $_.name -ceq 'reference_ordinary_alpha' }) |
+                Should -BeNullOrEmpty -Because 'the name-keyed answer must not be reported as the life-keyed one'
+            @($p.unverifiable | Where-Object { $_.name -ceq 'reference_ordinary_alpha' }).Count | Should -Be 1
+            # Every pointer subject on this store is life-unbound, so none of them is accounted.
+            @($p.accounted | Where-Object { $_.how -ceq 'still-hot' }) | Should -BeNullOrEmpty
+            @($p.unverifiable).Count | Should -BeGreaterThan 5
+
+            # And with nothing else outstanding, the whole store reads 'unverifiable' - the check
+            # declining to answer rather than returning a plausible wrong one.
+            script:Add-SlateRow -Path $store.Slate -Rows @(
+                '2026-08-08 | reference_critical_orphan@unknown | critical | yes | assessed at this sweep')
+            $clean = Test-MSPartition -Inventory $inv -IndexPath $store.Index -AsOf $script:Sweep1
+            @($clean.unaccounted) | Should -BeNullOrEmpty
+            $clean.result | Should -BeExactly 'unverifiable'
+        }
+
+        It 'does not let a proposal retract an executed exit [P3]' {
+            $store = script:New-FixtureStore
+            $inv = New-MSInventory -IndexPath $store.Index -AsOf $script:Sweep1
+            script:Remove-Pointer -IndexPath $store.Index -Name 'reference_dupe_source'
+            script:Add-LedgerRecord -Path $store.Ledger -Rows @(
+                '2026-08-08 | executed | promote | reference_dupe_source@2026-07-01 | landed | somewhere (merged to main)')
+            (Test-MSPartition -Inventory $inv -IndexPath $store.Index -AsOf $script:Sweep1).result | Should -BeExactly 'unaccounted' -Because 'an unassessed orphan is still outstanding in this fixture'
+            @((Test-MSPartition -Inventory $inv -IndexPath $store.Index -AsOf $script:Sweep1).accounted |
+                    Where-Object { $_.name -ceq 'reference_dupe_source' })[0].how | Should -BeExactly 'exited-with-record'
+
+            # the one ledger write an unattended session is authorized to make
+            script:Add-LedgerRecord -Path $store.Ledger -Rows @(
+                '2026-08-08 | proposed | promote | reference_dupe_source@2026-07-01 | a later proposal about the same act | somewhere')
+            @((Test-MSPartition -Inventory $inv -IndexPath $store.Index -AsOf $script:Sweep1).accounted |
+                    Where-Object { $_.name -ceq 'reference_dupe_source' })[0].how |
+                Should -BeExactly 'exited-with-record' -Because 'a status may advance and may not retreat'
+        }
+
+        It 'gives a same-date tie to the later row, so a lawful exit is not read as loss [P4]' {
+            $store = script:New-FixtureStore
+            $inv = New-MSInventory -IndexPath $store.Index -AsOf $script:Sweep1
+            script:Remove-Pointer -IndexPath $store.Index -Name 'reference_tail_zeta'
+            # restore first, then the exit, both on one day - the restore-then-disposition flow
+            script:Add-LedgerRecord -Path $store.Ledger -Rows @(
+                '2026-08-08 | executed | restore | reference_tail_zeta@2026-07-22 | brought back to reconsider | MEMORY.md',
+                '2026-08-08 | executed | promote | reference_tail_zeta@2026-07-22 | and then promoted at the same slate | somewhere (merged to main)')
+            @((Test-MSPartition -Inventory $inv -IndexPath $store.Index -AsOf $script:Sweep1).accounted |
+                    Where-Object { $_.name -ceq 'reference_tail_zeta' })[0].how | Should -BeExactly 'exited-with-record'
+        }
+
+        It 'still lets a later restore undo an earlier exit [P4 other polarity]' {
+            $store = script:New-FixtureStore
+            script:Add-LedgerRecord -Path $store.Ledger -Rows @(
+                '2026-08-09 | executed | restore | reference_interrupted_eta@2026-07-05 | the promotion was abandoned | MEMORY.md')
+            (Get-MSLedger -Path $store.Ledger -AsOf $script:Sweep2).ExitsInForce.ContainsKey('reference_interrupted_eta@2026-07-05') | Should -BeFalse
+        }
+
+        It 'refuses a self-record and an untrusted slate at the exit gate, in that order [P6]' {
+            $store = script:New-FixtureStore
+            $slate = Get-MSSlateState -Path $store.Slate -AsOf $script:Sweep1
+            (Test-MSExitAllowed -SlateState $slate -Identity 'reference_ordinary_alpha@2026-06-14' -Disposition 'ledger-compaction').Allowed |
+                Should -BeFalse -Because 'the authority table forbids an unattended ledger compaction outright'
+
+            script:Add-SlateRow -Path $store.Slate -Rows @('2026-08-08 | reference_tail_zeta@2026-07-22 | critical | maybe | not a vocabulary value')
+            $bad = Get-MSSlateState -Path $store.Slate -AsOf $script:Sweep1
+            foreach ($d in @('keep-hot-with-expiry', 'settle-in-place', 'restore', 'promote')) {
+                (Test-MSExitAllowed -SlateState $bad -Identity 'reference_ordinary_alpha@2026-06-14' -Disposition $d).Allowed |
+                    Should -BeFalse -Because "an unreadable slate must not produce a green light for $d"
+            }
+        }
+
+        It 'does not enumerate a pointer at one of the store''s own files [P11]' {
+            $store = script:New-FixtureStore
+            $lines = [System.Collections.Generic.List[string]]::new()
+            $lines.AddRange([string[]]@([System.IO.File]::ReadAllLines($store.Index)))
+            $lines.Add("- [the store's own ledger](LEDGER.md) - what left and why")
+            [System.IO.File]::WriteAllLines($store.Index, $lines)
+            $inv = New-MSInventory -IndexPath $store.Index -AsOf $script:Sweep1
+            @($inv.subjects | Where-Object { $_.name -ceq 'LEDGER' }) | Should -BeNullOrEmpty
+            @($inv.non_entry_files) | Should -Contain 'LEDGER'
+        }
+
+        It 'lets a record file carry a comment, and ignores a leftover end marker [P12/P16]' {
+            $store = script:New-FixtureStore
+            $before = @((Get-MSLedger -Path $store.Ledger -AsOf $script:Sweep1).Records).Count
+            script:Add-LedgerRecord -Path $store.Ledger -Rows @(
+                '<!-- memory-ledger-end -->',
+                '<!-- compacted quarterly; see store-records.md -->')
+            $after = Get-MSLedger -Path $store.Ledger -AsOf $script:Sweep1
+            @($after.Records).Count | Should -Be $before
+            $after.Malformed | Should -BeNullOrEmpty -Because 'a comment is annotation, not a broken record'
+
+            # but ordinary prose still is a record, and still reported
+            script:Add-LedgerRecord -Path $store.Ledger -Rows @('## Notes')
+            @((Get-MSLedger -Path $store.Ledger -AsOf $script:Sweep1).Malformed).Count | Should -Be 1
         }
     }
 

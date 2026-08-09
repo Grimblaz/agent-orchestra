@@ -35,8 +35,13 @@
     Emit the measurement or the validation result as a single JSON object.
 
 .OUTPUTS
-    Exit 0 - measured, or the record validates. Exit 1 - the record does not conform. Exit 3 -
-    usage error.
+    Exit 0 - measured, or the record validates.
+    Exit 1 - the record does not conform.
+    Exit 3 - usage error: no file at the path, or neither -Path nor -Validate was supplied.
+
+    Neither parameter is Mandatory, deliberately. A mandatory parameter makes an omitted argument a
+    console PROMPT, and an unattended sweep hangs on it rather than failing; this reports a usage
+    error and exits 3.
 
 .EXAMPLE
     pwsh Measure-MemorySurface.ps1 -Path ~/.claude/CLAUDE.md
@@ -47,10 +52,10 @@
 
 [CmdletBinding(DefaultParameterSetName = 'Measure')]
 param(
-    [Parameter(Mandatory = $true, ParameterSetName = 'Measure')]
+    [Parameter(ParameterSetName = 'Measure')]
     [string]$Path,
 
-    [Parameter(Mandatory = $true, ParameterSetName = 'Validate')]
+    [Parameter(ParameterSetName = 'Validate')]
     [string]$Validate,
 
     [Parameter()]
@@ -65,7 +70,16 @@ $ErrorActionPreference = 'Stop'
 
 . (Join-Path $PSScriptRoot 'lib' 'memory-sweep-core.ps1')
 
-if ($PSCmdlet.ParameterSetName -eq 'Validate') {
+# Neither supplied: a usage error the caller can read, not a console prompt an unattended sweep
+# blocks on forever.
+if ([string]::IsNullOrWhiteSpace($Path) -and [string]::IsNullOrWhiteSpace($Validate)) {
+    $reason = 'supply -Path to measure a destination, or -Validate to check a measurement record'
+    if ($Json) { Write-Output ([pscustomobject]@{ result = 'usage-error'; reason = $reason } | ConvertTo-Json -Depth 3) }
+    else { Write-Output "RESULT: usage-error`nreason: $reason" }
+    exit 3
+}
+
+if (-not [string]::IsNullOrWhiteSpace($Validate)) {
     $verdict = Test-MSSurfaceMeasurement -Record $Validate
     if ($Json) {
         Write-Output ([pscustomobject]@{ result = $(if ($verdict.Conforming) { 'conforming' } else { 'non-conforming' }); problems = @($verdict.Problems) } | ConvertTo-Json -Depth 4)
