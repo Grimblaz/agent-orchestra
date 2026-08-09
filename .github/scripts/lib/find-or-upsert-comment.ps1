@@ -5,7 +5,8 @@
 
 .DESCRIPTION
     Find-OrUpsertComment lists comments on the given issue or pull-request,
-    searches for the supplied marker via substring containment, and either:
+    selects the comment whose FIRST LINE is exactly the supplied marker
+    (Test-CommentBodyMarkerLine1, marker-line1-selector.ps1), and either:
 
       * POSTs a new comment when no marker match exists,
       * PATCHes the existing comment when exactly one match exists,
@@ -33,8 +34,23 @@
     The PR or issue number on the current repository.
 
 .PARAMETER Marker
-    The HTML-comment marker (or any substring) used to recognise prior
-    upsert output. Substring-contained, not whole-line equality.
+    The HTML-comment marker used to recognise prior upsert output. It must be
+    the ENTIRE first line of the comment this function is meant to reach
+    (trailing whitespace on that line is immaterial; leading whitespace is
+    not). It is NOT a substring, a prefix, or a whole-line match anywhere in
+    the body.
+
+    Issue #1031 (parent #1011 AC2) narrowed this from `-like "*$Marker*"`.
+    Under the old rule a marker QUOTED IN PROSE — mid-line, inside backticks,
+    or alone on its own line inside a fenced block — was enough to select an
+    unrelated comment, whose body this function then REPLACED. The live
+    corpus carried one such comment: the approved plan comment for issue #782
+    (#issuecomment-4861653613) quotes `pc-emission-check-report` (delimiters
+    intact there, stripped here) on its line 37, and was the only match on
+    that issue, so the next emission-check post to #782 would have
+    overwritten the plan.
+    See marker-line1-selector.ps1 for the full rationale and for why a
+    line anchor is not sufficient.
 
 .PARAMETER Body
     The new body text to write. Replaces the existing body verbatim on the
@@ -75,6 +91,14 @@
 #     Find-OrUpsertComment first.
 #   - It can be tested independently via Get-Command and AST inspection.
 # ---------------------------------------------------------------------------
+# The line-1-exact selection predicate (issue #1031). Its own file, with no
+# side effects at dot-source time, so the two selectors that must reach the
+# SAME comment this one reaches can import it without importing
+# Find-OrUpsertComment (which shadows Pester mocks) or marker-transport-core
+# (which mutates [Console]::OutputEncoding process-wide). See that file's
+# .DESCRIPTION.
+. (Join-Path $PSScriptRoot 'marker-line1-selector.ps1')
+
 function Get-RestCommentId([object]$c) {
     if ($c.url -and ($c.url -match '#issuecomment-(\d+)$')) { return [long]$Matches[1] }
     try { return [long]$c.id } catch { return $null }
@@ -167,9 +191,13 @@ function Find-OrUpsertComment {
         }
     }
 
-    # --- 2. Filter via substring containment. ---
+    # --- 2. Filter: the marker must be the comment's own line-1 payload. ---
+    # Issue #1031 / parent #1011 AC2. Was `$_.body -like "*$Marker*"`, which
+    # let a marker quoted anywhere in prose select a comment this function
+    # then destroyed by whole-body PATCH (:236-238). A line anchor would not
+    # have been enough — see marker-line1-selector.ps1.
     $matchedComments = @($comments | Where-Object {
-            $_.body -and ($_.body -like "*$Marker*")
+            $_.body -and (Test-CommentBodyMarkerLine1 -Body ([string]$_.body) -Marker $Marker)
         })
 
     # --- 3. Branch on match count. ---

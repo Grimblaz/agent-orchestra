@@ -66,6 +66,17 @@
     for the runspace-boundary half of this same hazard). Callers therefore do
     NOT need to add it to the list above.
 
+    A SECOND EXCEPTION, on the same grounds: lib/marker-line1-selector.ps1
+    (issue #1031) is also dot-sourced by this file itself, immediately below.
+    It is a single dependency-free predicate with nothing at top level, so the
+    import is idempotent and order-independent. It is dot-sourced HERE rather
+    than left to the caller for the same reason #496 gives above: the marker
+    read at the degraded-retraction decision runs inside this function
+    fail-open try/catch, so a CommandNotFoundException from an unloaded
+    predicate would be swallowed and the cost section silently dropped — no
+    error, no signal, exactly the failure shape that note exists to prevent.
+    Callers therefore do NOT need to add it to the list above either.
+
     NOTE (apostrophe hygiene): comment prose added to this file should avoid
     possessive apostrophes. audit-hub-artifact-paths.ps1 extracts PowerShell
     path references using a naive single-quote pairing regex that treats EVERY
@@ -77,6 +88,10 @@
 
 # See the ONE EXCEPTION note above: dot-sourced here, not by the caller.
 . (Join-Path $PSScriptRoot 'cost-telemetry-budgets.ps1')
+
+# See the SECOND EXCEPTION note above (issue #1031): the shared line-1-exact
+# marker predicate, dot-sourced here rather than by the caller.
+. (Join-Path $PSScriptRoot 'marker-line1-selector.ps1')
 
 function Invoke-CostSessionRender {
     <#
@@ -466,8 +481,22 @@ function Invoke-CostSessionRender {
         # IsOrchestrated check, but keys off real events being present rather than absent.
         # The actual Find-OrUpsertComment call is left to the caller (see file-level
         # .DESCRIPTION) — this function only decides + composes the body.
+        # Issue #1031 (parent #1011 AC2, criterion AC-b second half): this read
+        # decides WHETHER the caller writes at all, and the writer it feeds
+        # (frame-credit-ledger.ps1:1488 -> Find-OrUpsertComment) POSTs A NEW
+        # COMMENT when it finds no match. Left unanchored while the writer was
+        # anchored, a marker merely QUOTED in some prose comment would make
+        # this read believe a stale degraded comment exists, the anchored
+        # writer would find none, and the run would post a brand-new comment
+        # asserting "Telemetry recovered" that nothing justifies — a spurious
+        # comment on a path where no legitimate target was ever lost, so a
+        # criterion about losing targets structurally cannot see it. Same
+        # asymmetry class persist-marker-core.ps1:681-696 records as producing
+        # "unbounded duplicate accretion on every subsequent write".
+        # So it uses the SAME predicate the writer uses: line-1-exact, from
+        # marker-line1-selector.ps1.
         $priorDegradedComment = if ($null -ne $PriorComments) {
-            @($PriorComments | Where-Object { $_.body -like "*$degradedMarker*" }) | Select-Object -First 1
+            @($PriorComments | Where-Object { Test-CommentBodyMarkerLine1 -Body ([string]$_.body) -Marker $degradedMarker }) | Select-Object -First 1
         } else { $null }
         if ($IsOrchestrated -and $null -ne $priorDegradedComment -and @($costEvents).Count -gt 0) {
             $shouldRetractDegraded = $true

@@ -4,6 +4,13 @@ All notable changes to agent-orchestra will be documented in this file.
 
 ## [Unreleased]
 
+## [3.16.1] — 2026-08-09
+
+### Fixed
+
+- Foreign selection in `Find-OrUpsertComment`: the upserter chose its PATCH target with an unanchored substring match and then replaced the whole comment body, so a marker quoted anywhere in prose could make an unrelated comment be selected as another family's write target and destroyed. A live instance existed — issue #782's approved plan comment quotes a `pc-emission-check-report` marker in prose and was the only match on that issue. Selection is now line-1-exact via a shared predicate (`.github/scripts/lib/marker-line1-selector.ps1`), and the two selectors that must reach the same comment — in `cost-baseline-harvest.ps1` and `cost-session-render.ps1` — import that same predicate rather than restating the rule (#1031).
+- Corrected four documents that still described the closed hazard as live, including the marker-writing guidance in `skills/session-memory-contract/references/handoff-markers.md` (#1031).
+
 ## [3.16.0] — 2026-08-09
 
 ### Changed

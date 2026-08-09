@@ -20,7 +20,7 @@ Every recorded write-failure incident happened **with the correct instructions l
 | --- | --- |
 | Shell quoting/escaping | #862 apostrophe bug (hit three times on one PR); `body=@"$VAR/path"` sending the literal path string instead of file contents |
 | Encoding | `gh view → gh edit --body-file` mojibake round-trip on Windows (em-dash/section-sign/ellipsis corruption) |
-| Comment targeting | `--edit-last` clobbering burst siblings; `Find-OrUpsertComment`'s `-like` substring matcher selecting the wrong comment |
+| Comment targeting | `--edit-last` clobbering burst siblings; `Find-OrUpsertComment`'s `-like` substring matcher selecting the wrong comment (**that second one is closed as of issue #1031** — selection is now line-1-exact; the row is kept because it is a record of an incident class, not a live defect list) |
 | Forgetting the literal | a plan persisted without the `plan-issue-{ID}` marker literal (frontmatter alone is not enough) |
 | Format precision | `phase-containment-{ID}` paired-tag shape mistaken for yaml-inside-comment |
 

@@ -16,9 +16,16 @@ edits, no review-judgment PR-surface emission work.**
   and compares against an expected count or threshold.
 - **splice-writer** — reads, then writes back a modified body (concatenate,
   replace-in-place, or insert-before-cursor).
-- **comment-selector** — selects a whole GitHub comment out of a set by
-  wildcard/substring containment (`-like`, `Find-OrUpsertComment`'s matcher),
-  as opposed to matching a byte position inside one already-fetched body.
+- **comment-selector** — selects a whole GitHub comment out of a set, as
+  opposed to matching a byte position inside one already-fetched body.
+  Historically this meant wildcard/substring containment (`-like`), which is
+  why the class exists as a separate one from block-selector: Part C's regex
+  anchoring cannot reach it. **Issue #1031 changed the three selectors that
+  reach a comment `Find-OrUpsertComment` writes** — that function itself and
+  its two behavioural mirrors — to a line-1-exact match
+  (`Test-CommentBodyMarkerLine1`, `.github/scripts/lib/marker-line1-selector.ps1`).
+  The remaining rows in this class are still substring-based; see the
+  comment-selector table below for which is which.
 
 **Polarity rule (load-bearing):** never narrow a presence-gate whose `$true`
 branch is the fail-loud path (the path that keeps the check honest/loud,
@@ -335,10 +342,13 @@ anchoring a regex inside an already-selected body. Sites:
 
 | Site | Pattern | Notes |
 | --- | --- | --- |
-| `.github/scripts/lib/find-or-upsert-comment.ps1:130` | `$_.body -like "*$Marker*"` | The mechanism named in the plan (M7): author-blind, matches a marker mentioned anywhere in ordinary prose, including a comment posted *before* the real target (earliest-REST-id tie-break at `:153-156` actively prefers the wrong comment in that case). This is the site s5's find-only, line-anchored selector (net-new glue, not a Part-C regex fix) is scoped to replace for the persistence-burst helper's own targeting — out of s1/s6 scope, in scope for s5. |
-| `frame-credit-ledger-core.ps1:945,987,2757,2828,2837` | `-like "*$token*"` (various tokens) | See per-family tables above; all wildcard-wrapped full-literal or prefix-literal matches. |
-| `Get-FCLOriginContext.ps1:329` | `-like "*$marker*"` | See frame-credit-ledger-{PR} table. |
-| `cost-fcl-helpers.ps1:470` | `-like "*$degradedMarker*"` | See cost-pattern-data table. |
+| `.github/scripts/lib/find-or-upsert-comment.ps1:171-173` | **RESOLVED (#1031)** — was `$_.body -like "*$Marker*"`, now `Test-CommentBodyMarkerLine1` | The mechanism named in the plan (M7): author-blind, it matched a marker mentioned anywhere in ordinary prose, including a comment posted *before* the real target (the earliest-REST-id tie-break at `:197-218` actively preferred the wrong comment in that case). Closed by issue #1031 (chunk 1 of #1011, parent AC2): selection is now line-1-exact via the shared predicate in `lib/marker-line1-selector.ps1`. A start-of-line or whole-line anchor was **not** sufficient — either would still select a marker alone on its own line inside a fenced block, the shape this repository's own plan bodies produce. Rationale, and the live exposure it closed (issue #782's plan comment), are in that file's `.DESCRIPTION`. The `s5` slice of **#885** that previously owned this replacement is discharged for this site; #885 remains open for its other sites. |
+| `.github/scripts/lib/cost-baseline-harvest.ps1:329` | **RESOLVED (#1031)** — was `-like "*$marker*"`, now `Test-CommentBodyMarkerLine1` | Must select the same comment `Find-OrUpsertComment` PATCHes, and says so in its own docstring (`:273-281`, `:80-91`). Now shares that function's single predicate rather than restating the rule, so the equivalence is structural. |
+| `.github/scripts/lib/cost-session-render.ps1:469-474` | **RESOLVED (#1031)** — was `-like "*$degradedMarker*"`, now `Test-CommentBodyMarkerLine1` | Declared no equivalence, but mirrored the behaviour and — unlike the two above — decides **whether the caller writes at all**. Anchoring the writer alone would have turned a quoted decoy into a spurious brand-new "telemetry recovered" comment, since the writer POSTs on zero matches (`find-or-upsert-comment.ps1:176-187`). Moved in lockstep for that reason. |
+| `frame-credit-ledger-core.ps1:945,987,2757,2828,2837` | `-like "*$token*"` (various tokens) | See per-family tables above; all wildcard-wrapped full-literal or prefix-literal matches. Out of #1031 scope: none of these tokens is a family `Find-OrUpsertComment` writes. |
+| `goal-contract-validate-core.ps1:566` | `-like "*$Marker*"` | Read-only, never routes through the write path, refuses on ambiguity, and its default marker (`plan-issue-{ID}`) is not a family `Find-OrUpsertComment` writes. Considered and left unchanged by #1031. |
+| ~~`Get-FCLOriginContext.ps1:329`~~ | — | **Stale row, removed (#1031).** That file contains no `-like` marker selector; the cited line does not exist as described. |
+| ~~`cost-fcl-helpers.ps1:470`~~ | — | **Stale row, removed (#1031).** `:470` is not a selector; the degraded marker is *composed* there (now `:510`, `Compose-FCLDegradedCostComment`). The live selector for that family was `cost-session-render.ps1:470`, now its own row above. |
 
 ## `$keyAnchor` — an internal-field anchor idiom, not a marker family (context only)
 
