@@ -777,6 +777,25 @@ Describe 'open-for-work surface (issue #974)' {
                 -Because 'the named surface must actually fire when late findings are sustained'
             $script:ResponseLoop | Should -Match '(?i)amend that record in place' `
                 -Because 'posting a second record is the failure mode this step exists to prevent'
+
+            # GUARD, NOT EVIDENCE (external review, PR #1033 F6): the two
+            # assertions above stayed green through deleting the advisory
+            # clause AND the issue-resolution step entirely -- neither
+            # anchor sits inside either deleted span. Three separate
+            # assertions, not one .*-chained regex: markdown reflow can
+            # split a sentence across lines, and .NET '.' does not cross
+            # newlines without (?s) -- a chained pattern would false-red on
+            # an ordinary rewrap. Anchored on 'skipped or failed amendment'
+            # rather than the bare phrase 'never halts the loop', because
+            # that bare phrase also appears at this file's marker-post step
+            # (line 24) and would pass without ever reading the amendment
+            # step's own text.
+            $script:ResponseLoop | Should -Match '(?i)skipped or failed amendment' `
+                -Because 'the advisory, never-halts property is the whole reason this step cannot become a silent blocking gate'
+            $script:ResponseLoop | Should -Match '(?i)close-out record amendment skipped' `
+                -Because 'the loud literal is what makes a skipped amendment visible in the Response Summary rather than silent'
+            $script:ResponseLoop | Should -Match '(?i)closingIssuesReferences' `
+                -Because 'this loop is otherwise entirely PR-keyed; without issue resolution the amendment has no issue to check or amend'
         }
 
         It 'AC7 - the index routing pointer lands on a surface that states both moments' {
