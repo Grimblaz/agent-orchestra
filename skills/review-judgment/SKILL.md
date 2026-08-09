@@ -1,6 +1,6 @@
 ---
 name: review-judgment
-description: "Reusable single-shot review judgment methodology for scoring prosecution and defense ledgers, verifying evidence, and emitting judge output. Use when ruling on review findings after prosecution and defense are available. DO NOT USE FOR: GitHub review intake routing, response-location policy, or fix execution ownership (keep those in Code-Review-Response.agent.md)."
+description: "Reusable single-shot review judgment methodology for scoring prosecution and defense ledgers, verifying evidence, and emitting judge output, plus the parent-owned post-judge steps every review lane runs against that output — the close-out record's amendment rule (its single home on every lane) and the Post-Judge Disposition Gate. Use when ruling on review findings after prosecution and defense are available, and when a lane needs the close-out amendment trigger. DO NOT USE FOR: GitHub review intake routing, response-location policy for review responses, or fix execution ownership (keep those in Code-Review-Response.agent.md)."
 ---
 
 <!-- platform-assumptions: markdown skill guidance for VS Code custom agents in Agent Orchestra; assumes the calling agent owns intake routing, categorization policy, and handoff to implementation. -->
@@ -252,6 +252,106 @@ Judgment does not implement fixes. It produces the ruling and the evidence packa
 | Trigger                             | Gotcha                                                         | Fix                                                                |
 | ----------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------ |
 | A ruling omits the `judge-rulings` block | Downstream consumers can miss completion or fail to route cleanly | Emit the `judge-rulings` block immediately after the score summary in the same payload; ensure the `<!-- review-judge-produced-{PR} -->` sentinel was written as a separate PR comment before |
+
+## Close-Out Record Amendment
+
+**Single home, every lane.** This section is the one place the close-out record's amendment rule is stated. Every lane that runs a judge reaches it by naming it from that lane's own entry document:
+
+| Lane | Entry document that names this section |
+| --- | --- |
+| `/orchestra:review` | `commands/orchestra-review.md` |
+| `/orchestra:review-lite` | `commands/orchestra-review-lite.md` |
+| `/orchestra:review-judge` | `commands/orchestra-review-judge.md` |
+| `/review-github` | `commands/review-github.md` |
+| `/orchestrate`, bare `review` via `/code-conductor` | `commands/orchestrate.md` and `commands/code-conductor.md`, which mandate reading `agents/Code-Conductor.agent.md` § Review Reconciliation Loop |
+| `/goal-run` | `commands/goal-run.md`, whose body `agents/Goal-Run.agent.md` § Stage 3 dispatches the `standard` adapter — panel, defense, **and judge** |
+
+**Out of population, stated rather than omitted.** AC8's standard is that an excluded path carries its reason, so each is named here rather than left to silence:
+
+- **`/orchestra:review-prosecute` and `/orchestra:review-defend`** — both stop before judge by their own contract, so no pass on them can sustain a finding.
+- **`/spine-run` and `/orchestra:spine`** — Spine-Runner **runs no judge**. Its frame port `review` is dispatched `skill-only` (`agents/Spine-Runner.agent.md` § Dispatch Table), which *inspects the PR body's `pipeline-metrics` block to verify a review row another lane emitted*; it never dispatches `code-review-response`. Its only adversarial-review mention is the Senior Engineer adversarial-pattern guard, which **halt-returns** rather than dispatching. A verifier of someone else's judge output sustains no findings of its own, so it triggers no amendment — the lane that produced those findings already did. Note the near-miss: `#552 D11`, quoted below to ground this step's executor, names "Code-Conductor **or spine-runner**" as orchestrating executors. That is about who may perform non-adversarial post-judgment work when a judge has run, not a claim that spine-runner runs one.
+- **The `design-challenge` and `proxy-github` adapters** — both declare no judge stage in their contracts.
+
+A path that reaches a judge and is missing from the table above is a gap in this section, not a lane that owes nothing — add it rather than reasoning about whether it "really" applies.
+
+Every other surface that mentions the amendment cites this one rather than restating it: two statements of one trigger are two things to keep in sync, and the drift between them is invisible until one is already wrong.
+
+**Executor: the owning parent workflow — never the judge subagent.** The judge's scope stops at its own emission — `agents/Code-Review-Response.agent.md`: *"Scope boundary: Code-Review-Response owns the sentinel and the `judge-rulings` comment only"* — and non-adversarial post-judgment work belongs to *"the orchestrating executor (Code-Conductor or spine-runner), **not** Code-Critic or Code-Review-Response"* per adversarial-independence `#552 D11` (`skills/validation-methodology/references/review-reconciliation.md` § Response Commit & Push). Do not place this step inside the judge's verification, scoring, or emission steps.
+
+**Why this file.** It already houses the post-judge steps the *parent* owns and each lane's entry document names by section — § Post-Judge Disposition Gate below is one, and is explicitly *"owned by the calling workflow … not by this skill's judgment pass"*. The close-out record is an issue-level account of the run that predates and outlives the review, not a review response, so this section is not the *"response-location policy"* this skill's frontmatter scopes away: it says nothing about where review responses are posted.
+
+### When it fires
+
+**Once per judge pass, on that pass's emission** — as soon as the parent holds that pass's judge output, and **before** the Post-Judge Disposition Gate below. Not after dispositions, and not after fixes.
+
+"That pass's judge output" is whatever form the pass emitted, not a fixed artifact list. On a pull-request target it is the `<!-- review-judge-produced-{PR} -->` sentinel, the `judge-rulings` block, and its phase-containment blocks. On a **non-PR review target** none of those three exists — all are PR-comment-scoped (§ Sentinel emission, § Judge-rulings comment, § Phase-containment emission), and `agents/code-review-response.md` § Persistence routes such a run to emit the score summary and `judge-rulings` payload directly in chat instead. There the trigger is that chat payload. Do not read the PR-shaped list as a precondition: a run that waits for artifacts its own lane never produces skips forever, which is the failure this section exists to remove.
+
+The moment is the judge's emission because that is where this step's input is produced: the record's item 1 is *"one line per sustained finding — where it was introduced, where it was catchable, where it was caught"* (`skills/post-pr-review/SKILL.md` § 9), which is the phase-containment blocks' own grain. Nothing downstream adds to it — a disposition rules `incorporate | dismiss | escalate`, and a fix lands or does not; neither changes where a defect was introduced, was catchable, or was caught. Firing here therefore does not make the record describe a state that never became true. It also means the amendment text must not describe fix status or disposition status; if it does, the wording is wrong for the moment, not the moment wrong for the wording.
+
+**Every judge pass, not only the first.** A run can reach a judge more than once — the main pass and the post-fix pass (`skills/validation-methodology/references/review-reconciliation.md` § Post-Fix Targeted Prosecution Pass), and a standalone `/orchestra:review-judge` re-run is a pass of its own. The post-fix pass by construction carries the latest findings a run has, which is exactly the population a late amendment exists for.
+
+### Resolving the issue
+
+This step is the only issue-keyed thing in an otherwise PR-keyed or target-keyed pipeline, so resolve the issue first, in this order:
+
+1. **When the review target is a pull request** — `gh pr view {PR} --json closingIssuesReferences`. This is the PR's own authoritative statement of what it closes. **Zero results**: fall through to route 2. **One result**: that is the issue. **More than one**: evaluate each separately rather than picking one.
+2. **Otherwise, the active issue id the parent already holds.** Every lane's dispatcher carries one when the run has one — the local-review commands pass *"active issue id if available"* as pre-dispatch context, and Code-Conductor, Goal-Run and Spine-Runner each run against an issue. This is the ordinary route on a run with **no** pull request, and it is why this step is not a documented no-op on lanes that review a non-PR target.
+3. **Neither available** — a degraded input, not the normal path. Report `no-issue-resolved` per § Advisory, and reported.
+
+**When both routes resolve and disagree, the pull request wins, and say so.** The parent can hold a different issue than the one the PR closes — a designed parent while the PR closes one of its chunks is the ordinary case, and a chunk's findings appended to the parent's record is a public misattribution on someone else's comment. Amend the issue route 1 returned, and name the held issue in the outcome so the divergence is visible rather than silently resolved.
+
+### Whether it applies
+
+Per resolved issue, **applies only** when both hold:
+
+- the issue carries a lawful **open-for-work affirmation record** — the lookup is `skills/post-pr-review/SKILL.md` § 9 "How to check". Use it rather than a substitute: `gh issue view --json comments` carries no `updated_at` and so cannot tell a lawful record from one edited after creation, failing in the permissive direction; **and**
+- a close-out record already exists on that issue, recognised by its first line (§ 9 "Action").
+
+**Does not apply otherwise**, and this step never manufactures a first record. It re-keys *when an existing record is amended*; it does not change which issues owe one, nor the two moments at which one is written — those stay at `skills/plan-authoring/SKILL.md` § The close-out obligation on an affirmation-record issue and at § 9.
+
+**`not-applicable` on a first-PR run is expected, not a coverage gap.** On a run that opens the issue's first pull request, the review completes before the pull request is created (`agents/Code-Conductor.agent.md` § Review Completion Gate), and the record is written after that review at the pre-PR moment stated in `skills/plan-authoring/SKILL.md` § The close-out obligation on an affirmation-record issue — this section does not restate that moment. So at judge time no record exists yet, and the record written moments later already accounts for this pass's findings. Nothing is owed and nothing is missed. This step's live population is a judge pass on an issue whose record **already** exists: a review of an already-open pull request, a second pull request, a post-fix pass after the record was written, or a resumed run. Read a first-PR `not-applicable` as the rule working, and do not "fix" it by making the step manufacture a record.
+
+### What it does
+
+When this pass sustained findings the existing record does not account for, **amend that record in place** — do not post a second one, which would read as two close-outs with no way to tell which is current — and say the amendment is one, per § 9.
+
+**The write route, because this section owns it and the obvious shortcuts mis-target.** The record has no marker family and no `persist-marker.ps1` write path, deliberately (§ 9), so the transport is a plain comment PATCH keyed by the comment's own id:
+
+1. The lawfulness lookup above already paginates the issue's comments through `gh api repos/{owner}/{repo}/issues/{ID}/comments --paginate`. Take the **`id`** of the comment whose first line is the record's, from that same read.
+2. **Re-read that comment's live body immediately before writing** — `gh api repos/{owner}/{repo}/issues/comments/{comment_id} --jq .body`. The record accumulates appended lines, and a body composed from an earlier read silently drops anything appended in between (`skills/safe-operations/references/git-and-gh-traps.md`).
+3. Append the amendment line to **that** live body and write it back: `gh api --method PATCH repos/{owner}/{repo}/issues/comments/{comment_id} -F body=@{file}`.
+
+**Two shortcuts are forbidden here, both documented mis-write traps** (same reference): `gh issue comment --edit-last` targets the author's most recent comment on the issue, which is whatever the run posted last rather than the record; and `Find-OrUpsertComment`'s `-Body` **replaces the existing body verbatim on the PATCH path** — it never re-reads and merges — so pointing it at a record that accumulates appended lines destroys them. That second hazard is about the *write*, not the *selection*: #1031 narrowed the selector to line-1-exact, and the close-out record is not marker-keyed at all, so it was never a candidate for that upserter. A mis-targeted or body-replacing write here damages a public comment whose first writer is often a person, which is why the id comes from the same read that recognised the record and never from a guess.
+
+**Bounded by what the record already carries.** Before amending, read it and name only the sustained findings it does not already account for — whether in its original items or in any amendment line already on it, whichever run appended that line. When this pass adds none, report `no-new-findings` and append nothing. Several near-identical dated lines on one record is the duplicate account this bound exists to prevent, not evidence that the step fired.
+
+**What "already account for" is matched on.** The record's item-1 lines are prose, and the judge's findings carry a `stable_finding_key` (§ Stable Finding Key), so the two do not share a key. Match on the **finding's own identity as the record states it** — the file-and-symptom pair a record line names, not string equality with a finding title. When a prior line plainly describes this pass's finding, it is accounted for; when you cannot tell, say so in the outcome rather than appending a line that may be a duplicate. Recording an uncertainty is cheap; a second near-identical dated line is the harm.
+
+### Advisory, and reported
+
+**A skipped or failed amendment never halts the loop** — nor the run, on a lane that has no loop. Emit the loud literal and carry it into this lane's accountability channel:
+
+- `⚠️ close-out record amendment skipped — {reason}`
+
+**The accountability channel, named per lane.** This step is advisory, so its report is the only trace it leaves; a lane with no named channel lets a skip disappear into a report that satisfies every other requirement. **The channel is the run's own terminal report** — the block a lane already returns or posts when it finishes — and every lane has one:
+
+| Lane | Channel |
+| --- | --- |
+| `/review-github` (GitHub intake) | Response Summary item 5 (`skills/validation-methodology/references/review-reconciliation.md` § Response Commit & Push) |
+| `/orchestrate`, bare `review` via `/code-conductor` — **existing-PR path** | the same Response Summary item 5 |
+| `/orchestrate` — **new-PR path** (Conductor Step 4 `gh pr create`) | the **Close-out record amendment** row of the PR-body pipeline-metrics block. That path fires no `persist-changes` and assembles no Response Summary — the two push sites are mutually exclusive — so item 5 does not exist there and pointing at it would name a slot the run never produces. |
+| `/orchestra:review`, `-lite`, `-judge` (local review) | a `Close-out record amendment:` line in the **judgment payload the command returns**, immediately after the `judge-rulings` block and beside the disposition-gate outcome. It is the parent's own line, appended to the payload — it does not alter the judge output the command returns unchanged. |
+| `/goal-run` | the Stage 3 report; on a halt, the typed halt report's own body |
+
+**Report one outcome per resolved issue, per judge pass** — not one per pass. Route 1's "more than one: evaluate each separately" means a single pass can resolve to several issues (a PR closing more than one), and each gets its own applies-only check and its own outcome; a pass that touched three issues reports three outcome lines, one per issue id, even when they differ — `amended` on one and `not-applicable` on another is the ordinary shape, not a conflict to resolve into a single line. State how many passes fired and, within each pass, how many issues it resolved. The outcomes partition per issue — exactly one applies to each:
+
+- `amended` — naming what it added, and naming the held issue when it differed from the PR's.
+- `no-new-findings` — the record already accounts for every finding this pass sustained.
+- `not-applicable` — an issue **was** resolved, and it carries no affirmation record or no existing record. Name which.
+- `no-issue-resolved` — route 3: neither an issue nor a pull request was available. Carries the loud literal below.
+- `skipped` — the step was reached but could not complete (a failed read, a failed write, a lookup error). Carries the loud literal below with its reason.
+
+**Not a gate.** Nothing refuses a judgment, a fix, a pull request, a merge, or a close because this step did not run, and nothing re-checks it once the run ends. A blocking check here would be the detector `Documents/Design/open-for-work.md` § The close-out habit deliberately declined, wearing another name.
 
 ## Post-Judge Disposition Gate
 

@@ -4,6 +4,22 @@ All notable changes to agent-orchestra will be documented in this file.
 
 ## [Unreleased]
 
+## [3.17.0] — 2026-08-09
+
+### Changed
+
+**The close-out record's amendment trigger moved to a firing point every review lane reaches** (#1039, chunk 2 of #1013). 3.16.0 named the GitHub-intake terminal sequence — `code-review-intake` § Response Loop Completion — as the amendment's firing surface. Three lanes run a judge and can sustain findings after a record exists, and two of them never load that surface: the local-review lane (`/orchestra:review`, `-lite`, `-judge`), which is the lane carrying this repository's chunk work, and the Conductor local-review lane. On those lanes a record written at the pre-PR moment had no documented trigger to amend it, which is 3.16.0's own falsifier firing — the failure was moved, not closed. PR #1033's review sustained 25 findings after the point that record would have been written.
+
+The rule now has one home, `skills/review-judgment/SKILL.md` § Close-Out Record Amendment, carrying a **lane table** naming the entry document each judge-running lane's reader actually opens: `commands/orchestra-review.md`, `commands/orchestra-review-lite.md`, `commands/orchestra-review-judge.md`, `commands/review-github.md`, `agents/Code-Conductor.agent.md` § Review Reconciliation Loop (reached via `commands/orchestrate.md` and `commands/code-conductor.md`), and `agents/Goal-Run.agent.md` § Stage 3 (reached via `commands/goal-run.md`) — and, beside it, the paths **excluded with their reasons**: `commands/orchestra-review-prosecute.md` and `commands/orchestra-review-defend.md` stop before judge, the `design-challenge` and `proxy-github` adversarial-review adapters declare no judge stage, and `commands/spine-run.md` / `commands/orchestra-spine.md` (`agents/Spine-Runner.agent.md`) dispatch their `review` port `skill-only`, verifying a row another lane emitted rather than running a judge of their own.
+
+It fires **at each judge pass's own emission** — where the record's per-finding item is produced — before the Post-Judge Disposition Gate and before fixes, on every pass including the post-fix one. "That pass's judge output" is whatever form the pass emitted: the sentinel, `judge-rulings` comment and phase-containment blocks on a pull-request target, and the chat payload on a non-PR target, where none of those three exists.
+
+Its executor is the **owning parent workflow, never the judge subagent**, per Code-Review-Response's scope boundary and adversarial-independence #552 D11. It resolves the issue from the pull request's own `closingIssuesReferences` first — falling through to the active issue id the parent holds, which is how a PR-less run resolves — and when both resolve and disagree the pull request wins and the divergence is named, so a chunk's findings cannot land on its designed parent's record. Because § 9 deliberately removes the `persist-marker.ps1` write path, the section now **names the write transport**: take the comment id from the same paginated read that recognised the record, re-read that comment's live body immediately before writing, and PATCH it by id — with `gh issue comment --edit-last` and `Find-OrUpsertComment` named as the forbidden shortcuts, both documented mis-write traps.
+
+The step stays **advisory** — it never halts a loop or a run, a skip stays loud, and every lane names where its outcome is reported, including the `/orchestrate` new-PR path, which assembles no Response Summary and so reports into the PR-body pipeline-metrics block instead of a slot it never produces. Outcomes partition into `amended`, `no-new-findings`, `not-applicable`, `no-issue-resolved`, and `skipped`. The GitHub lane's step 6 survives as a hand-off that restates none of the rule.
+
+Unchanged, deliberately: the two moments at which a record is *written*, the population the obligation binds, § 9's lawfulness lookup, and the declined close-out detector. Also stated rather than left to be rediscovered: on a run opening an issue's **first** pull request the step correctly reports `not-applicable`, because the review precedes the record's own creation and the record written afterwards already accounts for that pass's findings — the live population is a judge pass on an issue whose record already exists.
+
 ## [3.16.1] — 2026-08-09
 
 ### Fixed

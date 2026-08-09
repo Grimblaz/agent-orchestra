@@ -23,6 +23,10 @@ Run only the Code-Review-Response judge stage against existing prosecution and d
 
 Read `skills/adversarial-review/platforms/claude.md` and follow its parent-side dispatcher checklist as a thin caller with adapter `judge-only`. Pass the prosecution ledger, defense report, review target context, active issue id if available, existing review state, and review-state persistence target as the pre-dispatch context. Return the Markdown score summary and the `judge-rulings` block unchanged in the same payload.
 
+**Close-out record amendment**:
+
+As soon as each judge pass's emission is in hand — and before the disposition gate below — load `skills/review-judgment/SKILL.md § Close-Out Record Amendment` and run that step as the owning parent. A standalone judge re-run is a judge pass of its own, so this step fires here too. That section owns the trigger, the issue-resolution route, the write transport, and the outcome set; this command restates none of it and adds only the two facts it alone holds: the active issue id passed as pre-dispatch context above is what that section's route 2 reads, and its outcome is reported here as a `Close-out record amendment:` line appended to the returned judgment payload, immediately after the `judge-rulings` block. That line is this lane's named accountability channel.
+
 **Post-judgment disposition gate**:
 
 After the judge emits the `<!-- review-judge-produced-{PR} -->` sentinel and the judge-rulings comment, load `skills/review-judgment/SKILL.md § Post-Judge Disposition Gate` and run the full disposition pass over judge-sustained findings (`judge_ruling: sustained`). Defense-sustained findings are skipped silently. Steps in order:

@@ -29,17 +29,9 @@ After all judgment states reach terminal, the GitHub-intake response loop comple
 3. **Post-fix targeted prosecution pass** — when triggered per the R2 conditions (see `skills/validation-methodology/references/review-reconciliation.md § Post-Fix Targeted Prosecution Pass`). This pass's defense → judge cycle re-enters step 1's Post-Judge Disposition Gate — see step 1 above.
 4. **CE Gate** — run the CE Gate when a customer surface is affected (see `agents/Code-Conductor.agent.md § Customer Experience Gate`).
 5. **Persist changes** — fire `skills/persist-changes/SKILL.md` as the terminal *code-changing* step; steps 6 and 7 follow it and write no code (see `### Response Commit & Push` in `skills/validation-methodology/references/review-reconciliation.md` for the SSOT contract). The executor commits fix files and pushes to the PR's head remote, or surfaces a loud not-pushed reason.
-6. **Close-out record amendment (advisory)** — this step is the named firing surface for the close-out record's amendment rule (`skills/plan-authoring/SKILL.md` § The close-out obligation on an affirmation-record issue).
+6. **Close-out record amendment — reported here, fired earlier.** This loop neither states nor re-runs the rule. It fires at each judge pass's own emission, on every lane that runs a judge, from its single home: `skills/review-judgment/SKILL.md` § Close-Out Record Amendment. That section owns the trigger and its moment, the executor, the issue-resolution route, the applies-only preconditions, the amend-in-place procedure, its bound against duplicate accounts, and the loud skip literal — restating any of it here would recreate the two-triggers-to-keep-in-sync drift the move to a single home removed.
 
-   **Resolve the issue first — this loop is otherwise entirely PR-keyed and hands you no issue number.** Run `gh pr view {PR} --json closingIssuesReferences`. **Zero results**: the step does not apply; say so and continue. **One result**: that is the issue. **More than one**: evaluate each separately rather than picking one.
-
-   Then, per resolved issue: **applies only** when the issue carries an open-for-work affirmation record — the lookup is `skills/post-pr-review/SKILL.md` § 9 "How to check"; use it rather than a substitute, since `gh issue view --json comments` cannot tell a lawful record from an edited one — **and** a close-out record was already written, recognised by its first line (§ 9 "Action"). **Does not apply otherwise**, and this step never manufactures a first record.
-
-   When this pass sustained findings the existing record does not account for, **amend that record in place** — do not post a second one, which would read as two close-outs with no way to tell which is current — and say the amendment is one, per § 9. This exists because an unamended record is *present* and therefore reads as discharged, making it harder to notice than a missing one.
-
-   **Advisory**: a skipped or failed amendment never halts the loop. Emit the loud literal and carry it into the Response Summary:
-
-   - `⚠️ close-out record amendment skipped — {reason}`
+   What this step owns is the hand-off: carry the outcome that section returned, for each judge pass this loop ran (step 1's main pass and step 3's post-fix pass), into the Response Summary (step 7).
 7. **Response Summary** — assemble and return the Response Summary per the shape in `skills/validation-methodology/references/review-reconciliation.md § Response Commit & Push`.
 
 This step sequence is what makes a bare `/review-github` complete the full response loop — accepted fixes are applied, committed, and pushed to the existing PR branch without requiring an additional user instruction.
