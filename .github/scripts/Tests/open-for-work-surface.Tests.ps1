@@ -770,31 +770,37 @@ Describe 'open-for-work surface (issue #974)' {
         }
 
         It 'AC6 - the named firing surface actually carries the amendment step' {
-            # The rule names code-review-intake's terminal sequence. If that
-            # sequence does not run the amendment, the failure has been
-            # moved rather than closed.
-            $script:ResponseLoop | Should -Match '(?i)close-out record amendment' `
-                -Because 'the named surface must actually fire when late findings are sustained'
-            $script:ResponseLoop | Should -Match '(?i)amend that record in place' `
-                -Because 'posting a second record is the failure mode this step exists to prevent'
+            # SCOPED to step 6's own body, not matched against the whole
+            # document (external review, PR #1033 F6, post-fix round 2
+            # M-A/M-B/M-C). A whole-document match on this file has already
+            # burned this suite twice -- see the CloseOutHome and Step9
+            # scopers above, and #995 round-1 M17 -- and a third instance
+            # was found here: every un-scoped assertion this It ever had
+            # stayed green through inverting "Advisory ... never halts the
+            # loop" to "Blocking ... halts the loop until resolved", because
+            # the guarded phrase was chosen to avoid line 24's unrelated
+            # "never halts the loop" occurrence rather than scoped away from
+            # it. Scoping releases that constraint, so the assertions below
+            # can read the polarity-bearing text directly.
+            $step6 = [regex]::Match(
+                $script:ResponseLoop,
+                '(?ms)^6\.\s+\*\*Close-out record amendment.*?(?=^\d+\.\s+\*\*|\z)'
+            ).Value
+            $step6 | Should -Not -BeNullOrEmpty `
+                -Because 'step 6 must exist and have a body to assert against'
 
-            # GUARD, NOT EVIDENCE (external review, PR #1033 F6): the two
-            # assertions above stayed green through deleting the advisory
-            # clause AND the issue-resolution step entirely -- neither
-            # anchor sits inside either deleted span. Three separate
-            # assertions, not one .*-chained regex: markdown reflow can
-            # split a sentence across lines, and .NET '.' does not cross
-            # newlines without (?s) -- a chained pattern would false-red on
-            # an ordinary rewrap. Anchored on 'skipped or failed amendment'
-            # rather than the bare phrase 'never halts the loop', because
-            # that bare phrase also appears at this file's marker-post step
-            # (line 24) and would pass without ever reading the amendment
-            # step's own text.
-            $script:ResponseLoop | Should -Match '(?i)skipped or failed amendment' `
-                -Because 'the advisory, never-halts property is the whole reason this step cannot become a silent blocking gate'
-            $script:ResponseLoop | Should -Match '(?i)close-out record amendment skipped' `
-                -Because 'the loud literal is what makes a skipped amendment visible in the Response Summary rather than silent'
-            $script:ResponseLoop | Should -Match '(?i)closingIssuesReferences' `
+            # \s+ throughout, not a literal space: a newline inserted mid-
+            # phrase by ordinary markdown reflow does not cross '.' without
+            # (?s), and does not match a literal space either -- both were
+            # demonstrated to false-red an earlier, literal-space version of
+            # these same anchors.
+            $step6 | Should -Match '(?i)never\s+halts\s+the\s+loop' `
+                -Because 'the advisory, never-halts property is the whole reason this step cannot become a silent blocking gate; unlike a bare-phrase match, this cannot be satisfied by line 24''s unrelated occurrence once scoped to step 6'
+            $step6 | Should -Match '(?i)amend\s+that\s+record\s+in\s+place' `
+                -Because 'posting a second record is the failure mode this step exists to prevent'
+            $step6 | Should -Match ([regex]::Escape('⚠️ close-out record amendment skipped — {reason}')) `
+                -Because 'the loud literal, glyph and all, is what makes a skipped amendment visible rather than silent -- this repository already pins this document''s other two loud literals the same way, verbatim with glyph, in code-conductor-inline-commands.Tests.ps1'
+            $step6 | Should -Match '(?i)closingIssuesReferences' `
                 -Because 'this loop is otherwise entirely PR-keyed; without issue resolution the amendment has no issue to check or amend'
         }
 
