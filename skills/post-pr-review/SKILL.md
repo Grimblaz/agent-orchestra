@@ -226,18 +226,28 @@ if ((Test-Path 'Documents/Planning/sequence.yaml') -and (Test-Path '.github/scri
 
 **How to check** — run the lookup in `skills/open-for-work/SKILL.md` § Resuming an issue already opened for work. That section is the only place both recognised record forms are defined, and it is the instruction here, not an inference: read the issue's comments through `gh api repos/{owner}/{repo}/issues/{ID}/comments --paginate` (never `gh issue view --json comments`, which carries no `updated_at`), accept either the registered marker form or the interim practiced form's exact first line, and discard any record edited after creation. **Zero lawful records → skip this step.**
 
-**Action**: write one close-out comment on the issue, carrying three things:
+**Action**: write one close-out comment on the issue, carrying three things.
+
+**Its first line is exactly** `**Close-out record - issue {ID}**` (bold, ASCII only — a plain hyphen, deliberately no em dash given this repository's console-encoding history; `{ID}` is the issue number). This is identification, not decoration: the record is amendable in place (`skills/plan-authoring/SKILL.md` § The close-out obligation on an affirmation-record issue), and a later run cannot amend a comment it cannot pick out. Recognise a record by that line. **This is a first-line convention, not a marker family** — no marker, no `persist-marker.ps1` write path, and deliberately so, since a new family is machinery this work declined.
+
+**An amendment says it is one.** A run amending an existing record appends a dated line naming itself and what changed — *"Amended {date} by the run for PR #{N}: {what changed}."* — rather than silently rewriting. The record is a public artifact whose first writer is often a person, not this run, and an unannounced in-place rewrite of someone else's comment leaves a reader unable to tell an amendment from the original. When the comment's author is not the amending run, say so in that line.
+
+**Render marker-like text inert.** Item 1 folds in finding text, including findings derived from external reviewers, and this repository's findings routinely name marker families. A literal HTML-comment marker in the record is live to the raw-text scanners that read real comments, so strip the delimiters when quoting one (`skills/session-memory-contract/references/handoff-markers.md` § Writing about markers safely). Backticks do not neutralise it.
+
+The three things:
 
 1. **One line per sustained finding** — where it was introduced, where it was catchable, where it was caught. This is the phase-containment ledger's own grain, and this step **does not emit ledger blocks**: the emission mechanics belong to `Documents/Design/phase-containment-ledger.md` and the plan-surface ledger those blocks already live on. Point at that ledger and summarise from it; do not re-emit it here.
 
    **When no ledger exists** — reachable on a PR-less close, and on a novel-arm parent closed after its chunks carried their own reviews — say exactly that: *"No phase-containment ledger was produced for this issue; no sustained findings to summarise."* Do not invent a ledger reference, and do not silently omit the item. An absent ledger is a fact about the issue, not a gap in the record.
+
+   **Not-yet is a different state from absent, and at moment 1 it is the normal one.** A record written before the PR-creation action necessarily predates its own review, so no ledger exists *yet* — and the sentence above would be a false claim about the issue rather than a true one. Say instead: *"No phase-containment ledger exists yet; this record is provisional and is amended once review completes."* Reserve the absent form for a close where no ledger will ever be produced.
 2. **A dead-premises note** — which filed premises beat 1's grounding falsified and amended in place, so the next reader does not resurrect them.
 3. **The beat-2 re-route count** — how many times the escape hatch re-ran the routing. Zero is the common case and is reportable. **The count is what the run observed, not an arithmetic on comment counts.** Records-minus-one is a cross-check that legitimately disagrees in three directions: a record voided by a later edit still evidences a re-route that happened, a re-affirmation with an unchanged what-statement can append nothing at all, and a retried write can append twice for one re-route. Report the observed count, note how many affirmation records the issue carries and how many are lawful, and when those disagree say so and why.
 
 **When to write it — two moments, and the second is not a fallback for the first.**
 
 1. **Before the PR-creation action**, on a run that will open a pull request. That run meets this obligation earlier than this step: it is stated on the brief the run is dispatched against, at `skills/plan-authoring/SKILL.md` § The close-out obligation on an affirmation-record issue. This step owns the record's shape; that section owns when the obligation is read.
-2. **Before the close** (`## Completion` below), on a run that will not — an issue closed by hand with no pull request. Moment 1 structurally cannot reach that close, and it is a real case rather than a hypothetical one, so this backstop is stated alongside it rather than left implied.
+2. **Before the close** (`## Completion` below), **whenever moment 1 did not already produce the record on this issue**. Keyed on whether the record exists, **not** on whether a pull request exists. An issue closed by hand **without a pull request** is the obvious instance; it is not the only one. An issue also closes on a **closing keyword in a pull request belonging to a different issue** — a designed parent auto-closed by one of its own chunk PRs is exactly that, and moment 1 never fired for it, because the parent has no brief and the chunk that closed it owes no record of its own. A backstop keyed on PR-absence would miss that population while reading as complete.
 
 **Why it binds: the run ends at the close.** Afterwards there is no conversation left to write anything — which is how two of the six issues that owed a record got none at all.
 

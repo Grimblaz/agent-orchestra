@@ -126,10 +126,10 @@ The conversation's owner writes the close-out record on the issue. It applies on
 
 **Where the instruction lives, and why it moved** (#1013). It used to live only on the close-time checklist — `skills/post-pr-review/SKILL.md` § 9 — on the reasoning that an agent walking that checklist reaches it without being pointed here first. Measured across the six closed issues that owed a record, that did not hold: one landed before the close, three landed after it, and **two were never written at all**. The checklist's stated trigger is post-merge, so its reader arrives when the issue has already closed; and the instruction reachable at PR time sat in a lane none of the failing runs used. The obligation is now stated on the **brief** — `skills/plan-authoring/SKILL.md` § The close-out obligation on an affirmation-record issue — because the brief is what every run reads whichever lane it runs, and all six of those issues carried one. § 9 still owns the record's shape.
 
-**Two firing moments**, because a pre-PR rule cannot reach a close that never opens a PR:
+**Two firing moments**, because a pre-PR rule cannot reach a close no run of its own arrives at:
 
 1. **Pre-PR, on a run that will open a pull request** — written before the PR-creation action.
-2. **Close-time backstop, on a run that will not** — written before the close, by the conversation closing the issue. #990 is the live instance: closed by hand, no commit, no PR.
+2. **Close-time backstop, whenever moment 1 did not already produce the record** — written before the close, by the conversation closing the issue. Keyed on the record's existence rather than a PR's, because two different closes land here. #990 is the hand-closed instance: no commit, no PR. The other is a **designed parent auto-closed by a closing keyword in one of its own chunk PRs** — it has no brief, so moment 1 never fired, and the chunk run that closed it owes no record of its own. Keying moment 2 on PR-absence would leave that second population uncovered while reading as complete.
 
 The obligation is **advisory**, deliberately. **A detector was considered and declined** — not on a count argument, which this issue's own amendment falsified, but because a blocking gate is that declined mechanism under another name. The standing counter-argument is preserved rather than buried: a documentation clause has nothing re-checking the property once a run ends, so detection reverts to the incidental discovery that let two of six go missing. The revisit trigger is the first falsifier firing.
 

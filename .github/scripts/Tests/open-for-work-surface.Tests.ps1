@@ -586,6 +586,40 @@ Describe 'open-for-work surface (issue #974)' {
         # decision register, so the doctrine could contradict the skill and
         # every assertion here would still pass -- that read-set gap is the
         # defect this Context exists to close, not an incidental detail.
+        #
+        # NAMED RESIDUES -- properties AC1-AC7 state that these checks do
+        # NOT fully express. AC8 requires naming such a property rather
+        # than dropping it silently, so they are named here and in the PR's
+        # evidence account. Each was demonstrated by an executed mutation
+        # that left this Context green before the current shape landed.
+        #
+        #   1. AC4 ("no register row asserts unconditionally"). Rows are
+        #      selected by VOCABULARY. The set was widened after a mutation
+        #      inserting a third row ("The closing keyword alone discharges
+        #      the issue; no follow-up note on the issue is ever needed")
+        #      passed green; that phrasing is now caught. But "every row"
+        #      is not decidable by pattern -- a row asserting sufficiency
+        #      in wording none of these patterns anticipates still escapes.
+        #      This is exactly the trap the brief's own falsifier names:
+        #      the vocabulary is the limit, not the diligence.
+        #   2. AC3 ("stops telling them something false"). The negative is
+        #      keyed on the "can still find" claim family, after a match on
+        #      the deleted sentence verbatim let a paraphrase back in. A
+        #      restatement of the findability basis sharing none of that
+        #      wording still escapes. Whether a sentence asserts the
+        #      falsified basis is a reading, not a match.
+        #   3. AC5 ("every surface"). The surface set is DISCOVERED by scan
+        #      rather than hand-listed, which closes the new-surface
+        #      mutation. The residue is the discovery predicate itself: a
+        #      surface stating the obligation without ever using the phrase
+        #      "close-out record" is invisible to the scan -- the same
+        #      class as the register row that used no such phrase and was
+        #      missed twice by earlier passes.
+        #
+        # None of the three is closable by a stronger regex; closing them
+        # needs a reader. Do not add a detector to paper over it: the brief
+        # declined that mechanism deliberately, and nothing here re-checks
+        # these properties once a run ends.
 
         BeforeAll {
             $script:PostPr = & $script:ReadRepoFile 'skills/post-pr-review/SKILL.md'
@@ -599,9 +633,15 @@ Describe 'open-for-work surface (issue #974)' {
 
             # The obligation's home, extracted so an assertion cannot be
             # satisfied by text elsewhere in a 790-line file.
+            # Terminator is `^#{1,5}\s`, not `^#{2,4}\s`. The narrower form
+            # cannot match an h5 at all -- it consumes four '#' then needs
+            # whitespace against the fifth -- so demoting the terminating
+            # heading to `#####` silently ran the span past the section and
+            # quietly retired the "cannot be satisfied by text elsewhere"
+            # property this extraction exists for.
             $script:CloseOutHome = [regex]::Match(
                 $script:PlanAuthoring,
-                '(?ms)^#### The close-out obligation on an affirmation-record issue[^\n]*\n(?<body>.*?)(?=^#{2,4}\s|\z)'
+                '(?ms)^#### The close-out obligation on an affirmation-record issue[^\n]*\n(?<body>.*?)(?=^#{1,5}\s|\z)'
             ).Groups['body'].Value
 
             $script:Step9 = [regex]::Match(
@@ -637,8 +677,14 @@ Describe 'open-for-work surface (issue #974)' {
         It 'AC3 - the ordering rule gives the run-ends basis, drops the falsified one, and states its limit' {
             $script:Step9 | Should -Match '(?i)the run ends at the close' `
                 -Because 'that is the basis that actually holds'
-            $script:Step9 | Should -Not -Match '(?i)so the record lands on an issue a reader can still find it on' `
-                -Because 'the findability rationale is falsified at the grain this step itself reads'
+            # Keyed on the CLAIM family, not the deleted sentence. Matching
+            # the original sentence verbatim let a paraphrase of the same
+            # falsified basis back in with the suite green (demonstrated:
+            # "Write it before the close so a reader can still find the
+            # issue the record sits on." passed). Still narrower than the
+            # property AC3 states -- see named residue 2 above.
+            $script:Step9 | Should -Not -Match '(?i)can still find' `
+                -Because 'the findability rationale is falsified at the grain this step itself reads, and a paraphrase reintroduces the same false claim'
             $script:Step9 | Should -Match '(?i)ages? out of time-windowed sweeps' `
                 -Because 'without the surviving limit a reader over-learns the correction into "ordering never matters"'
         }
@@ -648,9 +694,16 @@ Describe 'open-for-work surface (issue #974)' {
             # uses the phrase "close-out" at all, and its second row uses
             # different vocabulary from its first -- a check keyed on one
             # row, or on this repository's usual vocabulary, misses it.
+            # Vocabulary widened past the two rows known to exist, so a
+            # third row phrased differently has a chance of being read.
+            # This reduces the escape; it does not close it -- residue 1.
             $rows = @(
                 $script:SessionHooks -split "`n" | Where-Object {
-                    $_ -match '(?i)auto-close is sufficient' -or $_ -match '(?i)Summary comment on issue'
+                    $_ -match '(?i)auto-close is sufficient' -or
+                    $_ -match '(?i)Summary comment on issue' -or
+                    $_ -match '(?i)closing keyword alone' -or
+                    ($_ -match '(?i)(auto[- ]?close|closes #|closing keyword)' -and
+                     $_ -match '(?i)(sufficient|discharges|no .{0,40}(comment|note|record).{0,25}(needed|required))')
                 }
             )
 
@@ -664,20 +717,46 @@ Describe 'open-for-work surface (issue #974)' {
         }
 
         It 'AC5 - every surface stating the obligation names the same two moments' {
-            $surfaces = @{
-                'skills/plan-authoring/SKILL.md'  = $script:PlanAuthoring
-                'skills/post-pr-review/SKILL.md'  = $script:PostPr
-                'skills/open-for-work/SKILL.md'   = $script:OfwSkill
-                'Documents/Design/open-for-work.md' = $script:OfwDoctrine
-                'Documents/Design/session-hooks.md' = $script:SessionHooks
-                'commands/open.md'                = $script:OpenCommand
-            }
+            # The surface set is DISCOVERED, not hand-listed. A hardcoded
+            # list cannot fail the way AC5 needs it to: adding a brand-new
+            # skill stating only the post-merge moment -- the exact
+            # regression AC5 exists to prevent -- left a hand-listed
+            # version of this assertion green, demonstrated by mutation.
+            $roots = @('skills', 'commands', 'Documents/Design')
+            $candidates = @(
+                foreach ($root in $roots) {
+                    $full = Join-Path $script:RepoRoot $root
+                    if (Test-Path -LiteralPath $full) {
+                        Get-ChildItem -LiteralPath $full -Recurse -File -Filter '*.md' |
+                            Where-Object { (Get-Content -LiteralPath $_.FullName -Raw) -match '(?i)close-out record' }
+                    }
+                }
+            )
 
-            foreach ($path in $surfaces.Keys) {
-                $surfaces[$path] | Should -Match '(?i)before the PR-creation action' `
-                    -Because "$path states the close-out obligation and must name the pre-PR moment"
-                $surfaces[$path] | Should -Match '(?i)before the close' `
-                    -Because "$path states the close-out obligation and must name the close-time backstop"
+            $candidates.Count | Should -BeGreaterOrEqual 6 `
+                -Because 'the discovery scan must find the known surfaces; a near-empty result means the scan broke, not that the repo is clean'
+
+            # Carve-out, stated rather than silent. These surfaces carry the
+            # record's AMENDMENT LIFECYCLE rule, not the statement of when
+            # the record is owed, so "names the same two moments" does not
+            # apply to them. Membership rule: a surface is in AC5's set when
+            # it tells a reader the record is OWED; it is carved out when it
+            # only tells a reader how an existing record is later amended.
+            $lifecycleOnly = @(
+                'skills/code-review-intake/SKILL.md',
+                'skills/code-review-intake/references/response-loop-completion.md',
+                'skills/validation-methodology/references/review-reconciliation.md'
+            )
+
+            foreach ($file in $candidates) {
+                $rel = ($file.FullName.Substring($script:RepoRoot.Length).TrimStart('\', '/')) -replace '\\', '/'
+                if ($lifecycleOnly -contains $rel) { continue }
+
+                $text = (Get-Content -LiteralPath $file.FullName -Raw) -replace "`r`n?", "`n"
+                $text | Should -Match '(?i)before the PR-creation action' `
+                    -Because "$rel states the close-out obligation and must name the pre-PR moment"
+                $text | Should -Match '(?i)before the close' `
+                    -Because "$rel states the close-out obligation and must name the close-time backstop"
             }
         }
 
@@ -714,8 +793,15 @@ Describe 'open-for-work surface (issue #974)' {
             # routes other topics, and a skill named for one of those would
             # otherwise satisfy this without the close-out reader landing
             # anywhere useful.
-            $joined = $rows -join ' '
-            $clause = $joined.Substring($joined.IndexOf('close-out', [System.StringComparison]::OrdinalIgnoreCase))
+            # Bounded PER ROW, not over the joined text. Joining first and
+            # slicing from the first 'close-out' to end-of-string means a
+            # second index row mentioning close-out silently widens the
+            # clause across every row after it, re-admitting exactly the
+            # destinations this narrowing exists to exclude.
+            $clause = (@($rows | ForEach-Object {
+                        $i = $_.IndexOf('close-out', [System.StringComparison]::OrdinalIgnoreCase)
+                        if ($i -ge 0) { $_.Substring($i) }
+                    })) -join ' '
 
             $targets = @{
                 'post-pr-review' = 'skills/post-pr-review/SKILL.md'
@@ -734,6 +820,18 @@ Describe 'open-for-work surface (issue #974)' {
 
             $landed.Count | Should -BeGreaterOrEqual 1 `
                 -Because "a reader following this pointer must land on a surface stating both moments; it routes to: $($named -join ', ')"
+
+            # The clause must ALSO name the obligation's own home. Without
+            # this the assertion is ENTAILED by AC5's post-pr-review checks
+            # and pins nothing about the index: reverting this row wholesale
+            # to its pre-change text left the whole Context green, because
+            # the pre-change clause named post-pr-review and post-pr-review
+            # now states both moments. That is the same defect the previous
+            # version of this test claimed to have fixed, one level down.
+            # Discriminating because the pre-change clause -- the text from
+            # 'close-out' onward -- named only post-pr-review.
+            $clause | Should -Match '(?i)plan-authoring' `
+                -Because 'the pre-change clause routed only to the post-merge checklist; naming the home is what makes this assertion fail at baseline'
         }
     }
 }
