@@ -4,6 +4,15 @@ All notable changes to agent-orchestra will be documented in this file.
 
 ## [Unreleased]
 
+## [3.16.1] — 2026-08-09
+
+### Fixed
+
+- Foreign selection in `Find-OrUpsertComment`: the upserter chose its PATCH target with an unanchored substring match and then replaced the whole comment body, so a marker quoted anywhere in prose could make an unrelated comment be selected as another family's write target and destroyed. A live instance existed — issue #782's approved plan comment quotes a `pc-emission-check-report` marker in prose and was the only match on that issue. Selection is now line-1-exact via a shared predicate (`.github/scripts/lib/marker-line1-selector.ps1`), and the two selectors that must reach the same comment — in `cost-baseline-harvest.ps1` and `cost-session-render.ps1` — import that same predicate rather than restating the rule (#1031).
+- Corrected every surface that still described the closed hazard as live — four design documents, three in-code docstrings (`goal-contract-validate-core.ps1`, `marker-transport-core.ps1`, `cost-fcl-helpers.ps1`) and one test comment — including the marker-writing guidance in `skills/session-memory-contract/references/handoff-markers.md`, which now also names the destructive transport the fix does **not** reach: whole-line comment selectors guarded by containment can still be steered by a marker quoted alone on its own line (#1031).
+- Recorded, in `marker-line1-selector.ps1`, that the writer's accept set is now a strict **subset** of the whole-line readers' rather than converged with them, and why that direction is the safe one — an over-selecting reader refuses loudly, an over-selecting writer destroys (#1031).
+- Extracted the prior-degraded-comment selection in `cost-session-render.ps1` into a named `Get-CSRPriorDegradedComment`. As an inline `Where-Object` behind a worker-runspace boundary it could not be reached by any hermetic test, so reverting it left the whole repository green while both sibling selectors reddened (#1031).
+
 ## [3.16.0] — 2026-08-09
 
 ### Changed

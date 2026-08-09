@@ -559,10 +559,18 @@ function Get-GCPinnedCommentBody {
         return $null
     }
 
-    # Marker-pinned selection -- literal substring containment, mirroring
-    # Find-OrUpsertComment's own matched-comment filter
-    # (find-or-upsert-comment.ps1:171-173) -- but this function never routes
-    # through that write/upsert path; it only reads.
+    # Marker-pinned selection -- literal substring containment.
+    #
+    # This NO LONGER mirrors Find-OrUpsertComment (#1031): that function now
+    # selects line-1-exact via Test-CommentBodyMarkerLine1
+    # (lib/marker-line1-selector.ps1), so this filter is strictly wider than
+    # the writer's. The divergence is deliberate and bounded, on three
+    # grounds: this function never routes through that write/upsert path, it
+    # only reads; it REFUSES on more than one match below rather than
+    # guessing, so a quotation can cost it an answer but never a wrong one;
+    # and its default marker family (plan-issue-{Issue}) is not a family
+    # Find-OrUpsertComment writes at all. Recorded here, where a reader of
+    # this selector meets it, rather than only in the design inventory.
     $matched = @(@($parsed) | Where-Object { $_.body -and ($_.body -like "*$Marker*") })
 
     if ($matched.Count -eq 0) {

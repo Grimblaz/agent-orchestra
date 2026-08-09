@@ -735,10 +735,15 @@ evidence:
             $zwsp = [char]0x200B
             # `\s` does not match `\p{Cf}` (Unicode "format" category, e.g.
             # zero-width space) -- the old `^\s*` anchor would have let this
-            # decoy slip past the cross-family scan even though a
-            # substring-based downstream reader (find-or-upsert-comment.ps1's
-            # `-like` matcher) still finds it, recreating the exact
-            # self-DoS class this hygiene rule exists to close.
+            # decoy slip past the cross-family scan even though downstream
+            # readers still find it, recreating the exact self-DoS class this
+            # hygiene rule exists to close. NOTE (#1031): this comment used to
+            # name find-or-upsert-comment.ps1's `-like` matcher as that
+            # downstream reader. It no longer is one — that selector is now
+            # line-1-exact and the decoy here sits on line 4, so it would not
+            # be selected. The hygiene rule this test pins is unchanged and
+            # still right; the still-substring readers it protects are the
+            # `.Contains`-over-body scans elsewhere in the catalog.
             $body = "$marker`n`nSome content.`n$zwsp$otherMarker`n`nA decoy live marker prefixed by an invisible zero-width space."
 
             $result = Invoke-PersistMarkerWrite -Family $script:PostNewFamily.Family -Owner $script:Owner -Repo $script:Repo -Number $script:IssueNumber -TargetSurface 'issue' -Marker $marker -Body $body

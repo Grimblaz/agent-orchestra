@@ -90,7 +90,7 @@ All captured evidence from this exercise must be persisted under a single durabl
 - **Sentinel**: `<!-- ce-gate-evidence-578 -->`
 - **Upsert Mechanism**: The comment must be upserted on re-runs using the existing repository helper:
   `Find-OrUpsertComment` (`.github/scripts/lib/find-or-upsert-comment.ps1`)
-- **Marker-Collision Guard**: The sentinel MUST be `ce-gate-evidence-578` (and NOT `ce-evidence-578`). Because `Find-OrUpsertComment` matches sentinels via a substring check, using `ce-evidence-578` would match and clobber the design-phase handoff comments (like `design-phase-complete-{ID}` and `engagement-record-design-{ID}`).
+- **Marker-Collision Guard**: The sentinel MUST be `ce-gate-evidence-578` (and NOT `ce-evidence-578`). *(Stated reason superseded by issue #1031: `Find-OrUpsertComment` no longer matches sentinels by substring — it requires the marker to be the comment's own first line — so a shorter sentinel can no longer clobber a `design-phase-complete-{ID}` or `engagement-record-design-{ID}` comment by prefix containment. The naming rule is kept because distinct, non-prefix sentinel names remain good practice for every other raw-text scanner in the catalog, but this specific clobber is closed.)*
 - **Uniqueness Check**: Before running the first upsert, run a grep or issue comment check to ensure `ce-gate-evidence-578` is not present in any pre-existing comment thread.
 
 ---
