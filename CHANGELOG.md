@@ -10,6 +10,21 @@ All notable changes to agent-orchestra will be documented in this file.
 
 Memory-store sweep machinery (#1018): the ledger, slate-state and cold-archive record shapes, and the executable sweep procedure with its five-plus-three disposition vocabulary, critical-first ordering, deferral expiry and three procedural checks. Four read-only instruments ship beside the policy check - inventory, disposition gates, partition and destination measurement - so every rule the procedure states is applied by a named command rather than re-derived by hand. The checker itself is unchanged at four axes and three parameters.
 
+## [3.14.3] — 2026-08-08
+
+### Fixed
+
+- **The procedure returned its first `located` verdict.** Filing #1030 reconciles against ruling record `followup-cf84c15934336579` on PR #1027 — the first time in this contract's history that step 6's match path has executed at all, and the first end-to-end proof that a `gate-approved` stamp is checkable against a real ruling record rather than a staged equivalent. The census in section 2e is updated to 2026-08-09 (52 provenance-stamped filings; 15 out of domain; 31 unsupported; 1 located) and now distinguishes the pre-2026-08-09 "never located, ever" state from the post-first-execution state, so the passage cannot read as a clean bill of health.
+- **The narrowed trust bound is now stated on all three surfaces that carry it** — section 2e, `Add-FollowUpIssue.ps1`'s ValidateSet comment, and `Documents/Design/safe-operations.md` — after external review caught that this change had narrowed only the first. Both prose surfaces carry an explicit must-be-amended-together note.
+
+## [3.14.2] — 2026-08-08
+
+### Fixed
+
+- **safe-operations section 2e — the reconciliation procedure, executed for the first time.** Running it over all 49 provenance-stamped filings reproduced the section's own stated counts exactly (34 ruling-asserting; 29 unsupported; the 5 not-reconcilable being precisely #858, #862, #864, #865, #992). Two corrections followed from the run:
+  - Step 5's false-`unsupported` defense enumerated five failure paths *through the helper* and mandated a `gh` exit-code probe. It missed a sixth that sits outside the helper: **caller error**. The probe is a separate `gh` call, so it exits 0 and reports the surface readable while every filing still reads `unsupported`. Step 5 now names the two mistakes and — the point the adversarial panel forced — states that they fail in **opposite** ways, so one remedy cannot cover both. `-IssueNumber` instead of `-Number` throws a `ParameterBindingException` before the helper runs: loud when the call stands bare, silently swallowed the moment it sits in a `try`/`catch` (and neither `-ErrorAction SilentlyContinue` nor `2>$null` silences it, since binding fails before the cmdlet's error stream exists). Treating the returned objects as bare strings never throws at all and returns nothing empty to notice — each object stringifies to `@{Body=…}` and still matches a naive text probe while parsing to zero records. Measured on PR #1014: 11 comments and 3 text hits either way, but 3 parsed `followup-` entries read correctly against 0 read mis-shaped. The mandated **positive control** is therefore pinned to the grain that catches both — parsed `followup-`-prefixed entries, not comments and not text hits — names the one surface that qualifies today (PR #1014's ruling record, comment `5200490355`), requires `-Repo` so a fork checkout cannot resolve onto another corpus, and routes a failed control to **`could-not-verify` for every filing in the run** rather than leaving it to fall through to `unsupported`.
+  - The trust bound named a detected class wider than what is detected. It now states the exact class: a session that omits the record write **while stamping a ruling-asserting value**. Domain membership is decided by a self-attested stamp, so a session that omits the record write and stamps `direct-request` is out of domain, not caught by a weaker verdict — meaning #1011, the exhibit this contract was written around, reads clean under one changed enum value. Recorded as a known, unclosed boundary with the live corpus figures, so an empty domain is not mistaken for a checked corpus.
+
 ## [3.14.1] — 2026-08-08
 
 ### Changed
