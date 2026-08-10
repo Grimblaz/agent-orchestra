@@ -321,6 +321,10 @@ You MUST maintain focused research scope:
 
 ## Skills Reference
 
+**Before asserting that anything is absent, or citing behaviour of code you did not write:**
+
+- **Mandated load, unconditional** — load `skills/safe-operations/SKILL.md` and read its § Tooling Lenses before writing any absence claim or any citation of another component's behaviour, not only when the research touches git or `gh`. This agent's whole output is search results turned into asserted findings, and both lenses there are about a search or a cited claim that reads true and is not; a dispatched subagent has no session-start memory surface, so that section is the only path by which they reach this pass.
+
 **When researching domain-specific business rules:**
 
 - Load relevant skills from `skills/` for project-specific domain context (if available)

@@ -76,7 +76,7 @@ Implements code to satisfy the approved tests and plan, writing minimal code (YA
 
 For Build-Test orchestration (Requirement Contract, defect triage, convergence gate, loop budget), follow `skills/parallel-execution/SKILL.md`.
 
-Use the `implementation-discipline` skill (`skills/implementation-discipline/SKILL.md`) for the reusable pre-implementation review, minimal-coding rules, delegation-over-duplication guidance, and markdown hygiene.
+**Mandated load, unconditional** — load `skills/implementation-discipline/SKILL.md` for the reusable pre-implementation review, minimal-coding rules, delegation-over-duplication guidance, markdown hygiene, and its § Implementation Lenses, not only when a slice looks large enough to need them. This agent is the one that performs propagation edits and term migrations across many files, which is exactly what those lenses are about; a dispatched subagent has no session-start memory surface, so that section is the only path by which they reach this pass.
 
 For terminal and validation execution guardrails, load `skills/terminal-hygiene/SKILL.md`.
 

@@ -45,8 +45,17 @@ BeforeAll {
     # Roster size: parent #1045 Amendment A1 (45 -> 46 after two same-day admissions).
     $script:ExpectedRosterCount = 46
     # Per-chunk promoted share: parent #1045 § Walking-skeleton lens list, as partitioned by A1.
-    # Chunk 1 takes 19; chunks 2 and 3 add their own rows here when they land.
-    $script:ExpectedPromotedByChunk = @{ '1' = 19 }
+    # Chunk 1 takes 19. Chunk 2 was ASSIGNED 27 and promoted 25. The other two returned a `conflict`
+    # verdict against shipped doctrine, and parent #1045 amendment A4.5 routes a second contradiction
+    # of any kind up rather than resolving it in-chunk - requested as A5 and unruled at chunk 2
+    # delivery. Their lens sections were removed from the tree rather than shipped beside the
+    # sentences they contradict, and the two entries passed to CHUNK 3 (#1051) under the parent's
+    # section chunk-sequence, which assigns chunk 3 "any roster entries not yet terminal". So 25 is
+    # the whole of chunk 2's promoted share, not a reduced one: no chunk-2 row is non-terminal.
+    # Chunk 3 adds its own promoted count here when it lands. An ABSENT key is the quiet escape -
+    # the audit iterates only the keys handed to it, so a chunk promoting under a key nobody
+    # declared would be counted by nothing.
+    $script:ExpectedPromotedByChunk = @{ '1' = 19; '2' = 25 }
     # The skills this promotion effort receives into. A references/ file appearing in any of these
     # needs a manifest row; directories outside the set belong to other skills and predate this
     # manifest, which is not the registry for them.
@@ -56,6 +65,10 @@ BeforeAll {
         'skills/adversarial-review'
         'skills/terminal-hygiene'
         'skills/safe-operations'
+        'skills/implementation-discipline'
+        'skills/test-driven-development'
+        'skills/design-exploration'
+        'skills/agent-memory-compaction'
     )
 
     $script:Live = Get-LessonPromotionAudit -RepoRoot $script:RepoRoot -ManifestPath $script:ManifestPath `
@@ -312,19 +325,19 @@ Describe 'Lesson promotion: one induced failure per class the guard claims to ca
 
     # --- Thresholds the manifest supplies ------------------------------------------------------
 
-    It 'INDUCED (disabled-floor class): a zeroed lens-body floor FAILS instead of switching the check off' {
+    It 'INDUCED (retuned-floor class): a zeroed lens-body floor FAILS instead of switching the check off' {
         # The cheapest way to silence a red is to disable the check that produced it. A floor of
         # zero is drift, not a relaxation.
         $r = script:Invoke-ScratchAudit { param($c) $c.Manifest.lens_body_floor.min_chars = 0 }
         $r.HasDrift | Should -BeTrue
-        ($r.DriftDetails -join ' ') | Should -Match 'lens_body_floor.min_chars is not a positive integer'
+        ($r.DriftDetails -join ' ') | Should -Match 'lens_body_floor.min_chars as 0; this reader owns that threshold'
     }
 
-    It 'INDUCED (disabled-floor class, siblings): a zeroed specificity floor FAILS on either component' {
+    It 'INDUCED (retuned-floor class, siblings): a zeroed specificity floor FAILS on either component' {
         $r1 = script:Invoke-ScratchAudit { param($c) $c.Manifest.specificity_floor.min_length = 0 }
-        ($r1.DriftDetails -join ' ') | Should -Match 'specificity_floor.min_length is not a positive integer'
+        ($r1.DriftDetails -join ' ') | Should -Match 'specificity_floor.min_length as 0; this reader owns that threshold'
         $r2 = script:Invoke-ScratchAudit { param($c) $c.Manifest.specificity_floor.min_content_words = 0 }
-        ($r2.DriftDetails -join ' ') | Should -Match 'specificity_floor.min_content_words is not a positive integer'
+        ($r2.DriftDetails -join ' ') | Should -Match 'specificity_floor.min_content_words as 0; this reader owns that threshold'
     }
 
     It 'INDUCED (emptied-collection class): an emptied loader list or pin list FAILS' {
@@ -610,6 +623,7 @@ description: "Another skill. Use when reconciling a promoted roster against its 
             Set-Content -LiteralPath $c.SkillPath -Encoding utf8 -Value ($body -replace 'The core sentence a reader has to reach in this section\.', 'The core sentence a reader has to reach in this section. See skills/project-references/SKILL.md for sidecars.')
         }
         ($r.DriftDetails -join ' ') | Should -Not -Match 'project-references'
+        ($r.DriftDetails -join ' | ') | Should -BeExactly '' -Because 'a fixture this test calls lawful must be drift-FREE, not merely free of one substring'
     }
 
     # --- Verdicts ------------------------------------------------------------------------------
@@ -621,10 +635,252 @@ description: "Another skill. Use when reconciling a promoted roster against its 
         ($r2.DriftDetails -join ' ') | Should -Match 'records no checked_against verdict'
     }
 
-    It 'INDUCED (shipped-conflict class): a lesson recorded as conflicting with doctrine FAILS' {
+    It 'INDUCED (unresolved-conflict class): a conflict verdict carrying NO resolution FAILS' {
+        # Re-pointed, not deleted (parent #1045 amendment A4.5). Before that amendment EVERY
+        # conflict was drift, which made the state the contradiction procedure describes -
+        # a shipped sentence the promoted lesson itself falsified, corrected in the same change -
+        # unwritable in any value the vocabulary admits. The cheap resolution was to widen the enum
+        # and delete this fixture; the guard survives instead, narrowed to the unresolved case.
         $r = script:Invoke-ScratchAudit { param($c) $c.Manifest.entries[0].checked_against.verdict = 'conflict' }
         $r.HasDrift | Should -BeTrue
-        ($r.DriftDetails -join ' ') | Should -Match 'does not ship - it routes up'
+        ($r.DriftDetails -join ' ') | Should -Match 'with no resolution'
+    }
+
+    It 'INDUCED (stub-resolution class): a conflict whose resolution is too short to name what moved FAILS' {
+        $r = script:Invoke-ScratchAudit { param($c)
+            $c.Manifest.entries[0].checked_against.verdict = 'conflict'
+            $c.Manifest.entries[0].checked_against['resolution'] = 'fixed it'
+        }
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'is a label, not a resolution'
+    }
+
+    It 'A conflict verdict carrying its resolution is LAWFUL - the amendment is a narrowing, not a removal' {
+        # The other polarity. Without this the two tests above are satisfied by a check that reds on
+        # every conflict, which is the pre-amendment behaviour wearing new message text.
+        $r = script:Invoke-ScratchAudit { param($c)
+            $c.Manifest.entries[0].checked_against.verdict = 'conflict'
+            $c.Manifest.entries[0].checked_against['resolution'] = 'The stale allowlist sentence at skills/terminal-hygiene/SKILL.md:36 was corrected in this change.'
+        }
+        ($r.DriftDetails -join ' ') | Should -Not -Match 'conflict'
+        ($r.DriftDetails -join ' | ') | Should -BeExactly '' -Because 'a fixture this test calls lawful must be drift-FREE, not merely free of one substring'
+    }
+
+    It 'INDUCED (resolution-without-conflict class): a resolution beside a clean verdict FAILS' {
+        $r = script:Invoke-ScratchAudit { param($c)
+            $c.Manifest.entries[0].checked_against['resolution'] = 'A resolution long enough to clear the floor but attached to no contradiction at all.'
+        }
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'means nothing beside any other verdict'
+    }
+
+    # --- fires_in vocabulary (parent #1045 amendment A4.6) ---------------------------------------
+
+    It 'INDUCED (undeclared-phase class): a fires_in value outside the declaration FAILS' {
+        # The real defect A4.6 records is not which words won: it is that a field the design calls a
+        # declared enum had NO assertion behind it, so the shipped vocabulary and the declared one
+        # diverged for a whole chunk and its review without anything noticing. This is that
+        # assertion. A green run over conforming rows is not evidence it exists; only this red is.
+        $r = script:Invoke-ScratchAudit { param($c) $c.Manifest.entries[0].fires_in = 'planning' }
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match "declares fires_in 'planning', which is not one of"
+    }
+
+    It 'INDUCED (undeclared-phase class): a promoted entry with fires_in removed FAILS' {
+        $r = script:Invoke-ScratchAudit { param($c) $c.Manifest.entries[0].Remove('fires_in') }
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match "declares fires_in ''"
+    }
+
+    # --- Derived consumer type (parent #1045 amendment A4.3) -------------------------------------
+    #
+    # The limb is DERIVED FROM THE TREE, never declared in the manifest. These three run as one
+    # argument and are worth reading together, because either half alone is misleading: the first
+    # shows the relaxation is real, the second and third show it is not a hole.
+
+    It 'A lens home no agent body mandates is LAWFUL with no loader entry - the main-session-only reading' {
+        $t = script:New-ScratchTree { param($c)
+            $c.Manifest.loading_surfaces = [ordered]@{}
+            # Strip the mandate from the body, so the tree says nothing loads this skill into a
+            # subagent. Under the pre-amendment check this state was red and the only escapes were
+            # re-homing away from the phase the skill names, or adding a mandated load to a body
+            # that does not do the work.
+            Set-Content -LiteralPath $c.AgentPath -Encoding utf8 -Value "# Demo Agent`n`n## Skills Reference`n`n- Nothing is mandated here.`n"
+        }
+        $r = Get-LessonPromotionAudit -RepoRoot $t.Dir -ManifestPath $t.ManifestPath `
+            -ExpectedRosterCount 2 -ExpectedPromotedByChunk @{ '1' = 1 } -ReceivingSkillDirs @('skills/demo-skill')
+        ($r.DriftDetails -join ' ') | Should -Not -Match 'unconditional loader'
+        ($r.DriftDetails -join ' ') | Should -Not -Match 'not main-session-only'
+        @($r.DriftDetails).Count | Should -Be 1 -Because 'this fixture strips the mandate marker from the tree, so exactly ONE unrelated finding is expected - pinning the count stops a second, real regression hiding behind it'
+        ($r.DriftDetails -join ' | ') | Should -Match 'which appears in no agent body'
+    }
+
+    It 'INDUCED (undeclared-chunk class): a promoted share under a chunk key the caller never declared FAILS' {
+        # The quietest escape this chunk could have created. The per-chunk loop iterates the
+        # CALLER's keys, so a chunk promoting lessons under a key nobody declared is counted by
+        # nothing at all - the roster still totals and every surviving row still checks out. An
+        # absent key is not a mismatched one, so this needs its own clause and its own mutation:
+        # setting the key to a wrong NUMBER exercises a different branch entirely.
+        $t = script:New-ScratchTree { }
+        $r = Get-LessonPromotionAudit -RepoRoot $t.Dir -ManifestPath $t.ManifestPath `
+            -ExpectedRosterCount 2 -ExpectedPromotedByChunk @{ '9' = 0 } -ReceivingSkillDirs @('skills/demo-skill')
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'which the caller.s expected-share map does not declare'
+    }
+
+    It 'INDUCED (retuned-marker class): a mandate_marker that appears in no agent body FAILS' {
+        # The one HIGH finding of PR #1061's review, and the sharpest shape in this file: the A4.3
+        # derivation reads the tree, but its only INPUT is a manifest field. Point mandate_marker at
+        # a string that appears nowhere and the derived set empties, every lens home reads
+        # main-session-only, and an emptied loading_surfaces then audits clean. Reproduced on the
+        # real manifest before the fix: two tokens took 43 drift findings to zero. Non-blankness was
+        # never the property that mattered. Nor was reaching the tree: defense showed any real
+        # agent-body string is findable and still derives nothing, so the marker is core-owned and
+        # a manifest that disagrees is drift whatever its value. The sibling test below uses a
+        # string that DOES exist in the tree, which is what discriminates this fix from that one.
+        $r = script:Invoke-ScratchAudit { param($c)
+            $c.Manifest.mandate_marker = 'Mandated load, unconditionally'
+            $c.Manifest.loading_surfaces = [ordered]@{}
+        }
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'this reader owns that vocabulary'
+    }
+
+    It 'INDUCED (retuned-marker class): a manifest marker that is REAL but derives nothing FAILS' {
+        # The first fix for this escape required the marker to be FINDABLE in an agent body, and
+        # defense falsified it in one pass: any real string occurring anywhere in any agent body
+        # is findable and derives ZERO mandated loads, so the two-token escape reopened unchanged.
+        # The marker is now core-owned; a manifest that disagrees is drift regardless of whether
+        # its value exists in the tree. This fixture uses a string that DOES exist in a real agent
+        # body, which is what makes it discriminating against the previous fix.
+        $r = script:Invoke-ScratchAudit { param($c)
+            $c.Manifest.mandate_marker = 'Core Principles'
+            $c.Manifest.loading_surfaces = [ordered]@{}
+        }
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'this reader owns that vocabulary'
+    }
+
+    It 'INDUCED (absent-population class): no agents directory FAILS rather than deriving an empty set' {
+        $t = script:New-ScratchTree { $c = $args[0]; $c.Manifest.loading_surfaces = [ordered]@{} }
+        Remove-Item -LiteralPath (Join-Path $t.Dir 'agents') -Recurse -Force
+        $r = Get-LessonPromotionAudit -RepoRoot $t.Dir -ManifestPath $t.ManifestPath `
+            -ExpectedRosterCount 2 -ExpectedPromotedByChunk @{ '1' = 1 } -ReceivingSkillDirs @('skills/demo-skill')
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'has no population and would read every lens home as main-session-only'
+    }
+
+    It 'A mandate quoted inside a FENCED block is not read as a live subagent consumer' {
+        # Every other reader in this file is fence-aware. When this one was not, a fenced example
+        # made the home a subagent consumer to the derivation while layer 4 (which matches unfenced
+        # text) refused the loader entry - so the home had NO writable green state, which is the
+        # unsatisfiable shape amendment A4.5 exists to remove, reproduced one function over.
+        $t = script:New-ScratchTree { param($c)
+            $c.Manifest.loading_surfaces = [ordered]@{}
+            Set-Content -LiteralPath $c.AgentPath -Encoding utf8 -Value "# Demo Agent`n`n## Skills Reference`n`n- **Mandated load, unconditional** - load ``skills/other-skill/SKILL.md`` here.`n`nHistorical example, no longer in force:`n`n``````markdown`n- **Mandated load, unconditional** - load ``skills/demo-skill/SKILL.md`` before writing any claim`n```````n"
+        }
+        $r = Get-LessonPromotionAudit -RepoRoot $t.Dir -ManifestPath $t.ManifestPath `
+            -ExpectedRosterCount 2 -ExpectedPromotedByChunk @{ '1' = 1 } -ReceivingSkillDirs @('skills/demo-skill')
+        ($r.DriftDetails -join ' ') | Should -Not -Match 'not main-session-only'
+        ($r.DriftDetails -join ' | ') | Should -BeExactly '' -Because 'a fixture this test calls lawful must be drift-FREE, not merely free of one substring'
+    }
+
+    It 'A mandate whose marker and skill path wrap onto separate lines IS derived' {
+        # A single-line search reads a markdown list-continuation as no mandate at all, which makes
+        # A4.3's stated safety property ("adding a mandated load turns this red") false for any
+        # mandate long enough to wrap - and several live mandate lines exceed 200 characters.
+        $t = script:New-ScratchTree { param($c)
+            $c.Manifest.loading_surfaces = [ordered]@{}
+            Set-Content -LiteralPath $c.AgentPath -Encoding utf8 -Value "# Demo Agent`n`n## Skills Reference`n`n- **Mandated load, unconditional** -`n  load ``skills/demo-skill/SKILL.md`` before writing any claim`n"
+        }
+        $r = Get-LessonPromotionAudit -RepoRoot $t.Dir -ManifestPath $t.ManifestPath `
+            -ExpectedRosterCount 2 -ExpectedPromotedByChunk @{ '1' = 1 } -ReceivingSkillDirs @('skills/demo-skill')
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'not main-session-only'
+    }
+
+    It 'An object with ZERO properties produces findings, not a StrictMode crash' {
+        # Regression guard. `$o.PSObject.Properties.Name` throws under StrictMode 3.0 when the
+        # property collection is empty, and an empty `loading_surfaces` became a lawful shape the
+        # moment A4.3 allowed every home to be main-session-only - so the missing-property guard was
+        # itself throwing on the emptiest object it could be handed. Found by running the amendment's
+        # own new tests, not by reading the diff.
+        $probe = '{}' | ConvertFrom-Json
+        { Get-LPField $probe 'anything' } | Should -Not -Throw
+        Get-LPField $probe 'anything' 'fallback' | Should -BeExactly 'fallback'
+    }
+
+    It 'INDUCED (asserted-consumer-type class): a mandated load in the tree with NO loader entry FAILS' {
+        # The same manifest as the test above - only the tree differs. That is the whole point of
+        # deriving: the manifest cannot buy itself the main-session-only reading, because the
+        # predicate is not one of its fields.
+        $t = script:New-ScratchTree { param($c) $c.Manifest.loading_surfaces = [ordered]@{} }
+        $r = Get-LessonPromotionAudit -RepoRoot $t.Dir -ManifestPath $t.ManifestPath `
+            -ExpectedRosterCount 2 -ExpectedPromotedByChunk @{ '1' = 1 } -ReceivingSkillDirs @('skills/demo-skill')
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'a home with a subagent consumer is not main-session-only'
+        ($r.DriftDetails -join ' ') | Should -Match 'agents/Demo\.agent\.md'
+    }
+
+    It 'A load line carrying a permission phrase does NOT make a home a subagent consumer' {
+        # The derived set reads the mandate-marker-bearing loads and applies the same negator test
+        # the layer-4 assertions do, so the two cannot disagree about what counts as unconditional.
+        $t = script:New-ScratchTree { param($c)
+            $c.Manifest.loading_surfaces = [ordered]@{}
+            Set-Content -LiteralPath $c.AgentPath -Encoding utf8 -Value "# Demo Agent`n`n## Skills Reference`n`n- **Mandated load, unconditional** - you may load ``skills/demo-skill/SKILL.md`` if relevant`n"
+        }
+        $r = Get-LessonPromotionAudit -RepoRoot $t.Dir -ManifestPath $t.ManifestPath `
+            -ExpectedRosterCount 2 -ExpectedPromotedByChunk @{ '1' = 1 } -ReceivingSkillDirs @('skills/demo-skill')
+        ($r.DriftDetails -join ' ') | Should -Not -Match 'not main-session-only'
+        ($r.DriftDetails -join ' | ') | Should -BeExactly '' -Because 'a fixture this test calls lawful must be drift-FREE, not merely free of one substring'
+    }
+
+    It 'An illustrative skill path with no mandate marker does NOT make a home a subagent consumer' {
+        $t = script:New-ScratchTree { param($c)
+            $c.Manifest.loading_surfaces = [ordered]@{}
+            Set-Content -LiteralPath $c.AgentPath -Encoding utf8 -Value "# Demo Agent`n`n## Skills Reference`n`n- For example, an adapter may live at ``skills/demo-skill/SKILL.md``.`n"
+        }
+        $r = Get-LessonPromotionAudit -RepoRoot $t.Dir -ManifestPath $t.ManifestPath `
+            -ExpectedRosterCount 2 -ExpectedPromotedByChunk @{ '1' = 1 } -ReceivingSkillDirs @('skills/demo-skill')
+        ($r.DriftDetails -join ' ') | Should -Not -Match 'not main-session-only'
+        @($r.DriftDetails).Count | Should -Be 1 -Because 'this fixture strips the mandate marker from the tree, so exactly ONE unrelated finding is expected - pinning the count stops a second, real regression hiding behind it'
+        ($r.DriftDetails -join ' | ') | Should -Match 'which appears in no agent body'
+    }
+
+    # --- Composite-convention deferral arm (parent #1045 amendments A3 and A4.4) ------------------
+
+    It 'INDUCED (unlisted-composite class): a references file missing from a skill that CARRIES the convention FAILS' {
+        $t = script:New-ScratchTree { param($c)
+            $body = Get-Content -LiteralPath $c.SkillPath -Raw -Encoding utf8
+            # Adopt the convention, but list nothing.
+            $body = $body -replace '## Traps', "## Composite References`n`n- nothing is listed here`n`n## Traps"
+            Set-Content -LiteralPath $c.SkillPath -Encoding utf8 -Value $body
+        }
+        $r = Get-LessonPromotionAudit -RepoRoot $t.Dir -ManifestPath $t.ManifestPath `
+            -ExpectedRosterCount 2 -ExpectedPromotedByChunk @{ '1' = 1 } -ReceivingSkillDirs @('skills/demo-skill')
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match "is not named in 'skills/demo-skill/SKILL.md' section 'Composite References'"
+    }
+
+    It 'A skill carrying the convention and listing every file is LAWFUL' {
+        $t = script:New-ScratchTree { param($c)
+            $body = Get-Content -LiteralPath $c.SkillPath -Raw -Encoding utf8
+            $body = $body -replace '## Traps', "## Composite References`n`n- [references/demo-exhibit.md](references/demo-exhibit.md): the demo traps`n`n## Traps"
+            Set-Content -LiteralPath $c.SkillPath -Encoding utf8 -Value $body
+        }
+        $r = Get-LessonPromotionAudit -RepoRoot $t.Dir -ManifestPath $t.ManifestPath `
+            -ExpectedRosterCount 2 -ExpectedPromotedByChunk @{ '1' = 1 } -ReceivingSkillDirs @('skills/demo-skill')
+        ($r.DriftDetails -join ' ') | Should -Not -Match 'Composite References'
+        ($r.DriftDetails -join ' | ') | Should -BeExactly '' -Because 'a fixture this test calls lawful must be drift-FREE, not merely free of one substring'
+    }
+
+    It 'A skill NOT carrying the convention is judged by the manifest registry alone' {
+        # A3's other arm, and the reason the check does not simply demand the convention everywhere:
+        # reading a convention no receiving skill carries would be a check with no population. The
+        # base fixture has no Composite References section at all.
+        $r = script:Invoke-ScratchAudit { }
+        ($r.DriftDetails -join ' ') | Should -Not -Match 'Composite References'
+        ($r.DriftDetails -join ' | ') | Should -BeExactly '' -Because 'a fixture this test calls lawful must be drift-FREE, not merely free of one substring'
     }
 
     It 'INDUCED (unreproducible-provenance class): a machine-local path recorded as a searched surface FAILS' {

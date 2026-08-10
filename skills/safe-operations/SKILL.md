@@ -1,6 +1,6 @@
 ---
 name: safe-operations
-description: "Safe file-operation, issue-creation, and git/gh state-claim protocol for Agent Orchestra. Use when choosing workspace tools, avoiding unsafe file writes, creating GitHub issues under the workflow rules, reporting CI state, claiming a test failure is pre-existing, writing to a GitHub comment or PR body, acting on a cleanup detector's output, or bumping the plugin version. DO NOT USE FOR: application-level debugging or replacing agent judgment on whether work is in scope."
+description: "Safe file-operation, issue-creation, and git/gh state-claim protocol for Agent Orchestra. Use when choosing workspace tools, avoiding unsafe file writes, creating GitHub issues under the workflow rules, reporting CI state, claiming a test failure is pre-existing, writing to a GitHub comment or PR body, acting on a cleanup detector's output, bumping the plugin version, concluding something is absent from a truncated search result, or re-checking cited claims after merging main into a branch. DO NOT USE FOR: application-level debugging or replacing agent judgment on whether work is in scope."
 ---
 
 # Safe Operations Instructions
@@ -10,6 +10,11 @@ description: "Safe file-operation, issue-creation, and git/gh state-claim protoc
 Establish safe, consistent rules for file operations, issue creation, and the git/`gh`/worktree operations agents use to inspect and change repository state. These rules prevent silent file corruption, ensure GitHub issues are always properly labeled, and keep state claims and destructive cleanup honest.
 
 ---
+
+## Composite References
+
+- [references/git-and-gh-traps.md](references/git-and-gh-traps.md): the traps behind § Section 3, in three parts — establishing what is true about a branch, writing to GitHub, and worktrees, paths and repo scripts
+- [references/search-and-merge-traps.md](references/search-and-merge-traps.md): the incident detail behind § Tooling Lenses — the truncated search that read as absence, and the merge that falsified a branch's cited reason
 
 ## Section 1: File Operation Rules (CRITICAL)
 
@@ -361,6 +366,22 @@ The known-versus-unknown split is not decoration: it is the direct input to the 
 [`references/git-and-gh-traps.md`](references/git-and-gh-traps.md) collects the traps in the tools this repository uses to inspect state and to write to GitHub. Like the PowerShell traps, they produce a confident, wrong answer rather than an error: a green check table for a commit you have moved past, a "pre-existing failure" verdict structurally unable to detect the defect it was asked about, a successful `PATCH` that destroys content nobody notices is gone.
 
 Read it before reporting CI state, before claiming a failure is pre-existing, before writing to a GitHub comment body, and before trusting a cleanup detector's silence. The write-path entries are directly in this skill's scope: a `PATCH` from a local file clobbers server-side appends, `-f body=@-` can post the literal string `@-`, and `--edit-last` targets the last comment posted rather than the one intended.
+
+## Tooling Lenses
+
+> **Authoritative source**: which lessons are promoted here, what anchor each one lives at, and the trigger text that has to reach a reader are recorded in `Documents/Planning/lesson-promotion-manifest.json`. `.github/scripts/Tests/lesson-promotion-manifest.Tests.ps1` is what stops this section and that manifest drifting apart, and it is the suite a red comes from. **Renaming a heading below is a migration, not a regression** — update that lesson's `anchor` in the manifest in the same commit as the rename. A red naming an anchor you just renamed is reporting a manifest row left behind, not a lost lens.
+
+Two ways the tools you establish facts with report an absence that is not there. Both produce a *false negative* — the direction that gets written down as evidence, because nothing in the output says the answer was truncated or has moved.
+
+### When a tool's own output is the evidence for an absence, or a merge has moved what you cite
+
+#### A search result that omits a long matching line reads as absence
+
+The search tool collapses long matching lines to `[Omitted long matching line]` (and `[Omitted long context line]`), and a load-bearing match hides there while the result set reads as "not found". This is worst exactly where it costs most — a check for whether something already exists, where a false absence licenses building it again from scratch. **When a result set contains any omitted line anywhere near the thing you are checking for, read that exact line or range directly before asserting absence.** Do not conclude "not present" from a result set that contains omitted lines, and do not propose build-from-scratch on one. The same discipline covers the neighbouring cases: a bounded read window and a hand-picked term set both produce absences that the output does not label as bounded. Exhibit: [references/search-and-merge-traps.md](references/search-and-merge-traps.md) § An omitted long line that read as absence.
+
+#### A merge of `main` can falsify a factual claim your branch cites, not just collide on a version
+
+A concurrent merge is not only a version-number problem. It can turn a true sentence in your branch into a false one, silently, because nothing re-checks prose against a moved dependency — and the shape that is hardest to notice is when the *conclusion* survives while its *stated reason* dies, since the sentence still reads correct. A scoped grep over **your** changed files structurally cannot find this class: the falsified text is in your diff while the thing that falsified it is not, so the trigger is the merge, not the file list. **After any merge of `main`, before claiming done:** list every behaviour, hazard, or mechanism your diff asserts about code you did not write, and re-read each against the merged tree rather than against memory of it. Prefer citing the surviving half explicitly ("this is about the *write*, not the *selection*") over deleting the citation — a reader who knew the old hazard needs telling that it closed. And check whether the landing pull request's own stale-surface sweep **missed a file you cite**; correcting it inline is usually one line in a file you already have open. Exhibit: [references/search-and-merge-traps.md](references/search-and-merge-traps.md) § A merge that falsified a branch's own justification.
 
 ## Gotchas
 

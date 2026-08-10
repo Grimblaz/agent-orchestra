@@ -76,7 +76,7 @@ A specialized mode for writing high-quality, behavior-focused tests.
 
 Writes behavior-focused tests before implementation (TDD). Tests should specify what the system should do, not how it does it.
 
-Load `skills/test-driven-development/SKILL.md` for the reusable red-green-refactor workflow, behavior-quality rules, integration-test methodology, and quality-gate guidance.
+**Mandated load, unconditional** — load `skills/test-driven-development/SKILL.md` for the reusable red-green-refactor workflow, behavior-quality rules, integration-test methodology, quality-gate guidance, and its § Test-Authoring Lenses, not only when the slice is a test slice. This agent decides where a test file lives, whether a rule is reachable by any test, and what a fabricated fixture emits into the run — the exact work those lenses govern; a dispatched subagent has no session-start memory surface, so that section is the only path by which they reach this pass.
 
 For parallel/serial Build-Test protocol and defect taxonomy, follow `skills/parallel-execution/SKILL.md`.
 
@@ -100,7 +100,7 @@ Generate Gherkin `.feature` files for `[auto]` scenarios only; exclude `[manual]
 - Load `skills/ui-testing/SKILL.md` for Testing Library patterns and query strategies
 - Load `skills/systematic-debugging/SKILL.md` before attempting fixes
 - Reference `.github/architecture-rules.md` when validating coverage and architecture compliance
-- **Mandated load, unconditional** — load `skills/verification-before-completion/SKILL.md` before writing any completion or evidence claim, not only when validating coverage. A dispatched subagent has no session-start memory surface, so that skill's § Verification Lenses is the only path by which those lessons reach this pass at all; a conditional load leaves the decision to a session that does not know what it is missing. Cost of the mandate, stated rather than left for a reader to wonder about: the skill is ~495 lines, so this adds roughly 6–7k tokens to every dispatch of this agent and of Code-Critic and Process-Review. That is the price of the reach, and it is the reason the section is capped and headroom-noted rather than allowed to grow.
+- **Mandated load, unconditional** — load `skills/verification-before-completion/SKILL.md` before writing any completion or evidence claim, not only when validating coverage. A dispatched subagent has no session-start memory surface, so that skill's § Verification Lenses is the only path by which those lessons reach this pass at all; a conditional load leaves the decision to a session that does not know what it is missing. Cost of the mandate, stated rather than left for a reader to wonder about: the skill is 429 lines as of issue #1050, down from 497 even after five lenses were added, because § The Completion Account's procedure moved behind a citation. This adds roughly 5–6k tokens to every dispatch of this agent and of Code-Critic and Process-Review. That is the price of the reach, and the extraction — reference-shaped depth out, lenses in — is how the section grows without the file doing so.
 - Load `skills/frame-credit-emission/SKILL.md` for the terminal-step credit-row emission contract
 - When dispatched with a frame spine and a cross-step reference is needed mid-turn, invoke the lookup primitive per `skills/frame-spine-lookup/` (Copilot: see `platforms/copilot.md`; Claude: see `platforms/claude.md`)
 

@@ -73,7 +73,7 @@ Create a feature branch if one doesn't already exist.
 
 ## Stage 2: Design Exploration
 
-Load `skills/design-exploration/SKILL.md` for the reusable workflow — research sequencing, option comparison, question preparation, end-to-end summarization, testing-scope selection, and the Hub/Consumer Classification Gate (also in `skills/customer-experience/SKILL.md`).
+**Mandated load, unconditional** — load `skills/design-exploration/SKILL.md` for the reusable workflow — research sequencing, option comparison, question preparation, end-to-end summarization, testing-scope selection, the Hub/Consumer Classification Gate (also in `skills/customer-experience/SKILL.md`), and its § Design Lenses, not only when the design looks novel. This agent runs the grounding pass and chooses between mechanism and doctrine, which is the work those lenses govern; a dispatched subagent has no session-start memory surface, so that section is the only path by which they reach this pass.
 
 **grounding gate** (before Stage 3): As each artifact is named during exploration, run Q2 (exec-env) and Q3 (current behavior) immediately per `skills/design-exploration/SKILL.md` § Grounding Discipline. After decisions settle, complete the pre-challenge batch (Q1, Q4, and `**Grounding Evidence**` block) before beginning Stage 3.
 
