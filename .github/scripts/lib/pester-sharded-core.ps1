@@ -90,7 +90,17 @@ function Get-IsolationRequiredFiles {
         # cannot survive a ten-wide fan-out on a four-vCPU runner, and the
         # failure would arrive on a stranger's pull request looking like a defect
         # in whatever they touched.
-        'orchestra-spine-command.Tests.ps1'
+        'orchestra-spine-command.Tests.ps1',
+        # Wall-clock bound over REAL git work: asserts a 50-commit batch
+        # completes inside 3s, and that a 50-commit run is sub-linear against a
+        # smaller one. The ratio assertion is scale-invariant and would survive
+        # contention; the absolute bounds are what a neighbour can starve.
+        # Measured by #1036 alongside the promotion: 16 of 16 alone, 14 of 16
+        # with the box saturated. It supplies its own git identity per command,
+        # so it does NOT belong on the real-git list -- isolation is the reason,
+        # and the two lists are kept apart precisely so a suite added for the
+        # wrong one can still be removed for the right one.
+        'test-orphan-branch-commits-absorbed.Tests.ps1'
     )
 }
 

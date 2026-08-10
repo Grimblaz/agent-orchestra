@@ -4,6 +4,29 @@ All notable changes to agent-orchestra will be documented in this file.
 
 ## [Unreleased]
 
+## [3.23.0] — 2026-08-10
+
+### Changed
+
+**The quarantine registry now holds only decisions about suites that were actually measured** (#1036, chunk 3 of 4 under designed parent #993). The per-PR gate selects a glob minus `.github/scripts/Tests/ci-quarantine.json`, and 188 of its 190 entries said nothing: they carried class `unclassified`, meaning the suite was omitted by an allowlist that no longer exists and nobody had ever checked whether it could run. **Selected goes 65 → 241 of 255 suites on disk; the registry goes 190 → 14.** Issue #1035 built the instrument that made this possible; this is the chunk that spends the measurement.
+
+**`unclassified` is retired rather than discouraged.** `Get-CISuiteSelection` refuses an entry carrying it, by class token — which matters, because 187 of the 188 entries shared one byte-identical sentence and a check keyed on that wording would have passed both polarity arms and then waved through every future entry phrased differently. The legal set is now `linux-red`, `never-ci`, and a new `no-signal` for a suite that executes and yields no verdict at all; `no-signal` requires an issue like `linux-red`, because the cheap alternative — widening `never-ci` — would have weakened the one class the whole triage exists to police. The guard this replaces asserted that a count was `-BeGreaterOrEqual 0` and no larger than the set it is a subset of: a tautology and a structural bound, green over a registry of 189 unmeasured entries.
+
+**Promotion is the gate expansion, so currency was not optional.** Re-measuring at this work's own commit rather than trusting chunk 1's four-day-old record found two suites — `copilot-sunset-skip-discipline` and `newcomer-audit-wrapper` — that had flipped `passed → failed` with **byte-identical content and the same instrument basis**. Other work landing broke them. Promoting from the older record would have reddened the gate for everyone.
+
+### Fixed
+
+**Nine suites were failing on defects that had nothing to do with what they assert**, and the causes were fixed rather than written up as nine misleading quarantine reasons:
+
+- `-WindowStyle Hidden`, a Windows-only `Start-Process` parameter that Linux rejects before the child starts, copy-pasted into six suites' harnesses. Applied on Windows and omitted elsewhere, so Windows behaviour is unchanged.
+- `conductor-body-size.Tests.ps1` counted lines by splitting the raw body on a newline, which yields a trailing empty element. `agents/Code-Conductor.agent.md` is exactly 500 lines and the ceiling is 500, so the contract read as breached **on every platform** while the file sat exactly at its limit.
+- Four suites' `gh` mocks still branched on `--body` after #1035 moved `Find-OrUpsertComment`'s new-comment path onto `--body-file`. `--body-file` matches `--body` by prefix, so each mock entered the branch and then `[Array]::IndexOf` found no literal `--body` element and recorded an empty body. In `frame-credit-ledger-suppress-failed-posts` the test this silently disarmed was the **control** whose only job is to prove the FAILED path is reachable. The drift was invisible precisely because those four suites did not run in CI — #1035 hardened the one mock that did.
+- Eleven `Join-Path $env:TEMP` sites in `phase-containment-rolling-history-core.Tests.ps1`, a variable PowerShell Core never sets on Linux. The product library had been fixed for this and the suite carries a regression test proving it; the suite's own scaffolding then reintroduced it.
+
+**Two promoted suites were moved off the gate's parallel shard, on measurement rather than suspicion.** `orchestra-spine-command.Tests.ps1` asserts a **50-millisecond** wall clock and `test-orphan-branch-commits-absorbed.Tests.ps1` a 3-second bound over a 50-commit real-git batch; run alone they are 15/15 and 16/16, and with the machine saturated they are 13/15 and 14/16. Promotion is what first exposes a suite to the fan-out, which is why this belongs here rather than with #1037.
+
+**Fourteen surfaces that asserted a quarantine fact this work makes false were corrected**, found by a nine-pattern sweep over 1,092 files — the pattern that caught `skills/plan-authoring/SKILL.md` names no filename at all. CHANGELOG entries are deliberately left alone: they record what was true at a release.
+
 ## [3.22.0] — 2026-08-10
 
 ### Added

@@ -106,6 +106,9 @@ Describe 'run-pester-sharded — real-git allowlist correctness' {
         # saturated, so this placement rests on an observation rather than on
         # the shape of the assertion.
         $isolation | Should -Contain 'orchestra-spine-command.Tests.ps1'
+        # And the orphan-branch absorption suite, whose 3-second bound covers a
+        # 50-commit real-git batch. Measured 16/16 alone and 14/16 saturated.
+        $isolation | Should -Contain 'test-orphan-branch-commits-absorbed.Tests.ps1'
     }
 
     It 'T2h: each sequential-shard entry''s stated basis is present in the file it names' {
@@ -122,6 +125,7 @@ Describe 'run-pester-sharded — real-git allowlist correctness' {
             @{ File = 'run-pester-sharded.Tests.ps1'; Pattern = 'status --porcelain --untracked' + '-files=all'; Why = 'tree-state snapshot compared against the runner' }
             @{ File = 'ci-glob-audit-core.Tests.ps1'; Pattern = '\$bound = \d+'; Why = 'a wall-clock bound a neighbour can starve' }
             @{ File = 'orchestra-spine-command.Tests.ps1'; Pattern = 'Elapsed\.TotalMilliseconds \| Should -BeLessThan \d+'; Why = 'a sub-second wall-clock bound a neighbour can starve' }
+            @{ File = 'test-orphan-branch-commits-absorbed.Tests.ps1'; Pattern = '\$sw\d*\.ElapsedMilliseconds \| Should -BeLessThan \d+'; Why = 'a wall-clock bound over a real-git batch a neighbour can starve' }
         )
 
         $selfSource = Get-Content -LiteralPath (Join-Path $script:TestsDir 'run-pester-sharded.Tests.ps1') -Raw

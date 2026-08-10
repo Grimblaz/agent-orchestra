@@ -71,12 +71,67 @@ Describe 'CI suite selection: the live tree' {
         $script:Live.SelectedNames | Should -Contain 'ci-suite-registration.Tests.ps1'
     }
 
-    It 'reports the unclassified backlog, so it stays visible while it shrinks' {
-        # Not asserted to be zero — it is 189 at the moment this ships, and
-        # pretending otherwise would be the dishonest version of this guard.
-        # Asserted to be REPORTED, and bounded by the quarantine's own size.
-        $script:Live.UnclassifiedCount | Should -BeGreaterOrEqual 0
-        $script:Live.UnclassifiedCount | Should -BeLessOrEqual $script:Live.Quarantined.Count
+    It 'holds no entry whose justification is that nobody looked' {
+        # This assertion replaces one that could not fail. It read
+        # `UnclassifiedCount -BeGreaterOrEqual 0` and `-BeLessOrEqual` the size
+        # of the set it is a subset of: a tautology and a structural bound, both
+        # green over a registry of 189 unmeasured entries. Issue #1035 measured
+        # the whole corpus on Linux and #1036 spent that measurement, so the
+        # honest assertion is now available and is the one that stands.
+        $script:Live.UnclassifiedCount | Should -Be 0 -Because 'the `unclassified` class was retired by #1036; an entry still carrying it rests on nobody having measured the suite, which is no longer true of any suite here'
+    }
+
+    It 'every entry meets its own class requirement, so the next one that does not is refused rather than regretted' {
+        # The whole of T1 in one live assertion: legal class, non-empty reason,
+        # and an issue on every class whose exclusion is expected to end. It is
+        # a restatement of HasDrift over exactly the entry-level rules, kept
+        # separate so a failure names the registry rather than the tree.
+        foreach ($e in $script:Live.Quarantined) {
+            [string]$e.class | Should -BeIn @('linux-red', 'never-ci', 'no-signal') -Because "$($e.file) must carry a class that is a decision about a measured suite"
+            [string]$e.reason | Should -Not -BeNullOrEmpty -Because "$($e.file) must say why it is skipped"
+            if ([string]$e.class -in @('linux-red', 'no-signal')) {
+                $hasIssue = ($e.PSObject.Properties.Match('issue').Count -gt 0) -and -not [string]::IsNullOrWhiteSpace([string]$e.issue)
+                $hasIssue | Should -BeTrue -Because "$($e.file) is class '$($e.class)', whose exclusion is expected to end, so something must be tracking that ending"
+            }
+        }
+    }
+
+    It 'no suite beneath the tests root is absent from the gate for any other reason (T6 coverage)' {
+        # The gate selects by SUBTRACTION, so `selected = onDisk - registry`
+        # holds by construction and proves nothing on its own. What this asserts
+        # is the part that does not: that every subtracted name is subtracted by
+        # an entry the clause above ADMITS. Before #1036 this was false for 188
+        # suites — they were absent on entries carrying a class that no longer
+        # exists — and the difference is empty only because that was fixed.
+        $admitted = @(
+            $script:Live.Quarantined |
+                Where-Object {
+                    [string]$_.class -in @('linux-red', 'never-ci', 'no-signal') -and
+                    -not [string]::IsNullOrWhiteSpace([string]$_.reason)
+                } |
+                ForEach-Object { [string]$_.file }
+        )
+        $onDiskNames = @(Get-ChildItem -LiteralPath $script:TestsRoot -Filter '*.Tests.ps1' -File | ForEach-Object { $_.Name })
+        $absentButNotAdmitted = @($onDiskNames | Where-Object { $script:Live.SelectedNames -notcontains $_ -and $admitted -notcontains $_ })
+        $absentButNotAdmitted | Should -BeNullOrEmpty -Because 'a suite absent from the gate on an entry the registry no longer admits is exactly the silent exclusion this registry replaced an allowlist to prevent'
+    }
+
+    It 'the one exemption the registry cannot express is stated rather than silent (T6 disclosure)' {
+        # The audit controls exist to exhibit each terminal state — including
+        # one that never returns. They are exempt from the gate by PLACEMENT,
+        # outside the tests root, because the contributor-facing recursive
+        # `Invoke-Pester` over that root is quarantine-blind and would hang on
+        # it. That is a deliberate decision, and this assertion is what makes it
+        # distinguishable from an oversight: if a control is ever moved beneath
+        # the tests root, it must be registered like anything else.
+        $controlsRoot = Join-Path $script:RepoRoot '.github/scripts/audit-controls'
+        Test-Path -LiteralPath $controlsRoot | Should -BeTrue -Because 'the exemption is a real directory, not a story about one'
+        $controls = @(Get-ChildItem -LiteralPath $controlsRoot -Filter '*.Tests.ps1' -File | ForEach-Object { $_.Name })
+        $controls.Count | Should -BeGreaterThan 0
+        $onDiskNames = @(Get-ChildItem -LiteralPath $script:TestsRoot -Filter '*.Tests.ps1' -File | ForEach-Object { $_.Name })
+        foreach ($c in $controls) {
+            $onDiskNames | Should -Not -Contain $c -Because "$c is exempt from the gate by living outside the tests root; beneath it, it would need a registry entry like any other suite"
+        }
     }
 }
 
@@ -121,6 +176,71 @@ Describe 'CI suite selection: one induced failure per class the guard claims to 
         $r = Get-CISuiteSelection -TestsRoot $t.Dir -QuarantinePath $t.QuarantinePath
         $r.HasDrift | Should -BeTrue
         ($r.DriftDetails -join ' ') | Should -Match 'is not one of'
+    }
+
+    It 'INDUCED (retired class): an entry still classed `unclassified` FAILS, and the refusal names the retirement' {
+        # The class this registry carried for 189 entries. Retiring it is the
+        # whole enforcement half of #1036: without this, "nobody looked" stays
+        # a legal justification and the backlog can grow back one entry at a
+        # time. The input here is one the pre-work registry ACTUALLY CONTAINED,
+        # reason text and all, so this is not a hypothetical rejection.
+        $preWorkReason = 'Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.'
+        $t = script:New-ScratchTree -Files @('a.Tests.ps1', 'b.Tests.ps1') -Quarantine @(
+            [ordered]@{ file = 'a.Tests.ps1'; class = 'unclassified'; reason = $preWorkReason; issue = $null }
+        )
+        $r = Get-CISuiteSelection -TestsRoot $t.Dir -QuarantinePath $t.QuarantinePath
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'RETIRED by issue #1036'
+        $r.UnclassifiedCount | Should -Be 1 -Because 'the count still reports the retired class so the gate can say the backlog is gone rather than leave it inferred'
+    }
+
+    It 'INDUCED (retired class, freshly phrased): the refusal is on the CLASS and survives wording it has never seen' {
+        # 187 of the 188 pre-work entries carried ONE byte-identical sentence.
+        # A guard keyed on that sentence would pass both polarity arms above and
+        # then wave through every future entry phrased differently — which is
+        # the specific way this check could be vacuous. So: same class, a reason
+        # this repository has never contained, and it must still be refused.
+        $t = script:New-ScratchTree -Files @('a.Tests.ps1', 'b.Tests.ps1') -Quarantine @(
+            [ordered]@{ file = 'a.Tests.ps1'; class = 'unclassified'; reason = 'Nobody has got round to checking whether this one works on the build machines yet.'; issue = $null }
+        )
+        $r = Get-CISuiteSelection -TestsRoot $t.Dir -QuarantinePath $t.QuarantinePath
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'RETIRED by issue #1036'
+    }
+
+    It 'CONVERSE: the pre-work sentence on a LEGAL class is clean, so the refusal is provably not keyed on wording' {
+        # The other half of the same property, and the half that is easy to
+        # leave out. If the check inspected the reason text, this tree would go
+        # red — the reason is the exact 187-entry sentence. It must not.
+        $preWorkReason = 'Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.'
+        $t = script:New-ScratchTree -Files @('a.Tests.ps1', 'b.Tests.ps1') -Quarantine @(
+            [ordered]@{ file = 'a.Tests.ps1'; class = 'never-ci'; reason = $preWorkReason; issue = $null }
+        )
+        $r = Get-CISuiteSelection -TestsRoot $t.Dir -QuarantinePath $t.QuarantinePath
+        $r.DriftDetails -join ' | ' | Should -BeExactly ''
+        $r.HasDrift | Should -BeFalse
+    }
+
+    It 'INDUCED (ticketless no-signal): a suite that yields no verdict needs a ticket for the condition that will end it' {
+        # Amendment 6 E1. Three suites are `executed-no-tests` because every
+        # test in them is skipped behind a dated Copilot-sunset TODO. Neither
+        # surviving class was a true statement about them: they are not failing
+        # on the platform, and the condition is not permanent. The cheap fix —
+        # widening never-ci — would have weakened the one class the whole triage
+        # exists to police, so this class carries linux-red's issue cost.
+        $bad = script:New-ScratchTree -Files @('a.Tests.ps1', 'b.Tests.ps1') -Quarantine @(
+            [ordered]@{ file = 'a.Tests.ps1'; class = 'no-signal'; reason = 'every test skipped'; issue = $null }
+        )
+        $rBad = Get-CISuiteSelection -TestsRoot $bad.Dir -QuarantinePath $bad.QuarantinePath
+        $rBad.HasDrift | Should -BeTrue
+        ($rBad.DriftDetails -join ' ') | Should -Match 'no issue number'
+
+        $good = script:New-ScratchTree -Files @('a.Tests.ps1', 'b.Tests.ps1') -Quarantine @(
+            [ordered]@{ file = 'a.Tests.ps1'; class = 'no-signal'; reason = 'every test skipped behind a dated sunset TODO'; issue = 651 }
+        )
+        $rGood = Get-CISuiteSelection -TestsRoot $good.Dir -QuarantinePath $good.QuarantinePath
+        $rGood.DriftDetails -join ' | ' | Should -BeExactly ''
+        $rGood.HasDrift | Should -BeFalse
     }
 
     It 'INDUCED (ticketless-temporary class): linux-red with no issue FAILS, never-ci without one does NOT' {
@@ -180,12 +300,12 @@ Describe 'CI suite selection: one induced failure per class the guard claims to 
         # returns HasDrift = $true for all inputs.
         $t = script:New-ScratchTree -Files @('a.Tests.ps1', 'b.Tests.ps1', 'c.Tests.ps1') -Quarantine @(
             [ordered]@{ file = 'b.Tests.ps1'; class = 'linux-red'; reason = 'fixture'; issue = 123 },
-            [ordered]@{ file = 'c.Tests.ps1'; class = 'unclassified'; reason = 'fixture'; issue = $null }
+            [ordered]@{ file = 'c.Tests.ps1'; class = 'never-ci'; reason = 'fixture'; issue = $null }
         )
         $r = Get-CISuiteSelection -TestsRoot $t.Dir -QuarantinePath $t.QuarantinePath
         $r.DriftDetails -join ' | ' | Should -BeExactly ''
         $r.SelectedNames | Should -Be @('a.Tests.ps1')
-        $r.UnclassifiedCount | Should -Be 1
+        $r.UnclassifiedCount | Should -Be 0
     }
 }
 
