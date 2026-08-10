@@ -10,6 +10,19 @@ All notable changes to agent-orchestra will be documented in this file.
 
 **Twenty-five maintainer lessons became firing lenses, each backed by an exhibit** (#1050, chunk 2 of #1045). Eight skills carry a chunk-2 lens section — five of them net-new — each carrying the actionable core of a lesson, behind a description trigger that names the condition where it bites; nine net-new `references/` files carry the incident detail those lenses cite. `verification-before-completion` went 497 to 429 lines *while gaining five lenses*, because § The Completion Account's procedure moved behind a citation — the inverse of the extraction its own headroom note suggested, which the standing check forbids. The check itself gained four amendments from the parent design: the consumer-type limb is now derived from the tree rather than declared in the manifest, the composite-convention deferral arm reads `## Composite References` where a skill carries it, a `conflict` verdict may ship only when it carries the resolution that closed it, and `fires_in` is asserted rather than merely declared. Adversarial review found that the derivation's only input was still a manifest field validated for non-blankness alone — retuning it took the audit from 43 findings to zero over an unmodified tree — so a marker must now be findable in an agent body. Two of the assigned 27 lessons returned contradiction verdicts against shipped doctrine and are withheld pending a parent ruling, with the reason recorded in the manifest rather than only in a test comment.
 
+## [3.21.2] — 2026-08-10
+
+### Changed
+
+- CI gate: the per-PR Pester check now runs its selected suites through the repository's own sharded runner, driven by the gate's selection rather than by a directory glob, with the fan-out width derived from #1035's measured duration distribution (#1037).
+- The sharded runner reports two totals that name their units - suites (files) and tests (test cases) - reconciles what ran against what was selected, and decides red/green from the same per-suite outcome rows it reports, so no reported figure is a failure signal in disguise. Four states redden a run: failing tests, no usable result, a suite that executed no tests (including all-skipped, which previously read green), and a selected suite that produced no result at all (#1037).
+- Invoke-PesterSharded gains -SuitePath (run an explicit selection; an empty list is an error, never a run over nothing) and -FanOutWidth; Get-PesterFanOutWidth and Resolve-PesterSuiteOutcome are new (#1037).
+- The gate job is bounded with timeout-minutes, and a green check now discloses what it excludes on the pull-request checks surface, with the excluded set and each entry class in the job summary (#1037).
+- run-pester-sharded.Tests.ps1 is promoted out of the CI quarantine - the one entry this change promotes - and carries the regression guard for the above (#1037).
+- terminal-hygiene and several design documents no longer describe the CI gate as a small allowlist or a registered run list; the #948 and performance-audit full-suite totals are marked incomparable with post-correction runs (#1037).
+- The sequential shard now carries two named membership lists rather than one: `Get-RealGitFiles` for suites that mutate git environment state, and `Get-IsolationRequiredFiles` for suites whose assertions a concurrent neighbour can falsify — a tree-state snapshot, or a wall-clock bound calibrated on an idle machine. Fanning the gate out is what created the second class, and the gate's own first run found it by starving a suite past its bound (#1037).
+- Nested runs of the sharded runner no longer emit CI-format error commands, so a deliberate crash fixture inside the runner's own guard suite can no longer put a red failure annotation on a green pull request's checks surface (#1037).
+
 ## [3.21.1] — 2026-08-10
 
 ### Removed

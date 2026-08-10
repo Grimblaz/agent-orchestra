@@ -11,11 +11,12 @@
     repository containing an actual squash merge, through the detector's
     candidate-surfacing path rather than the cleanup executor's, and requires
     that proof to be enforced by continuous integration. This file is new so it
-    can be added to .github/workflows/pester.yml's allowlist without inheriting
-    issue #904's Linux baggage.
+    is selected by .github/workflows/pester.yml (which runs a glob minus an
+    explicit quarantine — there is no allowlist to be added to) without
+    inheriting issue #904's Linux baggage.
 
     Following the pattern of session-cleanup-detector-goal-run.Tests.ps1 — the one
-    detector suite that IS allowlisted and does pass on the Linux runner — this
+    detector suite that is NOT quarantined and does pass on the Linux runner — this
     file deliberately avoids the mock-git PATH harness used by
     session-cleanup-detector.Tests.ps1. Every fixture here is a real, disposable
     git repository. That keeps the proof platform-neutral, which is exactly the

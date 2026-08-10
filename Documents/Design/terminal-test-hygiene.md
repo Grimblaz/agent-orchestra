@@ -54,7 +54,7 @@ Invoke-Pester 'path/to/specific.Tests.ps1' -Output Minimal
 ```
 
 The full-suite runner `.github/scripts/run-pester-sharded.ps1` (authored in issue #740 s4) is the
-standard Tier 1 validation gate at **step boundaries** — not during inner-loop iteration. Note: CI's `pester.yml` selects by **glob minus `.github/scripts/Tests/ci-quarantine.json`**, not by an allowlist — the allowlist was retired by PR #988. The divergence from the full local suite is real (191 quarantine rows against 255 suites on disk at `ec7bc60`) but is a row-by-row backlog carrying a class and a reason, not an intentional standing choice. *(Corrected under issue #1050.)*
+standard Tier 1 validation gate at **step boundaries** — not during inner-loop iteration. Note: CI's `pester.yml` runs a glob minus an explicit quarantine (`.github/scripts/Tests/ci-quarantine.json`) through that same sharded runner, driven by that selection rather than by a directory glob (issue #1037) — not an allowlist, and not a list a new suite has to be registered into. This divergence from the full local suite is intentional; derive the current selection from `Get-CISuiteSelection` rather than from a count written down anywhere.
 
 A Pester concurrency cap was considered but rejected: the targeted-only rule handles the 95% case
 with lower complexity (see R3).

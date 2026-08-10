@@ -1,11 +1,13 @@
 # Measures the WHOLE Pester corpus on Linux, on demand.
 #
-# The per-PR gate (pester.yml) runs a glob MINUS a quarantine: 61 of 252 suites
-# today. The other 191 — 189 of them class `unclassified`, meaning nobody ever
-# decided to exclude them — have never executed on this platform. This workflow
-# runs all of them, deliberately ignoring the quarantine, so #1036 can triage
-# with a failure message in hand and #1037 can size shards from a measured
-# duration distribution.
+# The per-PR gate (pester.yml) runs a glob MINUS a quarantine: 65 of 255 suites
+# at the time of writing, and the figure moves as chunks land — derive it from
+# `Get-CISuiteSelection` rather than reading it here. The other 190 — 188 of
+# them class `unclassified`, meaning nobody ever decided to exclude them — have
+# never executed on this platform. This workflow runs all of them, deliberately
+# ignoring the quarantine, so #1036 can triage with a failure message in hand,
+# and so #1037 could derive the gate's fan-out width from a measured duration
+# distribution over the whole population rather than the subset it gates today.
 #
 # IT GATES NOTHING. It is dispatch-only, it never touches pester.yml's
 # selection, and it is RED BY CONSTRUCTION: ignoring the quarantine means it

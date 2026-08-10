@@ -137,7 +137,7 @@ Line two names `skills/portfolio-tracker/SKILL.md`, outside every section.
         # Windows resolves gh.cmd through PATHEXT. Linux resolves only an
         # extensionless executable named gh, so BOTH are written and the execute
         # bit is set on the POSIX one. Same shape as the gh shim in
-        # post-merge-cleanup-squash-merge.Tests.ps1, which is registered in
+        # post-merge-cleanup-squash-merge.Tests.ps1, which is selected by
         # pester.yml and green on the Linux runner. Issue #922 records what
         # happens when only the Windows half is written: Get-Command gh fails on
         # Linux and the fixture silently means something else there.

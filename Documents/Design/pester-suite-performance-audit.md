@@ -211,6 +211,12 @@ The current `script-safety-contract.Tests.ps1` allowlist guard at line 77–95 o
 
 **Measured wall-clock**: 237.7s (inner) / 238.2s (outer timer including wrapper startup)
 **Test result**: 2747 pass, 0 fail across 166/166 files
+
+> Measured with the sharded runner's pre-#1037 counting, over a 166-file corpus that has
+> since grown. #1037 split the run's failure signal from its test count and replaced the
+> `files=N/N` shape with a selected-versus-reported reconciliation, so these totals are not
+> comparable with any later full-suite run and the unit of a differential comparison
+> against them has changed.
 **Baseline**: ~836s (pre-#740)
 **Speedup**: 3.5× (72% reduction)
 

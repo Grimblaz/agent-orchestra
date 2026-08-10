@@ -4,6 +4,18 @@
 **Issue**: #818 — CI: migrate Pester test suite to 6.x (pinned to 5.x as interim)
 **Purpose**: Unpin `.github/workflows/pester.yml` from the Pester 5.x hold-pin to a 6.x major-version window, port every test file that relied on Pester 5's removed mock fall-through behavior, and add a standing guard so the fall-through anti-pattern cannot silently regress.
 
+> **How CI selects suites changed after this document was written.** Every reference below
+> to a "CI-scoped run list", a suite being "registered in `pester.yml`", or files sitting
+> "outside the run list" describes the hand-maintained allowlist that CI used at the time.
+> That allowlist is gone: since the glob-minus-quarantine change, CI runs every
+> `*.Tests.ps1` in `.github/scripts/Tests/` **except** the files carrying an explicit,
+> classified entry in `ci-quarantine.json`, and since issue #1037 it runs them through the
+> sharded runner driven by that selection. There is nothing to register a suite into — a
+> new suite is gated the moment it is written, and exclusion now costs a reasoned registry
+> entry. The file counts below (186 total, ~166 unrun, a 22-file run list) are that era's
+> figures and are not today's; derive the current ones from `Get-CISuiteSelection`. The
+> Pester version-window pin this document establishes is unaffected and still in force.
+
 ---
 
 ## Problem

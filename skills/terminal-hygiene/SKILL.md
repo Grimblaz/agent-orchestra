@@ -33,9 +33,20 @@ When iterating on a specific test during red-green-refactor within an implementa
 Invoke-Pester 'path/to/specific.Tests.ps1' -Output Minimal
 ```
 
-The full-suite runner is `.github/scripts/run-pester-sharded.ps1` (authored in issue #740 s4); invoke it at step boundaries as the standard validation gate. Do not run the full suite during inner-loop iteration. Note: CI's `pester.yml` selects suites by **glob minus `.github/scripts/Tests/ci-quarantine.json`**, not by an allowlist. The allowlist was retired in PR #988 precisely because exclusion-by-default is silent, and this sentence describing one is a leftover of it: measured at `d610bbe`, the registry carries **191 rows against 255 `*.Tests.ps1` on disk**. So the divergence from the full local suite is real but is a **row-by-row backlog with a class and a reason on each entry**, not an intentional standing choice — see `skills/test-driven-development/SKILL.md` § Test-Authoring Lenses for what the classes mean and how to add one.
+The full-suite runner is `.github/scripts/run-pester-sharded.ps1` (authored in issue #740 s4); invoke it at step boundaries as the standard validation gate. Do not run the full suite during inner-loop iteration.
 
-Its reported failure count is **not** a count of tests — it adds one per failing *file* on top of the failing assertions, so a run reporting 13 may be 7 failing tests across 6 files. Build any baseline measurement in a detached worktree (`git worktree add --detach <path> <commit>`): a `git stash` cannot prove a failure is pre-existing, and a `git archive` extract has no repository metadata and fails a large number of tests for that reason alone. [`Documents/Design/test-suite-baseline-948.md`](../../Documents/Design/test-suite-baseline-948.md) records the last full-suite baseline, the runner's counting and false-green traps in detail, and the disposition of every test that was red at it.
+Note: CI's `pester.yml` runs a **glob minus an explicit quarantine** — every `*.Tests.ps1` in `.github/scripts/Tests/` except the files listed in `ci-quarantine.json` — through that same sharded runner, driven by that selection rather than by a directory glob (issue #1037). It is not an allowlist and there is no list to register a new suite into: a new suite is gated the moment it is written. Derive the current selection from `Get-CISuiteSelection` rather than reading a count out of any document; the quarantine shrinks as suites are triaged.
+
+That divergence from the full local suite is intentional, and it runs the other way too: `run-pester-sharded.ps1 -TestsPath <dir>` **globs**, so it measures every suite on disk *including* the quarantined ones. To reproduce what CI runs, pass the selection instead:
+
+```powershell
+. .github/scripts/lib/ci-suite-selection-core.ps1
+. .github/scripts/lib/pester-sharded-core.ps1
+$selection = Get-CISuiteSelection -TestsRoot '.github/scripts/Tests' -QuarantinePath '.github/scripts/Tests/ci-quarantine.json'
+Invoke-PesterSharded -SuitePath $selection.Selected -FanOutWidth 10
+```
+
+Since issue #1037 the runner reports **two** totals that name their units and are never summed — `TOTAL suites (unit: files)` with a per-outcome tally, and `TOTAL tests (unit: test cases)` — plus a reconciliation line against the caller's selection. Do **not** subtract a per-file phantom from the failure count: that increment is gone. It also means `ExitCode=1` with zero failing *tests* is now a shape that occurs on its own (a crashed worker, a suite that discovered nothing, a suite whose tests were all skipped, a selected suite with no result at all) rather than only alongside failing tests, so read the suite tally or the exit code, never the test-failure total alone. Build any baseline measurement in a detached worktree (`git worktree add --detach <path> <commit>`): a `git stash` cannot prove a failure is pre-existing, and a `git archive` extract has no repository metadata and fails a large number of tests for that reason alone. [`Documents/Design/test-suite-baseline-948.md`](../../Documents/Design/test-suite-baseline-948.md) records the last full-suite baseline, the runner's counting and false-green traps in detail, and the disposition of every test that was red at it.
 
 ## `isBackground` Default
 
