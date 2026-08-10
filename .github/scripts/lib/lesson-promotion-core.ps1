@@ -122,6 +122,16 @@ $script:LPRosterStates = @('promoted', 'recall-loss', 'pending')
 # and the only way the audited artifact cannot move that is for the reader to own it.
 $script:LPMandateMarker = 'Mandated load, unconditional'
 
+# The three remaining thresholds, for the same reason and closing the same shape one member wider
+# (PR #1061 judge finding J1). Flooring them at >= 1 stopped a value of ZERO disabling a check, but
+# not a value of ONE: setting all three to 1 audited the delivered tree clean, and the pointer-lens
+# guard - the single mechanism between a promotion and the disguised demotion this whole umbrella
+# exists to prevent - was silenced by a one-number manifest edit. Falsifier 2 of the brief predicts
+# exactly that. The reader owns the numbers; a manifest that disagrees is drift.
+$script:LPLensBodyFloor = 300
+$script:LPSpecificityMinLength = 24
+$script:LPSpecificityMinContentWords = 3
+
 function Get-LPField {
     <#
         Reads a property that may be absent. Under StrictMode a bare `$o.x` on a ConvertFrom-Json
@@ -511,15 +521,23 @@ function Get-LessonPromotionAudit {
     }
 
     $minLen = [int](Get-LPField $floor 'min_length' 0)
+    $useMinLen = $script:LPSpecificityMinLength; $useMinWords = $script:LPSpecificityMinContentWords; $useLensFloor = $script:LPLensBodyFloor
     $minWords = [int](Get-LPField $floor 'min_content_words' 0)
     $minLensBody = [int](Get-LPField $lensFloor 'min_chars' 0)
     $mandateMarker = [string](Get-LPField $m 'mandate_marker' '')
 
     # --- Every threshold the manifest supplies is itself floored. A floor of zero is a DISABLED
     #     check, and disabling a check is the cheapest way to silence a red.
-    if ($minLen -lt 1) { $drift.Add('specificity_floor.min_length is not a positive integer; a floor of zero disables the check rather than relaxing it') }
-    if ($minWords -lt 1) { $drift.Add('specificity_floor.min_content_words is not a positive integer; a floor of zero disables the check rather than relaxing it') }
-    if ($minLensBody -lt 1) { $drift.Add('lens_body_floor.min_chars is not a positive integer; a floor of zero disables the pointer-lens check rather than relaxing it') }
+    # J1: the reader owns these numbers. A floor is only a floor while the artifact under audit
+    # cannot lower it, and >= 1 admitted the whole useful range of evasions.
+    foreach ($f in @(
+            @{ Name = 'specificity_floor.min_length'; Got = $minLen; Want = $script:LPSpecificityMinLength },
+            @{ Name = 'specificity_floor.min_content_words'; Got = $minWords; Want = $script:LPSpecificityMinContentWords },
+            @{ Name = 'lens_body_floor.min_chars'; Got = $minLensBody; Want = $script:LPLensBodyFloor })) {
+        if ([int]$f.Got -ne [int]$f.Want) {
+            $drift.Add("manifest declares $($f.Name) as $($f.Got); this reader owns that threshold and uses $($f.Want). A floor the audited artifact can lower is not a floor - lowering all three to 1 audits a gutted lens clean.")
+        }
+    }
     if ([string]::IsNullOrWhiteSpace($mandateMarker)) { $drift.Add('manifest declares no mandate_marker, so a mandated load cannot be told from a permission') }
     if ($pins.Count -lt 1) { $drift.Add('manifest declares no in_file_pins, so no amended surface is required to carry its authoritative-source pin') }
     if ($entries.Count -lt 1) { $drift.Add('manifest carries no roster entries; a guard over an empty roster passes vacuously') }
@@ -663,8 +681,8 @@ function Get-LessonPromotionAudit {
             # alone cannot see it, because the trigger sentence survives inside the gutted section.
             # Measured on the UNFENCED body: a fenced example is not the lesson's core.
             $bodyLen = ([regex]::Replace($lensSection.BodyText, '^ {0,3}(`{3,}|~{3,}).*$', '', 'Multiline')).Trim().Length
-            if ($bodyLen -lt $minLensBody) {
-                $drift.Add("lens '$name' has a body of $bodyLen characters under '$anchor', below the lens-body floor of $minLensBody - a lens that short is a pointer, not the lesson's core")
+            if ($bodyLen -lt $useLensFloor) {
+                $drift.Add("lens '$name' has a body of $bodyLen characters under '$anchor', below the lens-body floor of $useLensFloor - a lens that short is a pointer, not the lesson's core")
             }
         }
 
@@ -682,7 +700,7 @@ function Get-LessonPromotionAudit {
             $tText = [string](Get-LPField $t 'text' '')
             $label = "lesson '$name' trigger on '$tSurfaceRel'"
 
-            foreach ($f in (Test-LPSpecificityFloor -Text $tText -MinLength $minLen -MinContentWords $minWords)) {
+            foreach ($f in (Test-LPSpecificityFloor -Text $tText -MinLength $useMinLen -MinContentWords $useMinWords)) {
                 $drift.Add("$label is $f")
             }
 
@@ -857,7 +875,7 @@ function Get-LessonPromotionAudit {
             $tSurface = [string](Get-LPField $t 'surface' '')
             $tText = [string](Get-LPField $t 'text' '')
             $label = "exhibit '$xRel' trigger on '$tSurface'"
-            foreach ($f in (Test-LPSpecificityFloor -Text $tText -MinLength $minLen -MinContentWords $minWords)) {
+            foreach ($f in (Test-LPSpecificityFloor -Text $tText -MinLength $useMinLen -MinContentWords $useMinWords)) {
                 $drift.Add("$label is $f")
             }
             $tAbs = & $resolve $tSurface

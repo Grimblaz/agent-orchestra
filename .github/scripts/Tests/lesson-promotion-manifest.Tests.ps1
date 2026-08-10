@@ -322,19 +322,19 @@ Describe 'Lesson promotion: one induced failure per class the guard claims to ca
 
     # --- Thresholds the manifest supplies ------------------------------------------------------
 
-    It 'INDUCED (disabled-floor class): a zeroed lens-body floor FAILS instead of switching the check off' {
+    It 'INDUCED (retuned-floor class): a zeroed lens-body floor FAILS instead of switching the check off' {
         # The cheapest way to silence a red is to disable the check that produced it. A floor of
         # zero is drift, not a relaxation.
         $r = script:Invoke-ScratchAudit { param($c) $c.Manifest.lens_body_floor.min_chars = 0 }
         $r.HasDrift | Should -BeTrue
-        ($r.DriftDetails -join ' ') | Should -Match 'lens_body_floor.min_chars is not a positive integer'
+        ($r.DriftDetails -join ' ') | Should -Match 'lens_body_floor.min_chars as 0; this reader owns that threshold'
     }
 
-    It 'INDUCED (disabled-floor class, siblings): a zeroed specificity floor FAILS on either component' {
+    It 'INDUCED (retuned-floor class, siblings): a zeroed specificity floor FAILS on either component' {
         $r1 = script:Invoke-ScratchAudit { param($c) $c.Manifest.specificity_floor.min_length = 0 }
-        ($r1.DriftDetails -join ' ') | Should -Match 'specificity_floor.min_length is not a positive integer'
+        ($r1.DriftDetails -join ' ') | Should -Match 'specificity_floor.min_length as 0; this reader owns that threshold'
         $r2 = script:Invoke-ScratchAudit { param($c) $c.Manifest.specificity_floor.min_content_words = 0 }
-        ($r2.DriftDetails -join ' ') | Should -Match 'specificity_floor.min_content_words is not a positive integer'
+        ($r2.DriftDetails -join ' ') | Should -Match 'specificity_floor.min_content_words as 0; this reader owns that threshold'
     }
 
     It 'INDUCED (emptied-collection class): an emptied loader list or pin list FAILS' {

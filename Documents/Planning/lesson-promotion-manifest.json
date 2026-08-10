@@ -303,7 +303,7 @@
           "CLAUDE.md",
           "Documents/Design/*.md"
         ],
-        "note": "No shipped surface states the remedy-reproduces-its-class checklist or the acceptance-versus-fix-diff sequencing distinction."
+        "note": "No surface among those searched states the remedy-reproduces-its-class checklist or the acceptance-versus-fix-diff sequencing distinction."
       }
     },
     {
@@ -376,7 +376,7 @@
           "CLAUDE.md",
           "Documents/Design/*.md"
         ],
-        "note": "Receiving-skill hits for \"population\" and \"optional\" are unrelated (close-out scope, schema optionality). No shipped statement of the read-inputs rule."
+        "note": "Receiving-skill hits for \"population\" and \"optional\" are unrelated (close-out scope, schema optionality). No statement among those searched of the read-inputs rule."
       }
     },
     {
@@ -409,7 +409,7 @@
           "CLAUDE.md",
           "Documents/Design/*.md"
         ],
-        "note": "No shipped surface states the partition tautology. Design-doc hits for \"partition\" are roster and corpus partitioning, unrelated."
+        "note": "No surface among those searched states the partition tautology. Design-doc hits for \"partition\" are roster and corpus partitioning, unrelated."
       }
     },
     {
@@ -475,7 +475,7 @@
           "CLAUDE.md",
           "Documents/Design/*.md"
         ],
-        "note": "No shipped surface states either falsifier. CLAUDE.md's quality-first section requires ledger evidence to relax a check, which is the converse question and does not conflict."
+        "note": "No surface among those searched states either falsifier. CLAUDE.md's quality-first section requires ledger evidence to relax a check, which is the converse question and does not conflict."
       }
     },
     {
@@ -574,7 +574,7 @@
           "CLAUDE.md",
           "Documents/Design/*.md"
         ],
-        "note": "No shipped surface states the substring-pin defect or the exit-code remedy."
+        "note": "No surface among those searched states the substring-pin defect or the exit-code remedy."
       }
     },
     {
@@ -607,7 +607,7 @@
           "CLAUDE.md",
           "Documents/Design/*.md"
         ],
-        "note": "The skill's 'pin' hits are mutation-grain pins about deliverable-grain red runs, a different subject. No shipped statement about substring-presence assertions, markup interposition, or a -Because message acting as a ratchet."
+        "note": "The skill's 'pin' hits are mutation-grain pins about deliverable-grain red runs, a different subject. No statement among those searched about substring-presence assertions, markup interposition, or a -Because message acting as a ratchet."
       }
     },
     {
@@ -640,7 +640,7 @@
           "CLAUDE.md",
           "Documents/Design/*.md"
         ],
-        "note": "No shipped surface mentions mutation-site selection. Design-doc hits for the bare word \"mutation\" are unrelated usages."
+        "note": "No surface among those searched mentions mutation-site selection. Design-doc hits for the bare word \"mutation\" are unrelated usages."
       }
     },
     {
@@ -706,7 +706,7 @@
           "CLAUDE.md",
           "Documents/Design/*.md"
         ],
-        "note": "No shipped surface states either half. Design-doc hits for \"fixture\" are unrelated test-authoring references."
+        "note": "No surface among those searched states either half. Design-doc hits for \"fixture\" are unrelated test-authoring references."
       }
     },
     {
@@ -779,7 +779,7 @@
           "CLAUDE.md",
           "Documents/Design/*.md"
         ],
-        "note": "No shipped rule anywhere to re-read what a diff asserts after a merge. Two design docs practise it - each carrying a superseded-by correction - without stating it."
+        "note": "No rule among the surfaces searched to re-read what a diff asserts after a merge. Two design docs practise it - each carrying a superseded-by correction - without stating it."
       }
     },
     {
@@ -1010,7 +1010,7 @@
           "CLAUDE.md",
           "Documents/Design/*.md"
         ],
-        "note": "No shipped surface distinguishes a delivery-time control from a standing guard. Design-doc hits for \"positive control\" are about planting controls, a different rule."
+        "note": "No surface among those searched distinguishes a delivery-time control from a standing guard. Design-doc hits for \"positive control\" are about planting controls, a different rule."
       }
     },
     {
@@ -1076,7 +1076,7 @@
           "CLAUDE.md",
           "Documents/Design/*.md"
         ],
-        "note": "Receiving-skill hits for \"universal\" are the \"Universal Verification Checklist\" heading and an unrelated sentence about a validator adapter. No shipped statement of the quantifier rule or the planted-control rule."
+        "note": "Receiving-skill hits for \"universal\" are the \"Universal Verification Checklist\" heading and an unrelated sentence about a validator adapter. No statement among those searched of the quantifier rule or the planted-control rule."
       }
     },
     {
@@ -1142,7 +1142,7 @@
           "CLAUDE.md",
           "Documents/Design/*.md"
         ],
-        "note": "No shipped surface states the bounded-read hazard or the directional bias in grounding errors."
+        "note": "No surface among those searched states the bounded-read hazard or the directional bias in grounding errors."
       }
     },
     {
@@ -1175,7 +1175,7 @@
           "CLAUDE.md",
           "Documents/Design/*.md"
         ],
-        "note": "The single receiving-skill hit for \"grain\" is about fix re-validation, an unrelated subject. No shipped statement of mutation grain."
+        "note": "The single receiving-skill hit for \"grain\" is about fix re-validation, an unrelated subject. No statement among those searched of mutation grain."
       }
     },
     {
@@ -1505,7 +1505,7 @@
           "CLAUDE.md",
           "Documents/Design/*.md"
         ],
-        "note": "Distinct from the ancestor-baseline rule: that one governs which commit a completion account may name, this one governs a verification script re-reading HEAD after its own commit. No shipped surface states it."
+        "note": "Distinct from the ancestor-baseline rule: that one governs which commit a completion account may name, this one governs a verification script re-reading HEAD after its own commit. No surface among those searched states it."
       }
     },
     {

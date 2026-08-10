@@ -1,6 +1,6 @@
 # Review Lens Exhibits
 
-Incident detail for the lenses in `skills/adversarial-review/SKILL.md` § Review Lenses. Each section below records one occurrence — the change under review, the defect a pass found in it, the artifacts and identifiers involved, and the measurements taken at the time. The actionable rules live in the lens sections that cite these exhibits; nothing here restates them.
+Incident detail for the lenses in `skills/adversarial-review/SKILL.md` § Review Lenses. Each section below records one occurrence — the change under review, the defect a pass found in it, the artifacts and identifiers involved, and the measurements taken at the time. The actionable rules live in the lens sections that cite these exhibits; the rules live in the lens, and where a sentence here necessarily carries one it is quoted as part of the incident rather than offered as the rule.
 
 ## Contents
 
