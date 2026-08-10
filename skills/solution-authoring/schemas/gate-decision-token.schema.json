@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "gate-decision-token",
-  "description": "Classification-decision token emitted by the solution-authoring gate at decision time. Written by the agent (L0) and optionally corroborated by the PostToolUse event logger (L1). Consumed by gate-reconciliation-core.ps1 (L2) and the Code-Critic missed-gate perspective (L3).",
+  "description": "Classification-decision token emitted by the solution-authoring gate at decision time. Written by the agent (L0), which since issue #1003 is the stream's only producer — the L1 PostToolUse event logger that formerly corroborated it was retired. Consumed by gate-reconciliation-core.ps1 (L2) and the Code-Critic missed-gate perspective (L3).",
   "type": "object",
   "required": ["decision_id", "phase", "outcome", "classification", "window_position", "timestamp"],
   "properties": {

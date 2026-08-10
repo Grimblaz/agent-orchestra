@@ -6,7 +6,7 @@ This skill's methodology is tool-agnostic, and so is the presentation of the gat
 
 ## Gate firing
 
-Put the decision brief to the engineer as the question body — for load-bearing adversarial-review dispositions, use the escalation tier (full prose per `§Rule: Decision brief structure`); for all other load-bearing decisions, use the base tier (3-sentence brief). The `audit_rationale` sentence goes in the conversation text immediately before the question body, never inside the question's own option payload. A `Decline engagement — proceed without classification` option is included as the last choice.
+Put the decision brief to the engineer as the question body — for load-bearing adversarial-review dispositions, use the escalation tier (full prose per `§Rule: Decision brief structure`); for all other load-bearing decisions, use the base tier (3-sentence brief). Include the `audit_rationale` sentence in the conversation text immediately before the question body, never anywhere inside the question artifact itself. Include a `Decline engagement — proceed without classification` option as the last choice.
 
 ## Skip rule invocation
 

@@ -362,7 +362,12 @@ Describe 'Atomic adversarial pipeline structural contract' {
             $window = script:Get-SentinelWindow -Text $dispatcher -Begin '<!-- adversarial-prosecution-dispatch-begin -->' -End '<!-- adversarial-defense-dispatch-end -->'
 
             $window | Should -Not -BeNullOrEmpty
-            $window | Should -Not -Match '(?i)(AskUserQuestion|ask the (user|operator|maintainer))'
+            # #1003 M22: the object is what matters, and the negation must not be swallowed.
+            # `(?<!not )` keeps a future *prohibition* inside the window ("do not ask the user
+            # anything") from reddening this assertion, which the unqualified widening would
+            # have done — a ratchet against correct text. An affirmative instruction to ask,
+            # or a bare tool name, still trips it.
+            $window | Should -Not -Match '(?i)(AskUserQuestion|(?<!\bnot )\bask(?:s|ing)? the (user|operator|maintainer)(?! nothing))'
             $dispatcher | Should -Match '(?is)sub[- ]skill.*indirection.*boundary|known.*indirection.*boundary|boundary.*sub[- ]skill'
         }
 

@@ -1,5 +1,14 @@
 # Design: Customer Experience Gate
 
+> **Mechanism superseded by issue #1003.** Where this document names a specific tool for
+> surfacing a decision — `AskUserQuestion`, `#tool:vscode/askQuestions`, "the structured-question
+> tool" — that naming no longer describes current behavior. The repository specifies **no**
+> presentation mechanism; the agent chooses per turn. The **obligations** these decisions record
+> — that the gate fires, that it carries its mandatory options, that a pacing directive cannot
+> suppress it — are unchanged and still binding. The mechanism references are left in place
+> because this is a dated decision record: rewriting them would make the document describe a
+> decision that was not the one taken. Read them as history, not instruction.
+
 ## Summary
 
 The Customer Experience Gate (CE Gate) is a named, first-class workflow phase that runs after the Validation Ladder and Code-Critic review, before PR creation. It answers: **"Does this change deliver the right experience for the person using this system?"** Code-Conductor delegates to Experience-Owner, who exercises CE scenarios using the right tool for the surface under change. When defects are found, a two-track response handles both the immediate fix and any systemic process gap.

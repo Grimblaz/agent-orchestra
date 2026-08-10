@@ -52,10 +52,14 @@ Describe 'continuation contract' {
         $script:ContinuationPointsPattern = '(?si)(validation).{0,400}(code review|review).{0,400}(CE Gate|customer.experience).{0,400}(PR creation|PR URL|create.{0,40}PR)'
 
         # Test 3: Stopping rules cover silent abandonment
-        $script:SilentAbandonmentPattern = '(?si)(end a session|end.{0,40}session).{0,200}(PR URL|pull request).{0,120}(escalat|ask)'
+        $script:SilentAbandonmentPattern = '(?si)(end a session|end.{0,40}session).{0,120}(PR URL|pull request).{0,60}\b(escalat\w*|ask\w*)\b'
+        # #1003 M10: the alternation is word-bounded (bare `ask` matched inside `task`,
+        # `masked`, `asking`) and the trailing window is tightened from 120 to 60 so a
+        # downstream rule cannot satisfy the assertion for rule 2. Mutation-verified:
+        # deleting rule 2's own escalation clause turns this False.
 
         # Test 4: "When uncertain, ask" fallback
-        $script:UncertainAskPattern = '(?si)(uncertain|not sure).{0,200}(escalat|ask)'
+        $script:UncertainAskPattern = '(?si)(uncertain|not sure).{0,160}\b(escalat\w*|ask\w*)\b'
 
         # Test 5: Anti-pattern "premature silent stop" named
         $script:PrematureSilentStopPattern = '(?si)premature silent stop.{0,200}(protocol violation|violation|anti-pattern|forbidden)'
@@ -77,6 +81,15 @@ Describe 'continuation contract' {
 
     It 'requires a "when uncertain, ask" fallback' {
         $script:FullContent | Should -Match $script:UncertainAskPattern -Because 'issue #354 requires the uncertainty-as-stop-reason anti-pattern to be addressed with an escalation fallback'
+    }
+
+    It 'the silent-abandonment pattern actually discriminates (#1003 M10 mutation control)' {
+        # A pattern that passes on the real body proves nothing unless it fails on a body
+        # that dropped the clause. Strip rule 2's escalation clause and re-evaluate.
+        $mutated = $script:StoppingRulesBlock -replace `
+            [regex]::Escape('or (b) an explicit escalation explaining why the pipeline cannot continue.'), 'or (b) nothing.'
+        $mutated | Should -Not -Match $script:SilentAbandonmentPattern `
+            -Because 'removing the escalation clause from hard-stop rule 2 must turn this assertion red'
     }
 
     It 'requires the anti-pattern "premature silent stop" to be named as a protocol violation' {

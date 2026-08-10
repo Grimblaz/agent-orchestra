@@ -223,7 +223,7 @@
     "term": "D1 / D2 / D3 (auto-mode rules)",
     "register": "stable-code",
     "kind": "family",
-    "expansion": "D1 / D2 / D3 (auto-mode boundary rules governing which tool calls auto-approve, which prompt the user, and why an engagement gate is unconditional)",
+    "expansion": "D1 / D2 / D3 (auto-mode boundary rules governing which tool calls auto-approve, which prompt the user, and that an engagement gate is unconditional)",
     "decode": "D1 / D2 / D3 = auto-mode boundary rules; see CLAUDE.md § Auto-mode boundary for the full definitions",
     "component_matchers": false
   },

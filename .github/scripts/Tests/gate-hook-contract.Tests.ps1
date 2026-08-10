@@ -12,12 +12,14 @@
       - gate-reconciliation-core.ps1 lib presence and interface contracts
 
     Issue #1003 retired the L1 `PostToolUse` gate-event logger: a hook keyed to one
-    presentation mechanism has no reliable trigger once the repository specifies no
-    mechanism for surfacing a decision. The four hook-specific assertions in this
-    suite were re-pointed rather than deleted — three now assert the retirement held,
-    and the fourth follows `Resolve-GateSessionKey` to its new home. The eight
-    non-hook assertions (schema, #556 regression guard, reconciler library) are
-    unchanged and must keep passing.
+    presentation mechanism has no reliable trigger once the surfaces Claude loads
+    specify no mechanism for surfacing a decision, and its output had not been
+    written since 2026-07-18. The four hook-specific assertions in this suite were
+    re-pointed rather than deleted, and became six: three assert the retirement held,
+    and three follow `Resolve-GateSessionKey` to its new home by invoking it (primary
+    branch, fallback rung, degenerate-input guard). The eight non-hook assertions
+    (schema, #556 regression guard, reconciler library) are unchanged and must keep
+    passing. Fourteen assertions in total, up from twelve.
 #>
 
 Describe 'gate session key relocation contract — issue #1003' {
@@ -51,6 +53,17 @@ Describe 'gate session key relocation contract — issue #1003' {
     It 'Resolve-GateSessionKey falls back to a key when no session id is supplied' {
         Resolve-GateSessionKey | Should -Match '^(b-|sha-|session$)' `
             -Because 'the documented fallback order is branch-slug then short sha then the literal session'
+    }
+
+    It 'Resolve-GateSessionKey never returns the degenerate bare key (#1003 M26)' {
+        # An id made only of characters the sanitizer strips must fall through to the next
+        # rung, not collapse to "s-" and merge every such session into one log file.
+        foreach ($degenerate in @('---', '///', '   ', '@@@')) {
+            $key = Resolve-GateSessionKey -SessionId $degenerate
+            $key | Should -Not -Be 's-' -Because "'$degenerate' must not produce the bare key"
+            $key | Should -Match '^(b-|sha-|session$)' `
+                -Because "'$degenerate' must drop to the branch-slug rung"
+        }
     }
 }
 

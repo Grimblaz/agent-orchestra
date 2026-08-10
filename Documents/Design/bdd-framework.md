@@ -1,5 +1,14 @@
 # Design: BDD Framework Integration
 
+> **Mechanism superseded by issue #1003.** Where this document names a specific tool for
+> surfacing a decision — `AskUserQuestion`, `#tool:vscode/askQuestions`, "the structured-question
+> tool" — that naming no longer describes current behavior. The repository specifies **no**
+> presentation mechanism; the agent chooses per turn. The **obligations** these decisions record
+> — that the gate fires, that it carries its mandatory options, that a pacing directive cannot
+> suppress it — are unchanged and still binding. The mechanism references are left in place
+> because this is a dated decision record: rewriting them would make the document describe a
+> decision that was not the one taken. Read them as history, not instruction.
+
 ## Summary
 
 The BDD Framework adds structured Given/When/Then scenario authoring with numbered ID traceability across the full agent pipeline. Experience-Owner authors G/W/T scenarios in the issue body before implementation; Scenario IDs (S1, S2…) flow through Issue-Planner classification, Code-Conductor CE pre-flight, the PR coverage table, and Code-Critic CE prosecution. A hard coverage-gap gate in Code-Conductor catches unexercised scenarios before a PR is created.

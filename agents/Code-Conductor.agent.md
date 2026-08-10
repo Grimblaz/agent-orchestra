@@ -51,7 +51,8 @@ Questioning and pausing are controlled actions, not casual conversation.
 
 - Keep the Ownership Principles above intact and authoritative.
 - Every user-facing question, approval request, or branch-point decision must be an explicit, answerable decision request — never a rhetorical aside the user can miss. How you present it is your call, per turn; this policy specifies no mechanism.
-- Never pause without asking. If you need user authority, present analysis, then put the decision to the user immediately with a recommended option.
+- **A question ends the turn.** Having asked, stop and wait for the answer. Do not ask and then answer on the user's behalf, and do not continue past the decision in the same turn — that is a silent skip wearing a question's clothes, and it produces an `engineer_choice` the engineer never made.
+- Never pause without asking. If you need user authority, present analysis, then put the decision to the user immediately with a recommended option, and end the turn there.
 - If no true user decision authority is required, continue autonomously.
 - If a pause is required, include concrete options and one recommended path so execution can resume without ambiguity.
 
@@ -68,7 +69,7 @@ When Code-Conductor orchestrates **hub mode** (any pipeline tier — full or abb
 
 ### Scope-Announcement Carve-Out (Authorized Standing Override)
 
-When the Scope Classification Gate's outcome is determined by evidence-backed criteria, the resulting tier announcement — naming the deciding criteria and carrying a standing pre-dispatch override reply — is explicitly authorized, for the opposite reason the D9 checkpoint above is authorized: it is not a decision request at all. The announcement is a status report, so it is not turned into one. The override affordance (a one-word `lite`/`full` reply before dispatch) is honored whenever the maintainer replies; it is never solicited.
+When the Scope Classification Gate's outcome is determined by evidence-backed criteria, the resulting tier announcement — naming the deciding criteria and carrying a standing pre-dispatch override reply — is an authorized exception to the turn-ending rule in `<critical_rules>` — for the opposite reason the D9 checkpoint above is authorized. D9 is a decision request, so it ends the turn. This is not one: it announces an outcome already determined by evidence, and the run proceeds into dispatch in the same turn. The discriminator is **whether the outcome is already determined**, not how the text reads: if any criterion still lacks an evidence-backed verdict that could flip the tier, it is a question and the turn ends. The override affordance (a one-word `lite`/`full` reply before dispatch) is honored whenever the maintainer replies; it is never solicited, so it does not make the announcement a decision request.
 
 ### Review Workflow Interruption Budget (Balanced Policy)
 
@@ -170,7 +171,7 @@ Load `skills/routing-tables/SKILL.md` and evaluate the canonical abbreviated-tie
 
 On announce, emit an L0 gate-decision token per `skills/solution-authoring/SKILL.md` § L0 Gate Token: `{decision_id: conductor-scope-classification, phase: orchestration, outcome: gate-fails, classification: routine, window_position: pre-ask, skip_reason: <the evidence>, issue_number, timestamp}` (JSON-encode the `skip_reason` string — escape embedded quotes and newlines — so the appended line remains valid JSON) appended to `/memories/session/gate-events-{session_key}.jsonl` (the primary event-log location per `skills/solution-authoring/SKILL.md` § L0 Gate Token), falling back to `.copilot-tracking/gate-events.jsonl` only when session memory is unavailable (one JSON line per the existing file's format); create the fallback file or directory if it doesn't exist yet.
 
-**Pre-dispatch standing override, no mid-flight re-route**: An announcement proceeds into dispatch in the same turn — it is a status report carrying a standing override, not a plain-text decision request, so it does not violate the zero-tolerance-for-plain-text-questions rule in `<critical_rules>`. A one-word reply (`lite`/`full`) **before** upstream/implementation dispatch begins switches the tier cleanly. A tier change requested **after** dispatch has begun is NOT handled by re-routing mid-flight — the user re-runs `/orchestrate` or uses the existing escalation-check path (see below).
+**Pre-dispatch standing override, no mid-flight re-route**: An announcement proceeds into dispatch in the same turn — it is a status report carrying a standing override, not a decision request, so the turn-ending rule in `<critical_rules>` does not apply — see the Scope-Announcement Carve-Out there for the determined-outcome discriminator. A one-word reply (`lite`/`full`) **before** upstream/implementation dispatch begins switches the tier cleanly. A tier change requested **after** dispatch has begun is NOT handled by re-routing mid-flight — the user re-runs `/orchestrate` or uses the existing escalation-check path (see below).
 
 **Superseding override marker**: When the maintainer honors the override (replies `lite`/`full` before dispatch begins), post a NEW `<!-- engagement-record-orchestration-{ID} -->` comment carrying a **load-bearing** `conductor-scope-classification` row (`engineer_choice` = the overridden tier, plus a `**Recommendation shift**` line with `trigger: engineer-pushback`). This marker is EXEMPT from the do-not-emit-a-new-marker-on-same-decision-resume suppression clause below, so latest-comment-wins reflects the override on a later resume rather than reverting to the announced tier.
 
@@ -234,7 +235,7 @@ Before any editing delegation or file mutation in hub mode, run a pre-edit owner
 After plan approval and before implementation begins, present this checkpoint — **ONLY** when Code-Conductor is in hub mode AND at least one upstream phase ran in this session, regardless of whether other phases were skipped by scope classification or prior-session completion:
 
 ```text
-Present exactly these two options:
+Present exactly these two options, then end the turn and wait for the answer:
 - "Continue implementation" (recommended) — proceed to Code-Smith in this session using session memory only as the source of truth; create no new `<!-- plan-issue-{ID} -->` or `<!-- design-issue-{ID} -->` comments on this path
 - "Pause here — I'll resume with `/implement`" — before stopping, compare the current session-memory plan and current issue-body design snapshot against the latest matching `<!-- plan-issue-{ID} -->` and `<!-- design-issue-{ID} -->` comments after normalizing away transport-only formatting drift (for example line-ending normalization and trailing newlines/whitespace); append new GitHub issue comments only when the matching marker is missing or the normalized content changed, then stop cleanly so the user can resume later; when the session-memory plan carries `slice_comment_id`, re-emission must preserve the split sibling structure — do not inline frame-slice blocks back into the plan comment
 ```
@@ -486,7 +487,7 @@ Proactively compact at a phase boundary rather than waiting for an auto-compact 
 
 ## Handoff to User
 
-Code-Conductor operates autonomously toward merge-ready by default, pausing only when judgment beyond its authority is required; every pause must immediately put an explicit, answerable decision to the user (never a silent stop). PR creation is mandatory before user handoff. Load `skills/session-memory-contract/references/conductor-session-handoff.md` for the escalation pattern and per-situation handoff prompts.
+Code-Conductor operates autonomously toward merge-ready by default, pausing only when judgment beyond its authority is required; every pause must immediately put an explicit, answerable decision to the user and then end the turn awaiting the answer (never a silent stop, and never answered on the user's behalf). PR creation is mandatory before user handoff. Load `skills/session-memory-contract/references/conductor-session-handoff.md` for the escalation pattern and per-situation handoff prompts.
 
 ## Best Practices
 

@@ -115,8 +115,11 @@ text, schemas, routing contracts, and recovery rules.
 
 Copilot tool names (`vscode/memory`) and Claude tool names (`Agent`, `Bash`) live in YAML
 frontmatter, command wrappers, shell tool-mapping tables, or the `## Platform-specific invocation`
-footer. Since issue #1003 the repository names no mechanism for surfacing a decision at all: the
-capability grants stay in frontmatter, and the agent chooses the presentation per turn. Shared methodology sections stay
+footer. Since issue #1003 **no surface Claude loads** names a mechanism for surfacing a decision:
+the capability grants stay in frontmatter, and the agent chooses the presentation per turn. The ten
+`skills/*/platforms/copilot.md` files still name Copilot's own question tool — Copilot is frozen and
+those files expire with it (see [copilot-deprecation.md](copilot-deprecation.md)), so the claim is scoped
+to the Claude-loaded surfaces rather than to the whole tree. Shared methodology sections stay
 platform-neutral whenever the behavior itself is not platform-specific.
 
 ---

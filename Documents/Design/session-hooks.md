@@ -1,5 +1,14 @@
 # Design: Session Hooks
 
+> **Mechanism superseded by issue #1003.** Where this document names a specific tool for
+> surfacing a decision — `AskUserQuestion`, `#tool:vscode/askQuestions`, "the structured-question
+> tool" — that naming no longer describes current behavior. The repository specifies **no**
+> presentation mechanism; the agent chooses per turn. The **obligations** these decisions record
+> — that the gate fires, that it carries its mandatory options, that a pacing directive cannot
+> suppress it — are unchanged and still binding. The mechanism references are left in place
+> because this is a dated decision record: rewriting them would make the document describe a
+> decision that was not the one taken. Read them as history, not instruction.
+
 > **Current state — Issue #409**: hook-based delivery returned, but now through plugin-distributed hook files rather than workspace-discovered `.github/hooks/session-cleanup.json`. Claude-format installs use `hooks/hooks.json`; Copilot-format installs use root `hooks.json` because Copilot does not define `${CLAUDE_PLUGIN_ROOT}`. The `session-startup` skill remains the agent-side contract for consuming injected `additionalContext`, preserving the run-once marker `/memories/session/session-startup-check-complete.md`, and keeping manual detector runs available. The plugin-release-hygiene `PostToolUse` hook now ships through the same plugin-distributed architecture. Historical context below is preserved so the earlier hook → instruction → skill eras remain traceable.
 >
 > Claude Code startup also includes a Claude-only Step 7b plugin drift backstop. Before reading the cached marketplace version, Step 7b attempts `claude plugin marketplace update` with a 5-second timeout. Timeout, non-zero exit, or unavailable `claude` emits `marketplace freshness check failed — using cached view` and continues from cache without retrying freshness; local-path non-git and dirty/detached classifications suppress that generic emit because their remediation is more specific. Headless runs perform the same freshness attempt and fail-open emission, suppressing only the post-drift stop/continue prompt. The later `claude plugin update agent-orchestra@agent-orchestra --yes` path keeps its separate 30-second timeout and retry behavior. Step 7b shares the existing Step 4 run-once marker; no second marker is introduced. Version 2.5.2 is the cache-invalidation release for this startup surface.

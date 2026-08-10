@@ -47,16 +47,16 @@ Planner absorption umbrella: [#588](https://github.com/Grimblaz/agent-orchestra/
 - source: "Ownership Principles"
   responsibility: "Escalate with concrete options and a recommendation when user authority is required."
   disposition: spine-runner-keeps
-  action: "Keep structured decision prompts as a conductor invariant for authority-boundary pauses."
+  action: "Keep explicit, answerable decision prompts as a conductor invariant for authority-boundary pauses."
   verification_status: verified
   verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Ownership Principles"
   responsibility: "Make every user-facing question or approval request an explicit, answerable decision."
   disposition: spine-runner-keeps
-  action: "Keep question-channel enforcement in the runtime shell for all conductor pauses."
-  verification_status: verified
-  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
+  action: "Keep the no-silent-pause rule enforced in the runtime shell for all conductor pauses."
+  verification_status: unverified
+  verified-against-sha: ""
   verified-via-pr-sha: ""
 - source: "Ownership Principles"
   responsibility: "Continue autonomously toward merge-ready unless true user decision authority is required."
@@ -69,8 +69,8 @@ Planner absorption umbrella: [#588](https://github.com/Grimblaz/agent-orchestra/
   responsibility: "Enforce the no-silent-pause rule: never pause without putting a decision to the user."
   disposition: spine-runner-keeps
   action: "Preserve as runtime guardrails around all D-rule checkpoints and branch decisions."
-  verification_status: verified
-  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
+  verification_status: unverified
+  verified-against-sha: ""
   verified-via-pr-sha: ""
 - source: "Model-Switch Checkpoint (Authorized Hub-Mode Pause)"
   responsibility: "Fire the authorized hub-mode D9 pause after plan approval when an upstream phase ran in-session."
@@ -90,8 +90,8 @@ Planner absorption umbrella: [#588](https://github.com/Grimblaz/agent-orchestra/
   responsibility: "Prevent silent session stops before PR creation or an explicit escalation."
   disposition: spine-runner-keeps
   action: "Keep continuation enforcement as a top-level conductor invariant."
-  verification_status: verified
-  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
+  verification_status: unverified
+  verified-against-sha: ""
   verified-via-pr-sha: ""
 - source: "Overview"
   responsibility: "Delegate specialized work to expert agents and announce each specialist before dispatch."
@@ -154,8 +154,8 @@ Planner absorption umbrella: [#588](https://github.com/Grimblaz/agent-orchestra/
   responsibility: "Load solution-authoring before any subsequent skill fires an engagement gate."
   disposition: adapter-handles
   action: "Use skills/solution-authoring/SKILL.md for engagement-gate classification before asking."
-  verification_status: verified
-  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
+  verification_status: unverified
+  verified-against-sha: ""
   verified-via-pr-sha: ""
 - source: "Process"
   responsibility: "Load upstream-onboarding and run its opening protocol after solution-authoring."
@@ -169,8 +169,8 @@ Planner absorption umbrella: [#588](https://github.com/Grimblaz/agent-orchestra/
   disposition: adapter-handles
   action: "Use the SMC-20 engagement-record-{phase}-{ID} marker payload contract and the same-decision-resume skip rule to preserve engagement state across sessions."
   revisit-trigger: "issue:#575"
-  verification_status: verified
-  verified-against-sha: "0672028396a2b22bceac7910960a7e2f32c20abe"
+  verification_status: unverified
+  verified-against-sha: ""
   verified-via-pr-sha: ""
 - source: "Process"
   responsibility: "Load terminal-hygiene for validation execution, continuation-prompt hazards, and non-fatal diagnostics."
@@ -233,8 +233,8 @@ Planner absorption umbrella: [#588](https://github.com/Grimblaz/agent-orchestra/
   responsibility: "Classify issue scope before upstream calls and present full vs abbreviated tiers as an explicit choice."
   disposition: spine-runner-keeps
   action: "Keep the authority-bound tier choice in hub orchestration before upstream dispatch."
-  verification_status: verified
-  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
+  verification_status: unverified
+  verified-against-sha: ""
   verified-via-pr-sha: ""
 - source: "Scope Classification Gate"
   responsibility: "Evaluate abbreviated-tier criteria and phase matrix through routing-tables gate criteria."
@@ -352,8 +352,8 @@ Planner absorption umbrella: [#588](https://github.com/Grimblaz/agent-orchestra/
   responsibility: "Adopt highest-scope-wins bundle tier and present all classifications in one prompt."
   disposition: spine-runner-keeps
   action: "Keep single-prompt bundle tier confirmation in hub-mode orchestration."
-  verification_status: verified
-  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
+  verification_status: unverified
+  verified-against-sha: ""
   verified-via-pr-sha: ""
 - source: "Multi-Issue Bundling"
   responsibility: "Run shared upstream phases once for the bundle, name bundle plans, and track completion markers per issue."
@@ -583,7 +583,7 @@ Planner absorption umbrella: [#588](https://github.com/Grimblaz/agent-orchestra/
 - source: "Hub Execution Workflow / Report Completion Step 5"
   responsibility: "Report work done, link the PR URL, and hand off to the user for review."
   disposition: spine-runner-keeps
-  action: "Keep completion reporting coupled to a created PR URL or structured stop condition."
+  action: "Keep completion reporting coupled to a created PR URL or an explicit stop condition."
   verification_status: verified
   verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
@@ -818,8 +818,8 @@ Planner absorption umbrella: [#588](https://github.com/Grimblaz/agent-orchestra/
   responsibility: "Escalate invalid premises, wrong scope, or significant unaddressed design questions to the user."
   disposition: spine-runner-keeps
   action: "Keep authority-bound tactical escalation in orchestration with recommended options."
-  verification_status: verified
-  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
+  verification_status: unverified
+  verified-against-sha: ""
   verified-via-pr-sha: ""
 - source: "Subagent Call Resilience (R5)"
   responsibility: "Classify subagent-call failures, apply retry/backoff, and route defer-vs-skip outcomes."
@@ -852,9 +852,9 @@ Planner absorption umbrella: [#588](https://github.com/Grimblaz/agent-orchestra/
 - source: "Handoff to User"
   responsibility: "Operate autonomously toward merge-ready and pause only with an explicit escalation when user judgment is required."
   disposition: spine-runner-keeps
-  action: "Keep user-handoff policy coupled to PR creation and structured authority-bound pauses."
-  verification_status: verified
-  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
+  action: "Keep user-handoff policy coupled to PR creation and explicit authority-bound pauses."
+  verification_status: unverified
+  verified-against-sha: ""
   verified-via-pr-sha: ""
 - source: "Handoff to User"
   responsibility: "Use explicit escalation patterns for design decisions, PR readiness, clarification, and workflow completion."

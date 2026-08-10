@@ -73,7 +73,7 @@ Describe 'plugin hooks config contract' -Tag 'unit' {
     It 'declares a Claude PostToolUse hook for plugin release hygiene' {
         $config = Get-JsonFile -Path $script:ClaudeHooksConfig
         $entries = Get-HookEntries -HooksConfig $config -EventName 'PostToolUse'
-        # PostToolUse carries multiple matchers (release-hygiene + the #617 gate-event-logger);
+        # PostToolUse formerly carried multiple matchers (release-hygiene + the #617 gate-event-logger, retired in #1003);
         # select the release-hygiene entry by its matcher rather than asserting a single entry.
         $releaseEntry = @($entries | Where-Object { $_.matcher -eq $script:PostToolUseMatcher })
 
@@ -112,7 +112,7 @@ Describe 'plugin hooks config contract' -Tag 'unit' {
         $config = Get-JsonFile -Path $script:CopilotHooksConfig
         $rootManifest = Get-JsonFile -Path $script:RootPluginManifest
         $sessionEntries = Get-HookEntries -HooksConfig $config -EventName 'SessionStart'
-        # PostToolUse carries multiple matchers (release-hygiene + the #617 gate-event-logger);
+        # PostToolUse formerly carried multiple matchers (release-hygiene + the #617 gate-event-logger, retired in #1003);
         # select the release-hygiene entry by its matcher.
         $postToolEntries = @(Get-HookEntries -HooksConfig $config -EventName 'PostToolUse' | Where-Object { $_.matcher -eq $script:PostToolUseMatcher })
         $cacheLocator = Get-CopilotCacheLocator -Manifest $rootManifest

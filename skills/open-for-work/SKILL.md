@@ -309,7 +309,7 @@ Then, in order:
 
 ## Gate-decision tokens
 
-Every checkpoint this conversation runs emits a **gate-decision token** — the agent's own self-report that a gate fired and how it resolved, written to the session event log (the "L0" layer, the agent-written one, as opposed to the hook-written L1 and the reconciler L2) — per `skills/solution-authoring/SKILL.md` § L0 Gate Token. Instructing emission is not enough to make the tokens readable, so each checkpoint's four fields are fixed here.
+Every checkpoint this conversation runs emits a **gate-decision token** — the agent's own self-report that a gate fired and how it resolved, written to the session event log (the "L0" layer, the agent-written one — since issue #1003 the only producer, the hook-written L1 having been retired — as opposed to the reconciler L2) — per `skills/solution-authoring/SKILL.md` § L0 Gate Token. Instructing emission is not enough to make the tokens readable, so each checkpoint's four fields are fixed here.
 
 **All tokens from this conversation carry `phase: experience`.** The conversation is the experience-replacement, and the token schema's closed five-value phase enum is **deliberately not extended** — a token carrying a new enum value fails validation before it reaches the reconciler, and every consumer filters on the five existing values. Do not "fix" this mapping by adding an open-for-work phase; the rationale is recorded here and in `skills/solution-authoring/SKILL.md` § L0 Gate Token so a later reader finds it before editing the schema.
 
