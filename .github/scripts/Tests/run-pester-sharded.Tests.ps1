@@ -100,6 +100,12 @@ Describe 'run-pester-sharded — real-git allowlist correctness' {
         # ~1.07s on an idle machine and which ten concurrent workers starved
         # past it on the gate's own first run.
         $isolation | Should -Contain 'ci-glob-audit-core.Tests.ps1'
+        # And the spine command suite, added by #1036 with the promotion that
+        # first exposed it to the fan-out: a 50-millisecond bound, which is the
+        # tightest in the corpus. Measured 15/15 alone and 13/15 with the box
+        # saturated, so this placement rests on an observation rather than on
+        # the shape of the assertion.
+        $isolation | Should -Contain 'orchestra-spine-command.Tests.ps1'
     }
 
     It 'T2h: each sequential-shard entry''s stated basis is present in the file it names' {
@@ -115,6 +121,7 @@ Describe 'run-pester-sharded — real-git allowlist correctness' {
             @{ File = 'run-pester-sharded.Tests.ps1'; Pattern = 'git' + ' -C \$fixture init'; Why = 'real git init fixture' }
             @{ File = 'run-pester-sharded.Tests.ps1'; Pattern = 'status --porcelain --untracked' + '-files=all'; Why = 'tree-state snapshot compared against the runner' }
             @{ File = 'ci-glob-audit-core.Tests.ps1'; Pattern = '\$bound = \d+'; Why = 'a wall-clock bound a neighbour can starve' }
+            @{ File = 'orchestra-spine-command.Tests.ps1'; Pattern = 'Elapsed\.TotalMilliseconds \| Should -BeLessThan \d+'; Why = 'a sub-second wall-clock bound a neighbour can starve' }
         )
 
         $selfSource = Get-Content -LiteralPath (Join-Path $script:TestsDir 'run-pester-sharded.Tests.ps1') -Raw

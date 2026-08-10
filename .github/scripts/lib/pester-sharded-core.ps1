@@ -81,7 +81,16 @@ function Get-IsolationRequiredFiles {
         # does real git init/commit in its own fixtures, so it would qualify
         # for the list above too -- it is here because isolation is the reason
         # that would survive if the git fixtures went away.
-        'run-pester-sharded.Tests.ps1'
+        'run-pester-sharded.Tests.ps1',
+        # Wall-clock bound, and the tightest one in the corpus: 50 MILLISECONDS
+        # (orchestra-spine-command.Tests.ps1, the no-spine fallback timing
+        # assertion). Added by #1036 when it promoted this suite, on measurement
+        # rather than on suspicion -- run alone it is 15 of 15, and run while the
+        # box is saturated it fails 2 of 15. A bound with that little headroom
+        # cannot survive a ten-wide fan-out on a four-vCPU runner, and the
+        # failure would arrive on a stranger's pull request looking like a defect
+        # in whatever they touched.
+        'orchestra-spine-command.Tests.ps1'
     )
 }
 

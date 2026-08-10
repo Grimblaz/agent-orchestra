@@ -2437,7 +2437,11 @@ function New-CIGlobAuditRecordDocuments {
     # come out any other way and rendering it as evidence overstates it.
     [void]$sb.AppendLine("- Registry lint: this record exists only because the gate's own selection procedure reported **no drift** when the population was derived; the run refuses outright otherwise. The ``HasDrift`` value below is that enforced precondition restated, not a second, independent check — it could not read anything else here.")
     [void]$sb.AppendLine("- ``HasDrift`` (as enforced at derivation): **$($Population.HasDrift)**")
-    [void]$sb.AppendLine("- Selected $($Population.SelectedCount); quarantine entries $($Population.QuarantinedCount) (unclassified $($Population.UnclassifiedCount)); stale $(@($Population.StaleQuarantine).Count).")
+    # `unclassified` was retired by issue #1036, so this figure is expected to be
+    # zero and is emitted anyway: a reader must be able to tell "the backlog is
+    # gone" from "nobody reported the backlog". A non-zero value here is an entry
+    # that the gate's own selection would already refuse.
+    [void]$sb.AppendLine("- Selected $($Population.SelectedCount); quarantine entries $($Population.QuarantinedCount) (entries on the RETIRED ``unclassified`` class, which should be 0: $($Population.UnclassifiedCount)); stale $(@($Population.StaleQuarantine).Count).")
     [void]$sb.AppendLine("- Derived population **$(@($Population.Names).Count)**; in-population rows in this record **$($inPop.Count)**; out-of-population rows **$($outPop.Count)** (named below).")
     $missing = @($Population.Names | Where-Object { $n = $_; -not ($inPop | Where-Object { $_.Name -eq $n }) })
     $extra = @($inPop | Where-Object { $Population.Names -notcontains $_.Name } | ForEach-Object { $_.Name })

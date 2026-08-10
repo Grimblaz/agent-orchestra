@@ -403,7 +403,7 @@ invoked directly against the delivered tree and against the pre-change baseline 
 
 | Suite | Quarantine class | Delivered | Baseline `ec7bc60` |
 | --- | --- | --- | --- |
-| `composite-skill-structure.Tests.ps1` | `unclassified` (quarantined; does not run in CI) | 3 passed, 0 failed | 3 passed, 0 failed |
+| `composite-skill-structure.Tests.ps1` | was `unclassified` (quarantined; did not run in CI). Measured green on Linux by #1035 and promoted by #1036 — it runs in CI now | 3 passed, 0 failed | 3 passed, 0 failed |
 | `audit-docs-mechanical.Tests.ps1` | not quarantined; runs in CI | 33 passed, 0 failed | 33 passed, 0 failed |
 
 **The composite suite's result is a constant, not a signal, and must not be read as one.** Its

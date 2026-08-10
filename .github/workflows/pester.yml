@@ -176,7 +176,7 @@ jobs:
             $md.Add('')
             $md.Add("**$($selection.Selected.Count) of $onDisk** suites on disk were selected to run. **$($excludedNames.Count)** were excluded by ``.github/scripts/Tests/ci-quarantine.json`` ($($byClass -join ', ')).")
             $md.Add('')
-            $md.Add('A suite is excluded only by an explicit, classified, reasoned entry in that registry. `unclassified` is a BACKLOG, not a decision: those suites were omitted by an allowlist that no longer exists and their CI-viability has never been measured here.')
+            $md.Add('A suite is excluded only by an explicit, classified, reasoned entry in that registry, and every legal class is a DECISION about a suite that was actually measured — issue #1036 retired `unclassified`, which meant "nobody looked", so `Get-CISuiteSelection` now refuses an entry carrying it. `linux-red` says where a failure was observed, not that its cause is platform-specific; `never-ci` is for an obstacle nothing here can remove, never one the gate chooses; `no-signal` is a suite that executes and yields no verdict. The last two of those three require an issue.')
             $md.Add('')
             $md.Add('<details><summary>The ' + $excludedNames.Count + ' suites this check does not cover</summary>')
             $md.Add('')

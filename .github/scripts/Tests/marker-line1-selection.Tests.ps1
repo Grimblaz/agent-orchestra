@@ -15,18 +15,24 @@
     post to #782 would have overwritten the plan.
 
     WHY THIS FILE EXISTS SEPARATELY FROM find-or-upsert-comment.Tests.ps1.
-    That suite is listed in ci-quarantine.json as `unclassified` (issue #993)
-    — never measured on Linux — so CI does not run it, and a red state
-    exhibited only there would be local-only. This file is NEW, so the
+    It was written when that suite was quarantined `unclassified` (issue #993)
+    — never measured on Linux — so CI did not run it, and a red state exhibited
+    only there would have been local-only. This file was NEW at the time, so the
     registry's rule ("CI runs every .github/scripts/Tests/*.Tests.ps1 EXCEPT
-    the files listed here") makes it run in the per-pull-request Pester gate
+    the files listed here") made it run in the per-pull-request Pester gate
     immediately. It is deliberately written to be CI-viable: no live `gh`, no
     network, no interactive terminal, no platform-specific paths — every
     external call goes through an in-process function mock.
 
-    Do NOT de-quarantine find-or-upsert-comment.Tests.ps1 to solve this. That
-    promotion is #993 chunk 2's job and it is mechanical only for a suite
-    already measured green.
+    THAT REASON HAS EXPIRED, and the file is kept anyway. Issue #1035 measured
+    the whole corpus on Linux and #1036 promoted find-or-upsert-comment.Tests.ps1
+    on that measurement, so both suites now run on every pull request. The
+    earlier instruction here — "do NOT de-quarantine find-or-upsert-comment
+    .Tests.ps1 to solve this" — was addressed to someone who would have promoted
+    an UNMEASURED suite to dodge writing this one; it was never an objection to
+    the measured promotion, which is exactly what #1036 was for. What survives
+    is that this file's mocked, network-free shape is the reason it can assert
+    the line-1 selection rule cheaply, and that is worth keeping on its own.
 #>
 
 BeforeAll {
