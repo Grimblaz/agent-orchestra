@@ -1246,6 +1246,20 @@ function ConvertTo-GCWallClockSeconds {
 # System.Diagnostics.Process + Kill($true) (the pwsh 7 / .NET Core 3+
 # tree-kill overload), with a taskkill /PID <pid> /T /F fallback if
 # Kill($true) itself throws on Windows.
+#
+# KNOWN CONFLATION (M52, issue #1035 review): $timedOut below is set $true
+# the moment WaitForExit's timeout elapses and is never revised if the
+# subsequent Kill($true) throws -- "the bound fired" and "the slot is free"
+# are two different facts this function reports as one. The taskkill
+# fallback in the catch block is also $IsWindows-gated, so a thrown Kill on
+# Linux has no fallback at all and the process may still be running when
+# this function returns. .github/scripts/lib/ci-glob-audit-core.ps1's
+# Invoke-CIGlobAuditSuite documents this same diagnosis (search that file for
+# "TimedOut = $true even when the kill threw") and works around it by
+# killing the tree itself, waiting for the corpse, and reporting a separate
+# ProcessSurvivedKill fact per row rather than trusting this function's
+# TimedOut value alone. That is the second independent re-derivation of this
+# diagnosis; a third reader should not have to re-derive it again.
 function script:Invoke-GCTreeKillableProcess {
     [CmdletBinding()]
     [OutputType([pscustomobject])]

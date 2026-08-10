@@ -295,6 +295,19 @@ families:
     notes: "Pester test files. Absent tests produce visible-warning in CI (tests are
       skipped or the suite reports fewer cases) but do not block agent dispatch."
 
+  ".github/scripts/Tests/*.json":
+    claude_resolves: plugin-cache
+    copilot_resolves: source-tree
+    requires_version_bump: true
+    experience: visible-warning
+    examples:
+      - .github/scripts/Tests/ci-quarantine.json
+    notes: "Data files the Pester tests root carries alongside its suites — today just the
+      CI suite-selection quarantine registry, which decides which suites the per-PR gate
+      runs. Its absence is deliberately NOT treated as an empty quarantine by
+      ci-suite-selection-core.ps1: the selection procedure reports drift instead, so a
+      missing registry surfaces as a visible CI failure rather than a silently widened run."
+
   ".github/scripts/Tests/fixtures/*.ps1":
     claude_resolves: plugin-cache
     copilot_resolves: source-tree
@@ -305,6 +318,28 @@ families:
     notes: "Test fixture scripts. Missing fixture causes the referencing Pester test to
       fail with a visible error rather than hard-blocking a pipeline run."
 
+  ".github/scripts/audit-controls/*":
+    claude_resolves: source-tree
+    copilot_resolves: source-tree
+    requires_version_bump: false
+    experience: hard-failure
+    examples:
+      - .github/scripts/audit-controls/passes.Control.Tests.ps1
+      - .github/scripts/audit-controls/fails.Control.Tests.ps1
+      - .github/scripts/audit-controls/never-returns.Control.Tests.ps1
+      - .github/scripts/audit-controls/README.md
+    notes: "Deliberately misbehaving Pester suites (issue #1035) the full-glob CI audit runs
+      against itself to prove it can tell its four terminal states (passed, failed,
+      executed-no-tests, did-not-complete) apart. Live outside .github/scripts/Tests/ on
+      purpose: never-returns.Control.Tests.ps1 deliberately never returns, and
+      Invoke-Pester .github/scripts/Tests/ (the command the contributor instructions and PR
+      template prescribe) is recursive and quarantine-blind, so a non-returning suite beneath
+      that root would hang a contributor's pre-PR run where no job ceiling exists. Nothing in
+      the repository enumerates this directory for execution; ci-glob-audit.ps1 -Mode Prepare
+      is handed each control's path explicitly and throws immediately if one is absent (hard
+      failure, no fallback). Hub-repo CI only, invoked by ci-full-glob-audit.yml; not a plugin
+      distribution entry point and not distributed to consumer repos, matching the
+      .github/workflows/*.yml resolution model."
   ".github/plugin/marketplace.json":
     claude_resolves: plugin-cache
     copilot_resolves: source-tree
