@@ -4,6 +4,12 @@ All notable changes to agent-orchestra will be documented in this file.
 
 ## [Unreleased]
 
+## [3.23.0] — 2026-08-10
+
+### Added
+
+- **The last two rostered lessons land, and the two sentences they contradicted are corrected** (#1051, closing umbrella #1045). Parent amendment A5 was ruled by the maintainer: A4.5's scope extends to admit both contradictions chunk 2 routed up. `skills/plugin-release-hygiene/SKILL.md` now directs computing the next version from `main` rather than from the branch — the branch-local increment that produces two internally-consistent branches on one number, which #1050's own delivery hit twice — and `Documents/Design/grounding-evidence-delivery-route.md` drops an absolute that its own recorded review had already falsified. Both lessons promote as lenses carrying a `conflict` verdict together with its resolution, which is the state amendment A4.5 made expressible. The promotion roster is now 46 of 46 terminal: 19 + 25 + 2 promoted, none pending.
+
 ## [3.22.0] — 2026-08-10
 
 ### Added

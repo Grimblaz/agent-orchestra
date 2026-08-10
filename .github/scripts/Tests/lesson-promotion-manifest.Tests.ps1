@@ -55,7 +55,7 @@ BeforeAll {
     # Chunk 3 adds its own promoted count here when it lands. An ABSENT key is the quiet escape -
     # the audit iterates only the keys handed to it, so a chunk promoting under a key nobody
     # declared would be counted by nothing.
-    $script:ExpectedPromotedByChunk = @{ '1' = 19; '2' = 25 }
+    $script:ExpectedPromotedByChunk = @{ '1' = 19; '2' = 25; '3' = 2 }
     # The skills this promotion effort receives into. A references/ file appearing in any of these
     # needs a manifest row; directories outside the set belong to other skills and predate this
     # manifest, which is not the registry for them.
@@ -69,6 +69,7 @@ BeforeAll {
         'skills/test-driven-development'
         'skills/design-exploration'
         'skills/agent-memory-compaction'
+        'skills/plugin-release-hygiene'
     )
 
     $script:Live = Get-LessonPromotionAudit -RepoRoot $script:RepoRoot -ManifestPath $script:ManifestPath `

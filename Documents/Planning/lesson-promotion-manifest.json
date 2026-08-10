@@ -122,6 +122,17 @@
         ".github/scripts/Tests/lesson-promotion-manifest.Tests.ps1",
         "migration, not a regression"
       ]
+    },
+    {
+      "surface": "skills/plugin-release-hygiene/SKILL.md",
+      "scope": "section",
+      "anchor": "## Release Lenses",
+      "must_contain": [
+        "Authoritative source",
+        "Documents/Planning/lesson-promotion-manifest.json",
+        ".github/scripts/Tests/lesson-promotion-manifest.Tests.ps1",
+        "migration, not a regression"
+      ]
     }
   ],
   "loading_surfaces": {
@@ -308,10 +319,37 @@
     },
     {
       "lesson": "reference_quoted_text_needs_position_not_heuristic",
-      "state": "pending",
+      "state": "promoted",
       "chunk": 3,
       "issue": 1051,
-      "pending_reason": "Assigned to chunk 2 (#1050); not promoted there. The contradiction procedure returned a `conflict` verdict against shipped doctrine, and parent #1045 amendment A4.5 routes a second contradiction of any kind up rather than resolving it in-chunk - requested as amendment A5 (#1045 comment 5244634056) and UNRULED at chunk 2 delivery. Chunk 2 removed the lens section from the tree rather than shipping it beside the sentence it contradicts, and passed the entry to chunk 3 under parent section chunk-sequence, which assigns it \"any roster entries not yet terminal\". Chunk 3 reads the A5 ruling and takes the entry to a terminal state; it must not promote on its own authority while A5 is open."
+      "kind": "lens",
+      "fires_in": "design",
+      "identity": "name-keyed",
+      "home": "skills/design-exploration/SKILL.md",
+      "anchor": "#### Telling a declaration from text quoting it is decidable by position, never by a heuristic",
+      "triggers": [
+        {
+          "surface": "skills/design-exploration/SKILL.md",
+          "surface_kind": "description",
+          "text": "designing a rule that must tell a declaration from text quoting it"
+        },
+        {
+          "surface": "skills/design-exploration/SKILL.md",
+          "surface_kind": "body",
+          "anchor": "#### Telling a declaration from text quoting it is decidable by position, never by a heuristic",
+          "text": "positional invariant a quote cannot satisfy"
+        }
+      ],
+      "checked_against": {
+        "verdict": "conflict",
+        "surfaces": [
+          "skills/design-exploration/SKILL.md",
+          "CLAUDE.md",
+          "Documents/Design/*.md"
+        ],
+        "note": "Documents/Design/grounding-evidence-delivery-route.md asserted that span-aware detection means a body that merely discusses the sentinel is \"never mistaken\" for one containing it. This lesson establishes that no use-versus-mention rule decided by surrounding text is decidable, and that \"not inside a fence\" specifically is not; the same document already records its own fence exclusion being silently broken by CRLF.",
+        "resolution": "The absolute was removed rather than the detector defended: the sentence now says the detector is not fooled by the shapes it models, and names the unfenced column-0 paste it does not catch. Corrected under parent #1045 amendment A5.1, which the maintainer ruled on 2026-08-10 by extending A4.5 scope to admit this contradiction and the release one."
+      }
     },
     {
       "lesson": "reference_boilerplate_propagation_is_where_a_claim_goes_false",
@@ -744,10 +782,37 @@
     },
     {
       "lesson": "reference_version_collision_invisible_until_merge",
-      "state": "pending",
+      "state": "promoted",
       "chunk": 3,
       "issue": 1051,
-      "pending_reason": "Assigned to chunk 2 (#1050); not promoted there. The contradiction procedure returned a `conflict` verdict against shipped doctrine, and parent #1045 amendment A4.5 routes a second contradiction of any kind up rather than resolving it in-chunk - requested as amendment A5 (#1045 comment 5244634056) and UNRULED at chunk 2 delivery. Chunk 2 removed the lens section from the tree rather than shipping it beside the sentence it contradicts, and passed the entry to chunk 3 under parent section chunk-sequence, which assigns it \"any roster entries not yet terminal\". Chunk 3 reads the A5 ruling and takes the entry to a terminal state; it must not promote on its own authority while A5 is open."
+      "kind": "lens",
+      "fires_in": "release",
+      "identity": "name-keyed",
+      "home": "skills/plugin-release-hygiene/SKILL.md",
+      "anchor": "#### Two branches can bump to the same version, and each one is internally consistent",
+      "triggers": [
+        {
+          "surface": "skills/plugin-release-hygiene/SKILL.md",
+          "surface_kind": "description",
+          "text": "bumping a version another branch may already have taken"
+        },
+        {
+          "surface": "skills/plugin-release-hygiene/SKILL.md",
+          "surface_kind": "body",
+          "anchor": "#### Two branches can bump to the same version, and each one is internally consistent",
+          "text": "Read `main`'s current version before bumping"
+        }
+      ],
+      "checked_against": {
+        "verdict": "conflict",
+        "surfaces": [
+          "skills/plugin-release-hygiene/SKILL.md",
+          "CLAUDE.md",
+          "Documents/Design/*.md"
+        ],
+        "note": "skills/plugin-release-hygiene/SKILL.md section 5 directed \"Compute the next semver from the current .claude-plugin/plugin.json version\" - the branch-local increment this lesson proves produces two internally-consistent branches on one number. The skill read main elsewhere, but only to decide whether to speak, never to choose the number, and said nothing about re-bumping after a merge.",
+        "resolution": "Section 5 now directs reading main via git show origin/main:.claude-plugin/plugin.json and adds a re-check-after-merge clause. Corrected under parent #1045 amendment A5.2, ruled by the maintainer on 2026-08-10. Reproduced live twice during issue #1050: branch 3.21.0 against main 3.21.1, then main 3.21.2 against branch 3.22.0 at the merge."
+      }
     },
     {
       "lesson": "reference_concurrent_merge_falsifies_cited_claims",
@@ -2070,6 +2135,22 @@
         }
       ],
       "note": "incident detail behind the two tooling lenses"
+    },
+    {
+      "file": "skills/plugin-release-hygiene/references/release-exhibits.md",
+      "gating_skill": "skills/plugin-release-hygiene/SKILL.md",
+      "promoted_by": "issue #1051",
+      "cited_by": [
+        {
+          "surface": "skills/plugin-release-hygiene/SKILL.md",
+          "anchor": "#### Two branches can bump to the same version, and each one is internally consistent"
+        },
+        {
+          "surface": "skills/plugin-release-hygiene/SKILL.md",
+          "anchor": "## Composite References"
+        }
+      ],
+      "note": "Incident detail behind the release lens, promoted under parent #1045 amendment A5.2."
     }
   ]
 }

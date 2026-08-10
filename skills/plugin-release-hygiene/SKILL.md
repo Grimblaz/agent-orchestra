@@ -1,6 +1,6 @@
 ---
 name: plugin-release-hygiene
-description: "Maintainer-side version-bump guardrail and Claude startup drift backstop guidance for plugin entry-point edits. Use when entry-point files change, when choosing patch/minor/major overrides, or when documenting/running the Claude plugin update surface. DO NOT USE FOR: CI release automation, registry publishing, or purely manual non-agent edit flows."
+description: "Maintainer-side version-bump guardrail and Claude startup drift backstop guidance for plugin entry-point edits. Use when entry-point files change, when choosing patch/minor/major overrides, when documenting/running the Claude plugin update surface, or when bumping a version another branch may already have taken. DO NOT USE FOR: CI release automation, registry publishing, or purely manual non-agent edit flows."
 provides: release-hygiene
 suggested-next-step: pwsh ./skills/plugin-release-hygiene/scripts/plugin-release-hygiene-hook.ps1
 applies-when: changeset.touchesPluginEntryPoint()
@@ -42,6 +42,10 @@ Any edit touching one of those paths requires a release-hygiene check before the
 ## Purpose
 
 Make the shipping consequence of an entry-point edit visible at the moment it happens. The default behavior is deterministic: propose a patch bump, offer a structured override for minor or major user-visible changes, or allow an explicit no-bump skip for comment-only edits. Coalesce that decision once per active state key so repeated edits do not spam the maintainer.
+
+## Composite References
+
+- [references/release-exhibits.md](references/release-exhibits.md): the incident detail behind Release Lenses - the collision this repository actually hit, the files it conflicted across, and how it was resolved
 
 ## Maintainer Flow
 
@@ -99,7 +103,9 @@ Allowed `keying_strategy` values are `session_id`, `branch_slug`, and `session_f
 
 ### 5. Apply The Bump
 
-Resolve the repo root with `git rev-parse --show-toplevel`, then locate `.github/scripts/bump-version.ps1`. Compute the next semver from the current `.claude-plugin/plugin.json` version and the chosen level.
+Resolve the repo root with `git rev-parse --show-toplevel`, then locate `.github/scripts/bump-version.ps1`. **Compute the next semver from `main`'s version, not your branch's** — read it with `git show origin/main:.claude-plugin/plugin.json` — then apply the chosen level. *(Corrected under issue #1051, parent #1045 amendment A5.2: this read "from the current `.claude-plugin/plugin.json` version", which is the branch-local increment that produces two internally-consistent branches on one number. `bump-version.ps1` does not check whether a version is already taken on `main`, so nothing catches the collision until the merge conflicts across every version-bearing file at once.)*
+
+**Re-check after any merge of `main`.** A bump that was valid when made can collide later, and re-running the script with the next free number is safer than hand-editing seven occurrences across five files. Issue #1050's own run hit this twice in one session: the branch stood at `3.21.0` while `main` had shipped `3.21.1`, and after merging, `main` moved again to `3.21.2` before the branch landed at `3.22.0`.
 
 Before invoking the script, construct a categorized CHANGELOG entry body. Group changes into the appropriate subsection(s) — `Fixed`, `Added`, or `Changed` — as a markdown bullet list. Pass the body as `-ChangelogEntry` and the primary category as `-ChangelogSection`. The script uses today's date internally (`Get-Date -Format 'yyyy-MM-dd'`); the caller only supplies the body.
 
@@ -134,6 +140,18 @@ claude plugin uninstall <plugin@marketplace>
 ```
 
 When a drift-check or maintainer flow needs one of these commands, attempt the command and parse the actual failure before claiming the surface is unavailable.
+
+## Release Lenses
+
+> **Authoritative source**: which lessons are promoted here, what anchor each one lives at, and the trigger text that has to reach a reader are recorded in `Documents/Planning/lesson-promotion-manifest.json`. `.github/scripts/Tests/lesson-promotion-manifest.Tests.ps1` is what stops this section and that manifest drifting apart, and it is the suite a red comes from. **Renaming a heading below is a migration, not a regression** — update that lesson's `anchor` in the manifest in the same commit as the rename. A red naming an anchor you just renamed is reporting a manifest row left behind, not a lost lens.
+
+One way a bump that is correct when you make it is wrong by the time it lands.
+
+### When you are choosing a version number, or landing after a merge
+
+#### Two branches can bump to the same version, and each one is internally consistent
+
+`bump-version.ps1` writes a version across several occurrences in several files and does **not** check whether that version is already taken on `main`. So two branches working in parallel can both land on the same number, and nothing catches it: each branch's release gate passes, CI passes, the changelog entry looks right, and the developer's own plugin cache agrees. It surfaces only at the merge, as a simultaneous conflict across every version-bearing file plus the changelog. **Read `main`'s current version before bumping** — `git show origin/main:.claude-plugin/plugin.json` — rather than incrementing from your own branch's value, and **re-check after any merge of `main`**, because a bump valid when made can collide later. Re-run the script with the next free number rather than hand-editing; the occurrence count across files is more than you will remember to fix by hand. Why it matters past tidiness: Claude Code keys its plugin cache by this version, so two different trees published under one number means a same-version install keeps serving whichever snapshot it cached first — the exact staleness the bump exists to prevent, failing silently. Changelog ordering is a separate resolution from the number, and after any scripted changelog merge verify the encoding: a stray BOM, `U+FFFD` replacement characters, and lost em-dashes are the recurring three. Exhibit: [references/release-exhibits.md](references/release-exhibits.md) § Two branches at 3.12.0.
 
 ## Related Guidance
 
