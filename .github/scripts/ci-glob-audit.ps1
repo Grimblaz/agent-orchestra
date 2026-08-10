@@ -456,6 +456,17 @@ switch ($Mode) {
         # loses its partial, and a missing partial is a hole in the record — the
         # audit is red BY CONSTRUCTION and the redness belongs at the end, after
         # the record is safely persisted.
+        #
+        # STATED AS CODE, NOT ONLY AS A COMMENT. Until the wrapper's own test
+        # suite existed, this block asserted that contract in prose and left the
+        # process to inherit whatever $LASTEXITCODE the last native call had set
+        # — and this mode makes several, including a `git config --get-regexp`
+        # that exits 1 when it simply matches nothing. So a shard whose suites
+        # all passed still exited 1 wherever that lookup came up empty, which
+        # `if: always()` on the upload hides right up until the compose job
+        # reads the run as failed. Caught on Linux by the first run of the very
+        # suite added because this file had no tests.
+        exit 0
     }
 
     'Compose' {
