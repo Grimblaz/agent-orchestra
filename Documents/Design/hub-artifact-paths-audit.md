@@ -1,6 +1,6 @@
 <!-- audit-meta
-last-verified: 18a28ba1b3c7125f70c76890a9996f50e49fd82a
-generated-at: 2026-08-02T18:41:45Z
+last-verified: f14a059979eca297d9c7e329923c866dd7e0b4d6
+generated-at: 2026-08-10T02:52:31Z
 -->
 
 ## Purpose
@@ -426,6 +426,16 @@ Copilot always reads from the source tree in the hub repo. This dual-resolved be
 - **examples**:
   - `Documents/INDEX.md`
 - **notes**: Generated project-reference documentation index in consumer repos. Not a hub distribution artifact; refreshed by /setup-references from the active repo's reference sidecars. Attempting to resolve it from the plugin cache or another repo is a wasted tool call.
+
+### `Documents/Planning/*.json`
+
+- **claude_resolves**: source-tree
+- **copilot_resolves**: source-tree
+- **requires_version_bump**: false
+- **experience**: wasted-tool-call
+- **examples**:
+  - `Documents/Planning/lesson-promotion-manifest.json`
+- **notes**: Hub-repo planning data consumed by a hub-only guard — the lesson-promotion manifest read by .github/scripts/lib/lesson-promotion-core.ps1 via .github/scripts/Tests/lesson-promotion-manifest.Tests.ps1 (#1049). Cited in backticks from three shipped skill bodies as the authoritative source for which maintainer lessons were promoted and where they live, which is why it enters the inventory at all. The manifest itself is hub-repo content and is never resolved at runtime by a consumer install: a consumer session that follows the citation performs a wasted tool call and proceeds with the lens sections it already loaded, which carry the lessons' actual content. Editing the manifest does not require a plugin version bump — the lens sections and descriptions it describes are the entry points, and those carry the bump.
 
 ### `Documents/Planning/*.yaml`
 

@@ -572,6 +572,24 @@ families:
       and proceeds without portfolio context. Editing the spec does not require a plugin
       version bump — it is hub-repo planning content, not a plugin entry point."
 
+  "Documents/Planning/*.json":
+    claude_resolves: source-tree
+    copilot_resolves: source-tree
+    requires_version_bump: false
+    experience: wasted-tool-call
+    examples:
+      - Documents/Planning/lesson-promotion-manifest.json
+    notes: "Hub-repo planning data consumed by a hub-only guard — the lesson-promotion manifest
+      read by .github/scripts/lib/lesson-promotion-core.ps1 via
+      .github/scripts/Tests/lesson-promotion-manifest.Tests.ps1 (#1049). Cited in backticks from
+      three shipped skill bodies as the authoritative source for which maintainer lessons were
+      promoted and where they live, which is why it enters the inventory at all. The manifest
+      itself is hub-repo content and is never resolved at runtime by a consumer install: a
+      consumer session that follows the citation performs a wasted tool call and proceeds with
+      the lens sections it already loaded, which carry the lessons' actual content. Editing the
+      manifest does not require a plugin version bump — the lens sections and descriptions it
+      describes are the entry points, and those carry the bump."
+
   "frame/ports/*.yaml":
     claude_resolves: both
     copilot_resolves: source-tree

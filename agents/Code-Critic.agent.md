@@ -237,7 +237,7 @@ The calling agent or judge still decides how to act on the findings; Code-Critic
 ## Related Guidance
 
 - Load `skills/software-architecture/SKILL.md` when a finding depends on architectural boundaries or dependency direction
-- Load `skills/verification-before-completion/SKILL.md` when validating whether the reviewed change is truly done
+- **Mandated load, unconditional** — load `skills/verification-before-completion/SKILL.md` before writing any completion or evidence claim, not only when validating whether the reviewed change is truly done. A dispatched subagent has no session-start memory surface, so that skill's § Verification Lenses is the only path by which those lessons reach this pass at all; a conditional load leaves the decision to a session that does not know what it is missing.
 
 ---
 

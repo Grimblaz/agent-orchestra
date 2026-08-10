@@ -1,6 +1,6 @@
 ---
 name: plan-authoring
-description: "Reusable implementation-plan authoring methodology. Use when running read-only discovery, drafting execution steps with CE Gate coverage, or preparing a plan for adversarial stress-testing and approval. DO NOT USE FOR: plan persistence, approval-policy enforcement, or direct implementation work (keep those in Issue-Planner.agent.md or use implementation-discipline)"
+description: "Reusable implementation-plan authoring methodology. Use when running read-only discovery, drafting execution steps with CE Gate coverage, or preparing a plan for adversarial stress-testing and approval; also when writing acceptance criteria that name a consumer, a population, or a proof standard, and when answering the vacuity question about a criteria set. DO NOT USE FOR: plan persistence, approval-policy enforcement, or direct implementation work (keep those in Issue-Planner.agent.md or use implementation-discipline)"
 ---
 
 <!-- platform-assumptions: markdown skill guidance for VS Code custom agents in Agent Orchestra; assumes Issue-Planner retains no-edit boundaries, approval prompting, and session-memory persistence semantics. -->
@@ -517,6 +517,34 @@ Beat 2 of the open-for-work flow classifies an issue **routine** or **novel** ag
 The n/a arm is an **emission, not a skip**. A review that says nothing about the routing call is indistinguishable from one that never looked — the same defect the required vacuity sentence exists to remove on the cold-read side.
 
 **Scope, stated so it is not over-read.** This charter reviews briefs. On the novel arm the routing verdict rides the `design-phase-complete` marker instead, and no review surface currently names *that* a target; the gap is recorded on #957 and is not closed here. Do not read this section as saying the routing call is reviewed wherever it is recorded.
+
+### Criteria Lenses
+
+> **Authoritative source**: which lessons are promoted here, what anchor each one lives at, and the trigger text that has to reach a reader are recorded in `Documents/Planning/lesson-promotion-manifest.json`. `.github/scripts/Tests/lesson-promotion-manifest.Tests.ps1` is what stops this section and that manifest drifting apart, and it is the suite a red comes from. **Renaming a heading below is a migration, not a regression** — update that lesson's `anchor` in the manifest in the same commit as the rename. A red naming an anchor you just renamed is reporting a manifest row left behind, not a lost lens.
+
+**Line budget, stated out loud because this file is already past the 500-line structural limit** (785 lines before this section, `wc -l`). This section is held to 40 lines. It is five lenses at roughly six lines each and no worked examples; anything longer belongs in a `references/` file, and adding a sixth lens here without moving the section out is the drift this note exists to make visible.
+
+Five ways a criteria set passes review and still fails to force the work. Each is a defect the conformance check above did not catch on its own.
+
+#### Criteria can pin the reader-facing surface completely and miss every programmatic consumer
+
+On #958 five criteria pinned what a maintainer reads from a runner's output, and all five were satisfiable by putting the feature in a gate script neither of the runner's two real callers executes — both dot-source the logic library directly, so the tests would still pass. The clause written to block it (*"no extra argument, no wrapper script, no opt-in flag"*) constrained **how the invoker invokes**, not **where the code lives**, and the gate script was itself a sanctioned entry point. **Enumerate the callers before writing the criteria**, then add a criterion in the form *"X is a property of doing the work, not of the entry point used to start it"*, proved by exercising both paths at one commit. Prose steering toward the right implementation is not a pin — and a falsifier is explicitly prose the run is not graded on (A3), so it cannot carry this either.
+
+#### One noun naming two things lets a compliant run satisfy every criterion and do nothing
+
+In the #948 brief "baseline" named two commits eight days apart — one bullet anchoring it on the last recorded-green commit, one criterion measuring "at that commit". Read literally, an executor pins at the green commit, records an empty failing set, and satisfies three criteria vacuously while the enumeration the plan exists to force never happens. The two meanings were distinct in the design and collapsed in the design-to-brief rewrite: prose reads unambiguously to an author holding both referents in mind, and an unattended executor holds only the text. **When a plan names two instants, two trees, or two commits, give them different nouns and state the distinction once, up front, before either is used.** Then ask conformance property 5's vacuity question directly.
+
+#### A vacuity answer can name the right verdict and cite blockers the executor can escape
+
+Property 5 demands a constructed candidate reading plus the clause that blocks it. Constructing the reading is not enough: **the named blocker must itself be unescapable**. On #944 both cited blockers had executor-controlled escapes — a population clause undercut by its own proof standard ("run the reader across the swept corpus", where the sweep was executor-chosen), and a veto flip undercut by the calendar, since the report's window came from `Get-Date` at invocation with no anchor parameter. The verdict was still right, but it survived on a clause never cited, so the recorded justification was weaker than it claimed — and the vacuity record is exactly the surface a later reader trusts. For each clause you name as blocking, ask **who controls whether this clause binds — the tree, or the run?** Prefer clauses pinned by evidence already in the brief over clauses pinned by a procedure the run defines.
+
+#### A proof standard can name every polarity and still miss the population none of its exhibits exercises
+
+On #1012 an acceptance criterion named four polarities and all four passed first run; a five-pass panel then found, unanimously, that every one of the four exhibits carried both surface anchors, while the procedure derived its search set from two body fields the writing helper declares **optional**. Five live filings carried neither, derived an empty set, and fell through to a false accusation. A polarity list enumerates *outcomes*; it does not enumerate the shapes of thing the procedure has to **read** to reach one. **List every field the procedure reads, open the writer that produces those fields, ask which are optional, then count the live population that omits each.** Two corollaries: collapsing distinct negative outcomes ("couldn't read it", "nothing to search", "no record exists") is how a detector becomes a false-alarm generator; and a new contract inherits an era, so it needs interpretation guidance for pre-contract artifacts — never a domain exclusion, since the exhibit it was written around must still fail.
+
+#### Specify at the knowledge level you actually have
+
+Already binding as chunked-delivery amendment **A1** and enforced by conformance property 2 above — read the rule there. What this lens adds is the failure it was extracted from and the shape to watch for: when a task's central unknown is a *discoverable external fact*, a pre-discovery spec that hard-codes the hypothesised answer becomes **structurally blind to the exact premise that is false**. On #908 a sample-inferred premise was encoded into a target's comparison operator, and the resulting contract scored the wrong implementation 8 of 8 and the source-verified one 3 of 8. Prefer resolution-shaped checks ("the derived value resolves against the real world-state") over expectation-shaped ones whose literal descends from a hypothesis, and treat primary evidence contradicting a locked premise mid-run as a spec gap to escalate — not something to comply with, and not something to silently fix.
 
 ### Adapter and executor selection
 

@@ -1,0 +1,906 @@
+{
+  "$schema_note": "Lesson promotion manifest. Repo-side authority for which maintainer lessons have left the private memory store, where each one lives, and the trigger text that has to reach a reader. Authored under issue #1049 (chunk 1 of #1045).",
+  "schema_version": 1,
+  "authoritative_check": ".github/scripts/Tests/lesson-promotion-manifest.Tests.ps1",
+  "rename_migration": "Renaming a lens heading is a migration, not a regression: update that entry's `anchor` here in the same commit as the rename.",
+  "roster_snapshot": {
+    "source": "private memory store index, section \"Method - how to be right\"",
+    "snapshot_date": "2026-08-09",
+    "count": 46,
+    "authority": "issue #1045 Amendment A1",
+    "note": "The store lives outside this repository and is absent from every CI runner. `count` is the pinned anchor a standing check can hold; reconciling the roster against the live store is a dated one-time observation recorded at delivery, not a regression guard."
+  },
+  "declared_states": [
+    "promoted",
+    "recall-loss",
+    "pending"
+  ],
+  "specificity_floor": {
+    "min_length": 24,
+    "min_content_words": 3,
+    "note": "Two independently-checked components. A trigger that is present to a text search and absent to a reader fails one of them."
+  },
+  "lens_body_floor": {
+    "min_chars": 300,
+    "note": "A lens whose body is a pointer (\"see the promotion manifest\") satisfies a naive reachability read while moving the lesson nowhere a session reads. A trigger assertion cannot see it, because the trigger sentence survives inside the gutted section. Measures substance, not quality: 300 characters of prose passes whether or not it carries the core - what it cannot be is a pointer. Shortest lens shipped here is 468 characters."
+  },
+  "in_file_pins": [
+    {
+      "surface": "skills/verification-before-completion/SKILL.md",
+      "scope": "section",
+      "anchor": "## Verification Lenses",
+      "must_contain": [
+        "Authoritative source",
+        "Documents/Planning/lesson-promotion-manifest.json",
+        ".github/scripts/Tests/lesson-promotion-manifest.Tests.ps1",
+        "migration, not a regression"
+      ]
+    },
+    {
+      "surface": "skills/plan-authoring/SKILL.md",
+      "scope": "section",
+      "anchor": "### Criteria Lenses",
+      "must_contain": [
+        "Authoritative source",
+        "Documents/Planning/lesson-promotion-manifest.json",
+        ".github/scripts/Tests/lesson-promotion-manifest.Tests.ps1",
+        "migration, not a regression"
+      ]
+    },
+    {
+      "surface": "skills/adversarial-review/SKILL.md",
+      "scope": "section",
+      "anchor": "## Review Lenses",
+      "must_contain": [
+        "Authoritative source",
+        "Documents/Planning/lesson-promotion-manifest.json",
+        ".github/scripts/Tests/lesson-promotion-manifest.Tests.ps1",
+        "migration, not a regression"
+      ]
+    },
+    {
+      "surface": ".github/scripts/Tests/lesson-promotion-manifest.Tests.ps1",
+      "scope": "file",
+      "must_contain": [
+        "Documents/Planning/lesson-promotion-manifest.json",
+        "RENAME MIGRATION",
+        "migration, not a regression"
+      ]
+    }
+  ],
+  "loading_surfaces": {
+    "skills/verification-before-completion/SKILL.md": {
+      "loads_unconditionally_from": [
+        {
+          "surface": "agents/Code-Critic.agent.md",
+          "anchor": "## Related Guidance",
+          "text": "load `skills/verification-before-completion/SKILL.md` before writing any completion or evidence claim"
+        },
+        {
+          "surface": "agents/Process-Review.agent.md",
+          "anchor": "## Skills Reference",
+          "text": "load `skills/verification-before-completion/SKILL.md` before writing any completion or evidence claim"
+        },
+        {
+          "surface": "agents/Test-Writer.agent.md",
+          "anchor": "## Skills Reference",
+          "text": "load `skills/verification-before-completion/SKILL.md` before writing any completion or evidence claim"
+        }
+      ],
+      "note": "This skill has no unconditional loader of its own, so its lenses reach subagent consumers only through these three validating bodies (parent #1045 P1-F19). Added by #1049; all three referenced it conditionally before."
+    },
+    "skills/plan-authoring/SKILL.md": {
+      "loads_unconditionally_from": [
+        {
+          "surface": "agents/Issue-Planner.agent.md",
+          "anchor": "## 2. Discovery",
+          "text": "Load `skills/plan-authoring/SKILL.md` for the reusable discovery workflow"
+        }
+      ],
+      "note": "Pre-existing loader, not added by #1049. Recorded so a later removal turns this check red."
+    },
+    "skills/adversarial-review/SKILL.md": {
+      "loads_unconditionally_from": [
+        {
+          "surface": "agents/Code-Critic.agent.md",
+          "anchor": "## Overview",
+          "text": "Load `skills/adversarial-review/SKILL.md` for the shared review core"
+        }
+      ],
+      "note": "Pre-existing loader, not added by #1049. Recorded so a later removal turns this check red."
+    }
+  },
+  "entries": [
+    {
+      "lesson": "reference_agentic_tooling_design_creed",
+      "state": "pending",
+      "chunk": 2,
+      "issue": 1050
+    },
+    {
+      "lesson": "reference_relocation_fix_must_name_the_failing_lane",
+      "state": "pending",
+      "chunk": 2,
+      "issue": 1050
+    },
+    {
+      "lesson": "reference_remedy_reproduces_its_own_defect_class",
+      "state": "promoted",
+      "chunk": 1,
+      "issue": 1049,
+      "kind": "lens",
+      "home": "skills/adversarial-review/SKILL.md",
+      "anchor": "#### A remedy for a silent defect reproduces that defect inside itself",
+      "triggers": [
+        {
+          "surface": "skills/adversarial-review/SKILL.md",
+          "surface_kind": "description",
+          "text": "prosecuting a remedy for the defect class it closes"
+        },
+        {
+          "surface": "skills/adversarial-review/SKILL.md",
+          "surface_kind": "body",
+          "anchor": "#### A remedy for a silent defect reproduces that defect inside itself",
+          "text": "read your output back through your own detector"
+        }
+      ],
+      "checked_against": {
+        "verdict": "clean",
+        "surfaces": [
+          "C:\\Users\\Micah",
+          "CLAUDE.md",
+          "Documents/Design/*.md"
+        ],
+        "note": "No shipped surface states the remedy-reproduces-its-class checklist or the acceptance-versus-fix-diff sequencing distinction."
+      }
+    },
+    {
+      "lesson": "reference_quoted_text_needs_position_not_heuristic",
+      "state": "pending",
+      "chunk": 2,
+      "issue": 1050
+    },
+    {
+      "lesson": "reference_boilerplate_propagation_is_where_a_claim_goes_false",
+      "state": "pending",
+      "chunk": 2,
+      "issue": 1050
+    },
+    {
+      "lesson": "reference_proof_standard_misses_unexercised_population",
+      "state": "promoted",
+      "chunk": 1,
+      "issue": 1049,
+      "kind": "lens",
+      "home": "skills/plan-authoring/SKILL.md",
+      "anchor": "#### A proof standard can name every polarity and still miss the population none of its exhibits exercises",
+      "triggers": [
+        {
+          "surface": "skills/plan-authoring/SKILL.md",
+          "surface_kind": "description",
+          "text": "writing acceptance criteria that name a consumer, a population, or a proof standard"
+        },
+        {
+          "surface": "skills/plan-authoring/SKILL.md",
+          "surface_kind": "body",
+          "anchor": "#### A proof standard can name every polarity and still miss the population none of its exhibits exercises",
+          "text": "List every field the procedure reads, open the writer that produces those fields"
+        }
+      ],
+      "checked_against": {
+        "verdict": "clean",
+        "surfaces": [
+          "C:\\Users\\Micah",
+          "CLAUDE.md",
+          "Documents/Design/*.md"
+        ],
+        "note": "Receiving-skill hits for \"population\" and \"optional\" are unrelated (close-out scope, schema optionality). No shipped statement of the read-inputs rule."
+      }
+    },
+    {
+      "lesson": "reference_preflight_tautology_partition_of_input",
+      "state": "promoted",
+      "chunk": 1,
+      "issue": 1049,
+      "kind": "lens",
+      "home": "skills/adversarial-review/SKILL.md",
+      "anchor": "#### A \"nothing was lost\" check assembled from a partition of its own input cannot fail",
+      "triggers": [
+        {
+          "surface": "skills/adversarial-review/SKILL.md",
+          "surface_kind": "description",
+          "text": "prosecuting a remedy for the defect class it closes"
+        },
+        {
+          "surface": "skills/adversarial-review/SKILL.md",
+          "surface_kind": "body",
+          "anchor": "#### A \"nothing was lost\" check assembled from a partition of its own input cannot fail",
+          "text": "Name the artifact your check reads and confirm it is the one that ships"
+        }
+      ],
+      "checked_against": {
+        "verdict": "clean",
+        "surfaces": [
+          "C:\\Users\\Micah",
+          "CLAUDE.md",
+          "Documents/Design/*.md"
+        ],
+        "note": "No shipped surface states the partition tautology. Design-doc hits for \"partition\" are roster and corpus partitioning, unrelated."
+      }
+    },
+    {
+      "lesson": "reference_blast_radius_from_executors_not_selectors",
+      "state": "pending",
+      "chunk": 2,
+      "issue": 1050
+    },
+    {
+      "lesson": "reference_guard_proposals_check_covered_population",
+      "state": "promoted",
+      "chunk": 1,
+      "issue": 1049,
+      "kind": "lens",
+      "home": "skills/adversarial-review/SKILL.md",
+      "anchor": "#### A proposed guard has two cheap falsifiers nobody runs",
+      "triggers": [
+        {
+          "surface": "skills/adversarial-review/SKILL.md",
+          "surface_kind": "description",
+          "text": "judging whether a proposed guard or a substring pin actually holds"
+        },
+        {
+          "surface": "skills/adversarial-review/SKILL.md",
+          "surface_kind": "body",
+          "anchor": "#### A proposed guard has two cheap falsifiers nobody runs",
+          "text": "A `HEAD`-scoped grep counts the surface and never the events"
+        }
+      ],
+      "checked_against": {
+        "verdict": "clean",
+        "surfaces": [
+          "C:\\Users\\Micah",
+          "CLAUDE.md",
+          "Documents/Design/*.md"
+        ],
+        "note": "No shipped surface states either falsifier. CLAUDE.md's quality-first section requires ledger evidence to relax a check, which is the converse question and does not conflict."
+      }
+    },
+    {
+      "lesson": "reference_proof_standard_presatisfied_by_baseline",
+      "state": "promoted",
+      "chunk": 1,
+      "issue": 1049,
+      "kind": "lens",
+      "home": "skills/verification-before-completion/SKILL.md",
+      "anchor": "#### Run the criterion's own discriminator against the untouched tree before you trust it",
+      "triggers": [
+        {
+          "surface": "skills/verification-before-completion/SKILL.md",
+          "surface_kind": "description",
+          "text": "naming a baseline commit for a differential suite claim"
+        },
+        {
+          "surface": "skills/verification-before-completion/SKILL.md",
+          "surface_kind": "body",
+          "anchor": "#### Run the criterion's own discriminator against the untouched tree before you trust it",
+          "text": "what else differs between X and Y for reasons unrelated to the work"
+        }
+      ],
+      "checked_against": {
+        "verdict": "clean",
+        "surfaces": [
+          "C:\\Users\\Micah",
+          "CLAUDE.md",
+          "Documents/Design/*.md"
+        ],
+        "note": "The skill's discriminating-evidence obligation says evidence must be able to come out negative; it does not say to run the discriminator against the baseline before shipping the criterion. No hit on any doctrine surface."
+      }
+    },
+    {
+      "lesson": "reference_mechanism_broke_the_property_it_provides",
+      "state": "pending",
+      "chunk": 2,
+      "issue": 1050
+    },
+    {
+      "lesson": "reference_pin_by_substring_is_not_a_pin",
+      "state": "promoted",
+      "chunk": 1,
+      "issue": 1049,
+      "kind": "lens",
+      "home": "skills/adversarial-review/SKILL.md",
+      "anchor": "#### A test asserting that a name appears in a script pins nothing",
+      "triggers": [
+        {
+          "surface": "skills/adversarial-review/SKILL.md",
+          "surface_kind": "description",
+          "text": "judging whether a proposed guard or a substring pin actually holds"
+        },
+        {
+          "surface": "skills/adversarial-review/SKILL.md",
+          "surface_kind": "body",
+          "anchor": "#### A test asserting that a name appears in a script pins nothing",
+          "text": "asserting its function names appear is not a pin"
+        }
+      ],
+      "checked_against": {
+        "verdict": "clean",
+        "surfaces": [
+          "C:\\Users\\Micah",
+          "CLAUDE.md",
+          "Documents/Design/*.md"
+        ],
+        "note": "No shipped surface states the substring-pin defect or the exit-code remedy."
+      }
+    },
+    {
+      "lesson": "reference_presence_pin_is_a_ratchet_against_qualification",
+      "state": "pending",
+      "chunk": 2,
+      "issue": 1050
+    },
+    {
+      "lesson": "reference_mutation_campaign_must_target_uncovered_sites",
+      "state": "promoted",
+      "chunk": 1,
+      "issue": 1049,
+      "kind": "lens",
+      "home": "skills/verification-before-completion/SKILL.md",
+      "anchor": "#### A mutation campaign that only touches sites the suite already covers proves nothing",
+      "triggers": [
+        {
+          "surface": "skills/verification-before-completion/SKILL.md",
+          "surface_kind": "description",
+          "text": "designing a mutation campaign or red-run evidence"
+        },
+        {
+          "surface": "skills/verification-before-completion/SKILL.md",
+          "surface_kind": "body",
+          "anchor": "#### A mutation campaign that only touches sites the suite already covers proves nothing",
+          "text": "enumerate what ships, then ask which of it any test would notice changing"
+        }
+      ],
+      "checked_against": {
+        "verdict": "clean",
+        "surfaces": [
+          "C:\\Users\\Micah",
+          "CLAUDE.md",
+          "Documents/Design/*.md"
+        ],
+        "note": "No shipped surface mentions mutation-site selection. Design-doc hits for the bare word \"mutation\" are unrelated usages."
+      }
+    },
+    {
+      "lesson": "reference_append_only_impossible_inside_bounded_region",
+      "state": "pending",
+      "chunk": 2,
+      "issue": 1050
+    },
+    {
+      "lesson": "reference_run_real_target_and_negatives_first",
+      "state": "promoted",
+      "chunk": 1,
+      "issue": 1049,
+      "kind": "lens",
+      "home": "skills/verification-before-completion/SKILL.md",
+      "anchor": "#### Point the instrument at the real target, and build the negatives first",
+      "triggers": [
+        {
+          "surface": "skills/verification-before-completion/SKILL.md",
+          "surface_kind": "description",
+          "text": "making an absence claim, a universal claim, or a one-time demonstration offered as a standing guarantee"
+        },
+        {
+          "surface": "skills/verification-before-completion/SKILL.md",
+          "surface_kind": "body",
+          "anchor": "#### Point the instrument at the real target, and build the negatives first",
+          "text": "fixtures are shaped by the same understanding that shaped the code"
+        }
+      ],
+      "checked_against": {
+        "verdict": "clean",
+        "surfaces": [
+          "C:\\Users\\Micah",
+          "CLAUDE.md",
+          "Documents/Design/*.md"
+        ],
+        "note": "No shipped surface states either half. Design-doc hits for \"fixture\" are unrelated test-authoring references."
+      }
+    },
+    {
+      "lesson": "reference_differential_rule_needs_an_ancestor_baseline",
+      "state": "promoted",
+      "chunk": 1,
+      "issue": 1049,
+      "kind": "lens",
+      "home": "skills/verification-before-completion/SKILL.md",
+      "anchor": "#### A baseline that is not an ancestor makes the differential rule vacuous",
+      "triggers": [
+        {
+          "surface": "skills/verification-before-completion/SKILL.md",
+          "surface_kind": "description",
+          "text": "naming a baseline commit for a differential suite claim"
+        },
+        {
+          "surface": "skills/verification-before-completion/SKILL.md",
+          "surface_kind": "body",
+          "anchor": "#### A baseline that is not an ancestor makes the differential rule vacuous",
+          "text": "the same hole opens wherever an absolute threshold is replaced by a relative one"
+        }
+      ],
+      "checked_against": {
+        "verdict": "cite",
+        "surfaces": [
+          "C:\\Users\\Micah",
+          "CLAUDE.md",
+          "Documents/Design/*.md"
+        ],
+        "note": "Already shipped doctrine: this skill's own section \"Which commit may be named as the baseline\" states the rule in full, and CLAUDE.md \"What a finished run is true of\" property 3 repeats it. The lens cites both and adds only the generalisation neither makes."
+      }
+    },
+    {
+      "lesson": "reference_version_collision_invisible_until_merge",
+      "state": "pending",
+      "chunk": 2,
+      "issue": 1050
+    },
+    {
+      "lesson": "reference_concurrent_merge_falsifies_cited_claims",
+      "state": "pending",
+      "chunk": 2,
+      "issue": 1050
+    },
+    {
+      "lesson": "reference_vacuity_defense_can_rest_on_escapable_clauses",
+      "state": "promoted",
+      "chunk": 1,
+      "issue": 1049,
+      "kind": "lens",
+      "home": "skills/plan-authoring/SKILL.md",
+      "anchor": "#### A vacuity answer can name the right verdict and cite blockers the executor can escape",
+      "triggers": [
+        {
+          "surface": "skills/plan-authoring/SKILL.md",
+          "surface_kind": "description",
+          "text": "answering the vacuity question about a criteria set"
+        },
+        {
+          "surface": "skills/plan-authoring/SKILL.md",
+          "surface_kind": "body",
+          "anchor": "#### A vacuity answer can name the right verdict and cite blockers the executor can escape",
+          "text": "the named blocker must itself be unescapable"
+        }
+      ],
+      "checked_against": {
+        "verdict": "cite",
+        "surfaces": [
+          "C:\\Users\\Micah",
+          "CLAUDE.md",
+          "Documents/Design/*.md"
+        ],
+        "note": "Property 5 already requires a constructed reading plus a quoted blocking clause; the lens cites it and adds the escapability test it does not carry."
+      }
+    },
+    {
+      "lesson": "reference_criteria_pin_reader_surface_miss_consumers",
+      "state": "promoted",
+      "chunk": 1,
+      "issue": 1049,
+      "kind": "lens",
+      "home": "skills/plan-authoring/SKILL.md",
+      "anchor": "#### Criteria can pin the reader-facing surface completely and miss every programmatic consumer",
+      "triggers": [
+        {
+          "surface": "skills/plan-authoring/SKILL.md",
+          "surface_kind": "description",
+          "text": "writing acceptance criteria that name a consumer, a population, or a proof standard"
+        },
+        {
+          "surface": "skills/plan-authoring/SKILL.md",
+          "surface_kind": "body",
+          "anchor": "#### Criteria can pin the reader-facing surface completely and miss every programmatic consumer",
+          "text": "Enumerate the callers before writing the criteria"
+        }
+      ],
+      "checked_against": {
+        "verdict": "clean",
+        "surfaces": [
+          "C:\\Users\\Micah",
+          "CLAUDE.md",
+          "Documents/Design/*.md"
+        ],
+        "note": "The skill's \"Downstream-consumer\" verification category is about citing a consumer for a load-bearing AC, not about enumerating callers before criteria are written; it does not state this rule and does not contradict it."
+      }
+    },
+    {
+      "lesson": "reference_enumeration_asserted_complete_grew_twice",
+      "state": "pending",
+      "chunk": 2,
+      "issue": 1050
+    },
+    {
+      "lesson": "reference_source_read_tag_only_as_good_as_search_scope",
+      "state": "pending",
+      "chunk": 2,
+      "issue": 1050
+    },
+    {
+      "lesson": "reference_fail_closed_predicate_is_not_fail_closed_writer",
+      "state": "pending",
+      "chunk": 2,
+      "issue": 1050
+    },
+    {
+      "lesson": "reference_selector_you_cannot_invoke_cannot_be_defended",
+      "state": "pending",
+      "chunk": 2,
+      "issue": 1050
+    },
+    {
+      "lesson": "reference_delivery_demo_is_not_a_regression_guard",
+      "state": "promoted",
+      "chunk": 1,
+      "issue": 1049,
+      "kind": "lens",
+      "home": "skills/verification-before-completion/SKILL.md",
+      "anchor": "#### A demonstration at delivery is not a regression guard",
+      "triggers": [
+        {
+          "surface": "skills/verification-before-completion/SKILL.md",
+          "surface_kind": "description",
+          "text": "making an absence claim, a universal claim, or a one-time demonstration offered as a standing guarantee"
+        },
+        {
+          "surface": "skills/verification-before-completion/SKILL.md",
+          "surface_kind": "body",
+          "anchor": "#### A demonstration at delivery is not a regression guard",
+          "text": "buys one dated observation, satisfiable by a transcript"
+        }
+      ],
+      "checked_against": {
+        "verdict": "clean",
+        "surfaces": [
+          "C:\\Users\\Micah",
+          "CLAUDE.md",
+          "Documents/Design/*.md"
+        ],
+        "note": "No shipped surface distinguishes a delivery-time control from a standing guard. Design-doc hits for \"positive control\" are about planting controls, a different rule."
+      }
+    },
+    {
+      "lesson": "feedback_ground_to_test_not_to_support",
+      "state": "pending",
+      "chunk": 2,
+      "issue": 1050
+    },
+    {
+      "lesson": "reference_universal_claims_need_standing_checks",
+      "state": "promoted",
+      "chunk": 1,
+      "issue": 1049,
+      "kind": "lens",
+      "home": "skills/verification-before-completion/SKILL.md",
+      "anchor": "#### A witness can falsify a universal but never establish one",
+      "triggers": [
+        {
+          "surface": "skills/verification-before-completion/SKILL.md",
+          "surface_kind": "description",
+          "text": "making an absence claim, a universal claim, or a one-time demonstration offered as a standing guarantee"
+        },
+        {
+          "surface": "skills/verification-before-completion/SKILL.md",
+          "surface_kind": "body",
+          "anchor": "#### A witness can falsify a universal but never establish one",
+          "text": "standing check that executes the quantifier on every run"
+        }
+      ],
+      "checked_against": {
+        "verdict": "clean",
+        "surfaces": [
+          "C:\\Users\\Micah",
+          "CLAUDE.md",
+          "Documents/Design/*.md"
+        ],
+        "note": "Receiving-skill hits for \"universal\" are the \"Universal Verification Checklist\" heading and an unrelated sentence about a validator adapter. No shipped statement of the quantifier rule or the planted-control rule."
+      }
+    },
+    {
+      "lesson": "reference_sweep_phrasings_miss_tables_and_interposed_words",
+      "state": "pending",
+      "chunk": 2,
+      "issue": 1050
+    },
+    {
+      "lesson": "reference_bounded_read_window_false_absence",
+      "state": "promoted",
+      "chunk": 1,
+      "issue": 1049,
+      "kind": "lens",
+      "home": "skills/verification-before-completion/SKILL.md",
+      "anchor": "#### A bounded read window produces a false absence, and the window gets recorded as the evidence",
+      "triggers": [
+        {
+          "surface": "skills/verification-before-completion/SKILL.md",
+          "surface_kind": "description",
+          "text": "making an absence claim, a universal claim, or a one-time demonstration offered as a standing guarantee"
+        },
+        {
+          "surface": "skills/verification-before-completion/SKILL.md",
+          "surface_kind": "body",
+          "anchor": "#### A bounded read window produces a false absence, and the window gets recorded as the evidence",
+          "text": "grep the whole file, or the whole tree"
+        }
+      ],
+      "checked_against": {
+        "verdict": "clean",
+        "surfaces": [
+          "C:\\Users\\Micah",
+          "CLAUDE.md",
+          "Documents/Design/*.md"
+        ],
+        "note": "No shipped surface states the bounded-read hazard or the directional bias in grounding errors."
+      }
+    },
+    {
+      "lesson": "reference_red_runs_at_deliverable_grain_miss_subproperties",
+      "state": "promoted",
+      "chunk": 1,
+      "issue": 1049,
+      "kind": "lens",
+      "home": "skills/verification-before-completion/SKILL.md",
+      "anchor": "#### A red run at deliverable grain says nothing about the deliverable's sub-properties",
+      "triggers": [
+        {
+          "surface": "skills/verification-before-completion/SKILL.md",
+          "surface_kind": "description",
+          "text": "designing a mutation campaign or red-run evidence"
+        },
+        {
+          "surface": "skills/verification-before-completion/SKILL.md",
+          "surface_kind": "body",
+          "anchor": "#### A red run at deliverable grain says nothing about the deliverable's sub-properties",
+          "text": "Enumerate the claims a criterion makes, not the features it adds"
+        }
+      ],
+      "checked_against": {
+        "verdict": "clean",
+        "surfaces": [
+          "C:\\Users\\Micah",
+          "CLAUDE.md",
+          "Documents/Design/*.md"
+        ],
+        "note": "The single receiving-skill hit for \"grain\" is about fix re-validation, an unrelated subject. No shipped statement of mutation grain."
+      }
+    },
+    {
+      "lesson": "reference_test_fabricated_state_pollutes_shared_artifact",
+      "state": "pending",
+      "chunk": 2,
+      "issue": 1050
+    },
+    {
+      "lesson": "reference_test_docstring_overclaim_hides_the_gap",
+      "state": "pending",
+      "chunk": 2,
+      "issue": 1050
+    },
+    {
+      "lesson": "feedback_discovery_neutral_specification",
+      "state": "promoted",
+      "chunk": 1,
+      "issue": 1049,
+      "kind": "lens",
+      "home": "skills/plan-authoring/SKILL.md",
+      "anchor": "#### Specify at the knowledge level you actually have",
+      "triggers": [
+        {
+          "surface": "skills/plan-authoring/SKILL.md",
+          "surface_kind": "description",
+          "text": "writing acceptance criteria that name a consumer, a population, or a proof standard"
+        },
+        {
+          "surface": "skills/plan-authoring/SKILL.md",
+          "surface_kind": "body",
+          "anchor": "#### Specify at the knowledge level you actually have",
+          "text": "structurally blind to the exact premise that is false"
+        }
+      ],
+      "checked_against": {
+        "verdict": "cite",
+        "surfaces": [
+          "C:\\Users\\Micah",
+          "CLAUDE.md",
+          "Documents/Design/*.md"
+        ],
+        "note": "Already shipped doctrine: chunked-delivery amendment A1, named from CLAUDE.md, and enforced by this skill's brief conformance check property 2 (source-read / sample-inferred provenance). The lens cites both and adds only the failure it was extracted from."
+      }
+    },
+    {
+      "lesson": "feedback_check_doctrine_before_proposing_mechanism",
+      "state": "pending",
+      "chunk": 2,
+      "issue": 1050
+    },
+    {
+      "lesson": "reference_one_noun_two_commits_vacuity",
+      "state": "promoted",
+      "chunk": 1,
+      "issue": 1049,
+      "kind": "lens",
+      "home": "skills/plan-authoring/SKILL.md",
+      "anchor": "#### One noun naming two things lets a compliant run satisfy every criterion and do nothing",
+      "triggers": [
+        {
+          "surface": "skills/plan-authoring/SKILL.md",
+          "surface_kind": "description",
+          "text": "answering the vacuity question about a criteria set"
+        },
+        {
+          "surface": "skills/plan-authoring/SKILL.md",
+          "surface_kind": "body",
+          "anchor": "#### One noun naming two things lets a compliant run satisfy every criterion and do nothing",
+          "text": "give them different nouns and state the distinction once"
+        }
+      ],
+      "checked_against": {
+        "verdict": "cite",
+        "surfaces": [
+          "C:\\Users\\Micah",
+          "CLAUDE.md",
+          "Documents/Design/*.md"
+        ],
+        "note": "Brief conformance check property 5 already carries the vacuity question verbatim; the lens cites it. The one-noun-two-referents mechanism that produces the vacuity is stated nowhere and is what the lens adds."
+      }
+    },
+    {
+      "lesson": "reference_guard_exemption_by_syntax_not_semantics",
+      "state": "pending",
+      "chunk": 2,
+      "issue": 1050
+    },
+    {
+      "lesson": "reference_noun_swapped_predicate_left_false",
+      "state": "pending",
+      "chunk": 2,
+      "issue": 1050
+    },
+    {
+      "lesson": "reference_demoting_a_signal_orphans_its_sole_consumers",
+      "state": "promoted",
+      "chunk": 1,
+      "issue": 1049,
+      "kind": "lens",
+      "home": "skills/adversarial-review/SKILL.md",
+      "anchor": "#### Demoting a signal orphans whatever it was the sole producer of",
+      "triggers": [
+        {
+          "surface": "skills/adversarial-review/SKILL.md",
+          "surface_kind": "description",
+          "text": "a change demotes or removes a signal"
+        },
+        {
+          "surface": "skills/adversarial-review/SKILL.md",
+          "surface_kind": "body",
+          "anchor": "#### Demoting a signal orphans whatever it was the sole producer of",
+          "text": "grep every `return` in the changed function and ask, per distinct output value"
+        }
+      ],
+      "checked_against": {
+        "verdict": "clean",
+        "surfaces": [
+          "C:\\Users\\Micah",
+          "CLAUDE.md",
+          "Documents/Design/*.md"
+        ],
+        "note": "The single CLAUDE.md hit for \"orphan\" is orphan git branches in session startup, an unrelated subject."
+      }
+    },
+    {
+      "lesson": "reference_coupled_rewrite_half_failure_invisible_to_counts",
+      "state": "pending",
+      "chunk": 2,
+      "issue": 1050
+    },
+    {
+      "lesson": "reference_verification_baseline_drift_after_commit",
+      "state": "promoted",
+      "chunk": 1,
+      "issue": 1049,
+      "kind": "lens",
+      "home": "skills/verification-before-completion/SKILL.md",
+      "anchor": "#### A differential script baselined on `HEAD` inverts the moment you commit",
+      "triggers": [
+        {
+          "surface": "skills/verification-before-completion/SKILL.md",
+          "surface_kind": "description",
+          "text": "naming a baseline commit for a differential suite claim"
+        },
+        {
+          "surface": "skills/verification-before-completion/SKILL.md",
+          "surface_kind": "body",
+          "anchor": "#### A differential script baselined on `HEAD` inverts the moment you commit",
+          "text": "Pin the base to an explicit SHA in a named variable"
+        }
+      ],
+      "checked_against": {
+        "verdict": "clean",
+        "surfaces": [
+          "C:\\Users\\Micah",
+          "CLAUDE.md",
+          "Documents/Design/*.md"
+        ],
+        "note": "Distinct from the ancestor-baseline rule: that one governs which commit a completion account may name, this one governs a verification script re-reading HEAD after its own commit. No shipped surface states it."
+      }
+    },
+    {
+      "lesson": "reference_verification_loop_false_green",
+      "state": "pending",
+      "chunk": 2,
+      "issue": 1050
+    },
+    {
+      "lesson": "reference_ci_allowlist_inverts_to_quarantine",
+      "state": "pending",
+      "chunk": 2,
+      "issue": 1050
+    },
+    {
+      "lesson": "feedback_grep_omitted_long_lines",
+      "state": "pending",
+      "chunk": 2,
+      "issue": 1050
+    },
+    {
+      "lesson": "reference_diagnose_remote_only_failures_in_one_dump",
+      "state": "pending",
+      "chunk": 2,
+      "issue": 1050
+    },
+    {
+      "lesson": "reference_relocating_a_line_carries_all_its_subjects",
+      "state": "pending",
+      "chunk": 2,
+      "issue": 1050
+    }
+  ],
+  "exhibits": [
+    {
+      "file": "skills/terminal-hygiene/references/powershell-traps.md",
+      "gating_skill": "skills/terminal-hygiene/SKILL.md",
+      "promoted_by": "issue #1019",
+      "cited_by": [
+        {
+          "surface": "skills/terminal-hygiene/SKILL.md",
+          "anchor": "## PowerShell and Pester traps"
+        }
+      ],
+      "triggers": [
+        {
+          "surface": "skills/terminal-hygiene/SKILL.md",
+          "surface_kind": "description",
+          "text": "an array collapses to a scalar or a single element"
+        }
+      ],
+      "note": "Retrofit (#1049): the gating description named terminal modes, Pester scoping and cost discipline and no PowerShell language condition at all. The citing body section pre-dates this chunk."
+    },
+    {
+      "file": "skills/safe-operations/references/git-and-gh-traps.md",
+      "gating_skill": "skills/safe-operations/SKILL.md",
+      "promoted_by": "issue #1019",
+      "cited_by": [
+        {
+          "surface": "skills/safe-operations/SKILL.md",
+          "anchor": "## Section 3: git, `gh`, worktree and repo-script traps"
+        }
+      ],
+      "triggers": [
+        {
+          "surface": "skills/safe-operations/SKILL.md",
+          "surface_kind": "description",
+          "text": "claiming a test failure is pre-existing"
+        }
+      ],
+      "note": "Retrofit (#1049): rows only. This gating description already named the conditions where these traps bite, so it needed no amendment - the asymmetry with terminal-hygiene is real and is why only one description moved."
+    }
+  ]
+}
