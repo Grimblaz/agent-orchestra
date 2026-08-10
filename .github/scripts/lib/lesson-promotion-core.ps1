@@ -67,6 +67,14 @@ $script:LPLoadNegators = @(
 
 $script:LPDeclaredVerdicts = @('clean', 'cite', 'conflict')
 
+# The roster's three states, fixed HERE rather than taken from the manifest (parent #1045
+# amendment A2.1). Reading the set from the artifact under audit is the manifest-authority defect
+# one level up: only `promoted` gets meaningful handling, so adding a fourth string to BOTH an
+# entry and `declared_states` - a typo, or an invented `half-done` - lets that entry bypass every
+# promotion check while the declared-state assertion stays green. Raised by the #1055 external
+# review (Codex P2).
+$script:LPRosterStates = @('promoted', 'recall-loss', 'pending')
+
 function Get-LPField {
     <#
         Reads a property that may be absent. Under StrictMode a bare `$o.x` on a ConvertFrom-Json
@@ -355,8 +363,17 @@ function Get-LessonPromotionAudit {
     }
     $schemaVersion = [int](Get-LPField $m 'schema_version' 0)
     if ($schemaVersion -lt 1) { $drift.Add("manifest declares schema_version '$schemaVersion'; a version this reader does not know how to read is drift") }
+    # The declared set is validated against the fixed three, not merely used. Otherwise a state the
+    # manifest invents is a state every promotion check skips.
     if ($declared.Count -lt 1) { $drift.Add('manifest declares no states, so every entry would be in an undeclared state') }
-    foreach ($v in $script:LPDeclaredVerdicts) { if ($declared -ccontains $v) { } }
+    foreach ($s in $declared) {
+        if ($script:LPRosterStates -cnotcontains [string]$s) {
+            $drift.Add("manifest declares state '$s', which is not one of $($script:LPRosterStates -join ', ') - an invented state is one every promotion check skips")
+        }
+    }
+    foreach ($s in $script:LPRosterStates) {
+        if ($declared -cnotcontains $s) { $drift.Add("manifest does not declare the state '$s', which the roster's state model requires") }
+    }
 
     $minLen = [int](Get-LPField $floor 'min_length' 0)
     $minWords = [int](Get-LPField $floor 'min_content_words' 0)

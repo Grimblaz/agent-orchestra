@@ -243,6 +243,26 @@ Describe 'Lesson promotion: one induced failure per class the guard claims to ca
         ($r.DriftDetails -join ' ') | Should -Match 'is in no declared state'
     }
 
+    It 'INDUCED (invented-state class): a fourth state declared AND used bypasses every promotion check, so it FAILS' {
+        # The manifest-authority defect one level up, raised by the #1055 external review: only
+        # `promoted` gets meaningful handling, so adding a string to BOTH an entry and
+        # `declared_states` would let that entry skip every check while the declared-state
+        # assertion stayed green. The set is validated against the fixed three, not merely used.
+        $r = script:Invoke-ScratchAudit {
+            param($c)
+            $c.Manifest.declared_states = @('promoted', 'recall-loss', 'pending', 'half-done')
+            $c.Manifest.entries[0].state = 'half-done'
+        }
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match "declares state 'half-done', which is not one of"
+    }
+
+    It 'INDUCED (dropped-state class): omitting a required state from the declared set FAILS' {
+        $r = script:Invoke-ScratchAudit { param($c) $c.Manifest.declared_states = @('promoted', 'pending') }
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match "does not declare the state 'recall-loss'"
+    }
+
     It 'INDUCED (roster-truncation class): an entry removed AND the count decremented together FAILS' {
         # The half that matters. Leaving the anchor behind is caught by any intra-manifest
         # comparison; a consistent edit is caught only because the expected count lives here.

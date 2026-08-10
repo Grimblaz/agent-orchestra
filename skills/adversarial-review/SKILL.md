@@ -111,6 +111,8 @@ Coverage and economy are orthogonal axes, not a single dial: coverage governs wh
 
 Five failure modes a lens-based sweep reads past, each drawn from a pass where it did.
 
+### When a remedy, a guard, a signal change, or a pin is the thing under review
+
 #### A remedy for a silent defect reproduces that defect inside itself
 
 When the thing being fixed is *silence*, the dominant failure mode is the fix re-enacting it. On PR #1006 a five-pass panel sustained **six** findings that were exactly that. Run this checklist against your own remedy: does its own output contain the shape it detects — read your output back through your own detector, and use a placeholder rather than a live literal. Can your safety check fail at all. Does a guard's predicate match the comment beside it (a *count* where the comment says *membership*). Does a diagnosis assert a cause its trigger does not establish. Does a counter double-count or shadow. Is the bound on the right half — two implementations answering the same question must share their load-bearing rules, and if they diverge, write down which is which at the divergence. Sequencing, not vigilance, is the lesson: running the acceptance criteria tests the contract's claims, and only a pass aimed at the **fix diff itself** asks whether a fix introduced a new defect or failed to close what it claims. Those are different questions. And whenever a fix adds a new outcome or branch, ask who controls the inputs that route to it.
