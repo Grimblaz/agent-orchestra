@@ -251,12 +251,19 @@ exit `$exitCode
             Set-Content -Path $harnessPath -Value $harness -Encoding UTF8
 
             $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+            # -WindowStyle is a Windows-only parameter of Start-Process: on Linux and macOS
+            # PowerShell rejects it outright ("The parameter '-WindowStyle' is not supported
+            # for the cmdlet 'Start-Process' on this edition of PowerShell") before the child
+            # even starts. It only suppresses the console flash on Windows, and this call
+            # already redirects both streams, so it is splatted in there and omitted elsewhere.
+            $hiddenWindow = if ($IsWindows) { @{ WindowStyle = 'Hidden' } } else { @{} }
+
             $process = Start-Process -FilePath 'pwsh' `
                 -ArgumentList @('-NoProfile', '-NonInteractive', '-File', $harnessPath) `
                 -RedirectStandardOutput $stdoutPath `
                 -RedirectStandardError $stderrPath `
                 -PassThru `
-                -WindowStyle Hidden
+                @hiddenWindow
 
             $finished = $process.WaitForExit($TimeoutSeconds * 1000)
             if (-not $finished) {

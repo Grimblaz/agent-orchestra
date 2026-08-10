@@ -21,7 +21,13 @@ Describe 'Code-Conductor shared-body size contract' {
             0
         }
         else {
-            ($script:ConductorBody -split "`n").Count
+            # Splitting a newline-TERMINATED file on "`n" yields a trailing empty element
+            # that is not a line, so a 500-line file counted 501 and this contract read as
+            # breached on every platform while the file sat exactly at its ceiling. Drop one
+            # trailing newline (and only one) so the count agrees with `wc -l`.
+            $body = $script:ConductorBody
+            if ($body.EndsWith("`n")) { $body = $body.Substring(0, $body.Length - 1) }
+            ($body -split "`n").Count
         }
     }
 
