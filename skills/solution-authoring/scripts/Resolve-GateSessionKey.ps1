@@ -19,9 +19,15 @@
 
     Resolution order (first match wins):
       1. `-SessionId` when supplied and it sanitizes to a non-empty slug -> `s-{sanitized}`
-      2. current branch name                                            -> `b-{slug}`
+      2. current branch name, when one exists                           -> `b-{slug}`
       3. short HEAD sha                                                 -> `sha-{sha}`
       4. literal `session`
+
+    Rung 2 requires an actual branch. On a detached checkout `git rev-parse --abbrev-ref HEAD`
+    still exits 0, but returns the literal string `HEAD` rather than failing -- there is no
+    branch to name. That literal is treated as no-branch and rung 2 falls through to rung 3, so
+    every detached revision gets its own sha-keyed log rather than every detached revision in
+    the same checkout colliding on one shared `b-HEAD` key.
 
     Rung 1 requires a non-empty slug, not merely a non-empty argument. A session id made
     entirely of characters the sanitizer strips (`'---'`, `'///'`) would otherwise collapse
@@ -58,9 +64,13 @@ function Resolve-GateSessionKey {
         }
     }
 
-    # Fallback 1: branch slug
+    # Fallback 1: branch slug. On a detached checkout, `git rev-parse --abbrev-ref HEAD`
+    # succeeds (exit 0) and returns the literal string "HEAD" rather than failing -- there is
+    # no branch to name. Treat that literal as no-branch and fall through to the sha rung;
+    # otherwise every detached revision in the same checkout would collide on one shared
+    # "b-HEAD" key, mixing unrelated gate-token streams (#1052 GH-2).
     $branch = (git rev-parse --abbrev-ref HEAD 2>$null)
-    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($branch)) {
+    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($branch) -and $branch -ne 'HEAD') {
         $slug = ($branch -replace '[^A-Za-z0-9._-]+', '-').TrimStart('-').TrimEnd('-')
         if (-not [string]::IsNullOrWhiteSpace($slug)) {
             return "b-$slug"

@@ -19,7 +19,8 @@
     and three follow `Resolve-GateSessionKey` to its new home by invoking it (primary
     branch, fallback rung, degenerate-input guard). The eight non-hook assertions
     (schema, #556 regression guard, reconciler library) are unchanged and must keep
-    passing. Fourteen assertions in total, up from twelve.
+    passing. Fourteen assertions, plus one more (#1052 GH-2, a detached-checkout
+    guard against `b-HEAD`) added during PR #1052's own GitHub-review-intake pass.
 #>
 
 Describe 'gate session key relocation contract — issue #1003' {
@@ -53,6 +54,36 @@ Describe 'gate session key relocation contract — issue #1003' {
     It 'Resolve-GateSessionKey falls back to a key when no session id is supplied' {
         Resolve-GateSessionKey | Should -Match '^(b-|sha-|session$)' `
             -Because 'the documented fallback order is branch-slug then short sha then the literal session'
+    }
+
+    It 'Resolve-GateSessionKey never returns b-HEAD on a detached checkout (#1052 GH-2)' {
+        # A real detached checkout, not a mock: `git rev-parse --abbrev-ref HEAD` behaves
+        # differently on a detached HEAD than a missing/failed lookup (exit 0, literal "HEAD"),
+        # which a mocked LASTEXITCODE could not reproduce.
+        $scratch = Join-Path ([System.IO.Path]::GetTempPath()) ("gsk-detached-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $scratch -Force | Out-Null
+        try {
+            Push-Location $scratch
+            git init --quiet 2>$null
+            git config user.email 'test@example.com' 2>$null
+            git config user.name 'Test' 2>$null
+            'a' | Out-File -FilePath 'a.txt' -Encoding utf8
+            git add a.txt 2>$null
+            git commit --quiet -m 'first' 2>$null
+            $sha = (git rev-parse --short HEAD 2>$null).Trim()
+            git checkout --quiet --detach HEAD 2>$null
+
+            $branchProbe = (git rev-parse --abbrev-ref HEAD 2>$null)
+            $branchProbe | Should -Be 'HEAD' -Because 'the detached-HEAD reproduction depends on this literal, non-error return'
+
+            $key = Resolve-GateSessionKey
+            $key | Should -Not -Be 'b-HEAD' -Because 'a detached checkout must not collide on a shared branch-shaped key'
+            $key | Should -Be "sha-$sha" -Because 'a detached checkout must fall through to the sha rung'
+        }
+        finally {
+            Pop-Location
+            Remove-Item -Path $scratch -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
 
     It 'Resolve-GateSessionKey never returns the degenerate bare key (#1003 M26)' {
