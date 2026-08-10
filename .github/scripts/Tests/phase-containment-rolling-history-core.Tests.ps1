@@ -3429,7 +3429,7 @@ Describe 'Get-PhaseContainmentHistory — issue #876 F1: default CachePath const
     It 'does not throw a null-binding error building the default CachePath when $env:TEMP is unset and no -CachePath is supplied' {
         # Only Windows conventionally sets $env:TEMP; PowerShell Core on
         # Linux/macOS leaves it unset by default. A prior version called
-        # `Join-Path $env:TEMP "..."` for the default CachePath, which
+        # `Join-Path ([System.IO.Path]::GetTempPath()) "..."` for the default CachePath, which
         # throws a terminating parameter-binding error the instant
         # $env:TEMP is $null -- reproducible even on this Windows host once
         # the variable is cleared (confirmed manually).
@@ -3450,7 +3450,7 @@ Describe 'Get-PhaseContainmentHistory — T1 partial-preservation on inter-surfa
         if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {
             Remove-Item -Path Function:gh -ErrorAction SilentlyContinue
         }
-        $tempCache = Join-Path $env:TEMP '.phase-containment-cache-Grimblaz-agent-orchestra-t1.json'
+        $tempCache = Join-Path ([System.IO.Path]::GetTempPath()) '.phase-containment-cache-Grimblaz-agent-orchestra-t1.json'
         if (Test-Path -LiteralPath $tempCache) { Remove-Item -LiteralPath $tempCache -Force -ErrorAction SilentlyContinue }
     }
 
@@ -3499,7 +3499,7 @@ apparatus_meta: false
             return '{}'
         }
 
-        $cachePath = Join-Path $env:TEMP '.phase-containment-cache-Grimblaz-agent-orchestra-t1.json'
+        $cachePath = Join-Path ([System.IO.Path]::GetTempPath()) '.phase-containment-cache-Grimblaz-agent-orchestra-t1.json'
         $result = Get-PhaseContainmentHistory -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 30 -TimeoutSeconds 1 -CachePath $cachePath 3>$null
 
         $result.Source    | Should -Be 'graphql'
@@ -3589,7 +3589,7 @@ Describe 'Get-PhaseContainmentHistory — InvalidEntryCount does not leak across
         if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {
             Remove-Item -Path Function:gh -ErrorAction SilentlyContinue
         }
-        $tempCache = Join-Path $env:TEMP '.phase-containment-cache-Grimblaz-agent-orchestra-m2.json'
+        $tempCache = Join-Path ([System.IO.Path]::GetTempPath()) '.phase-containment-cache-Grimblaz-agent-orchestra-m2.json'
         if (Test-Path -LiteralPath $tempCache) { Remove-Item -LiteralPath $tempCache -Force -ErrorAction SilentlyContinue }
     }
 
@@ -3641,7 +3641,7 @@ introduced_phase: NOT-A-VALID-PHASE
             return '{}'
         }
 
-        $cachePath = Join-Path $env:TEMP '.phase-containment-cache-Grimblaz-agent-orchestra-m2.json'
+        $cachePath = Join-Path ([System.IO.Path]::GetTempPath()) '.phase-containment-cache-Grimblaz-agent-orchestra-m2.json'
         $result = Get-PhaseContainmentHistory -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 30 -CachePath $cachePath -TimeoutSeconds 30 3>$null
 
         $result.Source            | Should -Be 'rest'
@@ -3655,7 +3655,7 @@ introduced_phase: NOT-A-VALID-PHASE
 
 Describe 'Get-PhaseContainmentHistory — InvalidEntryCount cache-survival (issue #772 P7)' {
     BeforeAll {
-        $script:CachePathP7 = Join-Path $env:TEMP '.phase-containment-cache-Grimblaz-agent-orchestra-p7.json'
+        $script:CachePathP7 = Join-Path ([System.IO.Path]::GetTempPath()) '.phase-containment-cache-Grimblaz-agent-orchestra-p7.json'
     }
 
     AfterEach {
@@ -3737,7 +3737,7 @@ introduced_phase: NOT-A-VALID-PHASE
 
 Describe 'Get-PhaseContainmentHistory — M1 cache-write guard (issue #772/#831 M1)' {
     BeforeAll {
-        $script:CachePathM1 = Join-Path $env:TEMP '.phase-containment-cache-Grimblaz-agent-orchestra-m1.json'
+        $script:CachePathM1 = Join-Path ([System.IO.Path]::GetTempPath()) '.phase-containment-cache-Grimblaz-agent-orchestra-m1.json'
     }
 
     AfterEach {
@@ -3818,7 +3818,7 @@ Describe 'Get-PhaseContainmentHistory — M1 cache-write guard (issue #772/#831 
 
 Describe 'Get-PhaseContainmentHistory — Matched/AuthorFilteredCount cache-survival (issue #842 M2)' {
     BeforeAll {
-        $script:CachePathM2 = Join-Path $env:TEMP '.phase-containment-cache-Grimblaz-agent-orchestra-m2round.json'
+        $script:CachePathM2 = Join-Path ([System.IO.Path]::GetTempPath()) '.phase-containment-cache-Grimblaz-agent-orchestra-m2round.json'
     }
 
     AfterEach {
@@ -3901,7 +3901,7 @@ Describe 'Get-PhaseContainmentHistory — Matched/AuthorFilteredCount cache-surv
 
 Describe 'Get-PhaseContainmentHistory — SkipCacheWrite suppresses the bypass-path orphan cache file (issue #842 M5)' {
     BeforeAll {
-        $script:BypassCachePathM5 = Join-Path $env:TEMP "phase-containment-bypass-$([guid]::NewGuid().ToString('N')).json"  # host-path-ok
+        $script:BypassCachePathM5 = Join-Path ([System.IO.Path]::GetTempPath()) "phase-containment-bypass-$([guid]::NewGuid().ToString('N')).json"  # host-path-ok
     }
 
     AfterEach {
@@ -3952,7 +3952,7 @@ Describe 'Get-PhaseContainmentHistory — SkipCacheWrite suppresses the bypass-p
     }
 
     It 'DOES write the cache file when -SkipCacheWrite is NOT set, on the same successful fetch shape (control case)' {
-        $controlCachePath = Join-Path $env:TEMP "phase-containment-bypass-control-$([guid]::NewGuid().ToString('N')).json"  # host-path-ok
+        $controlCachePath = Join-Path ([System.IO.Path]::GetTempPath()) "phase-containment-bypass-control-$([guid]::NewGuid().ToString('N')).json"  # host-path-ok
         try {
             $validBody = "<!-- plan-issue-1801 -->`n<!-- phase-containment-1801 -->`nfinding_key: plan-stress-test:1801:F1`nintroduced_phase: plan`ncatchable_phase: plan`ncaught_stage: plan-stress-test`nescape_distance: 0`nseverity: low`nsystemic_fix_type: plan-template`ncategory: pattern`napparatus_meta: false`n<!-- /phase-containment-1801 -->"
 
@@ -4009,7 +4009,7 @@ Describe 'Get-PhaseContainmentHistory — SkipCacheWrite suppresses the bypass-p
 
 Describe 'Get-PhaseContainmentHistory — bracketed cache filename write/read consistency (issue #842 M7)' {
     BeforeAll {
-        $script:CachePathM7 = Join-Path $env:TEMP '.phase-containment-cache-Grimblaz-agent-orchestra-github-actions[bot].json'  # host-path-ok
+        $script:CachePathM7 = Join-Path ([System.IO.Path]::GetTempPath()) '.phase-containment-cache-Grimblaz-agent-orchestra-github-actions[bot].json'  # host-path-ok
     }
 
     AfterEach {
