@@ -1,6 +1,6 @@
 <!-- audit-meta
-last-verified: 0f5728e859b9bcd20d3b22124f15c926d1621b29
-generated-at: 2026-08-10T02:49:13Z
+last-verified: d9f8e080ada6631eab00084095b5326fda287d6f
+generated-at: 2026-08-10T08:22:43Z
 -->
 
 ## Purpose
@@ -283,7 +283,7 @@ Copilot always reads from the source tree in the hub repo. This dual-resolved be
 - **examples**:
   - `.github/scripts/lib/cost-walker-copilot.ps1`
   - `.github/scripts/lib/frame-credit-ledger-core.ps1`
-- **notes**: Shared library scripts loaded by root hook scripts under .github/scripts/lib/. Sourced as dependencies at runtime; missing lib script propagates as a visible-warning from the calling hook.
+- **notes**: Shared library scripts under .github/scripts/lib/. The family's dominant member is a dependency of a root hook script, sourced at runtime, where a missing lib script propagates as a visible-warning from the calling hook — that is what claude_resolves, experience and requires_version_bump above describe. The family is NOT uniform in that respect, and saying so is cheaper than a second family: a hub-only member such as .github/scripts/lib/lesson-promotion-core.ps1 (#1049) is dot-sourced from the SOURCE TREE by a Pester suite that never runs in a consumer install, is never resolved from the plugin cache, and its absence is a CI test failure rather than a hook warning. Read the row as the hook-loaded case; check the member before relying on it for a hub-only library.
 
 ### `.github/scripts/Tests/*.json`
 
@@ -449,6 +449,16 @@ Copilot always reads from the source tree in the hub repo. This dual-resolved be
 - **examples**:
   - `Documents/INDEX.md`
 - **notes**: Generated project-reference documentation index in consumer repos. Not a hub distribution artifact; refreshed by /setup-references from the active repo's reference sidecars. Attempting to resolve it from the plugin cache or another repo is a wasted tool call.
+
+### `Documents/Planning/*.json`
+
+- **claude_resolves**: source-tree
+- **copilot_resolves**: source-tree
+- **requires_version_bump**: false
+- **experience**: wasted-tool-call
+- **examples**:
+  - `Documents/Planning/lesson-promotion-manifest.json`
+- **notes**: Hub-repo planning data consumed by a hub-only guard — the lesson-promotion manifest read by .github/scripts/lib/lesson-promotion-core.ps1 via .github/scripts/Tests/lesson-promotion-manifest.Tests.ps1 (#1049). Cited in backticks from three shipped skill bodies as the authoritative source for which maintainer lessons were promoted and where they live, which is why it enters the inventory at all. The manifest itself is hub-repo content and is never resolved at runtime by a consumer install: a consumer session that follows the citation performs a wasted tool call and proceeds with the lens sections it already loaded, which carry the lessons' actual content. Editing the manifest does not require a plugin version bump — the lens sections and descriptions it describes are the entry points, and those carry the bump.
 
 ### `Documents/Planning/*.yaml`
 

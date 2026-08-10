@@ -4,6 +4,12 @@ All notable changes to agent-orchestra will be documented in this file.
 
 ## [Unreleased]
 
+## [3.21.0] — 2026-08-10
+
+### Added
+
+Lesson-promotion manifest, standing check, and 19 promoted maintainer lessons: verification-before-completion, plan-authoring, and adversarial-review gain lens sections and description triggers; the three validating agent bodies gain unconditional mandated loads; terminal-hygiene's description now names the PowerShell-language conditions where its traps file bites (#1049).
+
 ## [3.20.0] — 2026-08-10
 
 ### Added

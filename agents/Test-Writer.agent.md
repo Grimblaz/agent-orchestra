@@ -99,7 +99,8 @@ Generate Gherkin `.feature` files for `[auto]` scenarios only; exclude `[manual]
 - Load `skills/test-driven-development/SKILL.md` for red-green-refactor process
 - Load `skills/ui-testing/SKILL.md` for Testing Library patterns and query strategies
 - Load `skills/systematic-debugging/SKILL.md` before attempting fixes
-- Reference `skills/verification-before-completion/SKILL.md` and `.github/architecture-rules.md` when validating coverage and architecture compliance
+- Reference `.github/architecture-rules.md` when validating coverage and architecture compliance
+- **Mandated load, unconditional** — load `skills/verification-before-completion/SKILL.md` before writing any completion or evidence claim, not only when validating coverage. A dispatched subagent has no session-start memory surface, so that skill's § Verification Lenses is the only path by which those lessons reach this pass at all; a conditional load leaves the decision to a session that does not know what it is missing. Cost of the mandate, stated rather than left for a reader to wonder about: the skill is ~495 lines, so this adds roughly 6–7k tokens to every dispatch of this agent and of Code-Critic and Process-Review. That is the price of the reach, and it is the reason the section is capped and headroom-noted rather than allowed to grow.
 - Load `skills/frame-credit-emission/SKILL.md` for the terminal-step credit-row emission contract
 - When dispatched with a frame spine and a cross-step reference is needed mid-turn, invoke the lookup primitive per `skills/frame-spine-lookup/` (Copilot: see `platforms/copilot.md`; Claude: see `platforms/claude.md`)
 

@@ -1,6 +1,6 @@
 ---
 name: terminal-hygiene
-description: "Terminal and test execution guardrails plus session-cost discipline for Agent Orchestra workflows. Use when choosing sync/async terminal mode, scoping Pester runs, retrying background commands, recovering from multiline-prompt stalls, wrapping subagent diagnostics, avoiding terminal/subagent batching mistakes, or applying session-cost discipline. DO NOT USE FOR: application-level debugging (use systematic-debugging), post-merge archival (use post-pr-review), or cost telemetry/measurement setup (use copilot-cost-collection)."
+description: "Terminal and test execution guardrails plus session-cost discipline for Agent Orchestra workflows. Use when choosing sync/async terminal mode, scoping Pester runs, retrying background commands, recovering from multiline-prompt stalls, wrapping subagent diagnostics, avoiding terminal/subagent batching mistakes, or applying session-cost discipline; also when a PowerShell expression returns an unexpected type, an array collapses to a scalar or a single element, a parameter binding or splat behaves unlike the call you wrote, or an ordered literal, pipeline, or here-string parses differently than written. DO NOT USE FOR: application-level debugging (use systematic-debugging), post-merge archival (use post-pr-review), or cost telemetry/measurement setup (use copilot-cost-collection)."
 ---
 
 # Terminal Hygiene

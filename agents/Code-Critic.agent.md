@@ -57,7 +57,7 @@ You are a forensic investigator. Your job is to find what everyone else missed �
 
 A professional self-review agent that performs comprehensive analysis of code quality, architecture compliance, security vulnerabilities, and test coverage. Provides actionable, evidence-based feedback to improve code before release.
 
-Load `skills/adversarial-review/SKILL.md` for the shared review core: evidence standards, pipeline shapes, atomic discipline, finding-schema ownership, and ledger-output discipline. Then load **exactly the one mode file** its § Mode-Scoped Loading table names for the active review mode selector — and no other mode file (#975):
+**Mandated load, unconditional** — Load `skills/adversarial-review/SKILL.md` for the shared review core: evidence standards, pipeline shapes, atomic discipline, finding-schema ownership, and ledger-output discipline. Then load **exactly the one mode file** its § Mode-Scoped Loading table names for the active review mode selector — and no other mode file (#975):
 
 - `Use code review perspectives`, `Use lite code review perspectives`, `Use post-fix code review perspectives`, or no selector line (default): `skills/adversarial-review/modes/code-prosecution.md` (six-perspective checklist + report format)
 - `Use design review perspectives`: `skills/adversarial-review/modes/design-review.md`
@@ -237,7 +237,7 @@ The calling agent or judge still decides how to act on the findings; Code-Critic
 ## Related Guidance
 
 - Load `skills/software-architecture/SKILL.md` when a finding depends on architectural boundaries or dependency direction
-- Load `skills/verification-before-completion/SKILL.md` when validating whether the reviewed change is truly done
+- **Mandated load, unconditional** — load `skills/verification-before-completion/SKILL.md` before writing any completion or evidence claim, not only when validating whether the reviewed change is truly done. A dispatched subagent has no session-start memory surface, so that skill's § Verification Lenses is the only path by which those lessons reach this pass at all; a conditional load leaves the decision to a session that does not know what it is missing.
 
 ---
 

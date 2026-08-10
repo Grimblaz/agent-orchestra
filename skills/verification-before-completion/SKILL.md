@@ -1,6 +1,6 @@
 ---
 name: verification-before-completion
-description: "Evidence-based verification checklist before marking work complete. Use before PRs, releases, marking tickets done, or any \"I'm finished\" declaration. DO NOT USE FOR: post-merge cleanup or archival (use post-pr-review) or processing GitHub review comments (use code-review-intake)."
+description: "Evidence-based verification checklist before marking work complete. Use before PRs, releases, marking tickets done, or any \"I'm finished\" declaration; also when naming a baseline commit for a differential suite claim, when designing a mutation campaign or red-run evidence, and when making an absence claim, a universal claim, or a one-time demonstration offered as a standing guarantee. DO NOT USE FOR: post-merge cleanup or archival (use post-pr-review) or processing GitHub review comments (use code-review-intake)."
 ---
 
 # Verification Before Completion
@@ -293,6 +293,58 @@ The first four object to vagueness, staleness, and unverified assumption. Of the
 - ❌ Evidence that the change is *present* offered as evidence that it is *sufficient* — a diff, a field that was added, a term that now appears in a document
 - ❌ A number with no population behind it — "most cases", "all the ones I checked" (not attributed)
 - ❌ A consistency check that passes when nothing moved (agreement across locations is not the same as change)
+
+## Verification Lenses
+
+> **Authoritative source**: which lessons are promoted here, what anchor each one lives at, and the trigger text that has to reach a reader are recorded in `Documents/Planning/lesson-promotion-manifest.json`. `.github/scripts/Tests/lesson-promotion-manifest.Tests.ps1` is what stops this section and that manifest drifting apart, and it is the suite a red comes from. **Renaming a heading below is a migration, not a regression** — update that lesson's `anchor` in the manifest in the same commit as the rename. A red naming an anchor you just renamed is reporting a manifest row left behind, not a lost lens.
+
+Nine ways verification evidence passes while proving nothing. Every one is an escape from this repository's own review record, and every one survived the checklists above — a checklist asks whether you produced evidence, and these ask whether the evidence could ever have come out negative.
+
+**Headroom, stated because the next addition is the one that crosses silently.** This file is 495 lines against the 500-line structural limit, and the suite that would enforce that limit is quarantined. A tenth lens does not fit here: move this section to a `references/` file first, and give it a manifest exhibit row when you do.
+
+### When you are naming a baseline commit for a differential suite claim
+
+#### A baseline that is not an ancestor makes the differential rule vacuous
+
+Stated in full at § Which commit may be named as the baseline and in `CLAUDE.md` § What a finished run is true of, property 3 — read the rule there rather than re-deriving it here. What this lens adds is the generalisation those two do not make: **the same hole opens wherever an absolute threshold is replaced by a relative one**. Whenever you write a relative rule, ask who picks the reference point and what stops them picking one that makes the comparison trivial.
+
+#### A differential script baselined on `HEAD` inverts the moment you commit
+
+A verification script that reads the "before" side with `git show HEAD:<file>` is correct only until the work is committed. After that, `HEAD` *is* the changed tree, so every "this text was absent pre-change and is present now" assertion compares the new tree against itself. The loud direction is a false red — 25 checks went red at once on #939 that way. The dangerous direction is silent: a check written as "the defect is *gone* now" passes vacuously against a baseline that never had it. Pin the base to an explicit SHA in a named variable, say in a comment why it is pinned, and grep for **every** `git show HEAD:` when repointing — one missed read is enough. A fix round needs a second pinned baseline too: the reviewed commit, so each fix check asserts the defect existed at the commit the reviewer saw.
+
+#### Run the criterion's own discriminator against the untouched tree before you trust it
+
+A proof standard goes vacuous the same way a test does. Before shipping a criterion that says "X and Y differ", build X and Y at the **unmodified** baseline and confirm the comparison comes out negative. On #969 it did not: all three review lenses built the criterion's own two corpora at unmodified `HEAD` and got the difference the criterion demanded, because the two inputs differed in more than the one variable under test — the denominator, the partition membership, and the exclusion note all moved too. The tell is exactly that: **what else differs between X and Y for reasons unrelated to the work?** If anything does, the criterion is measuring that instead. Hold everything constant except the property being discriminated, and name the span being compared.
+
+### When you are designing a mutation campaign or red-run evidence
+
+#### A mutation campaign that only touches sites the suite already covers proves nothing
+
+"22 mutations, each turns exactly one test red" reads as strong evidence and can be almost worthless. On #1018 that campaign came back 22 of 22 red, and a reviewer running **six** mutations found **four** that turned *zero* tests red — because the sites had been chosen, unconsciously, from the code the tests were written against. Pick sites from the **deliverable**, not from the test file: enumerate what ships, then ask which of it any test would notice changing. Mutate **both** polarities of every comparison you introduced, not just "remove the guard". Mutate the **prose** when the prose is the deliverable, and mutate rows a *later* fix added rather than only those present when the pins were written. An all-red campaign is the floor, not the verdict — state how the sites were chosen. And a mutation that comes back **green is a finding about the evidence**, never one that "did not apply": it reports that something ships which no assertion holds, which is the most informative result the campaign can produce. Record it against the check rather than dropping it as inapplicable.
+
+#### A red run at deliverable grain says nothing about the deliverable's sub-properties
+
+Deleting a whole deliverable in a scratch copy removes the one salient literal its pin asserts, so the pin fires and the red run looks conclusive. Its *other* claims — what it is conditioned on, where its output lands, who can reach it — were never separately asserted, so each stays independently deletable. On #973 four deliverables "proved" held, and mutation at sub-property grain came back 64 of 64 green three times over. **Enumerate the claims a criterion makes, not the features it adds, and mutate once per claim**: if only this clause vanished, which assertion goes red? Two shapes always worth mutating separately — a conditioning clause ("when the target is X"), whose deletion silently widens scope, and a named landing surface ("the answer lands in Y"), whose deletion sends the output nowhere while every other pin stays green.
+
+### When you are making an absence claim, a universal claim, or a one-time demonstration offered as a standing guarantee
+
+#### A witness can falsify a universal but never establish one
+
+Proof standards get derived by asking what a convincing *demonstration* would look like. That instinct is right for existentials and wrong for universals, and an executor grades against the proof standard — so a criterion stating "no X anywhere" with a one-fixture proof standard is passable by a run that built one fixture. Partition criteria by logical form **before** writing any proof standard. Existential claims take demonstration-shaped proof. Universal claims take a **standing check that executes the quantifier on every run**, not the transcript of it holding once. Value-domain claims are exercised over the whole domain — absent, `false` and `true` are three cases, and a standard testing only *absent* rewards the scrupulous run and catches only the omitting one.
+
+And every absence claim ships a **planted positive control, planted where the search is weakest**. "No X found" and "nothing looked for X" are the same evidence otherwise — but a plant in the shape the search was built around only proves the search can return *something*. On #977 an audit ran three phrasings, planted a positive of the form the phrasings were written for, saw all three flag it, and published "no second instance"; review then found five missed sites, all of a shape every phrasing's regex was structurally blind to. Before planting, ask: **what shape would my search miss, and is that what I am about to plant?**
+
+#### A bounded read window produces a false absence, and the window gets recorded as the evidence
+
+`Read` with `offset`/`limit` bounds the evidence, not the question; nothing in the output says "the window ended here." On #968 a context read as lines 250–339 produced an "uncovered" finding whose covering block opens at line **340**, and the resulting evidence row cited the window and was tagged verified — the error laundered into a certification before any reviewer saw it. For an **absence** claim, never bound the read: grep the whole file, or the whole tree. Counting claims need a mechanical count over the full span, not an eyeball over a window. And note the directional tell, which is the real lesson: grounding errors run in the direction that favours the conclusion you are arguing for, so audit absence claims for that bias specifically.
+
+#### A demonstration at delivery is not a regression guard
+
+*"Run controls at delivery and record the output"* buys one dated observation, satisfiable by a transcript — and the property it certifies starts decaying the moment the criterion is satisfied, with no signal. *"Ship a regression guard that exercises each axis against a modified copy"* buys the property over time and costs barely more to write. On #986 the delivery controls passed and review then found three inputs already reaching `clean` on a defective index, on the very axes those controls had certified — because each control had been planted where the check was strong. Ask at criterion-authoring time: **after this run ends, what re-checks this?** If the answer is "a person re-reading an issue comment", the criterion bought a demo, not a guard. This is a *plan*-phase fix, not a review-phase one: a criterion is what the executor builds to.
+
+#### Point the instrument at the real target, and build the negatives first
+
+Two checks that beat unit-level test-first at catching the expensive defects, because their unit is a population and a specification rather than a function. **Run it against the real target on day one**: fixtures are shaped by the same understanding that shaped the code, so they agree with it. On #1018 a fix was correct and never reached the population it existed for — identity-keying and name-keying are the same operation when every identity is unbound, which is true of 100% of the live corpus, and thirty seconds pointing the instrument at that corpus would have shown it. **Build each acceptance criterion's negative construction before the implementation**: built last, negatives get shaped to fit what you wrote rather than to the criterion. Standing caveat — this is one session's evidence; the phase-containment ledger is the instrument for whether it is systemic, and no lane changes on n=1.
 
 ## Verification Log Template
 

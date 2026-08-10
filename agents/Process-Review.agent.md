@@ -563,4 +563,4 @@ After completing the retrospective analysis and before handing off, emit a frame
 **Reusable retrospective methodology:**
 
 - Load `skills/process-analysis/SKILL.md` for standard retrospective workflow, report structure, scenario routing, and skill-usage audits
-- Reference `skills/verification-before-completion/SKILL.md` when the review needs evidence-based completion checks
+- **Mandated load, unconditional** — load `skills/verification-before-completion/SKILL.md` before writing any completion or evidence claim, not only when the review needs evidence-based completion checks. A dispatched subagent has no session-start memory surface, so that skill's § Verification Lenses is the only path by which those lessons reach this pass at all; a conditional load leaves the decision to a session that does not know what it is missing.

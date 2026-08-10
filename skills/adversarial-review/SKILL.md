@@ -1,6 +1,6 @@
 ---
 name: adversarial-review
-description: "Reusable adversarial review methodology for prosecution, defense, design challenge, and proxy review passes. Use when reviewing code, plans, designs, or external review ledgers with evidence-first rigor. DO NOT USE FOR: final judgment ownership, GitHub intake routing, or fix execution decisions (use review-judgment or code-review-intake)."
+description: "Reusable adversarial review methodology for prosecution, defense, design challenge, and proxy review passes. Use when reviewing code, plans, designs, or external review ledgers with evidence-first rigor; also when prosecuting a remedy for the defect class it closes, when a change demotes or removes a signal, and when judging whether a proposed guard or a substring pin actually holds. DO NOT USE FOR: final judgment ownership, GitHub intake routing, or fix execution decisions (use review-judgment or code-review-intake)."
 ---
 
 <!-- platform-assumptions: markdown skill guidance for VS Code custom agents in Agent Orchestra; assumes the calling agent retains read-only boundaries, mode routing, and finding-schema ownership. -->
@@ -104,6 +104,34 @@ Use the smallest checks that can disconfirm or support a suspected defect:
 Write findings so a defense or judge pass can act on them without reconstructing your reasoning from scratch. Avoid vague summaries such as "looks risky" or "might break stuff."
 
 Coverage and economy are orthogonal axes, not a single dial: coverage governs whether a finding is reported at all — maximize it, reporting every finding with a statable failure mode regardless of severity or confidence — while economy governs how tersely a reported finding is written. Economy never justifies dropping a real finding; it only controls how much prose surrounds it.
+
+## Review Lenses
+
+> **Authoritative source**: which lessons are promoted here, what anchor each one lives at, and the trigger text that has to reach a reader are recorded in `Documents/Planning/lesson-promotion-manifest.json`. `.github/scripts/Tests/lesson-promotion-manifest.Tests.ps1` is what stops this section and that manifest drifting apart, and it is the suite a red comes from. **Renaming a heading below is a migration, not a regression** — update that lesson's `anchor` in the manifest in the same commit as the rename. A red naming an anchor you just renamed is reporting a manifest row left behind, not a lost lens.
+
+Five failure modes a lens-based sweep reads past, each drawn from a pass where it did.
+
+### When a remedy, a guard, a signal change, or a pin is the thing under review
+
+#### A remedy for a silent defect reproduces that defect inside itself
+
+When the thing being fixed is *silence*, the dominant failure mode is the fix re-enacting it. On PR #1006 a five-pass panel sustained **six** findings that were exactly that. Run this checklist against your own remedy: does its own output contain the shape it detects — read your output back through your own detector, and use a placeholder rather than a live literal. Can your safety check fail at all. Does a guard's predicate match the comment beside it (a *count* where the comment says *membership*). Does a diagnosis assert a cause its trigger does not establish. Does a counter double-count or shadow. Is the bound on the right half — two implementations answering the same question must share their load-bearing rules, and if they diverge, write down which is which at the divergence. Sequencing, not vigilance, is the lesson: running the acceptance criteria tests the contract's claims, and only a pass aimed at the **fix diff itself** asks whether a fix introduced a new defect or failed to close what it claims. Those are different questions. And whenever a fix adds a new outcome or branch, ask who controls the inputs that route to it.
+
+#### A "nothing was lost" check assembled from a partition of its own input cannot fail
+
+A preflight that records the input as prose-segments interleaved with replaced-spans, then asserts their concatenation equals the original, is true by construction — both lists are slices of the input. It never touches the output being written, and it stays green while the written body loses the prose. The reasoning that makes it *feel* rigorous is the trap: "comparing the two outputs would be circular, since anything silently dropped would be absent from both" is right about the wrong direction. **Name the artifact your check reads and confirm it is the one that ships.** If every value in the assertion derives from the input, the check cannot observe the transform at all. Both halves are needed and catch different things: input equals partition-of-input catches a misjudged region extent; every segment appearing in order **in the output that gets written** catches dropped content.
+
+#### A proposed guard has two cheap falsifiers nobody runs
+
+Before agreeing that "we should add a guard for X", run both. **Is the motivating instance even inside the guard's population?** A guard scoped to tracked files cannot see a claim made in an issue comment, a PR description, or a brief's epistemic map — on #1000 the entire filing rested on one failure that occurred during authoring in a comment, and a tree-scoped grep confirmed no tracked file made a claim of that shape at all. **Has the covered population ever actually drifted?** `git log -S "<the exact referenced string>"` answers it in one command; on #1000 it returned two commits, both *adding* references, zero corrections ever. Both checks require searching a different scope than the one that feels natural — grep for the claim *shape* rather than the referenced token, and search history rather than `HEAD`. A `HEAD`-scoped grep counts the surface and never the events, which makes the exposure look large. Corollary: if the register the references point at is append-only, the reference-breaking mutation cannot occur without a policy change.
+
+#### Demoting a signal orphans whatever it was the sole producer of
+
+An amendment that weakens, demotes, or removes a signal reasons carefully about the direction it is fixing and never asks what else that signal was the only source of. On #922 an amendment demoted one check to inconclusive in both directions; the consequence was that no git-only signal could produce a conclusive negative at all, one decision had no constructible input, and the acceptance criterion that same amendment added was unsatisfiable. Three prosecution lenses missed it — only the convergence cold read caught it, because a lens reads the amendment against the design and the tree while nobody enumerates the *return values* of the function being changed. **Mechanically: grep every `return` in the changed function and ask, per distinct output value, is this the only path that produces it?** If yes, that value's downstream consumers are orphaned and the amendment must say what replaces them. Related: treat an amendment's own "does not regress" claim as a finder-worthy hypothesis, never as grounding.
+
+#### A test asserting that a name appears in a script pins nothing
+
+Reading a script as text and asserting its function names appear is not a pin. On #1018 the remediation for "every gate is reachable only from the test suite" was pinned exactly that way — `Get-Content -Raw` plus five `Should -Match` on names. A post-fix pass replaced the gate call with a hard-coded allow and left the name in a trailing comment: the shipped gate returned allowed, exit 0, for a move it exists to refuse, and all 86 tests stayed green. That is the original finding reproduced one level down inside its own fix. **Invoke the entry point and assert on the exit code.** In PowerShell `& .\s.ps1 -Args` runs the script in a child *scope*, not a child process, so its `exit N` sets `$LASTEXITCODE` and the caller continues — end-to-end coverage of parameter binding, the gate call and the exit code costs nothing and spawns no child shell.
 
 ## Related Guidance
 
