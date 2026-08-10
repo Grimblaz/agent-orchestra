@@ -6,30 +6,36 @@
 # happened to each one durably enough for three later chunks to read.
 #
 # WHY THIS EXISTS (issue #1035, chunk 1 of 4 under #993). The gate selects a
-# glob minus a quarantine. 191 of 252 suites are quarantined; 189 of those
-# carry class `unclassified`, which is not a decision — they were omitted by an
-# allowlist that no longer exists and their CI-viability has never been
-# measured anywhere but a maintainer's Windows machine. #1036 must split those
-# into "promote it" and "it structurally cannot run here", and its charter says
-# that split happens WITH A FAILURE MESSAGE IN HAND rather than by reading
-# source and guessing. #1037 must size shards from a measured per-suite
-# duration distribution over the whole population. Neither input exists.
+# glob minus a quarantine. When this shipped, 191 of 252 suites were
+# quarantined and 189 of those carried class `unclassified`, which is not a
+# decision — they were omitted by an allowlist that no longer exists and their
+# CI-viability had never been measured anywhere but a maintainer's Windows
+# machine. #1036 must split those into "promote it" and "it structurally
+# cannot run here", and its charter says that split happens WITH A FAILURE
+# MESSAGE IN HAND rather than by reading source and guessing. #1037 had to size
+# the gate's fan-out from a measured per-suite duration distribution over the
+# whole population. Neither input existed. (The live figures move as chunks
+# land; #1037 promoted one entry, so the counts above are this file's own
+# starting point, not a claim about today's tree. Derive the current ones from
+# `Get-CISuiteSelection`, which is what this audit itself does.)
 #
 # WHY IT COULD NOT JUST REUSE THE SHARDED RUNNER. `pester-sharded-core.ps1`
 # emits counts and never a message, so a row saying `fail=3` cannot tell #1036
 # whether a suite has a Linux path bug or needs a live `gh`. It also imposes no
-# bound: `Start-Process -Wait` takes none and no workflow here sets
-# `timeout-minutes`, so a suite that never returns occupies its slot to
-# GitHub's 360-minute ceiling and is neither a pass, a failure, nor a reported
-# skip. This audit attempts, by design, exactly the population most likely to
-# contain one.
+# PER-SUITE bound: `Start-Process -Wait` takes none, and while #1037 has since
+# bounded the gate's JOB, a job-level limit ends the whole check rather than
+# attributing the stall to a suite and carrying on. A suite that never returns
+# is still neither a pass, a failure, nor a reported skip there. This audit
+# attempts, by design, exactly the population most likely to contain one.
 #
 # FOUR TERMINAL STATES, NOT THREE. passed / failed / did-not-complete /
 # executed-no-tests. The fourth is load-bearing: a `Describe` behind a platform
-# guard completed, did not fail, and must never read as passed — and the
-# sharded runner gets it wrong in BOTH directions (it increments $totalFailed
-# for a zero-discovery suite at :681, while an all-skipped suite reaches exit 0
-# with Failed = 0 and reads as green).
+# guard completed, did not fail, and must never read as passed. The sharded
+# runner got this wrong in BOTH directions when this audit was written — it
+# folded a zero-discovery suite into the run's TEST-failure total, while an
+# all-skipped suite reached exit 0 and read as green. #1037 corrected both; the
+# state vocabulary here is unchanged, and the two now agree that a suite which
+# executed no tests is not a pass.
 #
 # NO FILE-SCOPE Set-StrictMode HERE. Same reason ci-suite-selection-core.ps1
 # gives: this file is dot-sourced into sessions that then run other people's
@@ -775,7 +781,7 @@ function Get-CIGlobAuditDurationAccount {
         emitting output the record needs. That drain is wall clock the stopwatch
         keeps counting, so a suite that exited in one second and left a
         pipe-holding descendant behind lands in the record at eleven — and
-        #1037 sizes shards from exactly these durations.
+        #1037 derived the gate's fan-out width from exactly these durations.
 
         FLAGGING THE ROW AS CONTAMINATING LATER ROWS IS A DIFFERENT STATEMENT.
         The record already says a held pipe contaminates the rows that follow it
@@ -1124,7 +1130,8 @@ function Invoke-CIGlobAuditSuite {
         ElapsedMs            = $duration.ElapsedMs
         # Named separately because the record must be able to say which is
         # which: a row whose descendant held the pipe absorbs up to the kill
-        # grace of drain into its total, and #1037 sizes shards from these.
+        # grace of drain into its total, and #1037 derived the gate's fan-out
+        # width from these.
         DrainMs              = $duration.DrainMs
         SuiteMs              = $duration.SuiteMs
         BoundSeconds         = $TimeoutSeconds
@@ -1495,19 +1502,19 @@ function Get-CIGlobAuditEnvironmentStatement {
         },
         [PSCustomObject]@{
             Dimension = 'process model'
-            Gate      = 'one Invoke-Pester over all selected suites in a single pwsh process'
+            Gate      = 'one child pwsh process per selected suite, via the sharded runner; the SUITE is unbounded, the job is bounded (#1037)'
             Audit     = $ProcessModel
             Agrees    = $false
-            Basis     = 'computed: structurally divergent by the parent design (B1)'
-            Note      = 'Structurally divergent by the parent design (B1): a bound cannot be applied per suite inside one shared process. A duration measured one way does not predict the same suite measured the other.'
+            Basis     = 'computed: same granularity since #1037, still divergent on the bound — the audit bounds and kills each suite, the gate bounds only the whole job'
+            Note      = 'Until #1037 this was divergent on GRANULARITY: the gate ran one shared Invoke-Pester, so a per-suite bound could not be applied at all. The gate now runs one process per suite as this audit does, and what survives is the bound — this audit kills a suite at its own limit and records it; the gate lets a suite run until the job''s limit expires and takes the whole job with it. A duration measured here still does not predict the same suite under the gate, but the reason is now CONTENTION (see the concurrency row), not the process model.'
         },
         [PSCustomObject]@{
             Dimension = 'concurrency'
-            Gate      = 'one job, one process, no parallelism'
+            Gate      = 'one job, N suite processes at a time on one runner (#1037; N derived from this audit''s own distribution)'
             Audit     = $Concurrency
             Agrees    = $false
-            Basis     = 'computed: the audit fans out across jobs; the gate does not'
-            Note      = 'Divergent, and stated because R7 depends on it: per-suite wall clock is only a usable distribution if nothing else ran on that runner at the same time.'
+            Basis     = 'computed: both fan out, and differently — the audit spreads suites across runners one at a time each, the gate runs several at once on one runner'
+            Note      = 'Divergent, and stated because R7 depends on it: per-suite wall clock is only a usable distribution if nothing else ran on that runner at the same time. That holds for THIS side and does not hold for the gate''s, which is why a duration measured here sizes the gate''s fan-out but does not predict its wall clock. Before #1037 the gate had no parallelism at all; the divergence has changed shape, not disappeared.'
         },
         [PSCustomObject]@{
             Dimension = 'PowerShell version'
@@ -1566,12 +1573,12 @@ function Get-CIGlobAuditEnvironmentStatement {
         },
         [PSCustomObject]@{
             Dimension = 'git identity'
-            Gate      = 'none supplied by the workflow'
+            Gate      = 'none supplied by the workflow itself; the sharded runner it now invokes supplies one AROUND ITS SEQUENTIAL SHARD (#1037)'
             Audit     = $GitIdentity
             Agrees    = $identityVerdict.Agrees
             Basis     = $identityVerdict.Basis
             Structured = $Facts['HasGitIdentity']
-            Note      = 'The sharded runner writes a temp global gitconfig for its real-git shard, which is this repository''s own evidence that a class of suites needs one. Neither the gate nor this audit supplies it.'
+            Note      = 'The verdict above is about the JOB environment, which is what this audit can observe on its own side, and there the two still match. An enumerated divergence sits underneath it: the sharded runner writes a temp global gitconfig around its sequential shard, so since #1037 the suites on that shard DO get an identity under the gate and get none here. That the runner needs one at all is this repository''s own evidence that a class of suites requires it — and this audit gives that class nothing, which is a real difference in what the two runs measure, not a formality.'
         },
         [PSCustomObject]@{
             Dimension = 'working directory'
@@ -2466,7 +2473,7 @@ function New-CIGlobAuditRecordDocuments {
     [void]$sb.AppendLine("- ``did-not-complete`` rows: $($Reachability.StalledCount)")
     [void]$sb.AppendLine("- reachable by the gate's selection: $(@($Reachability.GateReachable).Count)$(if (@($Reachability.GateReachable).Count) { ' — ' + ($Reachability.GateReachable -join ', ') })")
     [void]$sb.AppendLine("- located beneath the tests root: $(@($Reachability.TestsRootReachable).Count)$(if (@($Reachability.TestsRootReachable).Count) { ' — ' + ($Reachability.TestsRootReachable -join ', ') })")
-    [void]$sb.AppendLine("- clean: **$($Reachability.Clean)**$(if (-not $Reachability.Clean) { ' — this is a defect to escalate to #993, not a case to excuse. This chunk has no lawful remedy of its own: reclassifying a suite is #1036''s and adding `timeout-minutes` to the gate is #1037''s.' })")
+    [void]$sb.AppendLine("- clean: **$($Reachability.Clean)**$(if (-not $Reachability.Clean) { ' — this is a defect to escalate to #993, not a case to excuse. This chunk has no lawful remedy of its own: reclassifying a suite is #1036''s. The gate''s job is bounded as of #1037, so a suite that never returns now ends the check rather than holding it to the platform ceiling — but a bound is containment, not a fix: the suite still fails, and the reachability defect below is still the thing to escalate.' })")
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine('Both arms compare NORMALISED RELATIVE paths. The tests-root arm previously resolved the root to an absolute path and prefix-tested a relative row path, which is false for every row this pipeline can produce — so for the quarantined population, where the gate arm is also silent, both arms were dead at once and this line printed `clean: True` regardless.')
     [void]$sb.AppendLine('')
@@ -2568,7 +2575,7 @@ function New-CIGlobAuditRecordDocuments {
         [void]$sb.AppendLine('- **No non-contention claim is made for this run, because this run measured nothing.** No suite produced a row, so there is no duration here to be contended or uncontended. This is not a clean result; it is an absent one.')
     }
     else {
-        [void]$sb.AppendLine('- **No non-contention claim is made for this run.** Something outlived its bound or its parent, so an unknown amount of work overlapped the measurements. #1037 must not treat this run''s durations as a distribution.')
+        [void]$sb.AppendLine('- **No non-contention claim is made for this run.** Something outlived its bound or its parent, so an unknown amount of work overlapped the measurements. A consumer sizing the gate''s fan-out must not treat this run''s durations as a distribution.')
     }
     [void]$sb.AppendLine('')
 
@@ -2597,7 +2604,7 @@ function New-CIGlobAuditRecordDocuments {
 
     [void]$sb.AppendLine('### Per-suite rows')
     [void]$sb.AppendLine('')
-    [void]$sb.AppendLine("``ms`` is total wall clock the harness held the slot for this suite, and it INCLUDES the bounded drain the harness spends reading after the child has already exited or been killed. ``drain ms`` is how much of the total that drain was, and ``suite ms`` is the remainder — the suite's own cost, and the figure #1037 should size shards from. A row that exited in a second while a descendant held its output pipe reads ~11,000 ms total and ~1,000 ms suite; reading the total as the suite's cost is an order-of-magnitude error on exactly the rows the timing-integrity statement names. A ``-`` in either column means the row came from a shard partial that did not carry the figure — not that it measured zero. Read all of it against the timing-integrity statement above rather than as an unconditional measurement.")
+    [void]$sb.AppendLine("``ms`` is total wall clock the harness held the slot for this suite, and it INCLUDES the bounded drain the harness spends reading after the child has already exited or been killed. ``drain ms`` is how much of the total that drain was, and ``suite ms`` is the remainder — the suite's own cost, and the figure to size the gate's fan-out from, and the one #1037's width was derived over. A row that exited in a second while a descendant held its output pipe reads ~11,000 ms total and ~1,000 ms suite; reading the total as the suite's cost is an order-of-magnitude error on exactly the rows the timing-integrity statement names. A ``-`` in either column means the row came from a shard partial that did not carry the figure — not that it measured zero. Read all of it against the timing-integrity statement above rather than as an unconditional measurement.")
     [void]$sb.AppendLine('')
     if ($detailDocs.Count -gt 0) {
         $lastDetailMarker = if ($detailDocs.Count -gt 1) { ' .. `' + (& $detailMarkerFor $detailDocs.Count) + '`' } else { '' }

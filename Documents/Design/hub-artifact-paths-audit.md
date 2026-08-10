@@ -31,7 +31,7 @@ This audit document is produced and kept current by the following pipeline:
 
 (d) **Pester drift gate** (Step 5 test: `.github/scripts/Tests/hub-artifact-paths-coverage.Tests.ps1`): asserts that `-Diff` reports `added: 0; removed: 0; uncategorized: 0`, blocking merges when the inventory diverges from the classification.
 
-(e) **Pester CI workflow** (Step 4: `.github/workflows/pester.yml`): runs the full Pester suite on every pull request, including the extraction grammar tests and drift gate.
+(e) **Pester CI workflow** (Step 4: `.github/workflows/pester.yml`): runs a glob of `.github/scripts/Tests/` MINUS the explicit quarantine in `ci-quarantine.json` on every pull request — not the full suite — including the extraction grammar tests and drift gate. Derive the selection with `Get-CISuiteSelection`; a quarantined suite does not run here at all.
 
 (f) **Reproduction recipes for CE Gate**:
 

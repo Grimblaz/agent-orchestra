@@ -790,11 +790,11 @@ exit $LASTEXITCODE
         # positive case and its negative control — deliberately does NOT live
         # here. It is an integration claim spanning this predicate and
         # skills/session-startup/scripts/Ensure-ScratchGitignore.ps1, and this
-        # suite is not registered in .github/workflows/pester.yml's
-        # $config.Run.Path allowlist, so a regression test placed here would
+        # suite is quarantined out of .github/workflows/pester.yml's
+        # selection, so a regression test placed here would
         # never execute in CI. Both cases live in
         # .github/scripts/Tests/Ensure-ScratchGitignore.Tests.ps1 (T10/T11),
-        # which is registered and runs on every PR. Do not re-add a copy here:
+        # which is selected and runs on every PR. Do not re-add a copy here:
         # two copies of the same assertion is the two-sources-of-truth defect
         # #929 exists to remove.
     }

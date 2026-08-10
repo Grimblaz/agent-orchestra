@@ -7,6 +7,23 @@ on:
 jobs:
   pester:
     runs-on: ubuntu-latest
+    # A BOUND, not a formality (issue #1037). Before this, no job in this
+    # repository bounded itself, so a suite that never returned held the gate
+    # to GitHub's own 360-minute ceiling on every pull request until a human
+    # noticed — and the first signal is a job that looks like it is running
+    # normally. This chunk is what makes that live: it fans the gate out and
+    # promotes the corpus's most plausible non-returning worker, and #1036
+    # then promotes ~188 suites that have never executed on Linux.
+    #
+    # The arithmetic. The gate's own measured wall clock on two consecutive
+    # runs before this change was 2m11s. After it: 337s of measured suite time
+    # (run 31361629558's `suite ms` for the selected population) over a
+    # 4-vCPU runner is an ~84s CPU-bound floor, ~66s by the fan-out model, plus
+    # ~60s of checkout and module install. Even the whole 254-suite corpus that
+    # #1036 will promote into is a ~170s ideal makespan / ~305s CPU floor. So
+    # 15 minutes is ~7x the measured job and ~3x the worst post-#1036 estimate,
+    # and 24x BELOW the platform ceiling this exists to stop us reaching.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Install Pester
@@ -25,7 +42,7 @@ jobs:
           Install-Module -Name Pester -Force -SkipPublisherCheck -MinimumVersion 6.0.0 -MaximumVersion 6.999.999
           Import-Module Pester -MinimumVersion 6.0.0 -MaximumVersion 6.999.999
           Install-Module -Name powershell-yaml -Force -SkipPublisherCheck
-      - name: Run Pester tests (glob minus explicit quarantine)
+      - name: Run Pester tests (glob minus explicit quarantine, sharded)
         shell: pwsh
         run: |
           # SELECTION IS A GLOB MINUS A QUARANTINE, not an allowlist.
@@ -51,7 +68,14 @@ jobs:
           # The migration was conservative on purpose: exactly the files this
           # job already ran still run. What changed is what happens to the next
           # file someone adds.
+          #
+          # SHARDED, AND DRIVEN BY THE SELECTION (issue #1037). The selection
+          # below is handed to the repository's own sharded runner as an
+          # explicit list. The runner does NOT glob: its own default would
+          # discover every suite on disk, quarantine included, which is the one
+          # thing this selection exists to prevent.
           . .github/scripts/lib/ci-suite-selection-core.ps1
+          . .github/scripts/lib/pester-sharded-core.ps1
           $selection = Get-CISuiteSelection `
             -TestsRoot '.github/scripts/Tests' `
             -QuarantinePath '.github/scripts/Tests/ci-quarantine.json'
@@ -63,9 +87,68 @@ jobs:
             $selection.DriftDetails | ForEach-Object { Write-Host "::error::  $_" }
             exit 1
           }
-          Write-Host "Selected $($selection.Selected.Count) suite(s); quarantined $($selection.Quarantined.Count) (unclassified backlog: $($selection.UnclassifiedCount))."
-          $config = New-PesterConfiguration
-          $config.Run.Path = $selection.Selected
-          $config.Run.Exit = $true
-          $config.Output.Verbosity = 'Detailed'
-          Invoke-Pester -Configuration $config
+
+          # ---- What this green does NOT cover, where the check is read -----
+          #
+          # Every figure here is derived from the selection this run just made,
+          # never typed into this file: change the quarantine and these numbers
+          # change with it, with no edit here. A count written down in a
+          # workflow reads as a disclosure and is false the next time anyone
+          # touches the registry.
+          #
+          # `::notice::` is a workflow-command ANNOTATION: it renders on the
+          # pull request's checks surface, so a maintainer sees it without
+          # opening this step's log. The job summary below carries the excluded
+          # set itself with each entry's class — one hop from the same place.
+          $byClass = $selection.Quarantined | Group-Object -Property class |
+            Sort-Object Name | ForEach-Object { "$($_.Name) $($_.Count)" }
+          $onDisk = $selection.Selected.Count + $selection.Quarantined.Count
+          Write-Host ("::notice title=What this check covers::{0} of {1} suites on disk ran; {2} are excluded by the quarantine registry ({3}). The excluded list, with each entry's class and stated reason, is in this run's job summary." -f `
+            $selection.Selected.Count, $onDisk, $selection.Quarantined.Count, ($byClass -join ', '))
+
+          if ($env:GITHUB_STEP_SUMMARY) {
+            $md = [System.Collections.Generic.List[string]]::new()
+            $md.Add('## Pester gate — what this check covers')
+            $md.Add('')
+            $md.Add("**$($selection.Selected.Count) of $onDisk** suites on disk ran. **$($selection.Quarantined.Count)** were excluded by ``.github/scripts/Tests/ci-quarantine.json`` ($($byClass -join ', ')).")
+            $md.Add('')
+            $md.Add('A suite is excluded only by an explicit, classified, reasoned entry in that registry. `unclassified` is a BACKLOG, not a decision: those suites were omitted by an allowlist that no longer exists and their CI-viability has never been measured here.')
+            $md.Add('')
+            $md.Add('<details><summary>The ' + $selection.Quarantined.Count + ' suites this green does not cover</summary>')
+            $md.Add('')
+            $md.Add('| suite | class | issue | reason |')
+            $md.Add('| --- | --- | --- | --- |')
+            foreach ($q in ($selection.Quarantined | Sort-Object class, file)) {
+              $issue = if ($q.PSObject.Properties.Match('issue').Count -gt 0 -and $q.issue) { "#$($q.issue)" } else { '' }
+              $reason = ([string]$q.reason) -replace '\|', '\|'
+              $md.Add("| ``$($q.file)`` | $($q.class) | $issue | $reason |")
+            }
+            $md.Add('')
+            $md.Add('</details>')
+            $md -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          }
+
+          # ---- Run --------------------------------------------------------
+          #
+          # FanOutWidth is DERIVED, not chosen: Get-PesterFanOutWidth over the
+          # full-glob duration distribution measured by #1035's audit run
+          # 31361629558 at commit 0f3c824 returns 10 —
+          #   ceil(parallel total 1,171,050 ms / longest parallel suite 118,518 ms)
+          # past which another worker cannot shorten the run, because that one
+          # suite is on the critical path whatever else is running. Derived over
+          # the FULL GLOB deliberately: that is the load the gate carries after
+          # #1036, not the subset it gates today. The derivation and its inputs
+          # are pinned by an assertion in run-pester-sharded.Tests.ps1.
+          #
+          # Verbosity is Normal rather than Detailed: with 10 workers writing to
+          # one console, per-test Detailed output interleaves into something no
+          # one can read. Normal still prints every failing test, and the
+          # runner's own per-suite table and FAILED SUITES block name the suite.
+          $result = Invoke-PesterSharded `
+            -SuitePath $selection.Selected `
+            -FanOutWidth 10 `
+            -Output 'Normal'
+          if ($result.ExitCode -ne 0) {
+            Write-Host "::error title=Pester gate::$($result.SuitesNotPassed) of $($result.SuitesSelected) selected suite(s) did not pass. See the run summary above."
+            exit 1
+          }

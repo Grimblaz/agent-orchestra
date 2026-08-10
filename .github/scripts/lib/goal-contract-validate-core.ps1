@@ -1583,6 +1583,27 @@ function Test-GCSuiteGatePass {
         }
     }
 
+    # Issue #1037 changed what TotalFailed MEANS. It used to absorb one
+    # increment per zero-test file and one per crashed worker, so clause 2
+    # below caught those shapes as a side effect of a miscount. It is now a
+    # test-case count and nothing else -- so a crashed worker reaches here with
+    # TotalFailed = 0, and clause 2 no longer sees it. ExitCode still does, and
+    # clauses 4 and 5 now check the suite-level facts DIRECTLY rather than
+    # inferring them from an inflated number.
+    #
+    # Both new clauses are absent-tolerant: a result from a worktree carrying a
+    # pre-#1037 copy of the runner has neither field, and this predicate must
+    # not start failing closed on a shape it used to accept for good reason.
+    # Present-but-wrong is rejected; absent falls back to the original three.
+    $suitesNotPassed = script:Read-GCSuiteField -Result $Result -Name 'SuitesNotPassed'
+    if ($null -ne $suitesNotPassed -and $suitesNotPassed -ne 0) {
+        return $false
+    }
+    if ($Result.PSObject.Properties.Match('Reconciled').Count -gt 0 -and
+        $null -ne $Result.Reconciled -and -not [bool]$Result.Reconciled) {
+        return $false
+    }
+
     # The three-part gate (U1 CRITICAL fix): ExitCode==0 AND TotalFailed==0
     # AND (Passed+Failed)>0 -- NEVER TotalFailed alone. ExitCode alone
     # already rejects the TestsPath-not-found, zero-discovered, and
@@ -1590,6 +1611,23 @@ function Test-GCSuiteGatePass {
     # (clause 3) is an independent defensive floor against a hypothetical
     # ExitCode=0-but-nothing-ran shape.
     return ($exitCode -eq 0) -and ($totalFailed -eq 0) -and (($totalPassed + $totalFailed) -gt 0)
+}
+
+# Private: read an optional integer field, returning $null when it is absent or
+# unusable rather than silently casting it to 0 -- the same false-GREEN shape
+# R10 closed for ExitCode/TotalFailed, one field along.
+function script:Read-GCSuiteField {
+    param([object]$Result, [string]$Name)
+
+    if ($Result.PSObject.Properties.Match($Name).Count -eq 0) { return $null }
+    $raw = $Result.$Name
+    if ($null -eq $raw) { return $null }
+    $parsed = 0
+    if (-not [int]::TryParse([string]$raw, [ref]$parsed)) {
+        # Present but not a number: treat as a failure signal, not as absent.
+        return -1
+    }
+    return $parsed
 }
 
 # Private: the single fail-closed result shape this section ever returns for
@@ -1600,13 +1638,17 @@ function Test-GCSuiteGatePass {
 function script:New-GCFailClosedSuiteResult {
     param([switch]$TimedOut)
     [pscustomobject]@{
-        ExitCode     = 1
-        TotalPassed  = 0
-        TotalFailed  = 0
-        WallClockMs  = $null
-        MissingFiles = @()
-        FailedFiles  = @()
-        TimedOut     = [bool]$TimedOut
+        ExitCode        = 1
+        TotalPassed     = 0
+        TotalFailed     = 0
+        WallClockMs     = $null
+        MissingFiles    = @()
+        FailedFiles     = @()
+        # Fail-closed on the #1037 fields too, so this shape is rejected by
+        # every clause of the predicate rather than only by ExitCode.
+        SuitesNotPassed = 1
+        Reconciled      = $false
+        TimedOut        = [bool]$TimedOut
     }
 }
 
@@ -1655,6 +1697,12 @@ try {
         WallClockMs  = `$r.WallClockMs
         MissingFiles = @(`$r.MissingFiles)
         FailedFiles  = @(`$r.FailedFiles)
+        # Issue #1037: the suite-level facts, carried across the process
+        # boundary because TotalFailed no longer absorbs them. Null when the
+        # worktree holds a pre-#1037 copy of the runner, which
+        # Test-GCSuiteGatePass treats as absent rather than as zero.
+        SuitesNotPassed = `$r.SuitesNotPassed
+        Reconciled      = `$r.Reconciliation.Ok
     }
     `$out | ConvertTo-Json -Compress -Depth 5 | Set-Content -LiteralPath '$($resultFile -replace "'", "''")' -Encoding UTF8
     exit ([int]`$r.ExitCode)

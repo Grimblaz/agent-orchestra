@@ -20,11 +20,11 @@
            record carrying the throw's message, not silently dropped
 
     NOTE: This file exercises the real child-pwsh subprocess path against a
-    small scratch fixture directory (not the full 186-file suite) — each
+    small scratch fixture directory (not the whole on-disk corpus) — each
     Invoke-Pester6BaselineCapture call spawns a fresh pwsh process, so this
     file is slower than a pure-unit test file but still runs in low-single-
-    digit seconds per call. It is intentionally NOT registered in pester.yml's
-    CI run list (per the plan's non-goal: s2 does not touch pester.yml); CI
+    digit seconds per call. It is intentionally quarantined out of pester.yml's
+    CI selection (per the plan's non-goal: s2 does not touch pester.yml); CI
     installs only a single pinned Pester major via pester.yml, and T2's
     honoring proof needs at least two distinct installed majors to be
     meaningful.

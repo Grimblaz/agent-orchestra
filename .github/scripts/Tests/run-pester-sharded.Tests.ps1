@@ -10,6 +10,17 @@
       T2 - The real-git allowlist is keyed on actual fixture behavior, not string grep
       T3 - No-false-GREEN: crashed worker (exit code 1, no result file) = hard failure
       T4 - Determinism check: same set run twice, verify no flip detected on stable suite
+      A  - Run attribution (issue #958)
+      S  - Selection-driven execution, honest counting, and the gate's own
+           configuration (issue #1037)
+
+    WHY THIS SUITE RUNS IN CI. It was quarantined `unclassified` until issue
+    #1037, which is the chunk that extends the runner it guards. Assertions
+    protecting that work would have sat in a file the per-PR gate never
+    selected — a guard that does not run. It is the one quarantine entry #1037
+    promotes, and it pays for itself twice: it invokes the sharded runner at
+    sixteen sites, which makes it the recursion control the parent's AC4 asks
+    for.
 #>
 
 BeforeAll {
@@ -61,9 +72,28 @@ Describe 'run-pester-sharded — real-git allowlist correctness' {
             -Because "its 'git push' is a string literal in a Should -Match assertion, not a real git invocation"
     }
 
-    It 'T2d: real-git allowlist has exactly the two keyed files' {
+    It 'T2d: real-git allowlist has exactly the three keyed files' {
         $list = @(Get-RealGitFiles)
-        $list.Count | Should -Be 2 -Because 'exactly two files have real git init/commit fixture behavior'
+        $list.Count | Should -Be 3 -Because 'three files need the sequential shard: two for real git init/commit fixture behavior, and this suite for both that and isolation from concurrent writers'
+    }
+
+    It 'T2g: this suite is in the real-git allowlist, on both of its bases' {
+        # Issue #1037 put it here. Two independent reasons, either sufficient:
+        #   (1) it runs real `git init`/`add`/`commit` in its own fixtures,
+        #       which is this list's stated criterion; and
+        #   (2) its attribution test snapshots `git status` and then asserts the
+        #       runner reports the same cleanliness — under fan-out, ONE
+        #       concurrent suite writing a non-gitignored path into the checkout
+        #       between the snapshot and the nested run flips that answer. The
+        #       sequential shard runs after the parallel one, one file at a
+        #       time, so nothing else is writing while this suite runs.
+        $list = @(Get-RealGitFiles)
+        $list | Should -Contain 'run-pester-sharded.Tests.ps1'
+
+        $self = Get-Content -LiteralPath (Join-Path $script:TestsDir 'run-pester-sharded.Tests.ps1') -Raw
+        $self | Should -Match 'git -C \$fixture init' -Because 'basis (1): the fixture does a real git init'
+        $self | Should -Match "commit -q -m 'seed'" -Because 'basis (1): the fixture does a real git commit'
+        $self | Should -Match 'status --porcelain --untracked-files=all' -Because 'basis (2): the suite snapshots tree state and compares the runner against it'
     }
 
     It 'T2e: plugin-release-hygiene.Tests.ps1 contains actual git init invocation (verifies allowlist basis)' {
@@ -561,5 +591,498 @@ Describe 'spaced path stub' {
         # And the process's git must still work afterwards.
         $head = ([string](& git -C $script:RepoRoot rev-parse HEAD)).Trim()
         $head | Should -Match '^[0-9a-f]{40}$' -Because 'a later git call in the same process must not have been poisoned'
+    }
+}
+
+Describe 'run-pester-sharded — selection-driven execution and honest counting (issue #1037)' {
+
+    BeforeAll {
+        # One fixture directory holding every state the gate must react to. The
+        # directory deliberately contains suites that most tests below do NOT
+        # select: that is what makes "the selection drove the run" checkable
+        # rather than asserted — a runner that globbed would pick them up.
+        $script:SelDir = Join-Path ([System.IO.Path]::GetTempPath()) `
+            "pester-sharded-selection-$([System.Guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $script:SelDir -Force | Out-Null
+
+        $script:Fixture = @{}
+        function script:New-SelFixture {
+            param([string]$Name, [string]$Body)
+            $path = Join-Path $script:SelDir $Name
+            Set-Content -LiteralPath $path -Value $Body -Encoding UTF8
+            $script:Fixture[$Name] = $path
+        }
+
+        script:New-SelFixture 'sel-pass-a.Tests.ps1' @'
+#Requires -Version 7.0
+Describe 'pass a' {
+    It 'one' { 1 | Should -Be 1 }
+    It 'two' { 2 | Should -Be 2 }
+}
+'@
+        script:New-SelFixture 'sel-pass-b.Tests.ps1' @'
+#Requires -Version 7.0
+Describe 'pass b' {
+    It 'one' { 1 | Should -Be 1 }
+}
+'@
+        # State 1: a suite with failing tests.
+        script:New-SelFixture 'sel-fail.Tests.ps1' @'
+#Requires -Version 7.0
+Describe 'fail' {
+    It 'fails' { 1 | Should -Be 2 }
+    It 'passes' { 1 | Should -Be 1 }
+}
+'@
+        # State 2: a worker that produces no usable result at all. It exits the
+        # process during discovery, so the launcher never reaches the line that
+        # writes the result file. A `throw` would NOT do this — Pester catches
+        # it and still writes a result, which is S2c's case, not this one.
+        script:New-SelFixture 'sel-crash.Tests.ps1' @'
+#Requires -Version 7.0
+[Environment]::Exit(7)
+'@
+        # State 3a: discovered nothing.
+        script:New-SelFixture 'sel-zero.Tests.ps1' @'
+#Requires -Version 7.0
+Describe 'discovers nothing' { }
+'@
+        # State 3b: discovered tests and executed none of them. This limb read
+        # PASS before #1037: the per-file total included Skipped, so the
+        # zero-test detection never fired on it.
+        script:New-SelFixture 'sel-allskip.Tests.ps1' @'
+#Requires -Version 7.0
+Describe 'all skipped' {
+    It 'skipped one' -Skip { 1 | Should -Be 1 }
+    It 'skipped two' -Skip { 1 | Should -Be 1 }
+}
+'@
+
+        $script:CleanSelection = @($script:Fixture['sel-pass-a.Tests.ps1'], $script:Fixture['sel-pass-b.Tests.ps1'])
+
+        # The mixed run every counting assertion below reads. Run once: it is
+        # the single observation in which each red state is present, so the
+        # totals it reports are the ones that had to be honest.
+        $script:MixedResult = Invoke-PesterSharded -MinTestCount 0 -FanOutWidth 3 -Output 'None' -SuitePath @(
+            $script:Fixture['sel-pass-a.Tests.ps1']
+            $script:Fixture['sel-pass-b.Tests.ps1']
+            $script:Fixture['sel-fail.Tests.ps1']
+            $script:Fixture['sel-crash.Tests.ps1']
+            $script:Fixture['sel-zero.Tests.ps1']
+            $script:Fixture['sel-allskip.Tests.ps1']
+        )
+
+        function script:Get-SelOutcome {
+            param([object]$Result, [string]$File)
+            return @($Result.SuiteOutcomes | Where-Object { $_.File -eq $File })[0]
+        }
+    }
+
+    AfterAll {
+        if (Test-Path -LiteralPath $script:SelDir) {
+            Remove-Item -LiteralPath $script:SelDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    Context 'S1: the caller''s selection drives the run, not a directory glob' {
+
+        It 'S1a: runs exactly the suites handed to it, and none of the others sharing their directory' {
+            $result = Invoke-PesterSharded -SuitePath $script:CleanSelection -MinTestCount 0 -Output 'None'
+
+            # Derived from what actually produced a result row, not restated
+            # from the list handed in.
+            $executed = @($result.Results | ForEach-Object { $_.File } | Sort-Object)
+            $executed | Should -Be @('sel-pass-a.Tests.ps1', 'sel-pass-b.Tests.ps1')
+
+            # The negative arm, and it is the TREE that controls it: other
+            # *.Tests.ps1 files sit in that same directory and were excluded by
+            # the selection alone, with no edit to the runner between the two
+            # observations.
+            @(Get-ChildItem -LiteralPath $script:SelDir -Filter '*.Tests.ps1' -File).Count |
+                Should -BeGreaterThan $executed.Count -Because 'the directory holds suites the selection left out; a runner that globbed would have run them'
+            $executed | Should -Not -Contain 'sel-fail.Tests.ps1'
+            $executed | Should -Not -Contain 'sel-crash.Tests.ps1'
+
+            # And the complement still ran: a negative arm in which nothing ran
+            # would satisfy "that suite did not run" and prove nothing.
+            $result.ExitCode | Should -Be 0
+            $result.TotalPassed | Should -Be 3
+        }
+
+        It 'S1b: more than one suite is in flight at once, and it could have come out negative' {
+            # Three suites that mostly sleep. Wall clock is the observable: run
+            # them one at a time, then at width 3, and the second must finish
+            # materially sooner. A serial runner cannot pass this.
+            $sleepers = foreach ($i in 1..3) {
+                $name = "sel-sleep-$i.Tests.ps1"
+                script:New-SelFixture $name @"
+#Requires -Version 7.0
+Describe 'sleeper $i' {
+    It 'sleeps' { Start-Sleep -Seconds 2; 1 | Should -Be 1 }
+}
+"@
+                $script:Fixture[$name]
+            }
+
+            $serial = Invoke-PesterSharded -SuitePath @($sleepers) -MinTestCount 0 -FanOutWidth 1 -Output 'None'
+            $parallel = Invoke-PesterSharded -SuitePath @($sleepers) -MinTestCount 0 -FanOutWidth 3 -Output 'None'
+
+            $serial.ExitCode | Should -Be 0
+            $parallel.ExitCode | Should -Be 0
+            # Three 2-second sleeps overlapping saves about four seconds. The
+            # 1.5s margin sits well inside that and well outside scheduling
+            # noise, including on a runner already busy with other shards.
+            $parallel.WallClockMs | Should -BeLessThan ($serial.WallClockMs - 1500) `
+                -Because "three 2s suites run concurrently must finish sooner than the same three run one at a time (serial $($serial.WallClockMs)ms, concurrent $($parallel.WallClockMs)ms)"
+        }
+
+        It 'S1c: an empty selection fails; it is never a run over nothing' {
+            $result = Invoke-PesterSharded -SuitePath @() -MinTestCount 0 -ErrorAction SilentlyContinue
+            $result.ExitCode | Should -Be 1 -Because 'the caller selected nothing, and reporting green for that is the false-GREEN shape this runner refuses'
+        }
+
+        It 'S1d: a selection naming a file that is not there fails rather than running the rest' {
+            $result = Invoke-PesterSharded -MinTestCount 0 -ErrorAction SilentlyContinue -SuitePath @(
+                $script:Fixture['sel-pass-a.Tests.ps1']
+                (Join-Path $script:SelDir 'never-existed.Tests.ps1')
+            )
+            $result.ExitCode | Should -Be 1 -Because 'silently dropping a selected suite is the reconciliation failure this runner reports on'
+        }
+    }
+
+    Context 'S2: the totals say which unit they count, and nothing in them is a failure signal in disguise' {
+
+        It 'S2a: the reported test total is the honest test total, on a run containing a crashed and a zero-test suite' {
+            # The discriminating exhibit, on the UNITS question specifically.
+            # Exactly one test failed in this run. Under the previous mechanism
+            # the reported failure total was that one test PLUS one per
+            # zero-test file and one per crashed worker — file counts summed
+            # into a test count.
+            $script:MixedResult.TotalFailed | Should -Be 1 -Because 'one test failed; the other three red suites failed no tests at all'
+            $script:MixedResult.TotalPassed | Should -Be 4 -Because 'two plus one from the passing suites, plus the one passing test in the failing suite'
+            $script:MixedResult.TestsExecuted | Should -Be 5
+            $script:MixedResult.TestsSkipped | Should -Be 2 -Because 'the all-skipped suite skipped two, and skipped tests are not executed tests'
+        }
+
+        It 'S2b: the crashed suite''s own row carries no invented count' {
+            $row = @($script:MixedResult.Results | Where-Object { $_.File -eq 'sel-crash.Tests.ps1' })[0]
+            $row | Should -Not -BeNullOrEmpty
+            $row.HasResult | Should -BeFalse
+            $row.Failed | Should -Be 0 -Because 'a fabricated Failed = 1 here is a lie about how many tests failed, told in order to carry a failure signal'
+            $row.Passed | Should -Be 0
+            $row.TotalCount | Should -Be 0
+        }
+
+        It 'S2c: a suite whose discovery threw is not credited with a discovered test' {
+            # The per-file total used to be computed with the container failure
+            # already folded into the failed count, inflating a discovery-throw
+            # file from 0 to 1 — which then suppressed zero-test detection for
+            # exactly the most-broken files.
+            $throwDir = Join-Path $script:SelDir 'throwcase'
+            New-Item -ItemType Directory -Path $throwDir -Force | Out-Null
+            $throwFile = Join-Path $throwDir 'sel-throw.Tests.ps1'
+            Set-Content -LiteralPath $throwFile -Encoding UTF8 -Value @'
+#Requires -Version 7.0
+throw 'deliberate discovery failure'
+'@
+            try {
+                $result = Invoke-PesterSharded -SuitePath @($throwFile) -MinTestCount 0 -Output 'None'
+                $row = @($result.Results)[0]
+                $row.HasResult | Should -BeTrue -Because 'Pester catches a discovery throw and still writes a result'
+                $row.ContainerFailures | Should -BeGreaterThan 0
+                $row.TotalCount | Should -Be 0 -Because 'no test was discovered, so the discovered-test count is zero'
+                $row.Failed | Should -Be 0 -Because 'a failed container is one file, not one test'
+                (script:Get-SelOutcome -Result $result -File 'sel-throw.Tests.ps1').Outcome |
+                    Should -Be 'no-tests' -Because 'the inflated total used to hide exactly this case'
+                $result.ExitCode | Should -Be 1
+            }
+            finally {
+                Remove-Item -LiteralPath $throwDir -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+
+        It 'S2d: the reported figures and the redness decision come from the same per-suite rows' {
+            # Not "two numbers agree": the suite tally is recomputed from the
+            # outcome rows and must equal what the run reported, and the exit
+            # code must follow those same rows.
+            $rows = @($script:MixedResult.SuiteOutcomes)
+            $rows.Count | Should -Be 6
+            @($rows | Where-Object { $_.Outcome -ne 'passed' }).Count | Should -Be $script:MixedResult.SuitesNotPassed
+            $script:MixedResult.ExitCode | Should -Be 1
+            $script:MixedResult.SuitesSelected | Should -Be 6
+            $script:MixedResult.SuitesReported | Should -Be 6
+            $script:MixedResult.Reconciliation.Ok | Should -BeTrue
+
+            # And every row's outcome is what the one shared predicate says
+            # about that row, so the printed table cannot drift from the verdict.
+            foreach ($r in $script:MixedResult.Results) {
+                $expected = (Resolve-PesterSuiteOutcome -Row $r).Outcome
+                (script:Get-SelOutcome -Result $script:MixedResult -File $r.File).Outcome | Should -Be $expected
+            }
+        }
+    }
+
+    Context 'S3: each of the four states reddens the check on its own' {
+
+        # Each induced separately, against a run whose only other member passes.
+        # An exhibit shared between two states would discharge neither.
+        It 'S3a: <Case> reddens the run, and is the only thing wrong with it' -ForEach @(
+            @{ Case = 'failing tests'; File = 'sel-fail.Tests.ps1'; Outcome = 'failed-tests' }
+            @{ Case = 'no usable result'; File = 'sel-crash.Tests.ps1'; Outcome = 'no-result' }
+            @{ Case = 'discovered no tests'; File = 'sel-zero.Tests.ps1'; Outcome = 'no-tests' }
+            @{ Case = 'executed no tests, all skipped'; File = 'sel-allskip.Tests.ps1'; Outcome = 'no-tests' }
+        ) {
+            $result = Invoke-PesterSharded -MinTestCount 0 -Output 'None' -SuitePath @(
+                $script:Fixture['sel-pass-a.Tests.ps1']
+                $script:Fixture[$File]
+            )
+
+            $result.ExitCode | Should -Be 1 -Because "a suite with $Case must redden the check"
+            $result.SuitesNotPassed | Should -Be 1 -Because 'the other suite in this run passes, so exactly one thing is wrong'
+            (script:Get-SelOutcome -Result $result -File $File).Outcome | Should -Be $Outcome
+            (script:Get-SelOutcome -Result $result -File 'sel-pass-a.Tests.ps1').Outcome | Should -Be 'passed'
+            $result.Reconciliation.Ok | Should -BeTrue -Because 'nothing was dropped; the failure is the suite, not the accounting'
+        }
+
+        It 'S3b: a selected suite that produces no result row at all reddens the run and is named' {
+            # The fourth state cannot be induced from outside — it is the run
+            # failing to run something it was given. Induced at the shard
+            # dispatcher: the manifest names two suites, the shard list holds
+            # one. This is the exhibit for the "dropped before it executed" arm,
+            # which a run over a smaller set would otherwise report clean.
+            $files = @(
+                Get-Item -LiteralPath $script:Fixture['sel-pass-a.Tests.ps1']
+                Get-Item -LiteralPath $script:Fixture['sel-pass-b.Tests.ps1']
+            )
+            $dropped = @($files | Where-Object { $_.Name -eq 'sel-pass-a.Tests.ps1' })
+
+            $result = script:Invoke-ShardedRun -ParallelFiles $dropped -SequentialFiles @() `
+                -Output 'None' -AllFileManifest $files -MinTestCount 0 -FanOutWidth 2
+
+            $result.ExitCode | Should -Be 1 -Because 'a run that quietly covers a smaller set than it was given is the failure this reports'
+            $result.Reconciliation.Ok | Should -BeFalse
+            $result.Reconciliation.Selected | Should -Be 2
+            $result.Reconciliation.Reported | Should -Be 1
+            $result.Reconciliation.Missing | Should -Contain 'sel-pass-b.Tests.ps1'
+            (script:Get-SelOutcome -Result $result -File 'sel-pass-b.Tests.ps1').Outcome | Should -Be 'missing'
+        }
+
+        It 'S3c: a suite reported but never selected also fails reconciliation' {
+            $files = @(
+                Get-Item -LiteralPath $script:Fixture['sel-pass-a.Tests.ps1']
+                Get-Item -LiteralPath $script:Fixture['sel-pass-b.Tests.ps1']
+            )
+            $manifest = @($files | Where-Object { $_.Name -eq 'sel-pass-a.Tests.ps1' })
+
+            $result = script:Invoke-ShardedRun -ParallelFiles $files -SequentialFiles @() `
+                -Output 'None' -AllFileManifest $manifest -MinTestCount 0 -FanOutWidth 2
+
+            $result.ExitCode | Should -Be 1
+            $result.Reconciliation.Ok | Should -BeFalse
+            $result.Reconciliation.Unexpected | Should -Contain 'sel-pass-b.Tests.ps1'
+        }
+
+        It 'S3d: the negative control — all four absent, and the check is green' {
+            $result = Invoke-PesterSharded -SuitePath $script:CleanSelection -MinTestCount 0 -Output 'None'
+            $result.ExitCode | Should -Be 0
+            $result.SuitesNotPassed | Should -Be 0
+            $result.Reconciliation.Ok | Should -BeTrue
+            @($result.SuiteOutcomes | Where-Object { $_.Outcome -ne 'passed' }) | Should -BeNullOrEmpty
+        }
+
+        It 'S3e: redness for a crashed or zero-test suite does not arrive through a fabricated test count' {
+            # The whole point of splitting the channels. Under the previous
+            # mechanism both of these ran with a non-zero failure TOTAL — the
+            # failure signal WAS the count. Correct the count there and the run
+            # goes green; here it does not, because the signal has its own
+            # channel.
+            foreach ($file in @('sel-crash.Tests.ps1', 'sel-zero.Tests.ps1')) {
+                $result = Invoke-PesterSharded -MinTestCount 0 -Output 'None' -SuitePath @(
+                    $script:Fixture['sel-pass-a.Tests.ps1']
+                    $script:Fixture[$file]
+                )
+                $result.TotalFailed | Should -Be 0 -Because "$file failed no tests, and saying it failed one is the lie this replaces"
+                $result.ExitCode | Should -Be 1 -Because "$file must still redden the run with the count telling the truth"
+            }
+        }
+    }
+
+    Context 'S4: one predicate decides whether a suite passed, and every reader uses it' {
+
+        It 'S4a: the determinism comparison reads the same predicate, and sees a change of KIND' {
+            # This site used to recompute the judgement from the legacy fields
+            # and collapse every red state to 'fail'. A suite that crashed on
+            # one run and failed its tests on the other flipped, and the old
+            # comparison reported no flips.
+            $run1 = @([pscustomobject]@{ File = 'x.Tests.ps1'; Passed = 0; Failed = 0; Skipped = 0; NotRun = 0; ContainerFailures = 0; TotalCount = 0; HasResult = $false })
+            $run2 = @([pscustomobject]@{ File = 'x.Tests.ps1'; Passed = 0; Failed = 2; Skipped = 0; NotRun = 0; ContainerFailures = 0; TotalCount = 2; HasResult = $true })
+
+            $diff = @(script:Compare-RunResults -Run1 $run1 -Run2 $run2)
+            $diff.Count | Should -Be 1 -Because 'no-result and failed-tests are different outcomes, and collapsing both to "fail" is what made the determinism check blind'
+            $diff[0].Run1Outcome | Should -Be 'no-result'
+            $diff[0].Run2Outcome | Should -Be 'failed-tests'
+        }
+
+        It 'S4b: a genuinely stable pair still reports no flip' {
+            $row = [pscustomobject]@{ File = 'x.Tests.ps1'; Passed = 3; Failed = 0; Skipped = 0; NotRun = 0; ContainerFailures = 0; TotalCount = 3; HasResult = $true }
+            @(script:Compare-RunResults -Run1 @($row) -Run2 @($row)) | Should -BeNullOrEmpty
+        }
+    }
+
+    Context 'S5: the fan-out width is derived from a measured distribution, not chosen' {
+
+        It 'S5a: the measured full-glob distribution yields the width the gate uses' {
+            # Inputs read off the record posted on issue #1035 for audit run
+            # 31361629558 at commit 0f3c824 — the `suite ms` column over its
+            # 254 in-population rows, which is the FULL GLOB: the load the gate
+            # carries after #1036, not the subset it gates today.
+            $recordParallelTotalMs = 1171050   # 251 suites, the sequential three removed
+            $recordParallelMaxMs = 118518      # phase-containment-brief-review.Tests.ps1
+            $recordSequentialMs = 51253        # the three real-git suites
+
+            # Reconstructed to the three facts the derivation reads: the
+            # parallel set's total, its largest member, and the sequential sum.
+            $distribution = @{}
+            $distribution['big.Tests.ps1'] = $recordParallelMaxMs
+            $remaining = $recordParallelTotalMs - $recordParallelMaxMs
+            $each = [int][math]::Floor($remaining / 250)
+            for ($i = 1; $i -le 249; $i++) { $distribution["p$i.Tests.ps1"] = $each }
+            $distribution['p250.Tests.ps1'] = $remaining - ($each * 249)
+            $distribution['plugin-release-hygiene.Tests.ps1'] = 3154
+            $distribution['run-pester-sharded.Tests.ps1'] = 32794
+            $distribution['session-cleanup-detector.Tests.ps1'] = 15305
+
+            $derived = Get-PesterFanOutWidth -DurationMs $distribution
+
+            $derived.SequentialTotalMs | Should -Be $recordSequentialMs
+            $derived.ParallelTotalMs | Should -Be $recordParallelTotalMs
+            $derived.ParallelMaxMs | Should -Be $recordParallelMaxMs
+            $derived.Width | Should -Be 10 -Because 'ceil(parallel total / longest parallel suite) is the width past which another worker cannot shorten the run'
+            $derived.MakespanFloorMs | Should -Be ($recordSequentialMs + $recordParallelMaxMs)
+            $derived.MakespanAtWidthMs | Should -Be $derived.MakespanFloorMs -Because 'at the derived width the run already sits on its floor'
+        }
+
+        It 'S5b: the derivation discriminates — a different distribution gives a different width' {
+            # A derivation that returned the same number for any input would be
+            # a citation, not a derivation.
+            $flat = @{}
+            1..20 | ForEach-Object { $flat["flat$_.Tests.ps1"] = 1000 }
+            (Get-PesterFanOutWidth -DurationMs $flat).Width | Should -Be 20 `
+                -Because 'when every suite costs the same, every extra worker still shortens the run'
+
+            $dominated = @{ 'giant.Tests.ps1' = 100000 }
+            1..20 | ForEach-Object { $dominated["small$_.Tests.ps1"] = 100 }
+            (Get-PesterFanOutWidth -DurationMs $dominated).Width | Should -Be 2 `
+                -Because 'one suite on the critical path caps what fan-out can buy'
+
+            (Get-PesterFanOutWidth -DurationMs @{ 'only.Tests.ps1' = 5000 }).Width | Should -Be 1
+        }
+
+        It 'S5c: the width actually reaches the shard dispatcher' {
+            # A derived number nothing consumes is decoration.
+            $result = Invoke-PesterSharded -SuitePath $script:CleanSelection -MinTestCount 0 -FanOutWidth 4 -Output 'None'
+            $result.FanOutWidth | Should -Be 4
+        }
+    }
+
+    Context 'S6: the gate itself is configured the way this work requires' {
+
+        BeforeAll {
+            $script:GateYmlPath = Join-Path $script:RepoRoot '.github/workflows/pester.yml'
+            Import-Module powershell-yaml -ErrorAction SilentlyContinue
+            $script:GateYml = ConvertFrom-Yaml (Get-Content -LiteralPath $script:GateYmlPath -Raw)
+            $script:GateRun = ($script:GateYml.jobs.pester.steps |
+                Where-Object { $_.run -and $_.run -match 'Get-CISuiteSelection' } | Select-Object -First 1).run
+        }
+
+        It 'S6a: the gate hands its own selection to the sharded runner and never lets it glob' {
+            $script:GateRun | Should -Not -BeNullOrEmpty
+            $script:GateRun | Should -Match 'Invoke-PesterSharded' -Because 'the parent pinned the route to the runner already in the repository'
+            $script:GateRun | Should -Match '-SuitePath\s+\$selection\.Selected' -Because 'the gate''s own selection must drive the run'
+            $script:GateRun | Should -Not -Match '-TestsPath' -Because 'TestsPath globs, and the glob includes every quarantined suite the selection exists to exclude'
+        }
+
+        It 'S6b: the gate''s fan-out width is the derived one' {
+            $match = [regex]::Match($script:GateRun, '-FanOutWidth\s+(?<w>\d+)')
+            $match.Success | Should -BeTrue -Because 'a gate that passes no width silently takes the runner''s default'
+            [int]$match.Groups['w'].Value | Should -Be 10 -Because 'this is the width S5a derives from the measured distribution'
+        }
+
+        It 'S6c: the gate''s job is bounded, well below the platform''s own ceiling' {
+            $limit = $script:GateYml.jobs.pester['timeout-minutes']
+            $limit | Should -Not -BeNullOrEmpty -Because 'without this a suite that never returns holds the gate to GitHub''s 360-minute job ceiling on every pull request'
+            [int]$limit | Should -BeGreaterThan 0
+            # A limit at or above the platform ceiling discharges nothing.
+            [int]$limit | Should -BeLessThan 360
+            # And it is a bound rather than a formality: the gate's own measured
+            # wall clock before this change was 2m11s, and the whole 254-suite
+            # corpus #1036 promotes into is roughly a five-minute CPU-bound floor.
+            [int]$limit | Should -BeLessOrEqual 30 -Because 'a bound many multiples above any plausible run is the platform ceiling with extra steps'
+        }
+
+        It 'S6d: the disclosure''s figures are derived at run time, not typed into the workflow' {
+            # A count typed here reads as a disclosure and is false the next time
+            # anyone touches the registry — which is exactly what #1036 is
+            # chartered to do next.
+            $script:GateRun | Should -Match '::notice' -Because 'an annotation renders on the checks surface; a plain host line renders only inside the step log'
+            $script:GateRun | Should -Match '\$selection\.Selected\.Count' -Because 'the disclosed count must be the one this run derived'
+            $script:GateRun | Should -Match '\$selection\.Quarantined\.Count'
+            $script:GateRun | Should -Match 'GITHUB_STEP_SUMMARY' -Because 'the excluded set and its classes must be reachable from the check, not buried in the log'
+        }
+
+        It 'S6e: this suite is the one entry the gate now selects, and it was not promoted by being new' {
+            . (Join-Path $script:RepoRoot '.github/scripts/lib/ci-suite-selection-core.ps1')
+            $selection = Get-CISuiteSelection `
+                -TestsRoot (Join-Path $script:RepoRoot '.github/scripts/Tests') `
+                -QuarantinePath (Join-Path $script:RepoRoot '.github/scripts/Tests/ci-quarantine.json')
+
+            $selection.HasDrift | Should -BeFalse
+            $selection.SelectedNames | Should -Contain 'run-pester-sharded.Tests.ps1' `
+                -Because 'the assertions in this file are only a guard if the gate executes them'
+            @($selection.Quarantined | Where-Object { $_.file -eq 'run-pester-sharded.Tests.ps1' }) |
+                Should -BeNullOrEmpty -Because 'a new file in this directory is auto-selected by the glob, which would satisfy "the gate executes my assertions" while leaving the recursion control quarantined'
+        }
+    }
+
+    Context 'S7: the runner''s other consumers and its own floors still behave' {
+
+        It 'S7a: the floor the gate runs under is satisfiable, and reads the executed test count' {
+            # Discriminating in both directions at one commit.
+            $overFloor = Invoke-PesterSharded -SuitePath $script:CleanSelection -MinTestCount 3 -Output 'None'
+            $overFloor.TestsExecuted | Should -Be 3
+            $overFloor.ExitCode | Should -Be 0 -Because 'three tests executed meets a floor of three'
+
+            $underFloor = Invoke-PesterSharded -SuitePath $script:CleanSelection -MinTestCount 4 -Output 'None'
+            $underFloor.ExitCode | Should -Be 1 -Because 'the floor must still fire when fewer tests ran than it demands'
+        }
+
+        It 'S7b: the goal-contract validator''s gate predicate reads a field this work touches' {
+            # Re-derived, not copied: the second programmatic consumer of the
+            # runner's result contract. Its verdict must be unchanged, and it
+            # must be shown to DEPEND on the fields redefined here, or an
+            # unchanged verdict would be a foregone conclusion.
+            $validator = Join-Path $script:RepoRoot '.github/scripts/lib/goal-contract-validate-core.ps1'
+            $validator | Should -Exist
+            . $validator
+
+            $green = [pscustomobject]@{ ExitCode = 0; TotalPassed = 12; TotalFailed = 0; SuitesNotPassed = 0; Reconciled = $true }
+            Test-GCSuiteGatePass -Result $green | Should -BeTrue
+
+            # A crashed worker: under the corrected counting the failure TOTAL is
+            # 0, so the clause that used to catch it no longer does. The exit
+            # code does, and the suite-level field does independently.
+            $crashed = [pscustomobject]@{ ExitCode = 1; TotalPassed = 12; TotalFailed = 0; SuitesNotPassed = 1; Reconciled = $true }
+            Test-GCSuiteGatePass -Result $crashed | Should -BeFalse
+
+            # And the fields this work introduced are genuinely load-bearing:
+            # flipping either one alone flips the verdict.
+            $unpassed = [pscustomobject]@{ ExitCode = 0; TotalPassed = 12; TotalFailed = 0; SuitesNotPassed = 1; Reconciled = $true }
+            Test-GCSuiteGatePass -Result $unpassed | Should -BeFalse `
+                -Because 'a suite that crashed fails no tests, so a consumer reading only test counts would call that run green'
+
+            $unreconciled = [pscustomobject]@{ ExitCode = 0; TotalPassed = 12; TotalFailed = 0; SuitesNotPassed = 0; Reconciled = $false }
+            Test-GCSuiteGatePass -Result $unreconciled | Should -BeFalse `
+                -Because 'a run that did not account for its selection must not be read as green by a consumer either'
+        }
     }
 }

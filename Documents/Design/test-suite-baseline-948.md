@@ -40,6 +40,19 @@ a large number of tests for that reason alone.
 | 1 | `a3cc815` | 1 | `pass=5529 fail=13 files=238/238` | 494.8s |
 | 2 | `a3cc815` | 1 | `pass=5529 fail=13 files=238/238` | 466.8s |
 
+> **These totals are not comparable with any run taken after issue #1037, and the unit of
+> every differential comparison against them has changed.** They were produced by the
+> sharded runner's pre-#1037 counting, in which the reported `fail` figure was not a test
+> count: it absorbed one increment per zero-test file and one per crashed worker, and a
+> file whose discovery threw was credited with one discovered test it never had. #1037
+> split the failure signal from the test count, so the corrected runner reports `tests`
+> (test cases) and `suites` (files) as two figures that are never summed, and `fail`
+> as it appears above no longer has a successor field with the same meaning. The
+> `files=238/238` shape is likewise gone — the runner now reports selected-versus-reported
+> and reconciles them against the caller's selection. Treat the numbers here as a record of
+> what that commit's runner said, not as a baseline a later run can be differenced against.
+> The per-test dispositions below are unaffected: they name tests and assertions, not totals.
+
 The two runs are identical at per-test granularity: the same seven assertions failed in
 the same six files, with the same per-file pass/fail counts. The only textual difference
 between the two failure listings is the random GUID in the runner's own temp fixture

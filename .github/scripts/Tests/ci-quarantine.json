@@ -999,12 +999,6 @@
       "issue": 993
     },
     {
-      "file": "run-pester-sharded.Tests.ps1",
-      "class": "unclassified",
-      "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",
-      "issue": 993
-    },
-    {
       "file": "safe-operations-2b-bis-contract.Tests.ps1",
       "class": "unclassified",
       "reason": "Never registered under the allowlist this registry replaces, and never excluded for a stated reason — it was simply omitted. Whether it is CI-viable has not been measured on Linux.",

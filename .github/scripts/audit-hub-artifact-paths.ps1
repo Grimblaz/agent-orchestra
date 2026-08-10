@@ -718,7 +718,7 @@ function Invoke-RenderMode {
         '',
         "(d) **Pester drift gate** (Step 5 test: ${BT}.github/scripts/Tests/hub-artifact-paths-coverage.Tests.ps1${BT}): asserts that ${BT}-Diff${BT} reports ${BT}added: 0; removed: 0; uncategorized: 0${BT}, blocking merges when the inventory diverges from the classification.",
         '',
-        "(e) **Pester CI workflow** (Step 4: ${BT}.github/workflows/pester.yml${BT}): runs the full Pester suite on every pull request, including the extraction grammar tests and drift gate.",
+        "(e) **Pester CI workflow** (Step 4: ${BT}.github/workflows/pester.yml${BT}): runs a glob of ${BT}.github/scripts/Tests/${BT} MINUS the explicit quarantine in ${BT}ci-quarantine.json${BT} on every pull request — not the full suite — including the extraction grammar tests and drift gate. Derive the selection with ${BT}Get-CISuiteSelection${BT}; a quarantined suite does not run here at all.",
         '',
         "(f) **Reproduction recipes for CE Gate**:",
         '',

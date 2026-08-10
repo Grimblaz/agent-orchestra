@@ -4,9 +4,21 @@
     Pure-logic library for file-granular parallel sharded Pester runner (issue #740).
 
     Exposes these functions:
-      - Get-RealGitFiles      : return the real-git allowlist (files that do real git init/commit)
-      - Invoke-PesterSharded  : discover .Tests.ps1 files, run in parallel/sequential shards,
-                                aggregate results, enforce no-false-GREEN contract
+      - Get-RealGitFiles       : return the real-git allowlist (files that do real git init/commit)
+      - Get-PesterFanOutWidth  : derive a fan-out width from a measured duration distribution
+      - Invoke-PesterSharded   : run a SUPPLIED suite list (or, absent one, discover .Tests.ps1
+                                 files) in parallel/sequential shards, aggregate results,
+                                 enforce no-false-GREEN contract
+
+    TWO CHANNELS, NOT ONE (issue #1037). A run's failure signal and its test-count
+    total are separate. They used to share `$totalFailed`: a zero-test file and a
+    crashed worker each incremented it, which is what made the run red -- so
+    making the totals honest by deleting those increments would have turned a
+    crashed worker GREEN. Every per-suite row now carries an `Outcome`, one
+    function decides it (`Resolve-PesterSuiteOutcome`), and BOTH the reported
+    figures and the red/green decision are computed from those same rows. No
+    reported number is a failure signal in disguise, and no failure signal is a
+    number that had to be invented.
 #>
 
 # ---------------------------------------------------------------------------
@@ -14,6 +26,15 @@
 # These files execute actual `git init` + `git commit` fixtures and must run
 # sequentially (not in parallel) because they mutate git environment state.
 # The list is keyed on fixture behavior, not on string grep of 'git '.
+#
+# The sequential shard runs AFTER the parallel one and one file at a time, so
+# membership also buys isolation from concurrent writers -- which is why the
+# runner's own contract suite is on it (issue #1037). That suite snapshots
+# `git status` and then asserts the runner reports the same cleanliness; under
+# fan-out, ONE concurrent suite writing a non-gitignored path into the checkout
+# between the snapshot and the nested run flips the answer. It also does real
+# `git init`/`commit` in its own fixtures, which is this list's stated
+# criterion independently of that.
 # ---------------------------------------------------------------------------
 function Get-RealGitFiles {
     [CmdletBinding()]
@@ -22,8 +43,91 @@ function Get-RealGitFiles {
 
     return @(
         'plugin-release-hygiene.Tests.ps1',
+        'run-pester-sharded.Tests.ps1',
         'session-cleanup-detector.Tests.ps1'
     )
+}
+
+# ---------------------------------------------------------------------------
+# Fan-out width, derived (issue #1037, parent AC8)
+#
+# The width is NOT a number someone picked. It is read off a measured duration
+# distribution, and the arithmetic is the runner's own partition: the sequential
+# set runs in series AFTER the parallel set, so
+#
+#     makespan(W) = sum(sequential) + max( max(parallel), ceil(sum(parallel)/W) )
+#
+# Past the point where a worker's share of the parallel set drops below the
+# LARGEST single parallel suite, more width buys nothing -- that suite is on
+# the critical path whatever else is running. So the derived width is the
+# smallest W at which that happens:
+#
+#     W = ceil( sum(parallel) / max(parallel) )
+#
+# This discriminates: a flat distribution returns (near) the suite count, and
+# one dominated by a single long suite returns a small number. A derivation
+# that returned the same width for any input would be a citation, not a
+# derivation.
+#
+# What it does NOT model, stated so a reader does not over-read it: CPU
+# contention. The distribution it is fed was measured one suite at a time per
+# runner; the gate runs W at once on one runner. The width is an upper bound on
+# useful concurrency, not a prediction of wall clock.
+# ---------------------------------------------------------------------------
+function Get-PesterFanOutWidth {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        # suite file name -> measured duration in milliseconds
+        [Parameter(Mandatory)][hashtable]$DurationMs,
+        # names that run in the sequential shard (default: this runner's own list)
+        [string[]]$SequentialName,
+        [int]$MaxWidth = 64
+    )
+
+    Set-StrictMode -Version Latest
+
+    if ($null -eq $SequentialName) { $SequentialName = @(Get-RealGitFiles) }
+
+    $sequential = @($DurationMs.Keys | Where-Object { $SequentialName -contains $_ })
+    $parallel = @($DurationMs.Keys | Where-Object { $SequentialName -notcontains $_ })
+
+    $sequentialTotal = 0
+    foreach ($n in $sequential) { $sequentialTotal += [int]$DurationMs[$n] }
+
+    $parallelTotal = 0
+    $parallelMax = 0
+    foreach ($n in $parallel) {
+        $v = [int]$DurationMs[$n]
+        $parallelTotal += $v
+        if ($v -gt $parallelMax) { $parallelMax = $v }
+    }
+
+    # A distribution with no parallel work, or whose longest parallel suite
+    # measured zero, has no knee to find. Width 1 is the honest answer: there is
+    # nothing here to size from.
+    $width = 1
+    if ($parallel.Count -gt 0 -and $parallelMax -gt 0) {
+        $width = [int][math]::Ceiling($parallelTotal / [double]$parallelMax)
+    }
+    if ($width -lt 1) { $width = 1 }
+    if ($width -gt $parallel.Count -and $parallel.Count -gt 0) { $width = $parallel.Count }
+    if ($width -gt $MaxWidth) { $width = $MaxWidth }
+
+    $perWorker = if ($width -gt 0) { [int][math]::Ceiling($parallelTotal / [double]$width) } else { $parallelTotal }
+
+    return [pscustomobject]@{
+        Width             = $width
+        ParallelCount     = $parallel.Count
+        ParallelTotalMs   = $parallelTotal
+        ParallelMaxMs     = $parallelMax
+        SequentialCount   = $sequential.Count
+        SequentialTotalMs = $sequentialTotal
+        # W -> infinity: the sequential set plus the longest parallel suite.
+        MakespanFloorMs   = $sequentialTotal + $parallelMax
+        MakespanAtWidthMs = $sequentialTotal + [math]::Max($parallelMax, $perWorker)
+        Derivation        = "W = ceil(parallel total $parallelTotal ms / longest parallel suite $parallelMax ms) = $width; makespan floor = sequential $sequentialTotal ms + $parallelMax ms"
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -351,24 +455,40 @@ try {
 
     `$passed = 0
     `$failed = 0
-    `$totalCount = 0
+    `$skipped = 0
+    `$notRun = 0
+    `$containerFailures = 0
     if (`$null -ne `$r) {
         `$passed = [int]`$r.PassedCount
         `$failed = [int]`$r.FailedCount
-        # Count containers with Failed result as hard failures
-        # (covers discovery errors: throw in test file = Container.Result = 'Failed')
+        `$skipped = [int]`$r.SkippedCount
+        `$notRun = [int]`$r.NotRunCount
+        # A container whose Result is 'Failed' is a DISCOVERY error -- a throw at
+        # the top of the test file. It is reported on its own channel and is
+        # NOT folded into the test-failure count: doing that mixed two units
+        # (one file counted as one 'test') and, worse, inflated this file's
+        # discovered-test total from 0 to 1, which then hid the zero-test
+        # detection downstream for exactly the most-broken files.
         foreach (`$c in @(`$r.Containers)) {
             if ([string]`$c.Result -eq 'Failed') {
-                `$failed++
+                `$containerFailures++
             }
         }
-        `$totalCount = `$passed + `$failed + [int]`$r.SkippedCount + [int]`$r.NotRunCount
     }
+    `$discovered = `$passed + `$failed + `$skipped + `$notRun
 
-    `$obj = [ordered]@{ File = '$($TestFilePath | Split-Path -Leaf)'; Passed = `$passed; Failed = `$failed; TotalCount = `$totalCount }
+    `$obj = [ordered]@{
+        File              = '$($TestFilePath | Split-Path -Leaf)'
+        Passed            = `$passed
+        Failed            = `$failed
+        Skipped           = `$skipped
+        NotRun            = `$notRun
+        ContainerFailures = `$containerFailures
+        TotalCount        = `$discovered
+    }
     `$obj | ConvertTo-Json -Compress | Set-Content -LiteralPath '$($ResultFilePath -replace "'", "''")' -Encoding UTF8
 
-    if (`$failed -gt 0) { exit 1 } else { exit 0 }
+    if (`$failed -gt 0 -or `$containerFailures -gt 0) { exit 1 } else { exit 0 }
 }
 catch {
     Write-Error `$_
@@ -378,36 +498,135 @@ catch {
 }
 
 # ---------------------------------------------------------------------------
+# The ONE predicate that decides whether a suite passed (issue #1037)
+#
+# Every consumer calls this: the per-suite summary lines, the run's red/green
+# decision, the failed-file list, and the determinism comparison. Before this
+# existed the same judgement was written out five times, and one of the five --
+# inside Compare-RunResults -- silently disagreed with the others, which made
+# `-DeterminismCheck` blind to exactly the classes it was added to catch.
+#
+# Four outcomes redden. They are distinct because they fail differently and a
+# reader needs to know which one happened, not merely that something did:
+#
+#   failed-tests  the suite ran and tests failed (or a container failed to
+#                 discover while others ran)
+#   no-result     a worker produced no usable result file -- crashed, was
+#                 killed, or wrote something unparseable
+#   no-tests      the suite produced a result and executed nothing: nothing was
+#                 discovered, discovery threw, or every discovered test was
+#                 skipped
+#   missing       the suite was in the run's manifest and produced no row at
+#                 all (decided by reconciliation, not here)
+# ---------------------------------------------------------------------------
+function script:Read-RowField {
+    param([object]$Object, [string]$Name, [object]$Default)
+    if ($null -ne $Object -and $Object.PSObject.Properties.Match($Name).Count -gt 0 -and $null -ne $Object.$Name) {
+        return $Object.$Name
+    }
+    return $Default
+}
+
+function Resolve-PesterSuiteOutcome {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)][object]$Row)
+
+    $hasResult = [bool](script:Read-RowField $Row 'HasResult' $false)
+    $failed = [int](script:Read-RowField $Row 'Failed' 0)
+    $passed = [int](script:Read-RowField $Row 'Passed' 0)
+    $skipped = [int](script:Read-RowField $Row 'Skipped' 0)
+    $notRun = [int](script:Read-RowField $Row 'NotRun' 0)
+    $containerFailures = [int](script:Read-RowField $Row 'ContainerFailures' 0)
+    $executed = $passed + $failed
+
+    if (-not $hasResult) {
+        return [pscustomobject]@{ Outcome = 'no-result'; Passed = $false; Reason = 'no usable result file — worker crashed or wrote something unparseable' }
+    }
+    if ($failed -gt 0) {
+        return [pscustomobject]@{ Outcome = 'failed-tests'; Passed = $false; Reason = "$failed failing test(s)" }
+    }
+    if ($containerFailures -gt 0 -and $executed -gt 0) {
+        return [pscustomobject]@{ Outcome = 'failed-tests'; Passed = $false; Reason = "$containerFailures container(s) failed to discover" }
+    }
+    if ($executed -eq 0) {
+        $why = if ($containerFailures -gt 0) { 'discovery threw' }
+               elseif (($skipped + $notRun) -gt 0) { "every discovered test was skipped or not run ($($skipped + $notRun))" }
+               else { 'no tests discovered' }
+        return [pscustomobject]@{ Outcome = 'no-tests'; Passed = $false; Reason = "executed no tests — $why" }
+    }
+
+    return [pscustomobject]@{ Outcome = 'passed'; Passed = $true; Reason = "$passed test(s) passed" }
+}
+
+# ---------------------------------------------------------------------------
 # Invoke-PesterSharded
 # ---------------------------------------------------------------------------
 function Invoke-PesterSharded {
     [CmdletBinding()]
     param(
         [string]$TestsPath = (Join-Path $PSScriptRoot '../../../.github/scripts/Tests'),
+        # Issue #1037: the suite list the CALLER selected. When supplied, this
+        # runner never globs -- the per-PR gate's selection is a glob MINUS a
+        # quarantine, and a runner that re-globs would run the quarantined
+        # suites the gate deliberately excluded. Supplying an EMPTY list is an
+        # error, never a run over nothing.
+        [AllowEmptyCollection()][string[]]$SuitePath,
         [switch]$DeterminismCheck,
         [int]$MinTestCount = 200,
-        [string]$Output = 'Minimal'
+        [string]$Output = 'Minimal',
+        # How many suite processes run concurrently. Derived, not chosen --
+        # see Get-PesterFanOutWidth.
+        [ValidateRange(1, 256)][int]$FanOutWidth = 8
     )
 
-    # Resolve tests path
-    $resolvedTestsPath = $TestsPath
-    if (-not [System.IO.Path]::IsPathRooted($resolvedTestsPath)) {
-        $resolved = Resolve-Path $resolvedTestsPath -ErrorAction SilentlyContinue
-        if ($null -ne $resolved) { $resolvedTestsPath = $resolved.Path }
+    $selectionDriven = $PSBoundParameters.ContainsKey('SuitePath')
+
+    if ($selectionDriven) {
+        if (@($SuitePath).Count -eq 0) {
+            Write-Error 'SuitePath was supplied but empty. A run over no suites is a failure, not a pass: the caller selected nothing, and reporting green for that is the false-GREEN shape this runner exists to refuse.'
+            return [pscustomobject]@{ ExitCode = 1; TotalPassed = 0; TotalFailed = 0; Results = @() }
+        }
+
+        $allFiles = @()
+        $unreadable = @()
+        foreach ($p in $SuitePath) {
+            $item = Get-Item -LiteralPath $p -ErrorAction SilentlyContinue
+            if ($null -eq $item -or $item.PSIsContainer) { $unreadable += $p; continue }
+            $allFiles += $item
+        }
+        if ($unreadable.Count -gt 0) {
+            Write-Error "SuitePath names $($unreadable.Count) entr(y/ies) that is not a readable file: $($unreadable -join ', '). Dropping a selected suite silently is exactly the reconciliation failure this runner reports on."
+            return [pscustomobject]@{ ExitCode = 1; TotalPassed = 0; TotalFailed = 0; Results = @() }
+        }
+        $allFiles = @($allFiles | Sort-Object Name)
+
+        # Attribution anchors on the tests tree, and with a supplied list there
+        # is no TestsPath to anchor on. The first selected suite's directory is
+        # the tree those suites actually live in.
+        $resolvedTestsPath = $allFiles[0].DirectoryName
     }
+    else {
+        # Resolve tests path
+        $resolvedTestsPath = $TestsPath
+        if (-not [System.IO.Path]::IsPathRooted($resolvedTestsPath)) {
+            $resolved = Resolve-Path $resolvedTestsPath -ErrorAction SilentlyContinue
+            if ($null -ne $resolved) { $resolvedTestsPath = $resolved.Path }
+        }
 
-    if (-not (Test-Path -LiteralPath $resolvedTestsPath -PathType Container)) {
-        Write-Error "TestsPath not found: $resolvedTestsPath"
-        return [pscustomobject]@{ ExitCode = 1; TotalPassed = 0; TotalFailed = 0; Results = @() }
-    }
+        if (-not (Test-Path -LiteralPath $resolvedTestsPath -PathType Container)) {
+            Write-Error "TestsPath not found: $resolvedTestsPath"
+            return [pscustomobject]@{ ExitCode = 1; TotalPassed = 0; TotalFailed = 0; Results = @() }
+        }
 
-    # Discover all .Tests.ps1 files — the expected-file manifest
-    $allFiles = @(Get-ChildItem -LiteralPath $resolvedTestsPath -Filter '*.Tests.ps1' -File |
-        Sort-Object Name)
+        # Discover all .Tests.ps1 files — the expected-file manifest
+        $allFiles = @(Get-ChildItem -LiteralPath $resolvedTestsPath -Filter '*.Tests.ps1' -File |
+            Sort-Object Name)
 
-    if ($allFiles.Count -eq 0) {
-        Write-Error "No .Tests.ps1 files found in: $resolvedTestsPath"
-        return [pscustomobject]@{ ExitCode = 1; TotalPassed = 0; TotalFailed = 0; Results = @() }
+        if ($allFiles.Count -eq 0) {
+            Write-Error "No .Tests.ps1 files found in: $resolvedTestsPath"
+            return [pscustomobject]@{ ExitCode = 1; TotalPassed = 0; TotalFailed = 0; Results = @() }
+        }
     }
 
     $realGitNames = @(Get-RealGitFiles)
@@ -429,9 +648,9 @@ function Invoke-PesterSharded {
         if ($DeterminismCheck) {
             # Run twice and compare
             Write-Host "=== Determinism check: run 1 ===" -ForegroundColor Cyan
-            $run1 = script:Invoke-ShardedRun -ParallelFiles $parallelFiles -SequentialFiles $sequentialFiles -Output $Output -AllFileManifest $allFiles -MinTestCount $MinTestCount
+            $run1 = script:Invoke-ShardedRun -ParallelFiles $parallelFiles -SequentialFiles $sequentialFiles -Output $Output -AllFileManifest $allFiles -MinTestCount $MinTestCount -FanOutWidth $FanOutWidth
             Write-Host "=== Determinism check: run 2 ===" -ForegroundColor Cyan
-            $run2 = script:Invoke-ShardedRun -ParallelFiles $parallelFiles -SequentialFiles $sequentialFiles -Output $Output -AllFileManifest $allFiles -MinTestCount $MinTestCount
+            $run2 = script:Invoke-ShardedRun -ParallelFiles $parallelFiles -SequentialFiles $sequentialFiles -Output $Output -AllFileManifest $allFiles -MinTestCount $MinTestCount -FanOutWidth $FanOutWidth
 
             $diffFiles = script:Compare-RunResults -Run1 $run1.Results -Run2 $run2.Results
             if ($diffFiles.Count -gt 0) {
@@ -439,13 +658,14 @@ function Invoke-PesterSharded {
                 foreach ($d in $diffFiles) {
                     Write-Host "  $($d.File): run1=$($d.Run1Outcome) run2=$($d.Run2Outcome)" -ForegroundColor Red
                 }
-                return [pscustomobject]@{
-                    ExitCode        = 1
-                    TotalPassed     = $run1.TotalPassed
-                    TotalFailed     = $run1.TotalFailed
-                    Results         = $run1.Results
-                    DeterminismDiff = $diffFiles
-                }
+                # Run 1's whole record, with the verdict overridden — not a
+                # hand-built subset. A caller reading Reconciliation or
+                # SuiteOutcomes must not find them missing precisely on the
+                # runs where something went wrong.
+                $flipped = $run1.PSObject.Copy()
+                $flipped.ExitCode = 1
+                $flipped | Add-Member -NotePropertyName 'DeterminismDiff' -NotePropertyValue $diffFiles -Force
+                return $flipped
             }
             else {
                 Write-Host "`nDeterminism check: PASSED (no flips between runs)" -ForegroundColor Green
@@ -454,7 +674,7 @@ function Invoke-PesterSharded {
             return $run1
         }
 
-        return script:Invoke-ShardedRun -ParallelFiles $parallelFiles -SequentialFiles $sequentialFiles -Output $Output -AllFileManifest $allFiles -MinTestCount $MinTestCount
+        return script:Invoke-ShardedRun -ParallelFiles $parallelFiles -SequentialFiles $sequentialFiles -Output $Output -AllFileManifest $allFiles -MinTestCount $MinTestCount -FanOutWidth $FanOutWidth
     }
     finally {
         script:Set-AttributionEnvVar -Name $depthEnvName -Value $savedDepth
@@ -471,7 +691,8 @@ function script:Invoke-ShardedRun {
         [object[]]$SequentialFiles,
         [string]$Output,
         [object[]]$AllFileManifest = @(),
-        [int]$MinTestCount = 200
+        [int]$MinTestCount = 200,
+        [int]$FanOutWidth = 8
     )
 
     $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) "pester-sharded-$([System.Guid]::NewGuid().ToString('N'))"
@@ -524,39 +745,56 @@ function script:Invoke-ShardedRun {
                     try {
                         $data = Get-Content -LiteralPath $resultFile -Raw | ConvertFrom-Json
                         $bag.Add([pscustomobject]@{
-                            File        = $fileName
-                            Passed      = [int]$data.Passed
-                            Failed      = [int]$data.Failed
-                            TotalCount  = [int]$data.TotalCount
-                            WallClockMs = $sw.ElapsedMilliseconds
-                            ExitCode    = $exitCode
-                            HasResult   = $true
+                            File              = $fileName
+                            Passed            = [int]$data.Passed
+                            Failed            = [int]$data.Failed
+                            Skipped           = [int]$data.Skipped
+                            NotRun            = [int]$data.NotRun
+                            ContainerFailures = [int]$data.ContainerFailures
+                            TotalCount        = [int]$data.TotalCount
+                            WallClockMs       = $sw.ElapsedMilliseconds
+                            ExitCode          = $exitCode
+                            HasResult         = $true
                         }) | Out-Null
                     }
                     catch {
-                        # Result file malformed — treat as crash
+                        # Result file malformed — no usable result. Every count is
+                        # ZERO, deliberately: a fabricated `Failed = 1` here was
+                        # what reddened the run, and it did so by lying about how
+                        # many tests failed. HasResult = $false is the signal;
+                        # Resolve-PesterSuiteOutcome reads it and returns
+                        # 'no-result', which reddens on its own channel.
                         $bag.Add([pscustomobject]@{
-                            File        = $fileName
-                            Passed      = 0
-                            Failed      = 1
-                            WallClockMs = $sw.ElapsedMilliseconds
-                            ExitCode    = $exitCode
-                            HasResult   = $false
+                            File              = $fileName
+                            Passed            = 0
+                            Failed            = 0
+                            Skipped           = 0
+                            NotRun            = 0
+                            ContainerFailures = 0
+                            TotalCount        = 0
+                            WallClockMs       = $sw.ElapsedMilliseconds
+                            ExitCode          = $exitCode
+                            HasResult         = $false
                         }) | Out-Null
                     }
                 }
                 else {
-                    # No result file = worker crashed = hard failure (no-false-GREEN M7)
+                    # No result file = worker crashed = hard failure (no-false-GREEN M7),
+                    # carried by HasResult rather than by an invented test count.
                     $bag.Add([pscustomobject]@{
-                        File        = $fileName
-                        Passed      = 0
-                        Failed      = 1
-                        WallClockMs = $sw.ElapsedMilliseconds
-                        ExitCode    = $exitCode
-                        HasResult   = $false
+                        File              = $fileName
+                        Passed            = 0
+                        Failed            = 0
+                        Skipped           = 0
+                        NotRun            = 0
+                        ContainerFailures = 0
+                        TotalCount        = 0
+                        WallClockMs       = $sw.ElapsedMilliseconds
+                        ExitCode          = $exitCode
+                        HasResult         = $false
                     }) | Out-Null
                 }
-            } -ThrottleLimit 8
+            } -ThrottleLimit $FanOutWidth
         }
 
         # ---- Sequential shard (real-git files) ----
@@ -604,34 +842,47 @@ function script:Invoke-ShardedRun {
                         try {
                             $data = Get-Content -LiteralPath $resultFile -Raw | ConvertFrom-Json
                             $allResults.Add([pscustomobject]@{
-                                File        = $file.Name
-                                Passed      = [int]$data.Passed
-                                Failed      = [int]$data.Failed
-                                TotalCount  = [int]$data.TotalCount
-                                WallClockMs = $sw.ElapsedMilliseconds
-                                ExitCode    = $exitCode
-                                HasResult   = $true
+                                File              = $file.Name
+                                Passed            = [int]$data.Passed
+                                Failed            = [int]$data.Failed
+                                Skipped           = [int]$data.Skipped
+                                NotRun            = [int]$data.NotRun
+                                ContainerFailures = [int]$data.ContainerFailures
+                                TotalCount        = [int]$data.TotalCount
+                                WallClockMs       = $sw.ElapsedMilliseconds
+                                ExitCode          = $exitCode
+                                HasResult         = $true
                             }) | Out-Null
                         }
                         catch {
+                            # See the parallel shard's equivalent branch: no
+                            # fabricated counts, HasResult carries the signal.
                             $allResults.Add([pscustomobject]@{
-                                File        = $file.Name
-                                Passed      = 0
-                                Failed      = 1
-                                WallClockMs = $sw.ElapsedMilliseconds
-                                ExitCode    = $exitCode
-                                HasResult   = $false
+                                File              = $file.Name
+                                Passed            = 0
+                                Failed            = 0
+                                Skipped           = 0
+                                NotRun            = 0
+                                ContainerFailures = 0
+                                TotalCount        = 0
+                                WallClockMs       = $sw.ElapsedMilliseconds
+                                ExitCode          = $exitCode
+                                HasResult         = $false
                             }) | Out-Null
                         }
                     }
                     else {
                         $allResults.Add([pscustomobject]@{
-                            File        = $file.Name
-                            Passed      = 0
-                            Failed      = 1
-                            WallClockMs = $sw.ElapsedMilliseconds
-                            ExitCode    = $exitCode
-                            HasResult   = $false
+                            File              = $file.Name
+                            Passed            = 0
+                            Failed            = 0
+                            Skipped           = 0
+                            NotRun            = 0
+                            ContainerFailures = 0
+                            TotalCount        = 0
+                            WallClockMs       = $sw.ElapsedMilliseconds
+                            ExitCode          = $exitCode
+                            HasResult         = $false
                         }) | Out-Null
                     }
                 }
@@ -655,73 +906,146 @@ function script:Invoke-ShardedRun {
 
     $resultsArray = @($allResults)
 
-    # No-false-GREEN: expected-file manifest check
-    # Every discovered file must have a result; missing = crash = failure
-    $missingFiles = @()
-    if ($AllFileManifest.Count -gt 0) {
-        foreach ($expectedFile in $AllFileManifest) {
-            $found = $resultsArray | Where-Object { $_.File -eq $expectedFile.Name }
-            if ($null -eq $found) {
-                $missingFiles += $expectedFile.Name
-            }
-        }
-    }
+    # ---- Reconciliation against the manifest this run was ASKED to run ------
+    #
+    # "Selected" is the caller's word and it is kept. A mechanism that drops a
+    # selected suite before running it reconciles perfectly against what it ran
+    # and still failed to run what it was given -- so the comparison is against
+    # the manifest, in both directions, and duplicates count too.
+    $manifestNames = @($AllFileManifest | ForEach-Object { $_.Name })
+    $reportedNames = @($resultsArray | ForEach-Object { $_.File })
 
-    # Print per-file summary
-    $totalPassed = 0
-    $totalFailed = 0
+    $missingFiles = @($manifestNames | Where-Object { $reportedNames -notcontains $_ })
+    $unexpectedFiles = @($reportedNames | Sort-Object -Unique | Where-Object { $manifestNames -notcontains $_ })
+    $duplicateFiles = @($reportedNames | Group-Object | Where-Object { $_.Count -gt 1 } | ForEach-Object { $_.Name })
+    $reconciles = ($manifestNames.Count -gt 0) -and
+                  ($missingFiles.Count -eq 0) -and
+                  ($unexpectedFiles.Count -eq 0) -and
+                  ($duplicateFiles.Count -eq 0)
+
+    # ---- Per-suite outcomes: ONE record, read by both channels --------------
+    $outcomeRows = [System.Collections.Generic.List[object]]::new()
     $failedFiles = @()
 
     $sortedResults = @($resultsArray | Sort-Object File)
     foreach ($r in $sortedResults) {
-        $totalPassed += $r.Passed
-        $totalFailed += $r.Failed
+        $verdict = Resolve-PesterSuiteOutcome -Row $r
         $wallSec = [math]::Round($r.WallClockMs / 1000.0, 1)
-        $zeroTests = $r.HasResult -and $r.TotalCount -eq 0
-        if ($zeroTests) { $totalFailed++ }
-        $status = if ($r.Failed -gt 0 -or -not $r.HasResult -or $zeroTests) { 'FAIL' } else { 'PASS' }
-        $noResult = if (-not $r.HasResult) { ' [NO RESULT - WORKER CRASHED]' }
-                    elseif ($zeroTests) { ' [ZERO TESTS DISCOVERED]' }
-                    else { '' }
-        Write-Host ("  [{0,-4}] {1,-60} pass={2,4}  fail={3,4}  wall={4,6}s{5}" -f $status, $r.File, $r.Passed, $r.Failed, $wallSec, $noResult)
-        if ($r.Failed -gt 0 -or -not $r.HasResult -or $zeroTests) {
-            $failedFiles += $r.File
-        }
+        $status = if ($verdict.Passed) { 'PASS' } else { 'FAIL' }
+        $note = if ($verdict.Passed) { '' } else { "  [$($verdict.Outcome.ToUpperInvariant()) — $($verdict.Reason)]" }
+        Write-Host ("  [{0,-4}] {1,-60} pass={2,4}  fail={3,4}  skip={4,4}  wall={5,6}s{6}" -f
+            $status, $r.File, $r.Passed, $r.Failed, ($r.Skipped + $r.NotRun), $wallSec, $note)
+
+        $outcomeRows.Add([pscustomobject]@{
+            File    = $r.File
+            Outcome = $verdict.Outcome
+            Reason  = $verdict.Reason
+        }) | Out-Null
+        if (-not $verdict.Passed) { $failedFiles += $r.File }
     }
 
     foreach ($mf in $missingFiles) {
-        Write-Host ("  [FAIL] {0,-60} [MISSING RESULT - PRESUMED CRASH]" -f $mf) -ForegroundColor Red
-        $totalFailed++
+        Write-Host ("  [FAIL] {0,-60}  [MISSING — selected, produced no result at all]" -f $mf) -ForegroundColor Red
+        $outcomeRows.Add([pscustomobject]@{
+            File    = $mf
+            Outcome = 'missing'
+            Reason  = 'selected for this run and produced no result row at all'
+        }) | Out-Null
         $failedFiles += $mf
     }
-
-    $overallWallSec = [math]::Round($overallStart.ElapsedMilliseconds / 1000.0, 1)
-    Write-Host "`n  TOTAL: pass=$totalPassed  fail=$totalFailed  wall=${overallWallSec}s  files=$($resultsArray.Count)/$($AllFileManifest.Count)"
-
-    # Minimum test count baseline (no-false-GREEN contract M7 point 3)
-    $exitCode = 0
-    if ($totalFailed -gt 0 -or $missingFiles.Count -gt 0) {
-        $exitCode = 1
-        Write-Host "`n  FAILED FILES:" -ForegroundColor Red
-        foreach ($ff in $failedFiles) {
-            Write-Host "    $ff" -ForegroundColor Red
-        }
+    foreach ($uf in $unexpectedFiles) {
+        Write-Host ("  [FAIL] {0,-60}  [UNEXPECTED — reported but not selected]" -f $uf) -ForegroundColor Red
+    }
+    foreach ($df in $duplicateFiles) {
+        Write-Host ("  [FAIL] {0,-60}  [DUPLICATE — reported more than once]" -f $df) -ForegroundColor Red
     }
 
-    if ($AllFileManifest.Count -gt 0 -and $MinTestCount -gt 0 -and ($totalPassed + $totalFailed) -lt $MinTestCount) {
-        Write-Host "`n  WARNING: total test count $($totalPassed + $totalFailed) is below minimum $MinTestCount — possible suite misconfiguration" -ForegroundColor Yellow
+    # ---- Two totals, each saying which unit it counts -----------------------
+    #
+    # They are never summed together. `tests` counts test cases and is the sum
+    # of what the suites reported, with nothing added to carry a failure
+    # signal; `suites` counts files and comes from the same outcome rows the
+    # redness decision below reads.
+    $testsPassed = 0; $testsFailed = 0; $testsSkipped = 0; $testsNotRun = 0
+    foreach ($r in $resultsArray) {
+        $testsPassed += $r.Passed
+        $testsFailed += $r.Failed
+        $testsSkipped += $r.Skipped
+        $testsNotRun += $r.NotRun
+    }
+    $testsExecuted = $testsPassed + $testsFailed
+
+    $suitesNotPassed = @($outcomeRows | Where-Object { $_.Outcome -ne 'passed' })
+
+    $overallWallSec = [math]::Round($overallStart.ElapsedMilliseconds / 1000.0, 1)
+    Write-Host ''
+    Write-Host ("  TOTAL suites (unit: files): {0} selected, {1} reported — {2}" -f
+        $manifestNames.Count, $resultsArray.Count, (script:Format-OutcomeTally -Rows $outcomeRows))
+    Write-Host ("  TOTAL tests   (unit: test cases): {0} executed = {1} passed + {2} failed; {3} skipped, {4} not run" -f
+        $testsExecuted, $testsPassed, $testsFailed, $testsSkipped, $testsNotRun)
+    Write-Host ("  Reconciliation against the selection: {0}  (missing {1}, unexpected {2}, duplicate {3})  wall={4}s" -f
+        $(if ($reconciles) { 'OK' } else { 'FAILED' }), $missingFiles.Count, $unexpectedFiles.Count, $duplicateFiles.Count, $overallWallSec)
+
+    # ---- Redness: read off the outcome rows, never off a total -------------
+    $exitCode = 0
+    if ($suitesNotPassed.Count -gt 0) {
+        $exitCode = 1
+        Write-Host "`n  FAILED SUITES:" -ForegroundColor Red
+        foreach ($row in $suitesNotPassed) {
+            Write-Host "    $($row.File) — $($row.Outcome): $($row.Reason)" -ForegroundColor Red
+        }
+    }
+    if (-not $reconciles) {
+        $exitCode = 1
+        Write-Host "`n  RECONCILIATION FAILED: the run did not account for its selection exactly once." -ForegroundColor Red
+    }
+
+    # Minimum test count baseline (no-false-GREEN contract M7 point 3). It reads
+    # the EXECUTED test count, which no longer carries per-file increments -- so
+    # the floor now measures what its name says.
+    if ($manifestNames.Count -gt 0 -and $MinTestCount -gt 0 -and $testsExecuted -lt $MinTestCount) {
+        Write-Host "`n  WARNING: executed test count $testsExecuted is below minimum $MinTestCount — possible suite misconfiguration" -ForegroundColor Yellow
         $exitCode = 1
     }
 
     return [pscustomobject]@{
-        ExitCode     = $exitCode
-        TotalPassed  = $totalPassed
-        TotalFailed  = $totalFailed
-        WallClockMs  = $overallStart.ElapsedMilliseconds
-        Results      = $resultsArray
-        MissingFiles = $missingFiles
-        FailedFiles  = $failedFiles
+        ExitCode        = $exitCode
+        # Kept, and still test-case counts -- but now HONEST ones. Every
+        # programmatic consumer of these two fields is enumerated in
+        # goal-contract-validate-core.ps1's Test-GCSuiteGatePass and in the CLI
+        # wrapper; both were exercised against this change.
+        TotalPassed     = $testsPassed
+        TotalFailed     = $testsFailed
+        TestsSkipped    = $testsSkipped
+        TestsNotRun     = $testsNotRun
+        TestsExecuted   = $testsExecuted
+        SuitesSelected  = $manifestNames.Count
+        SuitesReported  = $resultsArray.Count
+        SuitesNotPassed = $suitesNotPassed.Count
+        SuiteOutcomes   = $outcomeRows.ToArray()
+        Reconciliation  = [pscustomobject]@{
+            Ok         = $reconciles
+            Selected   = $manifestNames.Count
+            Reported   = $resultsArray.Count
+            Missing    = $missingFiles
+            Unexpected = $unexpectedFiles
+            Duplicate  = $duplicateFiles
+        }
+        FanOutWidth     = $FanOutWidth
+        WallClockMs     = $overallStart.ElapsedMilliseconds
+        Results         = $resultsArray
+        MissingFiles    = $missingFiles
+        FailedFiles     = $failedFiles
     }
+}
+
+function script:Format-OutcomeTally {
+    param([object]$Rows)
+
+    $parts = foreach ($state in @('passed', 'failed-tests', 'no-result', 'no-tests', 'missing')) {
+        "$state=$(@($Rows | Where-Object { $_.Outcome -eq $state }).Count)"
+    }
+    return ($parts -join '  ')
 }
 
 # ---------------------------------------------------------------------------
@@ -742,8 +1066,16 @@ function script:Compare-RunResults {
         $r1 = $run1Map[$r2.File]
         if ($null -eq $r1) { continue }
 
-        $outcome1 = if ($r1.Failed -gt 0 -or -not $r1.HasResult -or ($r1.HasResult -and $r1.TotalCount -eq 0)) { 'fail' } else { 'pass' }
-        $outcome2 = if ($r2.Failed -gt 0 -or -not $r2.HasResult -or ($r2.HasResult -and $r2.TotalCount -eq 0)) { 'fail' } else { 'pass' }
+        # Through the SAME predicate the summary and the exit code use. This
+        # site used to recompute the judgement from the three legacy fields,
+        # which is how it went on reading a corrected mechanism by the old
+        # rules and reported "no flips" across two runs that differed.
+        #
+        # And it compares the OUTCOME, not merely pass/fail: a suite that
+        # crashed on one run and failed its tests on the other flipped, and
+        # collapsing both to 'fail' is the same blindness one level up.
+        $outcome1 = (Resolve-PesterSuiteOutcome -Row $r1).Outcome
+        $outcome2 = (Resolve-PesterSuiteOutcome -Row $r2).Outcome
 
         if ($outcome1 -ne $outcome2) {
             $diffs.Add([pscustomobject]@{
