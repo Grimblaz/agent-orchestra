@@ -7,7 +7,7 @@ Keep the shared review methodology in [../SKILL.md](../SKILL.md). This platform 
 ## Parent-side Gating And Tool Binding
 
 - Resolve the review target, issue, plan, design, diff, existing ledgers, or GitHub review payload before entering the adapter dispatch sequence.
-- If required pre-flight evidence is missing, gather it before prosecution begins. Parent surfaces may use `AskUserQuestion` during pre-flight only; atomic adapter dispatch must not pause for user choice after prosecution starts.
+- If required pre-flight evidence is missing, gather it before prosecution begins. Parent surfaces may ask the user during pre-flight only; atomic adapter dispatch must not pause for user choice after prosecution starts.
 - Use the `Agent` tool for Code-Critic prosecution and defense stages.
 - Use the `Agent` tool for Code-Review-Response judge stages.
 - Use `Bash` for local repo inspection, handshake capture, `gh` CLI calls, and terminal-scoped validation referenced by the active adapter.
@@ -164,7 +164,7 @@ After the terminal stage of an adapter completes successfully, inspect the selec
 
 ## Atomic Discipline Guard
 
-- No `AskUserQuestion` after atomic prosecution begins; gather missing inputs before the first dispatch.
+- Ask the user nothing after atomic prosecution begins; gather missing inputs before the first dispatch.
 - No edits by the parent between prosecution and the terminal stage of an atomic adapter.
 - No surfacing ledger contents for user reaction between prosecution and terminal stage.
 - No interim disposition, acceptance, dismissal, or scoring of findings before defense and judge complete for a three-stage atomic adapter.

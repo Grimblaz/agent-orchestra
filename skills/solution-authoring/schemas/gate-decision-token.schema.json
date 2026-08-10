@@ -18,7 +18,7 @@
     "outcome": {
       "type": "string",
       "enum": ["asked", "gate-fails", "declined", "same-decision-resume", "greenfield-defer"],
-      "description": "How the gate resolved. 'asked' = structured question was fired. All other values = lawful skip."
+      "description": "How the gate resolved. 'asked' = the decision was put to the engineer. All other values = lawful skip."
     },
     "classification": {
       "type": "string",
@@ -28,7 +28,7 @@
     "window_position": {
       "type": "string",
       "enum": ["pre-ask", "disposition", "judge-merge", "unknown", "review-disposition"],
-      "description": "Which gate firing position this token belongs to. 'pre-ask' = the classification-gate's pre-dispatch firing position — an upstream structured question when the outcome is indeterminate, or a determined-outcome announcement (no question) at the same firing position, e.g. the #786 scope-classification announce path. 'disposition' = adversarial finding disposition (#615 surface). 'judge-merge' = plan judge-merge disposition (#605 surface). 'review-disposition' = review-verdict disposition gate firing position."
+      "description": "Which gate firing position this token belongs to. 'pre-ask' = the classification-gate's pre-dispatch firing position — an upstream question when the outcome is indeterminate, or a determined-outcome announcement (no question) at the same firing position, e.g. the #786 scope-classification announce path. 'disposition' = adversarial finding disposition (#615 surface). 'judge-merge' = plan judge-merge disposition (#605 surface). 'review-disposition' = review-verdict disposition gate firing position."
     },
     "timestamp": {
       "type": "string",
@@ -37,7 +37,7 @@
     },
     "session_key": {
       "type": "string",
-      "description": "Optional: the session key used by the event logger hook (L1) so the L2 validator can locate corroborating L1 events without re-deriving the key."
+      "description": "Optional: the session key naming the token's own log file, derived by Resolve-GateSessionKey (skills/solution-authoring/scripts/Resolve-GateSessionKey.ps1). It records which stream the token was written to; it no longer correlates against a second producer, since the L1 event logger was retired in issue #1003."
     },
     "issue_number": {
       "type": "integer",

@@ -51,7 +51,7 @@ When the CE Gate reveals a defect:
 2. Delegate fix to Code-Smith / Test-Writer
 3. Add regression tests
 4. Re-exercise the CE scenario
-5. Loop budget: 2 cycles max, then escalate via `vscode/askQuestions`
+5. Loop budget: 2 cycles max, then escalate to the user
 
 **Track 2 — Systemic review**
 

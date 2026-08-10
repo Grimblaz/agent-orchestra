@@ -12,7 +12,7 @@
             - a Continuation Contract heading inside <critical_rules>
             - key continuation points where models commonly stall (validation, review, CE Gate, PR creation)
             - stopping rules that cover silent abandonment
-            - an askQuestions fallback when uncertain whether to continue
+            - an escalation fallback when uncertain whether to continue
             - the anti-pattern "premature silent stop" named as a protocol violation
 
         These tests lock the landed continuation-contract wording for issue #354 going forward; update them only when the contract semantics intentionally change.
@@ -52,10 +52,10 @@ Describe 'continuation contract' {
         $script:ContinuationPointsPattern = '(?si)(validation).{0,400}(code review|review).{0,400}(CE Gate|customer.experience).{0,400}(PR creation|PR URL|create.{0,40}PR)'
 
         # Test 3: Stopping rules cover silent abandonment
-        $script:SilentAbandonmentPattern = '(?si)(end a session|end.{0,40}session).{0,200}(PR URL|pull request).{0,120}(askQuestions|ask.{0,10}questions)'
+        $script:SilentAbandonmentPattern = '(?si)(end a session|end.{0,40}session).{0,200}(PR URL|pull request).{0,120}(escalat|ask)'
 
         # Test 4: "When uncertain, ask" fallback
-        $script:UncertainAskPattern = '(?si)(uncertain|not sure).{0,200}(askQuestions|ask.{0,10}questions)'
+        $script:UncertainAskPattern = '(?si)(uncertain|not sure).{0,200}(escalat|ask)'
 
         # Test 5: Anti-pattern "premature silent stop" named
         $script:PrematureSilentStopPattern = '(?si)premature silent stop.{0,200}(protocol violation|violation|anti-pattern|forbidden)'
@@ -72,11 +72,11 @@ Describe 'continuation contract' {
 
     It 'requires stopping rules to cover silent abandonment' {
         $script:StoppingRulesBlock | Should -Not -BeNullOrEmpty -Because 'issue #354 requires a <stopping_rules> block to exist in Code-Conductor'
-        $script:StoppingRulesBlock | Should -Match $script:SilentAbandonmentPattern -Because 'issue #354 requires stopping rules to cover ending a session without a PR URL or askQuestions call'
+        $script:StoppingRulesBlock | Should -Match $script:SilentAbandonmentPattern -Because 'issue #354 requires stopping rules to cover ending a session without a PR URL or an explicit escalation'
     }
 
-    It 'requires a "when uncertain, ask" fallback using askQuestions' {
-        $script:FullContent | Should -Match $script:UncertainAskPattern -Because 'issue #354 requires the uncertainty-as-stop-reason anti-pattern to be addressed with an askQuestions fallback'
+    It 'requires a "when uncertain, ask" fallback' {
+        $script:FullContent | Should -Match $script:UncertainAskPattern -Because 'issue #354 requires the uncertainty-as-stop-reason anti-pattern to be addressed with an escalation fallback'
     }
 
     It 'requires the anti-pattern "premature silent stop" to be named as a protocol violation' {

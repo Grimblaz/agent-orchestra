@@ -12,7 +12,7 @@ Shared opening-phase protocol for the three upstream agents in the Agent Orchest
 ## When to Use
 
 <!-- d-load-order-resolution-anchor -->
-Load this skill as an opening-phase action when a user-invocable upstream agent (Experience-Owner, Solution-Designer, Issue-Planner) or Code-Conductor receives a request referencing an existing GitHub issue, or when the developer is describing a brand-new idea (Greenfield Mode below). Structured-question contracts are platform-mode-independent — see your platform guide for any auto-mode boundary.
+Load this skill as an opening-phase action when a user-invocable upstream agent (Experience-Owner, Solution-Designer, Issue-Planner) or Code-Conductor receives a request referencing an existing GitHub issue, or when the developer is describing a brand-new idea (Greenfield Mode below). Engagement-gate contracts are platform-mode-independent — see your platform guide for any auto-mode boundary.
 
 ## When to Skip
 
@@ -53,7 +53,7 @@ This skill applies to user-invocable agents only. Subagents dispatched by Code-C
 
 ### Project Reference Loading
 
-Project references are optional onboarding context. They supplement the issue body and prior-phase markers; they do not replace upstream methodology or structured-question checkpoints.
+Project references are optional onboarding context. They supplement the issue body and prior-phase markers; they do not replace upstream methodology or engagement-gate checkpoints.
 
 1. If the canonical `<!-- refs-injected-{issue} -->` sentinel (see `skills/project-references/SKILL.md §Sentinel`) is present in this turn's injected context, the UserPromptSubmit hook already ran the deterministic loader — consume the injected bodies and cite where relevant; do **not** re-invoke the loader this turn.
 2. Discover reference configuration in this order: `.agent-orchestra.yml`, `.references/index.json`, then sidecars under declared roots as defined by `skills/project-references/SKILL.md`.
@@ -197,7 +197,7 @@ When no issue exists yet (the developer is describing a new idea in plain langua
 
 - Synthesize the brief from the user's prompt words.
 - Mark **every field** (required core and conditional alike) with a `(proposed)` suffix to signal that the content is not yet anchored to a real issue. The whole brief is unanchored when no issue exists, so the suffix applies uniformly to `What`, `Scope tier`, and any conditional content.
-- Include a prompt for issue creation: use the platform's structured-question tool to ask 'No issue exists yet — create a GitHub issue for this work?' with 'Create issue now (Recommended)' and 'Continue without issue (exploratory session)' as options. The active agent's GitHub Setup step then handles the actual creation.
+- Include a prompt for issue creation: ask 'No issue exists yet — create a GitHub issue for this work?' with 'Create issue now (Recommended)' and 'Continue without issue (exploratory session)' as options. The active agent's GitHub Setup step then handles the actual creation.
 - Omit the standards check — there is no inherited work to check against.
 
 Example greenfield brief:
@@ -222,7 +222,7 @@ When a concern is found, the agent **must**:
    When the required section is entirely absent from the inherited content (not present at all), treat the absence itself as the concern: cite the anchor, note that the required section is missing, and describe what it should contain — omitting the quote step since there is no offending text to quote.
 
 3. **Present the better approach** — describe what the corrected version should look like.
-4. **Ask via structured question** — present the concern and the better approach as a structured-question call (see `platforms/claude.md` and `platforms/copilot.md` for tool invocation). Mark the corrective approach as recommended.
+4. **Ask** — present the concern and the better approach to the user as an explicit, answerable choice. Mark the corrective approach as recommended.
 
 The user decides. A well-written but standards-violating prior phase does not proceed unchallenged.
 
@@ -230,9 +230,9 @@ The user decides. A well-written but standards-violating prior phase does not pr
 
 ### Rule: Non-overridability
 
-Standards-check structured questions are unconditional with respect to user pacing or auto-mode directives. Pacing directives apply to preference-clarifying pauses, not to methodology checkpoints. The user's lever to override a concern is to select an alternative option in the structured question, not to issue a pacing directive that suppresses it.
+Standards-check questions are unconditional with respect to user pacing or auto-mode directives. Pacing directives apply to preference-clarifying pauses, not to methodology checkpoints. The user's lever to override a concern is to select an alternative option the question offers, not to issue a pacing directive that suppresses it.
 
-Note: upstream-onboarding does NOT introduce a labeled `Decline engagement` option (unlike `solution-authoring/SKILL.md`); the asymmetry is intentional — the user's lever for standards checks is selecting from the structured-question options surfaced by the cite-anchor-and-quote Authority procedure.
+Note: upstream-onboarding does NOT introduce a labeled `Decline engagement` option (unlike `solution-authoring/SKILL.md`); the asymmetry is intentional — the user's lever for standards checks is selecting from the options surfaced by the cite-anchor-and-quote Authority procedure.
 
 <!-- upstream-onboarding-non-overridability:end -->
 
@@ -257,7 +257,7 @@ Each agent applies the standards check through its own lens, using the anchors b
 - `skills/customer-experience/SKILL.md` — Customer Language rule, Intent Scenario requirement
 - `skills/bdd-scenarios/SKILL.md` — scenario classification and ID traceability (when BDD is enabled)
 
-**Concern triggers** (raise a structured question when observed):
+**Concern triggers** (raise a standards-check question when observed):
 
 | Observation | Standard violated | Anchor |
 | --- | --- | --- |
@@ -304,7 +304,7 @@ Each agent applies the standards check through its own lens, using the anchors b
 
 ## Platform-specific invocation
 
-This skill's methodology is tool-agnostic. Platform-specific routing for structured questions lives alongside:
+This skill's methodology is tool-agnostic. Platform-specific routing lives alongside:
 
 - Claude Code: [platforms/claude.md](platforms/claude.md)
 - Copilot: [platforms/copilot.md](platforms/copilot.md)

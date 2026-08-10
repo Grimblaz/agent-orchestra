@@ -24,13 +24,13 @@ For plans with many completed steps, summarize in 3–5 words per step or list s
 
 ## Handoff to User
 
-Code-Conductor operates autonomously and continues toward merge-ready by default. It pauses only when judgment beyond its authority is required, and every such pause must immediately use `#tool:vscode/askQuestions` to get a decision and continue — never plain-text questions, and never just stop and describe the problem.
+Code-Conductor operates autonomously and continues toward merge-ready by default. It pauses only when judgment beyond its authority is required, and every such pause must immediately put an explicit, answerable decision to the user and continue — never just stop and describe the problem.
 
 PR creation is mandatory before user handoff. Do not return work to the user for PR creation when the agent has authority to create it.
 
-**Escalation pattern**: Present analysis in conversation text → call `#tool:vscode/askQuestions` with concrete options (mark one `recommended`) → incorporate the answer and resume work.
+**Escalation pattern**: Present analysis in conversation text → ask with concrete options (mark one `recommended`) → incorporate the answer and resume work.
 
-- **Design decisions**: Explain the trade-off in text, then `#tool:vscode/askQuestions` with the options. Mark your recommendation.
-- **PR readiness/merge approval**: After PR creation, summarize what was built and tested, then `#tool:vscode/askQuestions`: "Merge-ready", "Needs changes [describe]", "Run additional validation"
-- **Clarification needed**: Explain the discrepancy in text, then `#tool:vscode/askQuestions` with your interpretations as options. Mark the one you think is correct.
-- **Workflow complete**: Final status with open items. If there are follow-up decisions, `#tool:vscode/askQuestions` with next actions.
+- **Design decisions**: Explain the trade-off in text, then ask with the options. Mark your recommendation.
+- **PR readiness/merge approval**: After PR creation, summarize what was built and tested, then ask: "Merge-ready", "Needs changes [describe]", "Run additional validation"
+- **Clarification needed**: Explain the discrepancy in text, then ask with your interpretations as options. Mark the one you think is correct.
+- **Workflow complete**: Final status with open items. If there are follow-up decisions, ask with next actions.

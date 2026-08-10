@@ -7,7 +7,7 @@ description: The operating methodology for opening a filed standalone issue for 
 
 This skill is the **operating methodology** for the open-for-work flow. The doctrine — why the flow exists, what each beat is for, and the contracts it must not break — lives in [`Documents/Design/open-for-work.md`](../../Documents/Design/open-for-work.md). That document is the rationale home; this file is what the conversation actually follows, and it is self-contained: a run does not need the doctrine document handed to it.
 
-> Auto-mode boundary: see [CLAUDE.md § Auto-mode boundary](../../CLAUDE.md#auto-mode-boundary). Auto-mode does not suppress `AskUserQuestion`.
+> Auto-mode boundary: see [CLAUDE.md § Auto-mode boundary](../../CLAUDE.md#auto-mode-boundary). Auto-mode does not suppress engagement gates.
 
 <!-- vocab-pointer -->
 > **Unfamiliar with a code or term?** Shortcodes like `SMC-NN`, `D1/D2/D3`, and `CE Gate` are defined in the [plain-language vocabulary](../../HOW-IT-WORKS.md#vocab).

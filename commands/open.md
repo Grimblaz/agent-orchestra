@@ -5,7 +5,7 @@ argument-hint: "[issue number]"
 
 # /open
 
-> Auto-mode boundary: see [CLAUDE.md § Auto-mode boundary](../CLAUDE.md#auto-mode-boundary). Auto-mode does not suppress `AskUserQuestion`.
+> Auto-mode boundary: see [CLAUDE.md § Auto-mode boundary](../CLAUDE.md#auto-mode-boundary). Auto-mode does not suppress engagement gates.
 
 <!-- scope: claude-only -->
 

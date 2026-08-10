@@ -60,7 +60,7 @@ Experience-Owner frames the customer problem before design begins:
 4. **Design Intent Reference** — distills the CE Gate `Design Intent` field for the `[CE GATE]` plan step
 5. **Surface Readiness Assessment** — Identifies which tools are available for the surface under change
 6. **Persists output** — Posts a comment to the GitHub issue with the `<!-- experience-owner-complete-{ID} -->` marker
-7. **Interactivity** — Decision-by-decision confirmation using `#tool:vscode/askQuestions`; hub-mode budget 2–3 calls. See `### Collaboration Pattern` in the agent file.
+7. **Interactivity** — Decision-by-decision confirmation; hub-mode budget 2–3 questions. See `### Collaboration Pattern` in the agent file.
 
 ---
 

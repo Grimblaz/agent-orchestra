@@ -120,7 +120,7 @@
     "term": "engagement gate",
     "register": "stable-code",
     "kind": "atomic",
-    "expansion": "engagement gate (a required methodology checkpoint the agent must fire via AskUserQuestion — auto-mode does not suppress it)"
+    "expansion": "engagement gate (a required methodology checkpoint the agent must fire — auto-mode does not suppress it)"
   },
   {
     "term": "Value Reflex",
@@ -223,7 +223,7 @@
     "term": "D1 / D2 / D3 (auto-mode rules)",
     "register": "stable-code",
     "kind": "family",
-    "expansion": "D1 / D2 / D3 (auto-mode boundary rules governing which tool calls auto-approve, which prompt the user, and when AskUserQuestion is unconditional)",
+    "expansion": "D1 / D2 / D3 (auto-mode boundary rules governing which tool calls auto-approve, which prompt the user, and why an engagement gate is unconditional)",
     "decode": "D1 / D2 / D3 = auto-mode boundary rules; see CLAUDE.md § Auto-mode boundary for the full definitions",
     "component_matchers": false
   },

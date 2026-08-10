@@ -52,7 +52,7 @@ Planner absorption umbrella: [#588](https://github.com/Grimblaz/agent-orchestra/
   verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Ownership Principles"
-  responsibility: "Route every user-facing question or approval request through vscode/askQuestions."
+  responsibility: "Make every user-facing question or approval request an explicit, answerable decision."
   disposition: spine-runner-keeps
   action: "Keep question-channel enforcement in the runtime shell for all conductor pauses."
   verification_status: verified
@@ -66,7 +66,7 @@ Planner absorption umbrella: [#588](https://github.com/Grimblaz/agent-orchestra/
   verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "D-rules D1-D14 / Questioning & Pause Policy (Mandatory)"
-  responsibility: "Enforce zero-tolerance structured-question and no plain-text pause rules."
+  responsibility: "Enforce the no-silent-pause rule: never pause without putting a decision to the user."
   disposition: spine-runner-keeps
   action: "Preserve as runtime guardrails around all D-rule checkpoints and branch decisions."
   verification_status: verified
@@ -87,7 +87,7 @@ Planner absorption umbrella: [#588](https://github.com/Grimblaz/agent-orchestra/
   verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Continuation Contract (Mandatory)"
-  responsibility: "Prevent silent session stops before PR creation or a structured askQuestions pause."
+  responsibility: "Prevent silent session stops before PR creation or an explicit escalation."
   disposition: spine-runner-keeps
   action: "Keep continuation enforcement as a top-level conductor invariant."
   verification_status: verified
@@ -151,9 +151,9 @@ Planner absorption umbrella: [#588](https://github.com/Grimblaz/agent-orchestra/
   verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Process"
-  responsibility: "Load solution-authoring before any subsequent skill fires a structured question."
+  responsibility: "Load solution-authoring before any subsequent skill fires an engagement gate."
   disposition: adapter-handles
-  action: "Use skills/solution-authoring/SKILL.md for engagement-gate classification before structured questions."
+  action: "Use skills/solution-authoring/SKILL.md for engagement-gate classification before asking."
   verification_status: verified
   verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
@@ -165,7 +165,7 @@ Planner absorption umbrella: [#588](https://github.com/Grimblaz/agent-orchestra/
   verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Process"
-  responsibility: "Track the cross-session engagement-state limitation that may re-fire settled structured questions."
+  responsibility: "Track the cross-session engagement-state limitation that may re-fire settled decisions."
   disposition: adapter-handles
   action: "Use the SMC-20 engagement-record-{phase}-{ID} marker payload contract and the same-decision-resume skip rule to preserve engagement state across sessions."
   revisit-trigger: "issue:#575"
@@ -230,7 +230,7 @@ Planner absorption umbrella: [#588](https://github.com/Grimblaz/agent-orchestra/
   verified-against-sha: ""
   verified-via-pr-sha: ""
 - source: "Scope Classification Gate"
-  responsibility: "Classify issue scope before upstream calls and present full vs abbreviated tiers through askQuestions."
+  responsibility: "Classify issue scope before upstream calls and present full vs abbreviated tiers as an explicit choice."
   disposition: spine-runner-keeps
   action: "Keep the authority-bound tier choice in hub orchestration before upstream dispatch."
   verification_status: verified
@@ -349,7 +349,7 @@ Planner absorption umbrella: [#588](https://github.com/Grimblaz/agent-orchestra/
   verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Multi-Issue Bundling"
-  responsibility: "Adopt highest-scope-wins bundle tier and present all classifications in one askQuestions prompt."
+  responsibility: "Adopt highest-scope-wins bundle tier and present all classifications in one prompt."
   disposition: spine-runner-keeps
   action: "Keep single-prompt bundle tier confirmation in hub-mode orchestration."
   verification_status: verified
@@ -815,7 +815,7 @@ Planner absorption umbrella: [#588](https://github.com/Grimblaz/agent-orchestra/
   verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Tactical Adaptation"
-  responsibility: "Escalate invalid premises, wrong scope, or significant unaddressed design questions via askQuestions."
+  responsibility: "Escalate invalid premises, wrong scope, or significant unaddressed design questions to the user."
   disposition: spine-runner-keeps
   action: "Keep authority-bound tactical escalation in orchestration with recommended options."
   verification_status: verified
@@ -850,7 +850,7 @@ Planner absorption umbrella: [#588](https://github.com/Grimblaz/agent-orchestra/
   verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Handoff to User"
-  responsibility: "Operate autonomously toward merge-ready and pause only through askQuestions when user judgment is required."
+  responsibility: "Operate autonomously toward merge-ready and pause only with an explicit escalation when user judgment is required."
   disposition: spine-runner-keeps
   action: "Keep user-handoff policy coupled to PR creation and structured authority-bound pauses."
   verification_status: verified

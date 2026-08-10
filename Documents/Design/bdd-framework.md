@@ -101,7 +101,7 @@ Step 4 of Code-Conductor runs the BDD pre-flight gate when BDD is enabled:
 1. Grep `### S\d+` within `## Scenarios` to the next H2 boundary — produce authoritative S-ID list
 2. Check Evidence Summary for each S-ID label
 3. If all IDs present → pass, continue to PR creation
-4. If any IDs missing → present `vscode/askQuestions`:
+4. If any IDs missing → ask, with these options:
    - **Re-exercise** — ask Experience-Owner to exercise the missing scenario(s) and update evidence
    - **Waive** — record a documented waiver in the PR body with justification
    - **Abort** — stop the recovery cycle; emit `❌ CE Gate aborted — pre-flight: {N} of {M} scenarios uncovered` in the PR body; PR creation continues with the abort marker and documented reason

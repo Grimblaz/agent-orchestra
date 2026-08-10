@@ -54,12 +54,15 @@ Describe 'auto-mode boundary contract' {
             'auto-mode means don''t ask'
         )
 
-        # Negative-lookbehind patterns: tolerate citation prose "does not suppress `AskUserQuestion`"
-        # and "does not silence `AskUserQuestion`" while catching contradictory bare and backtick-wrapped forms.
-        # The \s+`? makes the patterns match both "suppress AskUserQuestion" and "suppress `AskUserQuestion`".
+        # Negative-lookbehind patterns: tolerate citation prose "does not suppress engagement gates"
+        # and "does not silence engagement gates" while catching contradictory forms.
+        # Issue #1003 re-pointed these from the tool name to the gate: the repository no longer
+        # specifies a presentation mechanism, so the property worth guarding is that nothing
+        # claims auto-mode suppresses the GATE. Left keyed on the tool name they would have
+        # become structurally unmatchable — a guard file that no longer guards.
         $script:ForbiddenPatterns = @(
-            '(?<!does not )suppress\s+`?AskUserQuestion`?',
-            '(?<!Auto-mode does not )silence\s+`?AskUserQuestion`?'
+            '(?<!does not )suppress\s+`?engagement gates?`?',
+            '(?<!Auto-mode does not )silence\s+`?engagement gates?`?'
         )
 
         $script:RiskyCommandWhitelist = @(
@@ -225,51 +228,51 @@ Describe 'auto-mode boundary contract' {
     # ─────────────────────────────────────────────────────────────
     Describe 'forbidden-phrase regex self-tests' {
 
-        It 'tolerates the citation prose "Auto-mode does not suppress AskUserQuestion"' {
-            $safe = 'Auto-mode does not suppress AskUserQuestion.'
-            $safe | Should -Not -Match '(?<!does not )suppress\s+`?AskUserQuestion`?' `
+        It 'tolerates the citation prose "Auto-mode does not suppress engagement gates"' {
+            $safe = 'Auto-mode does not suppress engagement gates.'
+            $safe | Should -Not -Match '(?<!does not )suppress\s+`?engagement gates?`?' `
                 -Because 'negative lookbehind must allow the citation prose'
         }
 
-        It 'catches the bare contradictory phrase "The agent should suppress AskUserQuestion in auto-mode"' {
-            $bad = 'The agent should suppress AskUserQuestion in auto-mode.'
-            $bad | Should -Match '(?<!does not )suppress\s+`?AskUserQuestion`?' `
+        It 'catches the bare contradictory phrase "The agent should suppress engagement gates in auto-mode"' {
+            $bad = 'The agent should suppress engagement gates in auto-mode.'
+            $bad | Should -Match '(?<!does not )suppress\s+`?engagement gates?`?' `
                 -Because 'regex must catch bare suppress without the negation prefix'
         }
 
-        It 'catches the backtick-wrapped contradictory phrase "suppress `AskUserQuestion` in auto-mode"' {
-            $bad = 'agents should suppress `AskUserQuestion` in auto-mode.'
-            $bad | Should -Match '(?<!does not )suppress\s+`?AskUserQuestion`?' `
+        It 'catches the backtick-wrapped contradictory phrase "suppress `engagement gates` in auto-mode"' {
+            $bad = 'agents should suppress `engagement gates` in auto-mode.'
+            $bad | Should -Match '(?<!does not )suppress\s+`?engagement gates?`?' `
                 -Because 'regex must catch backtick-wrapped suppress (the canonical codebase form)'
         }
 
-        It 'tolerates "Auto-mode does not suppress `AskUserQuestion`"' {
-            $safe = 'Auto-mode does not suppress `AskUserQuestion`.'
-            $safe | Should -Not -Match '(?<!does not )suppress\s+`?AskUserQuestion`?' `
+        It 'tolerates "Auto-mode does not suppress `engagement gates`"' {
+            $safe = 'Auto-mode does not suppress `engagement gates`.'
+            $safe | Should -Not -Match '(?<!does not )suppress\s+`?engagement gates?`?' `
                 -Because 'negative lookbehind must allow the backtick-wrapped negated form'
         }
 
-        It 'tolerates "Auto-mode does not silence AskUserQuestion"' {
-            $safe = 'Auto-mode does not silence AskUserQuestion in any mode.'
-            $safe | Should -Not -Match '(?<!Auto-mode does not )silence\s+`?AskUserQuestion`?' `
+        It 'tolerates "Auto-mode does not silence engagement gates"' {
+            $safe = 'Auto-mode does not silence engagement gates in any mode.'
+            $safe | Should -Not -Match '(?<!Auto-mode does not )silence\s+`?engagement gates?`?' `
                 -Because 'negative lookbehind must allow the negated form'
         }
 
-        It 'catches bare "silence AskUserQuestion"' {
-            $bad = 'Agents should silence AskUserQuestion when mode is auto.'
-            $bad | Should -Match '(?<!Auto-mode does not )silence\s+`?AskUserQuestion`?' `
+        It 'catches bare "silence engagement gates"' {
+            $bad = 'Agents should silence engagement gates when mode is auto.'
+            $bad | Should -Match '(?<!Auto-mode does not )silence\s+`?engagement gates?`?' `
                 -Because 'regex must catch bare silence form'
         }
 
-        It 'catches backtick-wrapped "silence `AskUserQuestion`"' {
-            $bad = 'Agents should silence `AskUserQuestion` when mode is auto.'
-            $bad | Should -Match '(?<!Auto-mode does not )silence\s+`?AskUserQuestion`?' `
+        It 'catches backtick-wrapped "silence `engagement gates`"' {
+            $bad = 'Agents should silence `engagement gates` when mode is auto.'
+            $bad | Should -Match '(?<!Auto-mode does not )silence\s+`?engagement gates?`?' `
                 -Because 'regex must catch backtick-wrapped silence form'
         }
 
-        It 'tolerates "Auto-mode does not silence `AskUserQuestion`"' {
-            $safe = 'Auto-mode does not silence `AskUserQuestion` in any mode.'
-            $safe | Should -Not -Match '(?<!Auto-mode does not )silence\s+`?AskUserQuestion`?' `
+        It 'tolerates "Auto-mode does not silence `engagement gates`"' {
+            $safe = 'Auto-mode does not silence `engagement gates` in any mode.'
+            $safe | Should -Not -Match '(?<!Auto-mode does not )silence\s+`?engagement gates?`?' `
                 -Because 'negative lookbehind must allow the backtick-wrapped negated form'
         }
     }

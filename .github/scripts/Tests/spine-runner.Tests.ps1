@@ -224,9 +224,8 @@ Describe 'Spine-Runner frame-walking contract' -Tag 'contract' {
             }
         }
 
-        It 'maps shared question, web, and browser surfaces onto Claude shell equivalents' {
-            $script:ClaudeShellFrontmatter | Should -Match '(?m)^tools:\s*.*\bWebFetch\b.*\bAskUserQuestion\b' -Because 'the Claude shell must expose equivalents for shared web and question surfaces'
-            $script:ClaudeShellContent | Should -Match '\|\s*`vscode/askQuestions`\s*\|\s*`AskUserQuestion`\s*\|' -Because 'the shared askQuestions surface must map to AskUserQuestion in Claude'
+        It 'maps shared web and browser surfaces onto Claude shell equivalents, and keeps the question capability granted' {
+            $script:ClaudeShellFrontmatter | Should -Match '(?m)^tools:\s*.*\bWebFetch\b.*\bAskUserQuestion\b' -Because 'the Claude shell must keep the capability grant for asking the user (issue #1003 removed the directive, not the capability)'
             $script:ClaudeShellContent | Should -Match '\|\s*`web`\s*\|\s*`WebFetch`\s+for\s+known\s+URLs\s*\|' -Because 'the shared web surface must map to WebFetch in Claude'
             $script:ClaudeShellContent | Should -Match '\|\s*Shared\s+parent\s+browser\s+capability\s*\(`browser/\*`\)\s*\|.*WebFetch.*computer-use.*surface\s+the\s+limitation' -Because 'the Claude shell must acknowledge shared parent browser fallback behavior instead of inventing browser coverage'
         }

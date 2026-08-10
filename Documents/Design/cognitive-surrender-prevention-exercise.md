@@ -43,7 +43,7 @@ Use the following provisioning recipe to prepare test issues, manage marker stat
 To verify cross-session same-decision-resume, a strict **two-session discipline** must be followed:
 
 1. **Session 1 (Upstream Phase)**: Run a real upstream phase to completion on a fresh test issue. The session must produce a genuine, durable `engagement-record-{phase}-{ID}` marker comment containing a substantively authored `articulation_text`. Hand-authored or pre-seeded marker/articulation fixtures are **strictly disallowed**.
-2. **Session 2 (Downstream Resume)**: In a completely distinct, fresh session (fresh tool invocation, new session start), re-enter the workflow and verify that the system successfully reads the durable marker and bypasses the structured question using the same-decision-resume rule.
+2. **Session 2 (Downstream Resume)**: In a completely distinct, fresh session (fresh tool invocation, new session start), re-enter the workflow and verify that the system successfully reads the durable marker and bypasses the question using the same-decision-resume rule.
 
 ---
 
@@ -52,7 +52,7 @@ To verify cross-session same-decision-resume, a strict **two-session discipline*
 Every maintainer verification of the same-decision-resume capability must run a **negative control** to distinguish genuine resume behavior from body re-derivation:
 
 - **Procedure**: Use a **separate, distinct negative-control test issue** (do not reuse the same test issue from the positive scenario). Create this issue WITHOUT first running Session 1, so no engagement-record marker exists. Then run Session 2 (fresh session, re-enter the workflow on this fresh issue). Confirm that the workflow prompts the maintainer again for classification — because no engagement-record marker is present to trigger same-decision-resume. This is non-destructive: the positive-scenario test issue and its markers remain intact throughout.
-- **Control Bar**: Confirm that the workflow is forced to prompt the maintainer again for classification. If the scenario passes equally (bypasses the structured question) with and without the marker present, it must be recorded as a **FAIL**.
+- **Control Bar**: Confirm that the workflow is forced to prompt the maintainer again for classification. If the scenario passes equally (bypasses the question) with and without the marker present, it must be recorded as a **FAIL**.
 
 ---
 

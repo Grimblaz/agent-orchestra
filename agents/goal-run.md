@@ -93,7 +93,6 @@ The Copilot-specific tool names in that file map to Claude Code equivalents belo
 
 | Shared body references | Claude Code tool or behavior |
 | --- | --- |
-| `vscode/askQuestions` | `AskUserQuestion` |
 | `execute` | `Bash` |
 | `read` | `Read` |
 | `edit` | `Edit`, `Write` |

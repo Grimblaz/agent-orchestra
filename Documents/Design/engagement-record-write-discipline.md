@@ -195,11 +195,13 @@ The `solution-authoring` classification gate is enforced through three layers ad
 
 ### L0 — Gate self-report token
 
-At each gate decision point, the agent emits a classification-decision token to the session event log (`memories/session/gate-events-{key}.jsonl`). Schema: `skills/solution-authoring/schemas/gate-decision-token.schema.json`. The `outcome` field (`asked | gate-fails | declined | same-decision-resume | greenfield-defer`) is the discriminator between lawful skips and potential silent skips. The `issue_number` field scopes tokens to their originating issue. The `window_position` field (`pre-ask | disposition | judge-merge`) maps to the three gate firing surfaces unified by `d-scope-boundary`.
+At each gate decision point, the agent emits a classification-decision token to the session event log (`memories/session/gate-events-{key}.jsonl`). Schema: `skills/solution-authoring/schemas/gate-decision-token.schema.json`. The `outcome` field (`asked | gate-fails | declined | same-decision-resume | greenfield-defer`) is the discriminator between lawful skips and potential silent skips. The `issue_number` field scopes tokens to their originating issue. The `window_position` field (`pre-ask | disposition | judge-merge`) maps to the three gate firing surfaces unified by `d-scope-boundary`. Since issue #1003 this is the *only* producer of the stream.
 
-### L1 — PostToolUse event logger (corroboration)
+### L1 — PostToolUse event logger (retired, issue #1003)
 
-A PostToolUse hook (`skills/solution-authoring/scripts/gate-event-logger-hook.ps1`) fires on `AskUserQuestion` (Claude) and `vscode/askQuestions` (Copilot) and appends corroboration events. The `Resolve-GateSessionKey` helper ensures the hook and validator use an identical key (AC12). L1 is designed for Claude; Copilot empirical confirmation is pending (see SMC-21).
+L1 was a `PostToolUse` hook (`skills/solution-authoring/scripts/gate-event-logger-hook.ps1`) matching `^(AskUserQuestion|vscode/askQuestions)$`, which appended corroboration events whenever that specific tool fired. **It was retired in issue #1003 and there is no hook-driven producer of this stream any more.** A hook keyed to one presentation mechanism has no reliable trigger once the repository specifies no mechanism for surfacing a decision, and the hook's own output (`memories/session/gate-events-s-*.jsonl`) had not been written to since 2026-07-18 in any case — the live stream was already entirely agent-written L0.
+
+What survived the retirement: the `Resolve-GateSessionKey` key derivation moved to `skills/solution-authoring/scripts/Resolve-GateSessionKey.ps1`, because the L0 writers interpolate `{session_key}` into the log filename and needed it reachable without the producer. **L2 is unaffected** — the reconciler reads L0 tokens only (`gate-reconciliation-core.ps1`), so it never consumed L1 events. Corroboration is therefore no longer available at all: L0 is a self-report with nothing checking it, which is the accepted cost of the retirement rather than an oversight.
 
 ### L2 — Warn-only reconciliation validator
 

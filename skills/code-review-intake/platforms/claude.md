@@ -6,7 +6,7 @@ Claude bindings:
 
 - Use `Bash` with the `gh` CLI to fetch PR review threads, top-level comments, review summaries, and issue context.
 - Use the `Agent` tool to invoke `code-critic` with `Review mode selector: "Score and represent GitHub review"` for proxy prosecution and `Review mode selector: "Use defense review perspectives"` for the defense pass, then invoke `code-review-response` for judgment.
-- Use `AskUserQuestion` only when no active PR or explicit review target can be resolved.
+- Ask the user only when no active PR or explicit review target can be resolved.
 - Use `WebFetch` only for supplemental remote evidence; GitHub intake itself stays on `gh` CLI.
 
 Keep methodology in `SKILL.md`; this platform note is only the Claude tool-binding shim.

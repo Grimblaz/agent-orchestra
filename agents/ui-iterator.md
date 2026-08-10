@@ -98,7 +98,6 @@ The Copilot-specific tool names in that file map to Claude Code equivalents belo
 | `read` | `Read` |
 | `edit` | `Edit`, `Write` |
 | `search` | `Grep`, `Glob` |
-| `vscode/askQuestions` | `AskUserQuestion` |
 | `browser/openBrowserPage` | Primary: `mcp__claude-in-chrome__*` page-open or navigation surface. Fallback: `mcp__Claude_Preview__preview_start` against the local dev server URL to create the preview session. Final fallback: user opens the target page manually, then pastes a screenshot. |
 | `browser/screenshotPage` | Primary: `mcp__claude-in-chrome__*` screenshot or capture surface. Fallback: `mcp__Claude_Preview__*` screenshot or capture surface after `preview_start`. Final fallback: user pastes the current screenshot into chat. |
 | `browser/clickElement` | Primary: `mcp__claude-in-chrome__*` click or DOM interaction surface. Fallback: `mcp__Claude_Preview__*` click or interaction surface after `preview_start`. Final fallback: user performs the interaction manually, then pastes an updated screenshot. |
