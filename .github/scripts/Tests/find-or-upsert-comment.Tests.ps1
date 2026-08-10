@@ -607,3 +607,57 @@ Describe 'Get-RestCommentId helper — static structure (AC6)' {
             -Because 'Get-RestCommentId must be resolvable after dot-sourcing the library, not only when Find-OrUpsertComment runs'
     }
 }
+
+Describe 'POST path fail-open contract when the body cannot be staged' {
+    # WHY THIS EXISTS. Routing the comment body through a temp file (issue #1035
+    # review, finding M26) hardened the POST path against the argv length limit
+    # — and, in its first draft, quietly changed this file's failure contract.
+    # `Send-NewCommentViaBodyFile` was `try { … } finally { … }` with no `catch`,
+    # so a temp directory that is full, read-only, or absent turned a comment
+    # write into a TERMINATING error thrown out of Find-OrUpsertComment. Every
+    # other failure here — a gh non-zero exit, an unresolvable repo, a
+    # whitespace-only marker — emits a stderr note and returns $null so the
+    # caller decides. Eleven production scripts dot-source this file, and the
+    # POST path is the one every first-ever marker write takes.
+    #
+    # This gap was found by an EXTERNAL reviewer on the fix commit, after this
+    # repository's own five-pass panel, defense, judge and post-fix pass had all
+    # run over it. The pin is here so the next edit cannot reopen it silently.
+
+    BeforeAll {
+        $script:FoucLib = (Resolve-Path (Join-Path $PSScriptRoot '..' 'lib' 'find-or-upsert-comment.ps1')).Path
+    }
+
+    It 'returns $null and reports, instead of throwing, when the temp body file cannot be created' {
+        # Driven in a child runspace with TMPDIR/TMP/TEMP pointed at a path that
+        # does not exist, which is what makes GetTempFileName throw. Doing it in
+        # a child keeps the poisoned environment out of every other test in this
+        # file rather than relying on cleanup ordering.
+        $missingTemp = Join-Path ([System.IO.Path]::GetTempPath()) ("fouc-absent-" + [System.Guid]::NewGuid().ToString('N'))
+        $probe = @'
+param($LibPath, $MissingTemp)
+$env:TMPDIR = $MissingTemp; $env:TMP = $MissingTemp; $env:TEMP = $MissingTemp
+. $LibPath
+function gh { $global:LASTEXITCODE = 0; return '' }
+$err = [System.IO.StringWriter]::new()
+$prev = [Console]::Error
+[Console]::SetError($err)
+try {
+    $result = Send-NewCommentViaBodyFile -Verb 'issue' -Number 7 -Body 'x' -ExplicitRepo $false
+    "THREW=no;NULL=$($null -eq $result);ERR=$($err.ToString().Trim())"
+}
+catch { "THREW=yes;MSG=$($_.Exception.Message)" }
+finally { [Console]::SetError($prev) }
+'@
+        $ps = [System.Management.Automation.PowerShell]::Create()
+        try {
+            $null = $ps.AddScript($probe).AddArgument($script:FoucLib).AddArgument($missingTemp)
+            $out = ($ps.Invoke() | Select-Object -Last 1)
+        }
+        finally { $ps.Dispose() }
+
+        $out | Should -Match 'THREW=no' -Because 'this file''s documented contract is fail-open: the caller decides whether a failed comment write is fatal'
+        $out | Should -Match 'NULL=True' -Because 'every other failure path here returns $null, and a staging failure is not special'
+        $out | Should -Match 'could not stage the comment body' -Because 'a silent $null would leave the caller unable to say why nothing was posted'
+    }
+}

@@ -157,6 +157,25 @@ function Send-NewCommentViaBodyFile {
         if ($ExplicitRepo) { $postArgs += @('-R', "$ResolvedOwner/$ResolvedRepo") }
         $postOutput = & gh @postArgs 2>$null
     }
+    catch {
+        # FAIL-OPEN, because that is this file's contract and routing the body
+        # through a temp file must not quietly change it. Every other failure
+        # here — a gh non-zero exit, an unresolvable repo, a whitespace marker —
+        # emits a stderr note and returns $null so the CALLER decides whether
+        # the failure is fatal. Without this catch, a temp directory that is
+        # full, read-only, or absent turns a comment write into a terminating
+        # error thrown out of Find-OrUpsertComment, and under a caller running
+        # `$ErrorActionPreference = 'Stop'` that aborts the caller mid-run. The
+        # POST path is the one every first-ever write to a marker takes, and
+        # eleven production scripts dot-source this file.
+        #
+        # Found by an external reviewer on the fix commit, not by this repo's
+        # own five-pass panel, defense, judge, or post-fix pass — recorded that
+        # way rather than absorbed silently, because a missed class is the
+        # finding.
+        [Console]::Error.WriteLine("Find-OrUpsertComment: could not stage the comment body for $Verb $Number ($($_.Exception.Message)); no comment was posted.")
+        return $null
+    }
     finally {
         if ($null -ne $bodyTempFile -and (Test-Path -LiteralPath $bodyTempFile)) {
             Remove-Item -LiteralPath $bodyTempFile -Force -ErrorAction SilentlyContinue

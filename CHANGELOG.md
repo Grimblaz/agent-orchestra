@@ -33,6 +33,8 @@ The pass also found that the hardened comment-POST path was **completely unpinne
 
 The root cause of that cluster was structural and is now fixed: `.github/scripts/ci-glob-audit.ps1` took the majority of the fixes and **had no tests at all** — the repository's own "green library nothing calls" inversion, one level up. It now has `.github/scripts/Tests/ci-glob-audit-wrapper.Tests.ps1`. Across the round, 37 mutations were applied to fixed lines and every one turned red, each fix additionally carrying a negative half so that a degenerate always-withhold or always-unknown remedy cannot satisfy it. Suite totals: 140 core, 37 wrapper, 21 comment-upsert; **2040 passing across the 63 gate-selected suites**, against baseline `800537c`. `record_format_version` moves to **2** — the per-suite table gained `drain ms` and `suite ms`, splitting a row's total from the time spent draining a pipe a descendant held open, which a consumer averaging v1's single column would have silently mixed.
 
+**One finding escaped the internal pipeline and was caught externally, recorded here rather than absorbed.** Hardening the comment-POST path put the body write inside `try { … } finally { … }` with no `catch`, so a temp directory that is full, read-only or absent turned a comment write into a *terminating* error thrown out of `Find-OrUpsertComment` — a function whose documented contract is fail-open, and which eleven production scripts dot-source. The five-pass panel, the defense pass, the judge and the post-fix pass all ran over that commit and none of them found it; an external reviewer did. It is fixed and pinned, and the pin says in its own comment where the finding came from, because a missed class is itself the finding.
+
 ## [3.19.0] — 2026-08-09
 
 ### Changed
