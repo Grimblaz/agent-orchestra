@@ -27,6 +27,35 @@
 # the behaviour #1031 removed; editing its fixture while keeping its title
 # would have left a test asserting the opposite of what ships.
 # ---------------------------------------------------------------------------
+#
+# ---------------------------------------------------------------------------
+# PAYLOAD PINNING (issue #1035 review, findings F3 + the PATCH-path sibling
+# it turned up).
+#
+# Both write paths in find-or-upsert-comment.ps1 stream their payload through
+# a temp file — the POST path via `--body-file` (M26) and the PATCH path via
+# `gh api --input` (Fix Pass3-F1). Neither payload was pinned by ANY assertion
+# in this file, for two different reasons, and both were proven by mutation
+# rather than suspected:
+#
+#   * POST — the mock matched '(issue|pr) comment \d+ --body', which
+#     '--body-file' satisfies BY PREFIX. The tests kept passing by luck, not
+#     by design. Writing an EMPTY body file, and deleting the Set-Content
+#     that writes the body at all, each left the suite at 17 passed / 0
+#     failed.
+#   * PATCH — the mock's regex ENDED at the comment id
+#     ('...issues/comments/(\d+)'), so everything after it — the `--input`
+#     flag, the temp path, and the JSON envelope — was never examined.
+#     Emptying the payload, deleting its write, replacing the body value with
+#     'CLOBBERED', and swapping `--input` for a bogus flag ALL left the suite
+#     at 17 passed / 0 failed.
+#
+# The fix is in the mock, not in the assertions alone: each branch now
+# requires its real flag and READS the temp file it points at. That read has
+# to happen inside the mock — both helpers delete the temp file in their own
+# `finally` block the instant `gh` returns, so mid-call is the only moment at
+# which the bytes the library intended to send exist on disk.
+# ---------------------------------------------------------------------------
 
 Describe 'Find-OrUpsertComment' {
     BeforeAll {
@@ -44,6 +73,29 @@ Describe 'Find-OrUpsertComment' {
         $script:mockComments = @()
         $script:mockRepoOwner = 'Grimblaz'
         $script:mockRepoName = 'agent-orchestra'
+        # Payload capture (see PAYLOAD PINNING note at the top of this file).
+        $script:lastPostBody = $null      # bytes read back out of --body-file
+        $script:lastPatchPayload = $null  # raw bytes read back out of --input
+        $script:lastPatchBody = $null     # .body decoded from that JSON envelope
+
+        # Resolve the temp-file path that FOLLOWS $Flag in the real argv and
+        # return the file's content. Reads the argv array rather than the
+        # space-joined string so a temp path containing spaces cannot break
+        # it. Returns a describing sentinel instead of $null on every failure
+        # so an assertion message names WHY there was no payload rather than
+        # reporting a bare null.
+        function global:Get-MockPayloadFromFile {
+            param([object[]]$ArgList, [string]$Flag)
+            $idx = [array]::IndexOf($ArgList, $Flag)
+            if ($idx -lt 0) { return "<<argv carried no $Flag flag>>" }
+            if ($idx + 1 -ge $ArgList.Count) { return "<<$Flag had no path argument>>" }
+            $path = [string]$ArgList[$idx + 1]
+            if (-not (Test-Path -LiteralPath $path)) { return "<<payload file '$path' does not exist>>" }
+            $raw = Get-Content -LiteralPath $path -Raw
+            # Get-Content -Raw yields $null (not '') for a zero-byte file.
+            if ($null -eq $raw) { return '' }
+            return [string]$raw
+        }
 
         function global:gh {
             param([Parameter(ValueFromRemainingArguments = $true)]$Args)
@@ -64,21 +116,47 @@ Describe 'Find-OrUpsertComment' {
                 $global:LASTEXITCODE = 0
                 return (@{ owner = @{ login = $script:mockRepoOwner }; name = $script:mockRepoName } | ConvertTo-Json -Depth 4)
             }
-            if ($joined -match 'api -X PATCH repos/[^/]+/[^/]+/issues/comments/(\d+)') {
+            # The ' --input ' tail is deliberately part of the match. Without
+            # it this branch matched any `api -X PATCH .../comments/<id>`
+            # whatsoever, so swapping `--input` for a bogus flag stayed green
+            # (see PAYLOAD PINNING at the top of this file). A PATCH that
+            # does not stream its payload through --input must now miss this
+            # branch, fall through to the catch-all below, and leave
+            # $script:lastPatchArgs null — which every PATCH test already
+            # asserts against.
+            if ($joined -match 'api -X PATCH repos/[^/]+/[^/]+/issues/comments/(\d+) --input ') {
                 if ($script:simulateFailure -eq 'patch') {
                     $global:LASTEXITCODE = 1
                     return ''
                 }
                 $script:lastPatchArgs = $Args
+                # Read the JSON envelope NOW: Find-OrUpsertComment deletes the
+                # temp file in its `finally` the instant this call returns.
+                $script:lastPatchPayload = Get-MockPayloadFromFile -ArgList $Args -Flag '--input'
+                $script:lastPatchBody = if ([string]::IsNullOrWhiteSpace($script:lastPatchPayload)) {
+                    "<<--input payload was empty>>"
+                }
+                else {
+                    try { ($script:lastPatchPayload | ConvertFrom-Json -ErrorAction Stop).body }
+                    catch { "<<--input payload is not valid JSON: $($script:lastPatchPayload)>>" }
+                }
                 $global:LASTEXITCODE = 0
                 return (@{ html_url = "https://github.com/$($script:mockRepoOwner)/$($script:mockRepoName)/issues/123#issuecomment-patched" } | ConvertTo-Json)
             }
-            if ($joined -match '(issue|pr) comment \d+ --body') {
+            # '--body-file', not '--body'. The old pattern was '--body', which
+            # '--body-file' satisfies by PREFIX — so a revert to the raw-argv
+            # `--body $Body` form (the ~32K CreateProcess limit M26 fixed)
+            # would have gone on passing. It now misses this branch and leaves
+            # $script:lastPostArgs null.
+            if ($joined -match '(issue|pr) comment \d+ --body-file ') {
                 if ($script:simulateFailure -eq 'post') {
                     $global:LASTEXITCODE = 1
                     return ''
                 }
                 $script:lastPostArgs = $Args
+                # Read the body NOW: Send-NewCommentViaBodyFile deletes the
+                # temp file in its `finally` the instant this call returns.
+                $script:lastPostBody = Get-MockPayloadFromFile -ArgList $Args -Flag '--body-file'
                 $global:LASTEXITCODE = 0
                 return "https://github.com/$($script:mockRepoOwner)/$($script:mockRepoName)/issues/123#issuecomment-new"
             }
@@ -101,6 +179,7 @@ Describe 'Find-OrUpsertComment' {
         # mock). The Function: PSDrive holds one entry per name regardless of
         # scope, so `Remove-Item Function:gh` actually removes the global mock.
         Remove-Item Function:gh -ErrorAction SilentlyContinue
+        Remove-Item Function:Get-MockPayloadFromFile -ErrorAction SilentlyContinue
     }
 
     Context 'PR comment - zero matches' {
@@ -110,6 +189,8 @@ Describe 'Find-OrUpsertComment' {
             $url | Should -Not -BeNullOrEmpty
             $script:lastPostArgs | Should -Not -BeNullOrEmpty
             $script:lastPatchArgs | Should -BeNullOrEmpty
+            $script:lastPostBody | Should -BeExactly 'hello' `
+                -Because 'the --body-file the POST points at must contain the caller-supplied body; without this the POST could send nothing at all and still pass'
         }
     }
 
@@ -122,6 +203,8 @@ Describe 'Find-OrUpsertComment' {
             $url | Should -Not -BeNullOrEmpty
             $script:lastPatchArgs | Should -Not -BeNullOrEmpty
             $script:lastPostArgs | Should -BeNullOrEmpty
+            $script:lastPatchBody | Should -BeExactly 'new body' `
+                -Because 'the --input JSON envelope must carry the caller-supplied body; without this the PATCH could send an empty or clobbered body and still pass'
         }
     }
 
@@ -130,17 +213,43 @@ Describe 'Find-OrUpsertComment' {
         # '<!-- frame-credit-ledger-123 --> first|second|third' — marker on
         # line 1 with trailing prose. Moved to marker-on-its-own-line-1. The
         # duplicate/earliest-id behaviour under test is unchanged.
+        # STDERR ASSERTION ADDED (issue #1035 review). This test's title has
+        # always claimed it "emits stderr warning naming duplicates", but its
+        # body only captured `$stderr` via `2>&1 | Tee-Object` and never
+        # asserted on it — and could not have: Find-OrUpsertComment reports
+        # via [Console]::Error.WriteLine, which writes straight to the process
+        # stderr handle and never enters PowerShell's error stream, so `2>&1`
+        # captures nothing. (Proof: the warning prints to the console during a
+        # passing run.) The whole pipeline also fed `Out-Null`, so the `$url =`
+        # assignment was dead too. Redirecting [Console]::Error to a
+        # StringWriter is what actually reaches the message.
         It 'PATCHes the earliest match and emits stderr warning naming duplicates' {
             $script:mockComments = @(
                 @{ id = 100; body = "<!-- frame-credit-ledger-123 -->`nfirst" },
                 @{ id = 200; body = "<!-- frame-credit-ledger-123 -->`nsecond" },
                 @{ id = 300; body = "<!-- frame-credit-ledger-123 -->`nthird" }
             )
-            $stderr = $null
-            $url = Find-OrUpsertComment -Type pr -Number 123 -Marker '<!-- frame-credit-ledger-123 -->' -Body 'new' 2>&1 | Tee-Object -Variable stderr | Out-Null
+            $errWriter = [System.IO.StringWriter]::new()
+            $originalErr = [Console]::Error
+            try {
+                [Console]::SetError($errWriter)
+                $url = Find-OrUpsertComment -Type pr -Number 123 -Marker '<!-- frame-credit-ledger-123 -->' -Body 'new'
+            }
+            finally {
+                [Console]::SetError($originalErr)
+            }
+            $captured = $errWriter.ToString()
+
+            $url | Should -Not -BeNullOrEmpty
             $script:lastPatchArgs | Should -Not -BeNullOrEmpty
             $joined = $script:lastPatchArgs -join ' '
             $joined | Should -Match 'comments/100'  # earliest id
+            $script:lastPatchBody | Should -BeExactly 'new'
+
+            $captured | Should -Match 'duplicates: 200, 300' `
+                -Because 'the warning must NAME the duplicate ids it is leaving unpatched, not merely say duplicates exist'
+            $captured | Should -Match 'patching earliest id 100' `
+                -Because 'the warning must name which comment it did patch'
         }
     }
 
@@ -151,6 +260,7 @@ Describe 'Find-OrUpsertComment' {
             $url | Should -Not -BeNullOrEmpty
             $script:lastPostArgs | Should -Not -BeNullOrEmpty
             ($script:lastPostArgs -join ' ') | Should -Match 'issue comment'
+            $script:lastPostBody | Should -BeExactly 'plan'
         }
     }
 
@@ -163,6 +273,7 @@ Describe 'Find-OrUpsertComment' {
             $url = Find-OrUpsertComment -Type issue -Number 429 -Marker '<!-- plan-issue-429 -->' -Body 'updated'
             $script:lastPatchArgs | Should -Not -BeNullOrEmpty
             $script:lastPostArgs | Should -BeNullOrEmpty
+            $script:lastPatchBody | Should -BeExactly 'updated'
         }
     }
 
@@ -207,6 +318,7 @@ Describe 'Find-OrUpsertComment' {
             $script:lastPatchArgs | Should -BeNullOrEmpty `
                 -Because 'a marker on line 3 is a mention; patching it would replace an unrelated comment body'
             $script:lastPostArgs | Should -Not -BeNullOrEmpty
+            $script:lastPostBody | Should -BeExactly 'new'
         }
     }
 
@@ -232,6 +344,7 @@ Describe 'Find-OrUpsertComment' {
             ($script:lastPatchArgs -join ' ') | Should -Match 'repos/ExplicitOwner/explicit-repo/issues/comments/999' `
                 -Because 'the PATCH path must embed the caller-supplied owner/repo, not "/" (nulled owner/repo)'
             ($script:lastPatchArgs -join ' ') | Should -Not -Match 'repos//issues'
+            $script:lastPatchBody | Should -BeExactly 'new body'
         }
 
         It 'threads explicit -Owner/-Repo through the POST (zero-match) path' {
@@ -242,6 +355,8 @@ Describe 'Find-OrUpsertComment' {
             $script:lastPostArgs | Should -Not -BeNullOrEmpty
             ($script:lastPostArgs -join ' ') | Should -Match '-R ExplicitOwner/explicit-repo' `
                 -Because 'the POST call must be explicitly repo-targeted with the caller-supplied owner/repo, not "/"'
+            $script:lastPostBody | Should -BeExactly 'hello' `
+                -Because 'repo-targeting and body transport are independent; pinning -R alone leaves the body unpinned'
         }
     }
 
@@ -266,6 +381,7 @@ Describe 'Find-OrUpsertComment' {
             $script:lastPatchArgs | Should -Not -BeNullOrEmpty
             ($script:lastPatchArgs -join ' ') | Should -Match 'comments/4359801030'
             $script:lastPostArgs | Should -BeNullOrEmpty
+            $script:lastPatchBody | Should -BeExactly 'new body'
         }
 
         It 'falls back to POST when GraphQL node id has no resolvable url' {
@@ -278,6 +394,8 @@ Describe 'Find-OrUpsertComment' {
             $url = Find-OrUpsertComment -Type pr -Number 484 -Marker '<!-- frame-credit-ledger-484 -->' -Body 'new body'
             $script:lastPostArgs | Should -Not -BeNullOrEmpty
             $script:lastPatchArgs | Should -BeNullOrEmpty
+            $script:lastPostBody | Should -BeExactly 'new body' `
+                -Because 'the no-resolvable-id fallback is a SECOND Send-NewCommentViaBodyFile call site and must transport the body too'
         }
 
         It 'picks the earliest numeric REST id when multiple GraphQL-id comments match' {
@@ -301,6 +419,91 @@ Describe 'Find-OrUpsertComment' {
             $url = Find-OrUpsertComment -Type pr -Number 484 -Marker '<!-- frame-credit-ledger-484 -->' -Body 'new'
             $script:lastPatchArgs | Should -Not -BeNullOrEmpty
             ($script:lastPatchArgs -join ' ') | Should -Match 'comments/100'
+            $script:lastPatchBody | Should -BeExactly 'new'
+        }
+    }
+
+    # -----------------------------------------------------------------------
+    # Payload transport (issue #1035 review F3 and its PATCH-path sibling).
+    #
+    # The assertions added to the Contexts above pin the body on every write
+    # path with a short literal. These pin the properties a short literal
+    # cannot reach: that the transport is the FILE-based form specifically,
+    # and that it survives payloads that a raw-argv or shell-quoted transport
+    # would truncate or mangle. Both are the actual motivation for M26 and
+    # Fix Pass3-F1 — the ~32K Windows CreateProcess argv limit against a
+    # composer that emits up to GitHub's 65,536-codepoint cap.
+    # -----------------------------------------------------------------------
+    Context 'Payload transport - POST (--body-file, M26)' {
+        It 'sends the body through --body-file and never through a raw --body argv element' {
+            $script:mockComments = @()
+            $null = Find-OrUpsertComment -Type pr -Number 123 -Marker '<!-- transport-post -->' -Body 'payload'
+            $argv = ($script:lastPostArgs -join ' ')
+            $argv | Should -Match '--body-file' `
+                -Because 'the file-based form is the fix; a raw --body packs the whole comment into one argv element'
+            # '--body' followed by anything other than '-' or a word char, i.e.
+            # the bare flag. Written as a lookahead because a plain '--body\b'
+            # ALSO matches inside '--body-file' (the y/- transition is a word
+            # boundary) and would make this assertion unfalsifiable.
+            $argv | Should -Not -Match '--body(?![\w-])' `
+                -Because 'a bare --body flag is the ~32K-argv-limited form M26 replaced'
+            $argv | Should -Not -Match 'payload' `
+                -Because 'the body text itself must never appear in argv - that is the whole point of the temp file'
+        }
+
+        It 'round-trips a cap-adjacent multi-line body through the temp file byte-for-byte' {
+            # Deliberately shaped like a real marker comment near GitHub's
+            # 65,536-codepoint cap, and containing characters a shell-quoted
+            # or argv-packed transport is most likely to mangle. The repeat
+            # count is COMPUTED from the line width rather than hard-coded, so
+            # editing the line cannot silently drop the fixture below the size
+            # regime the two assertions below claim for it.
+            $line = '| run | ' + ('x' * 60) + ' | `$Body` "quoted" ''single'' — ✓ |'
+            $reps = [math]::Ceiling(65000 / ($line.Length + 1))
+            $bigBody = "<!-- ci-glob-audit-run-abc123 -->`n" + (($line + "`n") * $reps)
+            $bigBody.Length | Should -BeGreaterThan 65000 `
+                -Because 'the fixture must actually exceed the ~32K argv regime this transport exists for'
+            $bigBody.Length | Should -BeLessOrEqual 65536 `
+                -Because 'and must stay a body GitHub would actually accept, not an unreachable one'
+
+            $script:mockComments = @()
+            $url = Find-OrUpsertComment -Type issue -Number 1035 -Marker '<!-- ci-glob-audit-run-abc123 -->' -Body $bigBody
+            $url | Should -Not -BeNullOrEmpty
+            $script:lastPostBody | Should -BeExactly $bigBody `
+                -Because 'a truncating, re-encoding, or newline-rewriting transport would post a corrupted comment'
+            $script:lastPostBody.Length | Should -Be $bigBody.Length
+        }
+    }
+
+    Context 'Payload transport - PATCH (--input JSON envelope, Fix Pass3-F1)' {
+        It 'sends the body through an --input JSON envelope and never through a raw -f body= argv element' {
+            $script:mockComments = @(@{ id = 777; body = "<!-- transport-patch -->`nold" })
+            $null = Find-OrUpsertComment -Type pr -Number 123 -Marker '<!-- transport-patch -->' -Body 'payload'
+            $argv = ($script:lastPatchArgs -join ' ')
+            $argv | Should -Match '--input ' `
+                -Because 'the stdin/file JSON form is the fix; -f "body=..." packs the whole payload into one argv element'
+            $argv | Should -Not -Match '-f body=' `
+                -Because 'the -f form is the ~32K-argv-limited shape Fix Pass3-F1 replaced'
+            $argv | Should -Not -Match 'payload' `
+                -Because 'the body text itself must never appear in argv'
+            $script:lastPatchPayload | Should -Match '^\s*\{' `
+                -Because 'the --input file must hold a JSON object, not the bare body text'
+            $script:lastPatchBody | Should -BeExactly 'payload'
+        }
+
+        It 'round-trips a cap-adjacent multi-line body through the JSON envelope byte-for-byte' {
+            $line = '| run | ' + ('x' * 60) + ' | `$Body` "quoted" ''single'' — ✓ |'
+            $reps = [math]::Ceiling(65000 / ($line.Length + 1))
+            $bigBody = "<!-- frame-credit-ledger-1035 -->`n" + (($line + "`n") * $reps)
+            $bigBody.Length | Should -BeGreaterThan 65000
+            $bigBody.Length | Should -BeLessOrEqual 65536
+
+            $script:mockComments = @(@{ id = 888; body = "<!-- frame-credit-ledger-1035 -->`nold" })
+            $url = Find-OrUpsertComment -Type pr -Number 1035 -Marker '<!-- frame-credit-ledger-1035 -->' -Body $bigBody
+            $url | Should -Not -BeNullOrEmpty
+            $script:lastPatchBody | Should -BeExactly $bigBody `
+                -Because 'JSON escaping of quotes, backslashes and newlines must survive the round trip intact'
+            $script:lastPatchBody.Length | Should -Be $bigBody.Length
         }
     }
 }
@@ -402,5 +605,59 @@ Describe 'Get-RestCommentId helper — static structure (AC6)' {
         }
         ($results | Select-Object -Last 1) | Should -Be 'found' `
             -Because 'Get-RestCommentId must be resolvable after dot-sourcing the library, not only when Find-OrUpsertComment runs'
+    }
+}
+
+Describe 'POST path fail-open contract when the body cannot be staged' {
+    # WHY THIS EXISTS. Routing the comment body through a temp file (issue #1035
+    # review, finding M26) hardened the POST path against the argv length limit
+    # — and, in its first draft, quietly changed this file's failure contract.
+    # `Send-NewCommentViaBodyFile` was `try { … } finally { … }` with no `catch`,
+    # so a temp directory that is full, read-only, or absent turned a comment
+    # write into a TERMINATING error thrown out of Find-OrUpsertComment. Every
+    # other failure here — a gh non-zero exit, an unresolvable repo, a
+    # whitespace-only marker — emits a stderr note and returns $null so the
+    # caller decides. Eleven production scripts dot-source this file, and the
+    # POST path is the one every first-ever marker write takes.
+    #
+    # This gap was found by an EXTERNAL reviewer on the fix commit, after this
+    # repository's own five-pass panel, defense, judge and post-fix pass had all
+    # run over it. The pin is here so the next edit cannot reopen it silently.
+
+    BeforeAll {
+        $script:FoucLib = (Resolve-Path (Join-Path $PSScriptRoot '..' 'lib' 'find-or-upsert-comment.ps1')).Path
+    }
+
+    It 'returns $null and reports, instead of throwing, when the temp body file cannot be created' {
+        # Driven in a child runspace with TMPDIR/TMP/TEMP pointed at a path that
+        # does not exist, which is what makes GetTempFileName throw. Doing it in
+        # a child keeps the poisoned environment out of every other test in this
+        # file rather than relying on cleanup ordering.
+        $missingTemp = Join-Path ([System.IO.Path]::GetTempPath()) ("fouc-absent-" + [System.Guid]::NewGuid().ToString('N'))
+        $probe = @'
+param($LibPath, $MissingTemp)
+$env:TMPDIR = $MissingTemp; $env:TMP = $MissingTemp; $env:TEMP = $MissingTemp
+. $LibPath
+function gh { $global:LASTEXITCODE = 0; return '' }
+$err = [System.IO.StringWriter]::new()
+$prev = [Console]::Error
+[Console]::SetError($err)
+try {
+    $result = Send-NewCommentViaBodyFile -Verb 'issue' -Number 7 -Body 'x' -ExplicitRepo $false
+    "THREW=no;NULL=$($null -eq $result);ERR=$($err.ToString().Trim())"
+}
+catch { "THREW=yes;MSG=$($_.Exception.Message)" }
+finally { [Console]::SetError($prev) }
+'@
+        $ps = [System.Management.Automation.PowerShell]::Create()
+        try {
+            $null = $ps.AddScript($probe).AddArgument($script:FoucLib).AddArgument($missingTemp)
+            $out = ($ps.Invoke() | Select-Object -Last 1)
+        }
+        finally { $ps.Dispose() }
+
+        $out | Should -Match 'THREW=no' -Because 'this file''s documented contract is fail-open: the caller decides whether a failed comment write is fatal'
+        $out | Should -Match 'NULL=True' -Because 'every other failure path here returns $null, and a staging failure is not special'
+        $out | Should -Match 'could not stage the comment body' -Because 'a silent $null would leave the caller unable to say why nothing was posted'
     }
 }

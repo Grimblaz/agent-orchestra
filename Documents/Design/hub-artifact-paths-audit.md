@@ -1,6 +1,6 @@
 <!-- audit-meta
-last-verified: 18a28ba1b3c7125f70c76890a9996f50e49fd82a
-generated-at: 2026-08-02T18:41:45Z
+last-verified: 0f5728e859b9bcd20d3b22124f15c926d1621b29
+generated-at: 2026-08-10T02:49:13Z
 -->
 
 ## Purpose
@@ -261,6 +261,19 @@ Copilot always reads from the source tree in the hub repo. This dual-resolved be
   - `.github/scripts/grounding-evidence-corpus-check.ps1`
 - **notes**: Root-level hook and utility scripts under .github/scripts/. Claude loads from plugin-cache; Copilot runs from source-tree. Missing script produces visible-warning because the hook that calls it will report an error but does not block the pipeline.
 
+### `.github/scripts/audit-controls/*`
+
+- **claude_resolves**: source-tree
+- **copilot_resolves**: source-tree
+- **requires_version_bump**: false
+- **experience**: hard-failure
+- **examples**:
+  - `.github/scripts/audit-controls/passes.Control.Tests.ps1`
+  - `.github/scripts/audit-controls/fails.Control.Tests.ps1`
+  - `.github/scripts/audit-controls/never-returns.Control.Tests.ps1`
+  - `.github/scripts/audit-controls/README.md`
+- **notes**: Deliberately misbehaving Pester suites (issue #1035) the full-glob CI audit runs against itself to prove it can tell its four terminal states (passed, failed, executed-no-tests, did-not-complete) apart. Live outside .github/scripts/Tests/ on purpose: never-returns.Control.Tests.ps1 deliberately never returns, and Invoke-Pester .github/scripts/Tests/ (the command the contributor instructions and PR template prescribe) is recursive and quarantine-blind, so a non-returning suite beneath that root would hang a contributor's pre-PR run where no job ceiling exists. Nothing in the repository enumerates this directory for execution; ci-glob-audit.ps1 -Mode Prepare is handed each control's path explicitly and throws immediately if one is absent (hard failure, no fallback). Hub-repo CI only, invoked by ci-full-glob-audit.yml; not a plugin distribution entry point and not distributed to consumer repos, matching the .github/workflows/*.yml resolution model.
+
 ### `.github/scripts/lib/*.ps1`
 
 - **claude_resolves**: plugin-cache
@@ -271,6 +284,16 @@ Copilot always reads from the source tree in the hub repo. This dual-resolved be
   - `.github/scripts/lib/cost-walker-copilot.ps1`
   - `.github/scripts/lib/frame-credit-ledger-core.ps1`
 - **notes**: Shared library scripts loaded by root hook scripts under .github/scripts/lib/. Sourced as dependencies at runtime; missing lib script propagates as a visible-warning from the calling hook.
+
+### `.github/scripts/Tests/*.json`
+
+- **claude_resolves**: plugin-cache
+- **copilot_resolves**: source-tree
+- **requires_version_bump**: true
+- **experience**: visible-warning
+- **examples**:
+  - `.github/scripts/Tests/ci-quarantine.json`
+- **notes**: Data files the Pester tests root carries alongside its suites — today just the CI suite-selection quarantine registry, which decides which suites the per-PR gate runs. Its absence is deliberately NOT treated as an empty quarantine by ci-suite-selection-core.ps1: the selection procedure reports drift instead, so a missing registry surfaces as a visible CI failure rather than a silently widened run.
 
 ### `.github/scripts/Tests/*.Tests.ps1`
 

@@ -114,6 +114,76 @@ function Get-RestCommentId([object]$c) {
     try { return [long]$c.id } catch { return $null }
 }
 
+# ---------------------------------------------------------------------------
+# Helper: Send-NewCommentViaBodyFile
+# (M26 fix, issue #1035 review) — hardens the POST (zero-match) path the
+# same way the PATCH path was hardened (Fix Pass3-F1 below): `gh issue
+# comment`/`gh pr comment --body $Body` packs the entire comment body into a
+# single argv element, which hits the ~32K Windows CreateProcess argv limit
+# for large documents. A new caller (the full-glob CI audit, issue #1035)
+# composes comments up to GitHub's 65,536-codepoint cap and, because its
+# record markers embed a run id, every run necessarily takes THIS path --
+# no prior comment ever exists to match, so there is no PATCH fallback to
+# rely on. `--body-file` is the `gh issue/pr comment` CLI's own file-based
+# equivalent of `gh api --input`, so this reuses that same temp-file
+# mechanism rather than inventing a second one.
+#
+# Defined at file scope (mirrors Get-RestCommentId above) so both POST call
+# sites inside Find-OrUpsertComment (zero-match, and the no-resolvable-id
+# fallback) share one implementation instead of duplicating the temp-file
+# lifecycle.
+#
+# NOTE ON $LASTEXITCODE: the caller inspects $LASTEXITCODE immediately after
+# calling this helper. `Remove-Item` in the `finally` block below is a
+# cmdlet, not a native executable, so it does not touch $LASTEXITCODE --
+# the value set by `& gh @postArgs` survives the cleanup and is still
+# current when this function returns.
+# ---------------------------------------------------------------------------
+function Send-NewCommentViaBodyFile {
+    param(
+        [Parameter(Mandatory)][string]$Verb,
+        [Parameter(Mandatory)][int]$Number,
+        [Parameter(Mandatory)][string]$Body,
+        [bool]$ExplicitRepo,
+        [string]$ResolvedOwner,
+        [string]$ResolvedRepo
+    )
+    $bodyTempFile = $null
+    $postOutput = $null
+    try {
+        $bodyTempFile = [System.IO.Path]::GetTempFileName()
+        Set-Content -LiteralPath $bodyTempFile -Value $Body -Encoding UTF8 -NoNewline
+        $postArgs = @($Verb, 'comment', $Number, '--body-file', $bodyTempFile)
+        if ($ExplicitRepo) { $postArgs += @('-R', "$ResolvedOwner/$ResolvedRepo") }
+        $postOutput = & gh @postArgs 2>$null
+    }
+    catch {
+        # FAIL-OPEN, because that is this file's contract and routing the body
+        # through a temp file must not quietly change it. Every other failure
+        # here — a gh non-zero exit, an unresolvable repo, a whitespace marker —
+        # emits a stderr note and returns $null so the CALLER decides whether
+        # the failure is fatal. Without this catch, a temp directory that is
+        # full, read-only, or absent turns a comment write into a terminating
+        # error thrown out of Find-OrUpsertComment, and under a caller running
+        # `$ErrorActionPreference = 'Stop'` that aborts the caller mid-run. The
+        # POST path is the one every first-ever write to a marker takes, and
+        # eleven production scripts dot-source this file.
+        #
+        # Found by an external reviewer on the fix commit, not by this repo's
+        # own five-pass panel, defense, judge, or post-fix pass — recorded that
+        # way rather than absorbed silently, because a missed class is the
+        # finding.
+        [Console]::Error.WriteLine("Find-OrUpsertComment: could not stage the comment body for $Verb $Number ($($_.Exception.Message)); no comment was posted.")
+        return $null
+    }
+    finally {
+        if ($null -ne $bodyTempFile -and (Test-Path -LiteralPath $bodyTempFile)) {
+            Remove-Item -LiteralPath $bodyTempFile -Force -ErrorAction SilentlyContinue
+        }
+    }
+    return $postOutput
+}
+
 function Find-OrUpsertComment {
     [CmdletBinding()]
     param(
@@ -225,13 +295,14 @@ function Find-OrUpsertComment {
 
     # --- 3. Branch on match count. ---
     if ($matchedComments.Count -eq 0) {
-        # POST a new comment via the appropriate verb.
+        # POST a new comment via the appropriate verb. Body is streamed
+        # through a temp file via --body-file (M26 fix, issue #1035 review)
+        # rather than packed into a raw argv element -- see
+        # Send-NewCommentViaBodyFile above for why.
         $verb = if ($Type -eq 'pr') { 'pr' } else { 'issue' }
-        $postArgs = @($verb, 'comment', $Number, '--body', $Body)
-        if ($explicitRepo) { $postArgs += @('-R', "$resolvedOwner/$resolvedRepo") }
-        $postOutput = & gh @postArgs 2>$null
+        $postOutput = Send-NewCommentViaBodyFile -Verb $verb -Number $Number -Body $Body -ExplicitRepo $explicitRepo -ResolvedOwner $resolvedOwner -ResolvedRepo $resolvedRepo
         if ($LASTEXITCODE -ne 0) {
-            [Console]::Error.WriteLine("Find-OrUpsertComment: gh $verb comment failed (exit $LASTEXITCODE)")
+            [Console]::Error.WriteLine("Find-OrUpsertComment: gh $verb comment failed (exit $LASTEXITCODE; body_length_chars=$($Body.Length))")
             return $null
         }
         return ($postOutput | Out-String).Trim()
@@ -251,12 +322,12 @@ function Find-OrUpsertComment {
     $sorted = @($pairs | Sort-Object -Property RestId)
     if ($sorted.Count -eq 0) {
         [Console]::Error.WriteLine("Find-OrUpsertComment: matched comment(s) have no resolvable REST id; posting new comment.")
+        # Same --body-file hardening as the zero-match POST path above (M26
+        # fix, issue #1035 review) -- see Send-NewCommentViaBodyFile.
         $verb = if ($Type -eq 'pr') { 'pr' } else { 'issue' }
-        $postArgs = @($verb, 'comment', $Number, '--body', $Body)
-        if ($explicitRepo) { $postArgs += @('-R', "$resolvedOwner/$resolvedRepo") }
-        $postOutput = & gh @postArgs 2>$null
+        $postOutput = Send-NewCommentViaBodyFile -Verb $verb -Number $Number -Body $Body -ExplicitRepo $explicitRepo -ResolvedOwner $resolvedOwner -ResolvedRepo $resolvedRepo
         if ($LASTEXITCODE -ne 0) {
-            [Console]::Error.WriteLine("Find-OrUpsertComment: gh $verb comment failed (exit $LASTEXITCODE)")
+            [Console]::Error.WriteLine("Find-OrUpsertComment: gh $verb comment failed (exit $LASTEXITCODE; body_length_chars=$($Body.Length))")
             return $null
         }
         return ($postOutput | Out-String).Trim()
