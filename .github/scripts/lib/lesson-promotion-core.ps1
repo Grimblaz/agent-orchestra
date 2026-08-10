@@ -23,16 +23,28 @@
     THE MANIFEST IS ALSO THE SUBJECT (PR #1055 review, findings M1-M4/M9-M15). An earlier revision
     took every population and threshold from the manifest, so a one-token manifest edit - a zeroed
     floor, an emptied loader array, a `promoted` flipped to `pending`, an exhibit row deleted -
-    left the whole suite green while the property this file exists to guarantee was false. Three
-    defences now stand against that:
+    left the whole suite green while the property this file exists to guarantee was false. Four
+    defences now stand against that (the fourth added by PR #1061's review, which found that three
+    were not enough):
 
       1. Every threshold the manifest supplies is itself floored here (a floor of zero is drift,
-         not a disabled check), and every declared collection must be non-empty.
+         not a disabled check), and every declared collection must be non-empty - with ONE stated
+         exception, added by parent amendment A4.3 and named here rather than left for a reader to
+         discover: `loading_surfaces` may legitimately be empty, because a tree in which no agent
+         body mandates any receiving skill has no layer-4 reach to declare. What stops that being
+         an escape is not a floor but defence 4 below.
       2. The counts that matter - the roster size and each chunk's promoted share - are passed in
          by the CALLER from a different artifact, never read from the manifest.
       3. The reverse scan's population is the tree (`skills/*/references/`), not the manifest's own
          list of receiving skills, so de-manifesting an exhibit cannot also de-scope the directory
          it sits in.
+      4. `mandate_marker` must be FINDABLE in an agent body, not merely non-blank. It is the one
+         manifest field the whole consumer-type derivation keys off, and validating only its
+         presence left a two-token escape: retune it to a string that appears nowhere and the
+         derived set empties, every lens home reads main-session-only, and an emptied
+         `loading_surfaces` then audits clean. Measured on the real manifest before this defence
+         existed: 43 drift findings to 0, suite still green (PR #1061 review, found independently
+         by two prosecution passes).
 
     What it deliberately does NOT reach, stated so nobody reads silence as coverage:
 

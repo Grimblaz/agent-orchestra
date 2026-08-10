@@ -4,6 +4,12 @@ All notable changes to agent-orchestra will be documented in this file.
 
 ## [Unreleased]
 
+## [3.22.0] — 2026-08-10
+
+### Added
+
+**Twenty-five maintainer lessons became firing lenses, each backed by an exhibit** (#1050, chunk 2 of #1045). Nine skills gained a lens section carrying the actionable core of a lesson, behind a description trigger that names the condition where it bites; nine net-new `references/` files carry the incident detail those lenses cite. `verification-before-completion` went 497 to 429 lines *while gaining five lenses*, because § The Completion Account's procedure moved behind a citation — the inverse of the extraction its own headroom note suggested, which the standing check forbids. The check itself gained four amendments from the parent design: the consumer-type limb is now derived from the tree rather than declared in the manifest, the composite-convention deferral arm reads `## Composite References` where a skill carries it, a `conflict` verdict may ship only when it carries the resolution that closed it, and `fires_in` is asserted rather than merely declared. Adversarial review found that the derivation's only input was still a manifest field validated for non-blankness alone — retuning it took the audit from 43 findings to zero over an unmodified tree — so a marker must now be findable in an agent body. Two of the assigned 27 lessons returned contradiction verdicts against shipped doctrine and are withheld pending a parent ruling, with the reason recorded in the manifest rather than only in a test comment.
+
 ## [3.21.1] — 2026-08-10
 
 ### Removed
