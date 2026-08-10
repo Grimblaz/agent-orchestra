@@ -5,14 +5,14 @@ argument-hint: "[issue number or short description of what needs customer framin
 
 # /experience
 
-> Auto-mode boundary: see [CLAUDE.md § Auto-mode boundary](/CLAUDE.md#auto-mode-boundary). Auto-mode does not suppress `AskUserQuestion`.
+> Auto-mode boundary: see [CLAUDE.md § Auto-mode boundary](/CLAUDE.md#auto-mode-boundary). Auto-mode does not suppress engagement gates.
 
 Run the Experience-Owner role inline in this conversation for the provided issue (upstream framing or CE Gate evidence capture).
 
 **Pre-flight**:
 
 1. If the arguments reference an existing GitHub issue (e.g., `#369` or a URL), include that context.
-2. If there are no arguments, use the `AskUserQuestion` tool to ask whether this is upstream framing (issue to frame) or downstream CE Gate (issue with a branch ready to exercise).
+2. If there are no arguments, ask whether this is upstream framing (issue to frame) or downstream CE Gate (issue with a branch ready to exercise).
 
 ## Pre-flight (session-startup)
 

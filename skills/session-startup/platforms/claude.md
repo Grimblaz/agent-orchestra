@@ -1,15 +1,15 @@
 # Platform — Claude Code
 
-> Auto-mode boundary: see [CLAUDE.md § Auto-mode boundary](/CLAUDE.md#auto-mode-boundary). Auto-mode does not suppress `AskUserQuestion`.
+> Auto-mode boundary: see [CLAUDE.md § Auto-mode boundary](/CLAUDE.md#auto-mode-boundary). Auto-mode does not suppress engagement gates.
 
 Claude Code receives `session-startup` through the plugin-distributed `SessionStart` hook declared in `hooks/hooks.json`. That hook runs the detector script from the plugin cache and injects any resulting `additionalContext` into the agent's first turn.
 
-When `session-startup` needs user confirmation before running the detector's fenced cleanup commands, Claude Code agents invoke the `AskUserQuestion` tool. Present the detector's `additionalContext` text and offer two options:
+When `session-startup` needs user confirmation before running the detector's fenced cleanup commands, present the detector's `additionalContext` text and offer exactly these two options:
 
 1. `Yes — run cleanup`
 2. `No — skip for now`
 
-For the Claude-only drift-check sub-step, use the same `AskUserQuestion` tool with these exact option labels:
+For the Claude-only drift-check sub-step, ask with these exact option labels:
 
 1. `Stop — I'll restart now`
 2. `Continue — run under old code`
@@ -18,9 +18,9 @@ Before the drift-check reads the marketplace view, run `claude plugin marketplac
 
 Silent skip remains for setup/environment failures such as `pwsh` missing; `claude` execution failures emit the fail-open notice above. For marketplace registrations in the local-path branch (non-git local directory or dirty/detached HEAD), suppress the freshness emit because the existing classification surfaces remediation. The verified-current silence guarantee applies only on the freshness-success branch; freshness failure uses cached comparison as a documented accepted limitation. Headless Claude runs perform the same freshness attempt and same fail-open emission; only the post-drift stop/continue prompt is suppressed in headless mode.
 
-If Claude is running headless and cannot ask a structured question, skip the prompt and emit the update result inline instead.
+If Claude is running headless and cannot ask the user anything, skip the prompt and emit the update result inline instead.
 
-> **D3b exemption**: `session-startup/SKILL.md` intentionally retains this methodology verbatim (see `path-migration-sweep-gate.Tests.ps1` D3b whitelist). The platform file documents the Claude Code-specific tool invocation without duplicating the full protocol.
+> **D3b exemption**: `session-startup/SKILL.md` intentionally retains this methodology verbatim (see `path-migration-sweep-gate.Tests.ps1` D3b whitelist). The platform file documents the Claude Code-specific detail without duplicating the full protocol.
 
 **Step 7c — Portfolio snapshot tool invocation**: Use the `Read` tool to check for `Documents/Planning/sequence.yaml`; if present, parse the `control_tower:` integer with a regex (`control_tower:\s*(\d+)`). Then use the `Bash` tool to run `gh issue view {control_tower} --json body --jq '.body'`, setting the Bash tool's `timeout` parameter to `3000` (milliseconds) — do not pass `--timeout` as a `gh` CLI flag, which does not exist on `gh issue view`. Extract up to 5 lines from the rendered portfolio section (between `<!-- portfolio-tracker:begin -->` and `<!-- portfolio-tracker:end -->`), always including the `as of … — rendered by render-portfolio.ps1` footer line. Any failure at any step → silent skip; do not surface errors to the user.
 

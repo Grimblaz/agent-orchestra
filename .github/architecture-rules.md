@@ -36,8 +36,8 @@ These rules define the structural constraints for Agent Orchestra. All agents an
 
 Some skills depend on platform-specific tool invocations that differ between Copilot (VS Code) and Claude Code. Those skills keep their methodology tool-agnostic inside `SKILL.md` and split platform-specific invocation guidance into sibling files:
 
-- `skills/{name}/platforms/copilot.md` — VS Code / Copilot invocation (e.g., `#tool:vscode/askQuestions`)
-- `skills/{name}/platforms/claude.md` — Claude Code invocation (e.g., `AskUserQuestion`)
+- `skills/{name}/platforms/copilot.md` — VS Code / Copilot invocation (e.g., `execute/runInTerminal`)
+- `skills/{name}/platforms/claude.md` — Claude Code invocation (e.g., the `Agent` tool for subagent dispatch)
 
 Each such skill ends with a byte-identical canonical routing footer listing both platform files. The footer keeps skill methodology portable across tools while letting each platform layer in its own tool bindings. D3b exemption: `session-startup` retains inline Copilot-specific methodology because its trigger path is Copilot-native.
 

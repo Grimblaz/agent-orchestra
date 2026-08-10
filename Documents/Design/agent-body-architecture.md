@@ -71,7 +71,7 @@ fingerprint against the parent prompt so tree-grounded claims do not rely on sta
 Claude slash commands are command wrappers, not alternate role definitions.
 
 - `/experience`, `/design`, and `/plan` resolve issue context, load the paired shared body, and adopt
-   the role inline so live `AskUserQuestion` prompts remain available.
+   the role inline so live engagement gates can reach the user.
 - `/orchestrate` resolves smart-resume state, loads `agents/Code-Conductor.agent.md`, and adopts
    Code-Conductor inline. Missing plan markers do not block hub mode because Code-Conductor can call
    Issue-Planner when planning is still needed.
@@ -113,9 +113,13 @@ text, schemas, routing contracts, and recovery rules.
 
 ### Platform-Specific Invocations
 
-Copilot tool names (`#tool:vscode/askQuestions`, `vscode/memory`) and Claude tool names
-(`AskUserQuestion`, `Agent`, `Bash`) live in YAML frontmatter, command wrappers, shell tool-mapping
-tables, or the `## Platform-specific invocation` footer. Shared methodology sections stay
+Copilot tool names (`vscode/memory`) and Claude tool names (`Agent`, `Bash`) live in YAML
+frontmatter, command wrappers, shell tool-mapping tables, or the `## Platform-specific invocation`
+footer. Since issue #1003 **no surface Claude loads** names a mechanism for surfacing a decision:
+the capability grants stay in frontmatter, and the agent chooses the presentation per turn. The ten
+`skills/*/platforms/copilot.md` files still name Copilot's own question tool — Copilot is frozen and
+those files expire with it (see [copilot-deprecation.md](copilot-deprecation.md)), so the claim is scoped
+to the Claude-loaded surfaces rather than to the whole tree. Shared methodology sections stay
 platform-neutral whenever the behavior itself is not platform-specific.
 
 ---

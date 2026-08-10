@@ -16,7 +16,7 @@ The hook also stays silent when the repo's managed version set is both internall
 
 The state file resolves from the git common root rather than the current worktree root, so linked worktrees in the same clone reuse the same `.claude/.state/` directory for a shared `session_id`.
 
-When the skill needs a user-facing override, invoke `AskUserQuestion` with these option labels:
+When the skill needs a user-facing override, ask with these option labels:
 
 1. `Patch`
 2. `Minor`

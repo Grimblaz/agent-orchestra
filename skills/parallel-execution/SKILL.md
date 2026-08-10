@@ -51,7 +51,7 @@ After convergence, protocol step 8 verifies the Requirement Contract AC items be
 ## Loop Budget
 
 - Maximum 3 correction cycles per step.
-- If exceeded, perform root-cause review and escalate via the platform's structured question tool (see `platforms/`) with a recommended option.
+- If exceeded, perform root-cause review and escalate with a recommended option.
 - RC conformance correction gets 1 dedicated cycle outside the main 3-cycle budget. If still unresolved, escalate with the unresolved AC items and recommended options.
 
 ## Anti-Test-Chasing Guardrail

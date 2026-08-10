@@ -70,7 +70,7 @@ The following rules are enforced at all judgment phases. Each `## 🚨 CRITICAL:
 
 | Gate                                  | Rule                                                                                                                              |
 | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| G1 — No plain-text questions          | Every question MUST use `#tool:vscode/askQuestions`                                                                               |
+| G1 — No rhetorical questions          | Every question MUST be an explicit, answerable decision request — never an aside the user can miss                                 |
 | G2 — Always call Code-Review-Response | Within the review pipeline, Code-Critic prosecution output must pass through Code-Review-Response judgment before reaching users. |
 | G3 — Deferred-Significant gate        | matches ≥1 structural criterion → auto-track, never abandon                                                                       |
 | G4 — Score summary mandatory          | Every judgment MUST include the score summary table                                                                               |

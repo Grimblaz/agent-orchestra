@@ -18,7 +18,7 @@ When a subagent call fails or returns no output, classify the failure before rou
 
 1. Wait `2^attempt × 30s` before retrying (attempt 1 = 60s, attempt 2 = 120s).
 2. On Sonnet-class model failure: before entering backoff, consider switching to an Opus-class model - Sonnet and Opus have separate per-model TPM limits, so Opus may still be available when Sonnet is throttled.
-3. After **2 consecutive retry failures** for the same call (3 total attempts in the timeout-failure path; the rate-limit-heuristic detection path described above may trigger a prompt after 2 attempts when the initial call + 1 retry both return empty output): prompt via the platform's structured-question tool with:
+3. After **2 consecutive retry failures** for the same call (3 total attempts in the timeout-failure path; the rate-limit-heuristic detection path described above may trigger a prompt after 2 attempts when the initial call + 1 retry both return empty output): prompt the user with:
    - Option A: "Defer remaining work - {N} findings pending (current conversation only)" _(recommended)_
    - Option B: "Skip remaining low-severity findings and continue" - only available when all pending findings are `low` severity; Critical/High/Medium findings cannot be skipped.
 
@@ -36,15 +36,15 @@ When a subagent call fails or returns no output, classify the failure before rou
 
 **Common Issues**:
 
-0. **No plan exists** -> Escalate via the platform's structured-question tool to request a plan path/options (with a recommended option)
+0. **No plan exists** -> Escalate to request a plan path/options (with a recommended option)
 1. **Specialist returns incomplete work** -> Diagnose what was unclear in your instructions. Retry with more specific guidance that addresses the gap - don't just re-submit the same prompt.
 2. **Tests fail after implementation** -> Investigate the failure pattern before delegating. Call Test-Writer with your diagnosis, not just "fix it."
 3. **Architecture violations detected** -> Call Refactor-Specialist with the specific violation and the project architecture rule being broken (see `.github/architecture-rules.md`).
 4. **Plan doesn't match reality** -> Adapt the plan. If the deviation is minor (renamed file, moved interface), adjust and proceed. If fundamental (design assumption invalid), escalate to user with analysis and a recommendation.
 
-**When to Escalate** - always via the platform's structured-question tool with structured options:
+**When to Escalate** - always with concrete options:
 
-- **Design decision required** -> Present options with pros/cons in conversation, then use the platform's structured-question tool with the options and your recommended choice
+- **Design decision required** -> Present options with pros/cons in conversation, then put the options and your recommended choice to the user
 - **Persistent failures** (max 2 retries per phase) -> Explain what you tried and your diagnosis, then ask: "Retry with [approach]", "Skip this step", "Abort and investigate manually"
 - **Blocking dependencies** -> Identify what's blocking, then ask: "Proceed with [workaround]", "Wait for [dependency]", "Restructure approach to [alternative]"
 - **Quality gates not met** -> Show which gate failed and the delta, then ask: "Accept and proceed (if marginal)", "Fix [specific issue]", "Defer to separate PR"
@@ -58,7 +58,7 @@ All terminal execution must be non-interactive and automation-safe:
 - Avoid commands that open prompts, pagers, editors, watch loops, or interactive REPL sessions unless the step explicitly requires long-running background execution.
 - For long-running/background tasks, state startup criteria and verification checks, and avoid blocking orchestration flow.
 - On command failure, capture stderr/stdout evidence and route via failure triage instead of re-running blindly.
-- If a command is known to be interactive-only, escalate with the platform's structured-question tool and provide non-interactive alternatives when possible.
+- If a command is known to be interactive-only, escalate and provide non-interactive alternatives when possible.
 
 ### Terminal Lifecycle Protocol
 

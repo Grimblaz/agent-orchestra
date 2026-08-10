@@ -122,7 +122,7 @@ Claude cleanup findings are capped at 10 concrete `claude/*` entries; additional
 
 ### Step 6 — Prompt the user
 
-If the output contains `hookSpecificOutput`, present the `additionalContext` text to the user and ask for confirmation before running cleanup. Use `#tool:vscode/askQuestions` with two options: "Yes — run cleanup" and "No — skip for now". The confirmation covers only the fenced cleanup block; inline current-worktree commands are deliberately narrative and require a separate manual run from another checkout.
+If the output contains `hookSpecificOutput`, present the `additionalContext` text to the user and ask for confirmation before running cleanup, offering exactly two options: "Yes — run cleanup" and "No — skip for now". The confirmation covers only the fenced cleanup block; inline current-worktree commands are deliberately narrative and require a separate manual run from another checkout.
 
 ### Step 7 — Run cleanup (only if confirmed)
 
@@ -147,7 +147,7 @@ After the cleanup path completes, run this Claude-only sub-step before continuin
    On failure, retry once on transient errors. If the retry also fails, emit a failure summary and the manual fallback command:
    `Plugin update failed: {error}. Manual fallback: claude plugin install agent-orchestra@agent-orchestra`
 
-6. **Present structured question (only after step 5 completes)**: The structured question MUST NOT be presented while the install is in flight or before it has been attempted (success or announced failure). After step 5 completes — whether it succeeded or failed — present the appropriate prompt (see the `Drift Failure-Mode Prompt` subsection below).
+6. **Ask (only after step 5 completes)**: The question MUST NOT be presented while the install is in flight or before it has been attempted (success or announced failure). After step 5 completes — whether it succeeded or failed — present the appropriate prompt (see the `Drift Failure-Mode Prompt` subsection below).
 
 **Silent skip conditions for this sub-step**: when `pwsh` is missing; when the `claude` CLI is missing or fails; when the marketplace registration points at a non-git local directory, dirty tree, or detached HEAD (the local-path classification already surfaces remediation).
 
@@ -158,7 +158,7 @@ After the cleanup path completes, run this Claude-only sub-step before continuin
 - Dirty tree or detached HEAD: surface that local marketplace remediation is skipped because the clone has local work
 - Fetch failure: fail open and continue
 
-**Headless Claude behavior**: Headless Claude runs perform the same steps 1–5 and same fail-open emission; only step 6 (the stop/continue structured question) is suppressed. The verified-current silence guarantee applies only on the freshness-success branch; on freshness failure, cached comparison is a documented accepted limitation.
+**Headless Claude behavior**: Headless Claude runs perform the same steps 1–5 and same fail-open emission; only step 6 (the stop/continue question) is suppressed. The verified-current silence guarantee applies only on the freshness-success branch; on freshness failure, cached comparison is a documented accepted limitation.
 
 This sub-step shares the existing Step 4 run-once marker; do not introduce a second marker or persistence mechanism.
 
@@ -166,7 +166,7 @@ This sub-step shares the existing Step 4 run-once marker; do not introduce a sec
 
 The canonical `### Inline-Dispatch Option Labels` YAML block keeps exactly 4 keys (`cleanup_yes`, `cleanup_no`, `drift_stop`, `drift_continue`) — no additional keys are added for failure-mode labels.
 
-**On install success** (step 5 of Step 7b succeeded): present the structured question using the canonical `drift_stop` and `drift_continue` option labels verbatim:
+**On install success** (step 5 of Step 7b succeeded): ask using the canonical `drift_stop` and `drift_continue` option labels verbatim:
 
 - `Stop — I'll restart now` (maps to `drift_stop`)
 - `Continue — run under old code` (maps to `drift_continue`)
@@ -253,7 +253,7 @@ This step is not gated by the session-startup run-once marker and fires on every
 
 If you are operating as an agent shell at `agents/{name}.md` whose body contains a `## Shared methodology` section naming a paired `agents/{Name}.agent.md`, **or if you are an inline slash-command dispatch at `commands/{name}.md` that names a paired `agents/{Name}.agent.md` body in its load reference**, load that paired file via the platform's file-read tool before proceeding. Use the D1 plugin-cache-first body resolution sequence documented in your host file's own `### Step 9 — Paired-body halt-on-fail` block (each agent shell and each command file carries its own per-body cascade).
 
-If that load fails, emit exactly: `⚠️ Shared-body load failed for agents/{Name}.agent.md — {error}. This run cannot continue without the canonical methodology; surface this to the user and stop.` After emitting that message, do not make any further tool calls, subagent dispatches, structured-question calls, or any other agent actions.
+If that load fails, emit exactly: `⚠️ Shared-body load failed for agents/{Name}.agent.md — {error}. This run cannot continue without the canonical methodology; surface this to the user and stop.` After emitting that message, do not make any further tool calls, subagent dispatches, questions to the user, or any other agent actions.
 
 If the paired load succeeds, cite it with `Shared body loaded — proceeding as {AgentName}` and include the full-form H2 body names exactly as they appear in the shared body, excluding `Platform-specific invocation`.
 
@@ -292,7 +292,7 @@ Run these three checks in Claude Code to audit the auto-mode boundary in your se
 
 **2. Risky case (D2):** Run `gh pr merge --admin` against a draft PR you own, then **abort at the Claude Code permission prompt** — do not complete the merge. Expected: a permission prompt appears before execution. If no prompt appears and the command is silently denied, you are observing the L2 contextual-classifier override pattern documented above. Fallback: (a) record the chat transcript verbatim, (b) confirm the [cleanup-script allowlist entry](#permission-allowlist-recommended) is applied (project-level for contributors, `~/.claude/settings.json` for plugin consumers — see that skill section for the correct path), (c) file an issue at the [agent-orchestra repo](https://github.com/Grimblaz/agent-orchestra/issues) with the transcript and settings excerpt.
 
-**3. Axis B case (D3):** Run `/experience N` against an **existing issue** you own (use an issue that already carries an upstream marker — e.g., a `<!-- experience-owner-complete-{ID} -->` comment from a prior `/experience` run — so the upstream-onboarding standards check actually fires; a fresh unframed issue will skip the standards check per [skills/upstream-onboarding/SKILL.md § When to Skip](../upstream-onboarding/SKILL.md#when-to-skip)). Verify the upstream-onboarding standards check fires `AskUserQuestion`. If the agent skips the question and assumes an answer, D3 has regressed — report it on [issue #546](https://github.com/Grimblaz/agent-orchestra/issues/546).
+**3. Axis B case (D3):** Run `/experience N` against an **existing issue** you own (use an issue that already carries an upstream marker — e.g., a `<!-- experience-owner-complete-{ID} -->` comment from a prior `/experience` run — so the upstream-onboarding standards check actually fires; a fresh unframed issue will skip the standards check per [skills/upstream-onboarding/SKILL.md § When to Skip](../upstream-onboarding/SKILL.md#when-to-skip)). Verify the upstream-onboarding standards check puts the concern to you as an explicit, answerable question — in whatever form the agent chose. If the agent skips the question and assumes an answer, D3 has regressed — report it on [issue #546](https://github.com/Grimblaz/agent-orchestra/issues/546).
 <!-- auto-mode-boundary-recipe:end -->
 
 ## Gotchas

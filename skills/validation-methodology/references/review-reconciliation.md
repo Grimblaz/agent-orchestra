@@ -94,7 +94,7 @@ Fire this gate immediately before PR creation and on any post-review resume path
 - The caller owns criteria construction for `Test-GateCriteria -Gate review_completion`. Build `Criteria` from the three stage booleans only. `review_mode` is label-only metadata and is not part of the criteria.
 - The caller also owns the missing-stage list. Build it from the `false` stage booleans in stage order: prosecution, defense, judgment.
 - On failure, emit the exact string `❌ Review pipeline incomplete — {missing stages}`.
-- Default recovery is automatic re-entry into the missing stage or stages. Use `askQuestions` only when automatic re-entry is infeasible because required context, ledgers, or user-choice input is missing.
+- Default recovery is automatic re-entry into the missing stage or stages. Ask the user only when automatic re-entry is infeasible because required context, ledgers, or user-choice input is missing.
 
 ### GitHub Review Intake & Judgment
 

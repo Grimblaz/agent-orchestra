@@ -219,8 +219,8 @@ Describe 'Code-Conductor frame-spine dispatch contract' -Tag 'contract' {
         $script:ExecuteEachStepSection | Should -Match '(?is)(key is already set|key.{0,60}set|suppression key.{0,80}skip).{0,400}(skip.{0,80}prompt|prompt.{0,80}skip)' `
             -Because 'SMC-18 suppression must document: check key first; if set, skip prompt entirely (no re-prompt this session)'
 
-        # Headless skip: when vscode/askQuestions is unavailable, skip silently
-        $script:ExecuteEachStepSection | Should -Match '(?is)(Headless skip|vscode/askQuestions.{0,80}unavailable|CI or programmatic).{0,300}skip' `
+        # Headless skip: when there is no interactive channel to the user, skip silently
+        $script:ExecuteEachStepSection | Should -Match '(?is)(Headless skip|no interactive channel.{0,80}user|CI or programmatic).{0,300}skip' `
             -Because 'the sub-bullet must document the headless-skip clause for CI / programmatic invocations'
 
         # Platform gate: Claude orchestration paths skip this sub-bullet entirely

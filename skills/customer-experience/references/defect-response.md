@@ -15,7 +15,7 @@ When a functional defect or intent deficiency is found:
 - Route to Code-Smith (implementation defect) or Test-Writer (test gap) with scenario failure evidence
 - Require regression test for the defect
 - Re-exercise the failing scenario after fix
-- Loop budget: **2 fix-revalidate cycles maximum**, then escalate via `#tool:vscode/askQuestions` with options: "Retry with different approach", "Skip CE Gate with documented risk", "Abort and investigate manually"
+- Loop budget: **2 fix-revalidate cycles maximum**, then escalate with options: "Retry with different approach", "Skip CE Gate with documented risk", "Abort and investigate manually"
 
 **Intent deficiencies (partial or weak intent match)** also route through Track 1: route to Code-Smith with the specific rubric criterion violated and the design intent reference from the `[CE GATE]` step's `Design Intent` field (falling back to the latest durable `<!-- design-issue-{ID} -->` handoff comment, then to the issue body if no durable handoff exists). Platform-local design caches may be used as an optimization when available, but they are not required. When the deficiency requires a new design decision before a fix can be defined (e.g., the core interaction model contradicts the design intent rather than merely being under-polished), Code-Conductor may instead create a follow-up issue with rationale — this is a judgment call, not automatic; the default is to fix in-PR.
 

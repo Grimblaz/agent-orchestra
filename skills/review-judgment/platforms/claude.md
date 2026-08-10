@@ -9,6 +9,6 @@ Claude bindings:
 - Use the `Agent` tool to invoke the `code-review-response` shell for the judge pass.
 - Use `Bash` for local verification reads and `gh` CLI operations when the judgment path is GitHub-backed.
 - Use `WebFetch` only when the cited evidence lives outside the workspace.
-- Use `AskUserQuestion` if the prosecution ledger, defense report, or review target context is incomplete.
+- Ask the user if the prosecution ledger, defense report, or review target context is incomplete.
 
 Keep methodology in `SKILL.md`; this platform note is only the Claude tool-binding shim.

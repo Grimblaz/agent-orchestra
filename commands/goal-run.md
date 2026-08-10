@@ -17,7 +17,7 @@ Run the Goal-Run role inline in this conversation to launch or resume a single i
 
 **Pre-flight**:
 
-1. Resolve the issue number from `$ARGUMENTS`. If no single issue number is present, use the `AskUserQuestion` tool.
+1. Resolve the issue number from `$ARGUMENTS`. If no single issue number is present, ask for one.
 2. Resolve an optional second token from `$ARGUMENTS`: `adopt` or `restart`. Any other second token, or more than one extra token, is invalid — report the exact unrecognized text and stop rather than guessing intent. Absent, this is a plain launch/resume invocation with no lever.
 
 ## Pre-flight (session-startup)
