@@ -2,15 +2,15 @@
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 
 # Get-CostTranscriptSlug coverage, split out of cost-walker.Tests.ps1 by issue
-# #908 so it can be registered as a CI gate.
+# #908 so it can be gated by CI on its own.
 #
-# Why the split: cost-walker.Tests.ps1 has never been registered in
-# .github/workflows/pester.yml, and this repository currently has no way to
+# Why the split: cost-walker.Tests.ps1 is quarantined out of
+# .github/workflows/pester.yml's selection, and this repository currently has no way to
 # measure whether it is Linux-clean (no Linux runner available to the
 # maintainer, and its 13 conditional skips gate on git-remote availability
-# rather than on platform, so a local run cannot stand in for one). Registering
+# rather than on platform, so a local run cannot stand in for one). Promoting
 # it wholesale would therefore be an unmeasured bet. This file is Linux-clean by
-# construction and can be registered on evidence rather than assumption:
+# construction and can be promoted on evidence rather than assumption:
 # Get-CostTranscriptSlug is a pure string function, every assertion is a string
 # or integer comparison, and the Windows-shaped paths below are only ever
 # function arguments -- nothing here touches the filesystem, git, or a PSDrive.

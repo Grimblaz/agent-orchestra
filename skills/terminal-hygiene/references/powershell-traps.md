@@ -450,7 +450,7 @@ the counting trap; it is the fuller and more careful treatment, and
 
 What follows is what that record does **not** cover.
 
-### Read the right `TOTAL:` line — the runner is re-entrant
+### Read the right run's totals — the runner is re-entrant, and there are two of them
 
 **Trap.** `run-pester-sharded.Tests.ps1` is
 itself a suite file that drives `Invoke-PesterSharded` against temp fixtures — around thirty call
@@ -477,7 +477,9 @@ four-case curiosity: since #1037 a crashed worker, a suite that discovered no te
 tests were all skipped, and a selected suite that produced no result at all each redden the run
 while failing zero *tests*. The old list — path unresolved, zero discovered, the `MinTestCount`
 floor, a `-DeterminismCheck` flip — still holds and is no longer exhaustive. Read `SuitesNotPassed`
-and `SuiteOutcomes`, or `ExitCode`; never `TotalFailed` alone.
+and `SuiteOutcomes`, or `ExitCode`; never `TotalFailed` alone. The widely copied comment in
+`goal-contract-validate-core.ps1` said "THREE distinct situations"; #1037 corrected it there and in
+`Documents/Design/goal-contract-validator.md`, and if you find a fourth copy it is stale.
 
 **Seen in:** #948.
 

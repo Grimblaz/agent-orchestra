@@ -42,6 +42,7 @@ param(
     [AllowEmptyCollection()][string[]]$SuitePath,
     [switch]$DeterminismCheck,
     [int]$MinTestCount = 200,
+    [ValidateSet('None', 'Minimal', 'Normal', 'Detailed', 'Diagnostic')]
     [string]$Output = 'Minimal',
     [ValidateRange(1, 256)][int]$FanOutWidth = 8
 )

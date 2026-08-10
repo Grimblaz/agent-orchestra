@@ -112,12 +112,17 @@ kind** — any failure, flaky or not, is `fail`.
 > not a change smuggled in here.
 
 The gate predicate
-(`Test-GCSuiteGatePass`) requires all three of `ExitCode -eq 0`,
-`TotalFailed -eq 0`, and `(TotalPassed + TotalFailed) -gt 0` — not
-`TotalFailed` alone. `Invoke-PesterSharded` returns `ExitCode=1,
-TotalFailed=0` on three distinct no-run shapes (tests-path-not-found,
-zero-tests-discovered, and the runner's own `MinTestCount` floor), so gating
-on `TotalFailed` alone would green-light a suite that never actually ran.
+(`Test-GCSuiteGatePass`) requires all of `ExitCode -eq 0`,
+`TotalFailed -eq 0`, `(TotalPassed + TotalFailed) -gt 0`, and — since issue
+#1037 — `SuitesNotPassed` being zero and `Reconciled` being true when the
+result carries them. Never `TotalFailed` alone. `Invoke-PesterSharded` returns
+`ExitCode=1, TotalFailed=0` on many shapes, and since #1037 that is the
+**normal** shape for most red runs rather than a three-case list: the original
+three no-run shapes (tests-path-not-found, zero-tests-discovered, the runner's
+own `MinTestCount` floor) plus a crashed worker, a suite that discovered no
+tests, a suite whose tests were all skipped, and a selected suite that produced
+no result at all — none of which fails a single *test*. Gating on `TotalFailed`
+alone would green-light every one of them.
 This was caught as a CRITICAL finding in the plan stress test and is the
 single most important invariant in the file — the gate predicate is
 isolated as its own pure function specifically so every false-GREEN shape is

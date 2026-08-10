@@ -598,7 +598,9 @@ function Get-CIGlobAuditLauncherScript {
         (verified against every shape a Linux filesystem allows); an
         unconstrained verbosity string would be one caller away from arbitrary
         code in the child, and the same pattern already exists unconstrained at
-        `pester-sharded-core.ps1:347`.
+        `pester-sharded-core.ps1`'s `Get-ShardLauncherScript` (cited by
+        function rather than by line: #1037 moved the line this used to name,
+        and a line number is a citation that goes stale without saying so).
     #>
     param(
         [Parameter(Mandatory)][string]$SuiteFile,

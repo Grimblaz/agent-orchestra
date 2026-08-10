@@ -51,33 +51,40 @@ a large number of tests for that reason alone.
 > `files=238/238` shape is likewise gone — the runner now reports selected-versus-reported
 > and reconciles them against the caller's selection. Treat the numbers here as a record of
 > what that commit's runner said, not as a baseline a later run can be differenced against.
-> The per-test dispositions below are unaffected: they name tests and assertions, not totals.
+> The per-test **dispositions** below are unaffected — they name tests and assertions, not
+> totals — but § *Reading the runner's failure count* describes the pre-#1037 counting
+> mechanism itself and is marked there as a record of it rather than as current guidance.
 
 The two runs are identical at per-test granularity: the same seven assertions failed in
 the same six files, with the same per-file pass/fail counts. The only textual difference
 between the two failure listings is the random GUID in the runner's own temp fixture
 path, which is not a test.
 
-### Reading the runner's failure count
+### Reading the runner's failure count — as it behaved AT THIS BASELINE
 
-**The reported failure count is not a count of tests.** The runner sets the count from
-the failing-test total and then increments it once per test container whose result is
-`Failed` (`.github/scripts/lib/pester-sharded-core.ps1`, the `Result -eq 'Failed'`
-branch). One test file is one container, so every failing file contributes one phantom.
-`fail=13` here is **7 failing assertions across 6 files**, plus 6 per-file artifacts.
+> **This whole section describes the pre-#1037 runner and is kept as a record of how
+> these numbers were read, not as instructions for reading a current run.** Every
+> mechanism below was removed or renamed by issue #1037; the note above the totals
+> table says why. For a current run, read the two unit-named totals (`TOTAL suites`,
+> `TOTAL tests`) and the reconciliation line.
 
-That reconciliation is not applied blind. A crashed worker and a file that discovers zero
-tests both enter the count with no failing assertion behind them, so subtracting the file
-count would report "zero real failures" for either. Both shapes are read off the per-file
-status line (`[NO RESULT - WORKER CRASHED]`, `[ZERO TESTS DISCOVERED]`), never derived.
-Neither occurred in these runs.
+**The reported failure count was not a count of tests.** The runner set the count from
+the failing-test total and then incremented it once per test container whose result was
+`Failed`. One test file is one container, so every failing file contributed one phantom.
+`fail=13` here was **7 failing assertions across 6 files**, plus 6 per-file artifacts.
+
+That reconciliation was not applied blind. A crashed worker and a file that discovered
+zero tests both entered the count with no failing assertion behind them, so subtracting
+the file count would have reported "zero real failures" for either. Both shapes were read
+off the per-file status line (`[NO RESULT - WORKER CRASHED]`, `[ZERO TESTS DISCOVERED]`),
+never derived. Neither occurred in these runs.
 
 `crash-worker.Tests.ps1` and `zero-tests.Tests.ps1` appear in the output and are **not**
 failures of this suite. They are temporary fixtures that `run-pester-sharded.Tests.ps1`
 creates to exercise the runner's own no-false-green contract. They do not exist in
-`.github/scripts/Tests/`, and they appear only inside nested `files=1/1` and `files=2/2`
-totals — never in the `files=238/238` total, which is this suite's real result. Counting
-the failed-file list naively yields 15 rather than 13 for exactly this reason.
+`.github/scripts/Tests/`, and they appeared only inside nested `files=1/1` and `files=2/2`
+totals — never in the `files=238/238` total, which was this suite's real result. Counting
+the failed-file list naively yielded 15 rather than 13 for exactly this reason.
 
 ### The measured failing set
 

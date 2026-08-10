@@ -19,8 +19,10 @@
     protecting that work would have sat in a file the per-PR gate never
     selected — a guard that does not run. It is the one quarantine entry #1037
     promotes, and it pays for itself twice: it invokes the sharded runner at
-    sixteen sites, which makes it the recursion control the parent's AC4 asks
-    for.
+    many sites (count them rather than trusting a figure written down here —
+    the last one this docstring carried was stale by roughly a factor of two
+    within the same commit that added it), which makes it the recursion control
+    the parent's AC4 asks for.
 #>
 
 BeforeAll {
@@ -72,28 +74,71 @@ Describe 'run-pester-sharded — real-git allowlist correctness' {
             -Because "its 'git push' is a string literal in a Should -Match assertion, not a real git invocation"
     }
 
-    It 'T2d: real-git allowlist has exactly the three keyed files' {
+    It 'T2d: real-git allowlist has exactly the two keyed files' {
         $list = @(Get-RealGitFiles)
-        $list.Count | Should -Be 3 -Because 'three files need the sequential shard: two for real git init/commit fixture behavior, and this suite for both that and isolation from concurrent writers'
+        $list.Count | Should -Be 2 -Because 'exactly two files have real git init/commit fixture behavior; suites that need the sequential shard for ISOLATION are on Get-IsolationRequiredFiles, a separate list with a separate criterion'
     }
 
-    It 'T2g: this suite is in the real-git allowlist, on both of its bases' {
-        # Issue #1037 put it here. Two independent reasons, either sufficient:
-        #   (1) it runs real `git init`/`add`/`commit` in its own fixtures,
-        #       which is this list's stated criterion; and
-        #   (2) its attribution test snapshots `git status` and then asserts the
-        #       runner reports the same cleanliness — under fan-out, ONE
-        #       concurrent suite writing a non-gitignored path into the checkout
-        #       between the snapshot and the nested run flips that answer. The
-        #       sequential shard runs after the parallel one, one file at a
-        #       time, so nothing else is writing while this suite runs.
-        $list = @(Get-RealGitFiles)
-        $list | Should -Contain 'run-pester-sharded.Tests.ps1'
+    It 'T2g: the sequential shard is the union of the two lists, and each entry is on the one that names its reason' {
+        # Issue #1037 split this. The sequential shard buys two different
+        # things — an isolated git environment, and a machine with nothing else
+        # of ours on it — and merging the reasons into one list means a suite
+        # added for the wrong one can never be removed for the right one.
+        $realGit = @(Get-RealGitFiles)
+        $isolation = @(Get-IsolationRequiredFiles)
+        $shard = @(Get-SequentialShardFiles)
 
-        $self = Get-Content -LiteralPath (Join-Path $script:TestsDir 'run-pester-sharded.Tests.ps1') -Raw
-        $self | Should -Match 'git -C \$fixture init' -Because 'basis (1): the fixture does a real git init'
-        $self | Should -Match "commit -q -m 'seed'" -Because 'basis (1): the fixture does a real git commit'
-        $self | Should -Match 'status --porcelain --untracked-files=all' -Because 'basis (2): the suite snapshots tree state and compares the runner against it'
+        $shard | Should -Be (@($realGit + $isolation | Sort-Object -Unique)) `
+            -Because 'the runner partitions on the union; a name on both lists is one shard member, not two'
+
+        # This suite is on the ISOLATION list: its attribution test snapshots
+        # `git status` and then asserts the runner reports the same cleanliness,
+        # which ONE concurrent suite writing a non-gitignored path into the
+        # checkout would flip.
+        $isolation | Should -Contain 'run-pester-sharded.Tests.ps1'
+        # And the audit core suite, whose 6-second bound was calibrated at
+        # ~1.07s on an idle machine and which ten concurrent workers starved
+        # past it on the gate's own first run.
+        $isolation | Should -Contain 'ci-glob-audit-core.Tests.ps1'
+    }
+
+    It 'T2h: each sequential-shard entry''s stated basis is present in the file it names' {
+        # DISCRIMINATING PINS. An earlier revision matched patterns that appear
+        # verbatim in its own assertion lines, so deleting the fixture code they
+        # pinned left them green — the self-match hazard, inside the guard for
+        # the one entry this chunk promotes. Every pattern below is ASSEMBLED
+        # from pieces (or is a regex with a metacharacter), so the string being
+        # searched for never appears literally in this file. That is what makes
+        # each pin discriminating; it is asserted rather than assumed by the
+        # self-match check immediately after the loop.
+        $checks = @(
+            @{ File = 'run-pester-sharded.Tests.ps1'; Pattern = 'git' + ' -C \$fixture init'; Why = 'real git init fixture' }
+            @{ File = 'run-pester-sharded.Tests.ps1'; Pattern = 'status --porcelain --untracked' + '-files=all'; Why = 'tree-state snapshot compared against the runner' }
+            @{ File = 'ci-glob-audit-core.Tests.ps1'; Pattern = '\$bound = \d+'; Why = 'a wall-clock bound a neighbour can starve' }
+        )
+
+        $selfSource = Get-Content -LiteralPath (Join-Path $script:TestsDir 'run-pester-sharded.Tests.ps1') -Raw
+
+        foreach ($check in $checks) {
+            $path = Join-Path $script:TestsDir $check.File
+            $path | Should -Exist
+            $content = Get-Content -LiteralPath $path -Raw
+            $content | Should -Match $check.Pattern -Because "$($check.File) is on the sequential shard for its $($check.Why)"
+        }
+
+        # The two pins that look at THIS file discriminate only while the string
+        # they search for lives in FIXTURE code and never inside an assertion.
+        # Written out inside a `Should -Match` it would match itself, and
+        # deleting the fixture would leave the pin green — the self-match
+        # hazard. That is why the patterns above are assembled from pieces; this
+        # asserts the property rather than trusting it. Legitimate duplication
+        # in fixture code is fine and is not what this counts.
+        $assertionLines = @($selfSource -split "`r?`n" | Where-Object { $_ -match 'Should\s+-(Match|BeLike)' })
+        foreach ($literal in @(('git' + ' -C $fixture init'), ('status --porcelain --untracked' + '-files=all'))) {
+            $inAssertion = @($assertionLines | Where-Object { $_.Contains($literal) })
+            $inAssertion.Count | Should -Be 0 `
+                -Because "'$literal' must not appear inside an assertion in this file; written out there, the pin matches itself and survives the deletion of the fixture it exists to pin"
+        }
     }
 
     It 'T2e: plugin-release-hygiene.Tests.ps1 contains actual git init invocation (verifies allowlist basis)' {
@@ -709,31 +754,79 @@ Describe 'all skipped' {
             $result.TotalPassed | Should -Be 3
         }
 
-        It 'S1b: more than one suite is in flight at once, and it could have come out negative' {
-            # Three suites that mostly sleep. Wall clock is the observable: run
-            # them one at a time, then at width 3, and the second must finish
-            # materially sooner. A serial runner cannot pass this.
-            $sleepers = foreach ($i in 1..3) {
-                $name = "sel-sleep-$i.Tests.ps1"
-                script:New-SelFixture $name @"
+        It 'S1b: more than one suite is in flight at once, evidenced by OVERLAP rather than by wall clock' {
+            # The observable is whether two suites' execution windows INTERSECT.
+            # An earlier revision compared total wall clock at width 1 against
+            # width 3, which is a machine-speed-dependent assertion on a suite
+            # that now runs in the per-PR gate — the review's own falsifier F8
+            # names a nondeterministic red on unrelated pull requests as the
+            # most expensive kind. Overlap discriminates just as sharply and
+            # cannot be starved into a false red: a serial runner produces
+            # strictly disjoint windows no matter how slow the machine is.
+            $overlapDir = Join-Path $script:SelDir 'overlap'
+            New-Item -ItemType Directory -Path $overlapDir -Force | Out-Null
+            try {
+                # Each suite stamps UTC ticks on entry and on exit. Under a
+                # serial runner every window is disjoint; under fan-out at
+                # least two must intersect.
+                $sleepers = foreach ($i in 1..3) {
+                    $path = Join-Path $overlapDir "ov-$i.Tests.ps1"
+                    $stamp = Join-Path $overlapDir "ov-$i.window.txt"
+                    Set-Content -LiteralPath $path -Encoding UTF8 -Value @"
 #Requires -Version 7.0
-Describe 'sleeper $i' {
-    It 'sleeps' { Start-Sleep -Seconds 2; 1 | Should -Be 1 }
+Describe 'overlap probe $i' {
+    It 'records its own execution window' {
+        `$start = [DateTime]::UtcNow.Ticks
+        Start-Sleep -Seconds 2
+        `$end = [DateTime]::UtcNow.Ticks
+        Set-Content -LiteralPath '$stamp' -Value "`$start,`$end" -Encoding UTF8
+        1 | Should -Be 1
+    }
 }
 "@
-                $script:Fixture[$name]
+                    $path
+                }
+
+                $result = Invoke-PesterSharded -SuitePath @($sleepers) -MinTestCount 0 -FanOutWidth 3 -Output 'None'
+                $result.ExitCode | Should -Be 0
+
+                $windows = @(Get-ChildItem -LiteralPath $overlapDir -Filter '*.window.txt' | ForEach-Object {
+                        $parts = (Get-Content -LiteralPath $_.FullName -Raw).Trim() -split ','
+                        [pscustomobject]@{ Start = [long]$parts[0]; End = [long]$parts[1] }
+                    })
+                $windows.Count | Should -Be 3 -Because 'every probe must have recorded a window, or the evidence below is over a smaller set than it claims'
+
+                $overlaps = 0
+                for ($a = 0; $a -lt $windows.Count; $a++) {
+                    for ($b = $a + 1; $b -lt $windows.Count; $b++) {
+                        if ($windows[$a].Start -lt $windows[$b].End -and $windows[$b].Start -lt $windows[$a].End) { $overlaps++ }
+                    }
+                }
+                $overlaps | Should -BeGreaterThan 0 `
+                    -Because 'at least two suites must have been executing at the same instant; a serial runner produces strictly disjoint windows however slow the machine is'
+
+                # The negative arm, so the instrument is shown to discriminate:
+                # the same three suites at width 1 must produce NO overlap.
+                Get-ChildItem -LiteralPath $overlapDir -Filter '*.window.txt' | Remove-Item -Force
+                $serial = Invoke-PesterSharded -SuitePath @($sleepers) -MinTestCount 0 -FanOutWidth 1 -Output 'None'
+                $serial.ExitCode | Should -Be 0
+
+                $serialWindows = @(Get-ChildItem -LiteralPath $overlapDir -Filter '*.window.txt' | ForEach-Object {
+                        $parts = (Get-Content -LiteralPath $_.FullName -Raw).Trim() -split ','
+                        [pscustomobject]@{ Start = [long]$parts[0]; End = [long]$parts[1] }
+                    })
+                $serialOverlaps = 0
+                for ($a = 0; $a -lt $serialWindows.Count; $a++) {
+                    for ($b = $a + 1; $b -lt $serialWindows.Count; $b++) {
+                        if ($serialWindows[$a].Start -lt $serialWindows[$b].End -and $serialWindows[$b].Start -lt $serialWindows[$a].End) { $serialOverlaps++ }
+                    }
+                }
+                $serialOverlaps | Should -Be 0 `
+                    -Because 'width 1 is one process at a time, so this assertion could have come out positive and did not'
             }
-
-            $serial = Invoke-PesterSharded -SuitePath @($sleepers) -MinTestCount 0 -FanOutWidth 1 -Output 'None'
-            $parallel = Invoke-PesterSharded -SuitePath @($sleepers) -MinTestCount 0 -FanOutWidth 3 -Output 'None'
-
-            $serial.ExitCode | Should -Be 0
-            $parallel.ExitCode | Should -Be 0
-            # Three 2-second sleeps overlapping saves about four seconds. The
-            # 1.5s margin sits well inside that and well outside scheduling
-            # noise, including on a runner already busy with other shards.
-            $parallel.WallClockMs | Should -BeLessThan ($serial.WallClockMs - 1500) `
-                -Because "three 2s suites run concurrently must finish sooner than the same three run one at a time (serial $($serial.WallClockMs)ms, concurrent $($parallel.WallClockMs)ms)"
+            finally {
+                Remove-Item -LiteralPath $overlapDir -Recurse -Force -ErrorAction SilentlyContinue
+            }
         }
 
         It 'S1c: an empty selection fails; it is never a run over nothing' {
@@ -936,18 +1029,25 @@ throw 'deliberate discovery failure'
             # 31361629558 at commit 0f3c824 — the `suite ms` column over its
             # 254 in-population rows, which is the FULL GLOB: the load the gate
             # carries after #1036, not the subset it gates today.
-            $recordParallelTotalMs = 1171050   # 251 suites, the sequential three removed
+            $recordParallelTotalMs = 1142460   # 250 suites, the sequential four removed
             $recordParallelMaxMs = 118518      # phase-containment-brief-review.Tests.ps1
-            $recordSequentialMs = 51253        # the three real-git suites
+            $recordSequentialMs = 79843        # the four sequential-shard suites
 
             # Reconstructed to the three facts the derivation reads: the
             # parallel set's total, its largest member, and the sequential sum.
             $distribution = @{}
             $distribution['big.Tests.ps1'] = $recordParallelMaxMs
             $remaining = $recordParallelTotalMs - $recordParallelMaxMs
-            $each = [int][math]::Floor($remaining / 250)
-            for ($i = 1; $i -le 249; $i++) { $distribution["p$i.Tests.ps1"] = $each }
-            $distribution['p250.Tests.ps1'] = $remaining - ($each * 249)
+            $each = [int][math]::Floor($remaining / 249)
+            for ($i = 1; $i -le 248; $i++) { $distribution["p$i.Tests.ps1"] = $each }
+            $distribution['p249.Tests.ps1'] = $remaining - ($each * 248)
+            # The four sequential-shard members, at the record's own figures.
+            # These are the suites' costs AT THAT COMMIT; the promoted guard
+            # suite has since grown (measured 80.3s in gate run 31415554651
+            # against the 32,794 ms here), which lengthens the sequential tail
+            # and is accounted for in pester.yml's bound arithmetic rather than
+            # here — the WIDTH reads only the parallel set.
+            $distribution['ci-glob-audit-core.Tests.ps1'] = 28590
             $distribution['plugin-release-hygiene.Tests.ps1'] = 3154
             $distribution['run-pester-sharded.Tests.ps1'] = 32794
             $distribution['session-cleanup-detector.Tests.ps1'] = 15305
@@ -1026,8 +1126,12 @@ throw 'deliberate discovery failure'
             # chartered to do next.
             $script:GateRun | Should -Match '::notice' -Because 'an annotation renders on the checks surface; a plain host line renders only inside the step log'
             $script:GateRun | Should -Match '\$selection\.Selected\.Count' -Because 'the disclosed count must be the one this run derived'
-            $script:GateRun | Should -Match '\$selection\.Quarantined\.Count'
+            $script:GateRun | Should -Match '\$excludedNames' -Because 'the excluded count must be derived from the selection too'
+            $script:GateRun | Should -Match 'Sort-Object -Unique' -Because 'the excluded count is over DISTINCT file names: the registry has no duplicate-entry check, and counting raw entries inflated the denominator'
             $script:GateRun | Should -Match 'GITHUB_STEP_SUMMARY' -Because 'the excluded set and its classes must be reachable from the check, not buried in the log'
+            # Registry text is untrusted: the registry is a file a pull request
+            # can edit, and its `reason` renders into a maintainer-facing table.
+            $script:GateRun | Should -Match 'Format-RegistryCell' -Because 'every interpolated registry value must go through one escaper, not an ad-hoc pipe replace'
         }
 
         It 'S6e: this suite is the one entry the gate now selects, and it was not promoted by being new' {
@@ -1083,6 +1187,45 @@ throw 'deliberate discovery failure'
             $unreconciled = [pscustomobject]@{ ExitCode = 0; TotalPassed = 12; TotalFailed = 0; SuitesNotPassed = 0; Reconciled = $false }
             Test-GCSuiteGatePass -Result $unreconciled | Should -BeFalse `
                 -Because 'a run that did not account for its selection must not be read as green by a consumer either'
+
+            # Present-but-wrong is rejected, not coerced. `[bool]` on any
+            # non-empty string is true, so the string 'false' passed a guard
+            # whose own comment said it would not.
+            $stringly = [pscustomobject]@{ ExitCode = 0; TotalPassed = 12; TotalFailed = 0; SuitesNotPassed = 0; Reconciled = 'false' }
+            Test-GCSuiteGatePass -Result $stringly | Should -BeFalse `
+                -Because 'the string "false" is not a reconciled run, and [bool] on it is $true'
+
+            # The absent-tolerant branch, which nothing the gate selects tested
+            # before: a worktree holding a pre-#1037 copy of the runner emits
+            # neither field, and this predicate must not start failing closed on
+            # a shape it accepted for good reason.
+            $legacy = [pscustomobject]@{ ExitCode = 0; TotalPassed = 12; TotalFailed = 0 }
+            Test-GCSuiteGatePass -Result $legacy | Should -BeTrue `
+                -Because 'a pre-#1037 result shape carries neither new field and must still be judged on the original three clauses'
+            $legacyRed = [pscustomobject]@{ ExitCode = 1; TotalPassed = 12; TotalFailed = 0 }
+            Test-GCSuiteGatePass -Result $legacyRed | Should -BeFalse
+        }
+
+        It 'S7c: the suite-level fields survive the process boundary the validator puts them through' {
+            # D3: the child launcher wrote both fields and the parent's return
+            # rebuild dropped them, so the two clauses above were dead on the
+            # only production path while a comment claimed otherwise. Assert
+            # the rebuild carries them, by reading the source of both ends
+            # rather than by trusting the predicate to be reachable.
+            $validatorSource = Get-Content -LiteralPath (Join-Path $script:RepoRoot '.github/scripts/lib/goal-contract-validate-core.ps1') -Raw
+
+            # The child writes them...
+            $validatorSource | Should -Match 'SuitesNotPassed = `\$r\.SuitesNotPassed' `
+                -Because 'the launcher must serialize the suite-level count across the process boundary'
+            $validatorSource | Should -Match 'Reconciled      = `\$r\.Reconciliation\.Ok' `
+                -Because 'the launcher must serialize the reconciliation verdict'
+
+            # ...and the parent must hand them on. This is the site that dropped
+            # them: a seven-property rebuild between the JSON and the predicate.
+            $validatorSource | Should -Match 'SuitesNotPassed = \$suitesNotPassed' `
+                -Because 'the parent rebuild must carry the field through, or the predicate never sees it'
+            $validatorSource | Should -Match 'Reconciled      = \$reconciled' `
+                -Because 'same for the reconciliation verdict'
         }
     }
 }

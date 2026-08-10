@@ -22,19 +22,32 @@
 #>
 
 # ---------------------------------------------------------------------------
-# Real-git allowlist
-# These files execute actual `git init` + `git commit` fixtures and must run
-# sequentially (not in parallel) because they mutate git environment state.
-# The list is keyed on fixture behavior, not on string grep of 'git '.
+# The sequential shard, and the THREE reasons a suite lands on it
 #
-# The sequential shard runs AFTER the parallel one and one file at a time, so
-# membership also buys isolation from concurrent writers -- which is why the
-# runner's own contract suite is on it (issue #1037). That suite snapshots
-# `git status` and then asserts the runner reports the same cleanliness; under
-# fan-out, ONE concurrent suite writing a non-gitignored path into the checkout
-# between the snapshot and the nested run flips the answer. It also does real
-# `git init`/`commit` in its own fixtures, which is this list's stated
-# criterion independently of that.
+# The sequential shard runs AFTER the parallel one, one file at a time, so
+# membership buys two things: an isolated git environment, and a machine with
+# nothing else of ours running on it. Those are different reasons and they are
+# kept in different lists -- a suite added for the wrong reason is a suite
+# nobody can later remove for the right one.
+#
+#   Get-RealGitFiles          mutates git environment state (real `git init` +
+#                             `git commit` fixtures). Keyed on fixture
+#                             behaviour, not on a string grep of 'git '.
+#   Get-IsolationRequiredFiles asserts something that ANOTHER suite running
+#                             beside it can falsify -- a tree-state snapshot,
+#                             or a wall-clock bound.
+#
+# The second list is issue #1037's. Fanning the gate out created two ways for a
+# neighbour to make a suite lie, and the gate's own first run found the second
+# one the hard way: `ci-glob-audit-core.Tests.ps1` asserts that a child suite
+# completes inside a 6-second bound calibrated at ~1.07s WITH THE MACHINE TO
+# ITSELF, and ten workers on a four-vCPU runner starved it past six. That test
+# is not wrong -- its bound is deliberately mutation-proven -- so the fix is to
+# give it back the conditions it was calibrated under rather than to loosen it.
+#
+# NOT open here: re-deriving membership for the whole corpus. That question
+# arrives with #1036's ~188 promotions, and it now arrives with a named third
+# class rather than as a surprise.
 # ---------------------------------------------------------------------------
 function Get-RealGitFiles {
     [CmdletBinding()]
@@ -43,9 +56,45 @@ function Get-RealGitFiles {
 
     return @(
         'plugin-release-hygiene.Tests.ps1',
-        'run-pester-sharded.Tests.ps1',
         'session-cleanup-detector.Tests.ps1'
     )
+}
+
+function Get-IsolationRequiredFiles {
+    <#
+        Suites whose assertions a concurrent neighbour can falsify. Each entry
+        names WHICH of the two hazards it is exposed to, because the remedy for
+        one is not the remedy for the other.
+    #>
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param()
+
+    return @(
+        # Wall-clock bound: asserts a child suite completes inside a limit
+        # calibrated on an idle machine. Starved past it under fan-out on the
+        # gate's own first run (#1037).
+        'ci-glob-audit-core.Tests.ps1',
+        # Tree-state snapshot: takes `git status`, then asserts the runner
+        # reports the same cleanliness. ONE concurrent suite writing a
+        # non-gitignored path into the checkout between the two flips it. Also
+        # does real git init/commit in its own fixtures, so it would qualify
+        # for the list above too -- it is here because isolation is the reason
+        # that would survive if the git fixtures went away.
+        'run-pester-sharded.Tests.ps1'
+    )
+}
+
+function Get-SequentialShardFiles {
+    <#
+        The union the runner actually partitions on. Sorted and de-duplicated
+        so a name appearing on both lists is one shard member, not two.
+    #>
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param()
+
+    return @(@(Get-RealGitFiles) + @(Get-IsolationRequiredFiles) | Sort-Object -Unique)
 }
 
 # ---------------------------------------------------------------------------
@@ -80,25 +129,38 @@ function Get-PesterFanOutWidth {
     param(
         # suite file name -> measured duration in milliseconds
         [Parameter(Mandatory)][hashtable]$DurationMs,
-        # names that run in the sequential shard (default: this runner's own list)
+        # names that run in the sequential shard (default: this runner's own union)
         [string[]]$SequentialName,
-        [int]$MaxWidth = 64
+        [ValidateRange(1, 256)][int]$MaxWidth = 64
     )
 
     Set-StrictMode -Version Latest
 
-    if ($null -eq $SequentialName) { $SequentialName = @(Get-RealGitFiles) }
+    if ($null -eq $SequentialName) { $SequentialName = @(Get-SequentialShardFiles) }
 
     $sequential = @($DurationMs.Keys | Where-Object { $SequentialName -contains $_ })
     $parallel = @($DurationMs.Keys | Where-Object { $SequentialName -notcontains $_ })
 
+    # A cell that is not a number names the suite it came from. The input is
+    # meant to be a parsed measurement record, and a bare cast error tells the
+    # reader nothing about which row to go and look at.
+    function script:Read-DurationCell {
+        param([hashtable]$Table, [string]$Name)
+        $raw = $Table[$Name]
+        $parsed = 0
+        if (-not [int]::TryParse([string]$raw, [ref]$parsed)) {
+            throw "Get-PesterFanOutWidth: duration for '$Name' is '$raw', which is not a whole number of milliseconds."
+        }
+        return $parsed
+    }
+
     $sequentialTotal = 0
-    foreach ($n in $sequential) { $sequentialTotal += [int]$DurationMs[$n] }
+    foreach ($n in $sequential) { $sequentialTotal += (script:Read-DurationCell -Table $DurationMs -Name $n) }
 
     $parallelTotal = 0
     $parallelMax = 0
     foreach ($n in $parallel) {
-        $v = [int]$DurationMs[$n]
+        $v = script:Read-DurationCell -Table $DurationMs -Name $n
         $parallelTotal += $v
         if ($v -gt $parallelMax) { $parallelMax = $v }
     }
@@ -110,9 +172,12 @@ function Get-PesterFanOutWidth {
     if ($parallel.Count -gt 0 -and $parallelMax -gt 0) {
         $width = [int][math]::Ceiling($parallelTotal / [double]$parallelMax)
     }
-    if ($width -lt 1) { $width = 1 }
-    if ($width -gt $parallel.Count -and $parallel.Count -gt 0) { $width = $parallel.Count }
+    # Ceilings BEFORE the floor, so the floor is the last word. The other order
+    # let a MaxWidth of 0 return a width of 0 -- which this function documents
+    # as impossible and the runner's own [ValidateRange(1,256)] then rejects.
+    if ($parallel.Count -gt 0 -and $width -gt $parallel.Count) { $width = $parallel.Count }
     if ($width -gt $MaxWidth) { $width = $MaxWidth }
+    if ($width -lt 1) { $width = 1 }
 
     $perWorker = if ($width -gt 0) { [int][math]::Ceiling($parallelTotal / [double]$width) } else { $parallelTotal }
 
@@ -438,8 +503,21 @@ function script:Get-ShardLauncherScript {
     param(
         [string]$TestFilePath,
         [string]$ResultFilePath,
-        [string]$OutputVerbosity
+        [ValidateSet('None', 'Minimal', 'Normal', 'Detailed', 'Diagnostic')]
+        [string]$OutputVerbosity,
+        # When true the worker is told NOT to emit CI-format error commands.
+        # A nested run's children are FIXTURES -- this suite's own contract
+        # tests deliberately crash workers -- and their `##[error]` lines are
+        # promoted by GitHub into red failure annotations on the pull-request
+        # checks surface. On a fully green pull request that surface would
+        # still carry an annotation claiming a discovery failed, which is
+        # exactly the legibility the gate's disclosure exists to provide.
+        # Scoped to nested runs on purpose: the OUTER run's genuinely failing
+        # suites should keep their annotations.
+        [bool]$SuppressCIAnnotations
     )
+
+    $ciFormat = if ($SuppressCIAnnotations) { 'None' } else { 'Auto' }
 
     # Single-quote literals in PowerShell here-string are safe.
     # The paths are embedded in the script via @"..."@ substitution.
@@ -449,6 +527,7 @@ try {
     `$cfg = New-PesterConfiguration
     `$cfg.Run.Path = @('$($TestFilePath -replace "'", "''")')
     `$cfg.Output.Verbosity = '$OutputVerbosity'
+    `$cfg.Output.CIFormat = '$ciFormat'
     `$cfg.Run.Exit = `$false
     `$cfg.Run.PassThru = `$true
     `$r = Invoke-Pester -Configuration `$cfg
@@ -478,7 +557,7 @@ try {
     `$discovered = `$passed + `$failed + `$skipped + `$notRun
 
     `$obj = [ordered]@{
-        File              = '$($TestFilePath | Split-Path -Leaf)'
+        File              = '$(($TestFilePath | Split-Path -Leaf) -replace "'", "''")'
         Passed            = `$passed
         Failed            = `$failed
         Skipped           = `$skipped
@@ -549,7 +628,11 @@ function Resolve-PesterSuiteOutcome {
     if ($containerFailures -gt 0 -and $executed -gt 0) {
         return [pscustomobject]@{ Outcome = 'failed-tests'; Passed = $false; Reason = "$containerFailures container(s) failed to discover" }
     }
-    if ($executed -eq 0) {
+    # `-le`, not `-eq`. A total predicate must not have an exit that only a
+    # non-negative input can reach: a row carrying a negative count resolved to
+    # 'passed' under `-eq 0`, which is a false GREEN one character wide in the
+    # single function that decides redness.
+    if ($executed -le 0) {
         $why = if ($containerFailures -gt 0) { 'discovery threw' }
                elseif (($skipped + $notRun) -gt 0) { "every discovered test was skipped or not run ($($skipped + $notRun))" }
                else { 'no tests discovered' }
@@ -557,6 +640,45 @@ function Resolve-PesterSuiteOutcome {
     }
 
     return [pscustomobject]@{ Outcome = 'passed'; Passed = $true; Reason = "$passed test(s) passed" }
+}
+
+# ---------------------------------------------------------------------------
+# The ONE shape a run that never reached a shard returns
+#
+# There used to be two result contracts: the full one, and a four-property stub
+# emitted by every early error. A caller reading `Reconciliation` or
+# `SuiteOutcomes` found them missing precisely on the runs where something had
+# gone wrong, and the gate's own error annotation rendered "of  selected
+# suite(s) did not pass" with two blanks in it. Every field the full return
+# carries is present here, at the value a run that executed nothing honestly
+# has.
+# ---------------------------------------------------------------------------
+function script:New-DegenerateShardResult {
+    return [pscustomobject]@{
+        ExitCode        = 1
+        TotalPassed     = 0
+        TotalFailed     = 0
+        TestsSkipped    = 0
+        TestsNotRun     = 0
+        TestsExecuted   = 0
+        SuitesSelected  = 0
+        SuitesReported  = 0
+        SuitesNotPassed = 0
+        SuiteOutcomes   = @()
+        Reconciliation  = [pscustomobject]@{
+            Ok         = $false
+            Selected   = 0
+            Reported   = 0
+            Missing    = @()
+            Unexpected = @()
+            Duplicate  = @()
+        }
+        FanOutWidth     = 0
+        WallClockMs     = 0
+        Results         = @()
+        MissingFiles    = @()
+        FailedFiles     = @()
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -574,6 +696,7 @@ function Invoke-PesterSharded {
         [AllowEmptyCollection()][string[]]$SuitePath,
         [switch]$DeterminismCheck,
         [int]$MinTestCount = 200,
+        [ValidateSet('None', 'Minimal', 'Normal', 'Detailed', 'Diagnostic')]
         [string]$Output = 'Minimal',
         # How many suite processes run concurrently. Derived, not chosen --
         # see Get-PesterFanOutWidth.
@@ -585,7 +708,7 @@ function Invoke-PesterSharded {
     if ($selectionDriven) {
         if (@($SuitePath).Count -eq 0) {
             Write-Error 'SuitePath was supplied but empty. A run over no suites is a failure, not a pass: the caller selected nothing, and reporting green for that is the false-GREEN shape this runner exists to refuse.'
-            return [pscustomobject]@{ ExitCode = 1; TotalPassed = 0; TotalFailed = 0; Results = @() }
+            return (script:New-DegenerateShardResult)
         }
 
         $allFiles = @()
@@ -597,7 +720,23 @@ function Invoke-PesterSharded {
         }
         if ($unreadable.Count -gt 0) {
             Write-Error "SuitePath names $($unreadable.Count) entr(y/ies) that is not a readable file: $($unreadable -join ', '). Dropping a selected suite silently is exactly the reconciliation failure this runner reports on."
-            return [pscustomobject]@{ ExitCode = 1; TotalPassed = 0; TotalFailed = 0; Results = @() }
+            return (script:New-DegenerateShardResult)
+        }
+
+        # EVERY identity in this runner -- the per-suite result file, the
+        # generated launcher, the row key, the reconciliation key -- is the
+        # LEAF NAME. A directory glob made that safe for free; an explicit list
+        # does not. Two entries sharing a leaf overwrite each other's launcher,
+        # so one suite runs twice, the other never runs at all, and its row
+        # still reads `passed` with its tests counted into the honest total.
+        # Reconciliation does redden that run, on `duplicate` -- but the
+        # diagnostic names the symptom and the totals are already wrong by then.
+        # Refuse up front instead, and say what to do about it.
+        $collisions = @($allFiles | Group-Object Name | Where-Object { $_.Count -gt 1 })
+        if ($collisions.Count -gt 0) {
+            $detail = ($collisions | ForEach-Object { "$($_.Name) <- " + (($_.Group | ForEach-Object { $_.FullName }) -join ' , ') }) -join '; '
+            Write-Error "SuitePath contains $($collisions.Count) leaf name(s) shared by more than one file: $detail. This runner keys every per-suite artifact on the leaf name, so a collision silently runs one suite twice and never runs the other. Rename one, or select them in separate runs."
+            return (script:New-DegenerateShardResult)
         }
         $allFiles = @($allFiles | Sort-Object Name)
 
@@ -616,7 +755,7 @@ function Invoke-PesterSharded {
 
         if (-not (Test-Path -LiteralPath $resolvedTestsPath -PathType Container)) {
             Write-Error "TestsPath not found: $resolvedTestsPath"
-            return [pscustomobject]@{ ExitCode = 1; TotalPassed = 0; TotalFailed = 0; Results = @() }
+            return (script:New-DegenerateShardResult)
         }
 
         # Discover all .Tests.ps1 files — the expected-file manifest
@@ -625,15 +764,15 @@ function Invoke-PesterSharded {
 
         if ($allFiles.Count -eq 0) {
             Write-Error "No .Tests.ps1 files found in: $resolvedTestsPath"
-            return [pscustomobject]@{ ExitCode = 1; TotalPassed = 0; TotalFailed = 0; Results = @() }
+            return (script:New-DegenerateShardResult)
         }
     }
 
-    $realGitNames = @(Get-RealGitFiles)
+    $sequentialNames = @(Get-SequentialShardFiles)
 
     # Split into parallel and sequential shards
-    $parallelFiles = @($allFiles | Where-Object { $realGitNames -notcontains $_.Name })
-    $sequentialFiles = @($allFiles | Where-Object { $realGitNames -contains $_.Name })
+    $parallelFiles = @($allFiles | Where-Object { $sequentialNames -notcontains $_.Name })
+    $sequentialFiles = @($allFiles | Where-Object { $sequentialNames -contains $_.Name })
 
     # Issue #958: read the attribution before anything runs, and publish this
     # run's depth so that any run nested inside it -- this suite's own contract
@@ -648,9 +787,9 @@ function Invoke-PesterSharded {
         if ($DeterminismCheck) {
             # Run twice and compare
             Write-Host "=== Determinism check: run 1 ===" -ForegroundColor Cyan
-            $run1 = script:Invoke-ShardedRun -ParallelFiles $parallelFiles -SequentialFiles $sequentialFiles -Output $Output -AllFileManifest $allFiles -MinTestCount $MinTestCount -FanOutWidth $FanOutWidth
+            $run1 = script:Invoke-ShardedRun -ParallelFiles $parallelFiles -SequentialFiles $sequentialFiles -Output $Output -AllFileManifest $allFiles -MinTestCount $MinTestCount -FanOutWidth $FanOutWidth -SuppressCIAnnotations:($attribution.Depth -gt 0)
             Write-Host "=== Determinism check: run 2 ===" -ForegroundColor Cyan
-            $run2 = script:Invoke-ShardedRun -ParallelFiles $parallelFiles -SequentialFiles $sequentialFiles -Output $Output -AllFileManifest $allFiles -MinTestCount $MinTestCount -FanOutWidth $FanOutWidth
+            $run2 = script:Invoke-ShardedRun -ParallelFiles $parallelFiles -SequentialFiles $sequentialFiles -Output $Output -AllFileManifest $allFiles -MinTestCount $MinTestCount -FanOutWidth $FanOutWidth -SuppressCIAnnotations:($attribution.Depth -gt 0)
 
             $diffFiles = script:Compare-RunResults -Run1 $run1.Results -Run2 $run2.Results
             if ($diffFiles.Count -gt 0) {
@@ -662,6 +801,12 @@ function Invoke-PesterSharded {
                 # hand-built subset. A caller reading Reconciliation or
                 # SuiteOutcomes must not find them missing precisely on the
                 # runs where something went wrong.
+                #
+                # `PSObject.Copy()` is SHALLOW: Reconciliation, SuiteOutcomes
+                # and Results below are the same object references run 1 holds.
+                # Safe here because only the value-typed ExitCode is reassigned
+                # and run 1 is discarded on this path — stated so a later edit
+                # that mutates a nested member knows what it is doing.
                 $flipped = $run1.PSObject.Copy()
                 $flipped.ExitCode = 1
                 $flipped | Add-Member -NotePropertyName 'DeterminismDiff' -NotePropertyValue $diffFiles -Force
@@ -671,10 +816,20 @@ function Invoke-PesterSharded {
                 Write-Host "`nDeterminism check: PASSED (no flips between runs)" -ForegroundColor Green
             }
 
+            # Run 2's verdict is not discardable. `-DeterminismCheck` used to
+            # return run 1 outright, so a run 2 that reddened for a reason the
+            # flip comparison cannot express -- a reconciliation failure, the
+            # minimum-count floor -- was thrown away, and the mode that exists
+            # to catch flakiness reported the green half of a flaky pair.
+            if ($run2.ExitCode -ne 0 -and $run1.ExitCode -eq 0) {
+                Write-Host "`n  Determinism: run 2 was red for a reason no outcome flipped on (reconciliation or the minimum-count floor). Returning run 2." -ForegroundColor Red
+                return $run2
+            }
+
             return $run1
         }
 
-        return script:Invoke-ShardedRun -ParallelFiles $parallelFiles -SequentialFiles $sequentialFiles -Output $Output -AllFileManifest $allFiles -MinTestCount $MinTestCount -FanOutWidth $FanOutWidth
+        return script:Invoke-ShardedRun -ParallelFiles $parallelFiles -SequentialFiles $sequentialFiles -Output $Output -AllFileManifest $allFiles -MinTestCount $MinTestCount -FanOutWidth $FanOutWidth -SuppressCIAnnotations:($attribution.Depth -gt 0)
     }
     finally {
         script:Set-AttributionEnvVar -Name $depthEnvName -Value $savedDepth
@@ -692,7 +847,11 @@ function script:Invoke-ShardedRun {
         [string]$Output,
         [object[]]$AllFileManifest = @(),
         [int]$MinTestCount = 200,
-        [int]$FanOutWidth = 8
+        [int]$FanOutWidth = 8,
+        # Set for a NESTED run: its workers are fixtures, and their CI-format
+        # error lines would otherwise land as failure annotations on the
+        # pull-request checks surface. See Get-ShardLauncherScript.
+        [switch]$SuppressCIAnnotations
     )
 
     $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) "pester-sharded-$([System.Guid]::NewGuid().ToString('N'))"
@@ -711,7 +870,7 @@ function script:Invoke-ShardedRun {
                 $baseName   = [System.IO.Path]::GetFileNameWithoutExtension($_.Name)
                 $resultFile = Join-Path $tempDir "$baseName.json"
                 $launchFile = Join-Path $tempDir "$baseName.launcher.ps1"
-                $content    = script:Get-ShardLauncherScript -TestFilePath $_.FullName -ResultFilePath $resultFile -OutputVerbosity $Output
+                $content    = script:Get-ShardLauncherScript -TestFilePath $_.FullName -ResultFilePath $resultFile -OutputVerbosity $Output -SuppressCIAnnotations ([bool]$SuppressCIAnnotations)
                 [System.IO.File]::WriteAllText($launchFile, $content, [System.Text.UTF8Encoding]::new($false))
                 [pscustomobject]@{
                     Name        = $_.Name
@@ -822,7 +981,7 @@ function script:Invoke-ShardedRun {
                     $resultFile  = Join-Path $tempDir "$baseName.json"
                     $launchFile  = Join-Path $tempDir "$baseName.launcher.ps1"
 
-                    $launchContent = script:Get-ShardLauncherScript -TestFilePath $file.FullName -ResultFilePath $resultFile -OutputVerbosity $Output
+                    $launchContent = script:Get-ShardLauncherScript -TestFilePath $file.FullName -ResultFilePath $resultFile -OutputVerbosity $Output -SuppressCIAnnotations ([bool]$SuppressCIAnnotations)
                     [System.IO.File]::WriteAllText($launchFile, $launchContent, [System.Text.UTF8Encoding]::new($false))
 
                     $sw = [System.Diagnostics.Stopwatch]::StartNew()
@@ -1040,9 +1199,20 @@ function script:Invoke-ShardedRun {
 }
 
 function script:Format-OutcomeTally {
+    <#
+        The buckets come from the ROWS, unioned with the known states so a
+        zero still prints. A hard-coded state list would count a future sixth
+        outcome in the redness decision (`Outcome -ne 'passed'`) and omit it
+        from the printed tally — the two readers of one record disagreeing,
+        which is the defect class this whole mechanism exists to remove.
+    #>
     param([object]$Rows)
 
-    $parts = foreach ($state in @('passed', 'failed-tests', 'no-result', 'no-tests', 'missing')) {
+    $known = @('passed', 'failed-tests', 'no-result', 'no-tests', 'missing')
+    $present = @($Rows | ForEach-Object { $_.Outcome } | Sort-Object -Unique)
+    $states = @($known) + @($present | Where-Object { $known -notcontains $_ })
+
+    $parts = foreach ($state in $states) {
         "$state=$(@($Rows | Where-Object { $_.Outcome -eq $state }).Count)"
     }
     return ($parts -join '  ')
@@ -1061,10 +1231,28 @@ function script:Compare-RunResults {
 
     $run1Map = @{}
     foreach ($r in $Run1) { $run1Map[$r.File] = $r }
+    $run2Map = @{}
+    foreach ($r in $Run2) { $run2Map[$r.File] = $r }
 
-    foreach ($r2 in $Run2) {
-        $r1 = $run1Map[$r2.File]
-        if ($null -eq $r1) { continue }
+    # The UNION, not run 2's keys. This walked run 2 alone and `continue`d on
+    # any file run 1 did not have -- so a suite that PRODUCED NO ROW in one of
+    # the two runs was invisible in both directions, which is exactly the
+    # flakiness `-DeterminismCheck` exists to catch. A row that appears in one
+    # run and not the other is the most determinism-relevant thing there is.
+    $allFiles = @(@($run1Map.Keys) + @($run2Map.Keys) | Sort-Object -Unique)
+
+    foreach ($file in $allFiles) {
+        $r1 = $run1Map[$file]
+        $r2 = $run2Map[$file]
+
+        if ($null -eq $r1 -or $null -eq $r2) {
+            $diffs.Add([pscustomobject]@{
+                File        = $file
+                Run1Outcome = if ($null -eq $r1) { 'absent' } else { (Resolve-PesterSuiteOutcome -Row $r1).Outcome }
+                Run2Outcome = if ($null -eq $r2) { 'absent' } else { (Resolve-PesterSuiteOutcome -Row $r2).Outcome }
+            }) | Out-Null
+            continue
+        }
 
         # Through the SAME predicate the summary and the exit code use. This
         # site used to recompute the judgement from the three legacy fields,
