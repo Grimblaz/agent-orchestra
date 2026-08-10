@@ -721,19 +721,37 @@ description: "Another skill. Use when reconciling a promoted roster against its 
         ($r.DriftDetails -join ' ') | Should -Match 'which the caller.s expected-share map does not declare'
     }
 
-    It 'INDUCED (unreachable-marker class): a mandate_marker that appears in no agent body FAILS' {
+    It 'INDUCED (retuned-marker class): a mandate_marker that appears in no agent body FAILS' {
         # The one HIGH finding of PR #1061's review, and the sharpest shape in this file: the A4.3
         # derivation reads the tree, but its only INPUT is a manifest field. Point mandate_marker at
         # a string that appears nowhere and the derived set empties, every lens home reads
         # main-session-only, and an emptied loading_surfaces then audits clean. Reproduced on the
         # real manifest before the fix: two tokens took 43 drift findings to zero. Non-blankness was
-        # never the property that mattered - reaching the tree is.
+        # never the property that mattered. Nor was reaching the tree: defense showed any real
+        # agent-body string is findable and still derives nothing, so the marker is core-owned and
+        # a manifest that disagrees is drift whatever its value. The sibling test below uses a
+        # string that DOES exist in the tree, which is what discriminates this fix from that one.
         $r = script:Invoke-ScratchAudit { param($c)
             $c.Manifest.mandate_marker = 'Mandated load, unconditionally'
             $c.Manifest.loading_surfaces = [ordered]@{}
         }
         $r.HasDrift | Should -BeTrue
-        ($r.DriftDetails -join ' ') | Should -Match 'which appears in no agent body'
+        ($r.DriftDetails -join ' ') | Should -Match 'this reader owns that vocabulary'
+    }
+
+    It 'INDUCED (retuned-marker class): a manifest marker that is REAL but derives nothing FAILS' {
+        # The first fix for this escape required the marker to be FINDABLE in an agent body, and
+        # defense falsified it in one pass: any real string occurring anywhere in any agent body
+        # is findable and derives ZERO mandated loads, so the two-token escape reopened unchanged.
+        # The marker is now core-owned; a manifest that disagrees is drift regardless of whether
+        # its value exists in the tree. This fixture uses a string that DOES exist in a real agent
+        # body, which is what makes it discriminating against the previous fix.
+        $r = script:Invoke-ScratchAudit { param($c)
+            $c.Manifest.mandate_marker = 'Core Principles'
+            $c.Manifest.loading_surfaces = [ordered]@{}
+        }
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'this reader owns that vocabulary'
     }
 
     It 'INDUCED (absent-population class): no agents directory FAILS rather than deriving an empty set' {

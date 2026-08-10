@@ -1722,6 +1722,10 @@
       "cited_by": [
         {
           "surface": "skills/verification-before-completion/SKILL.md",
+          "anchor": "#### A baseline that is not an ancestor makes the differential rule vacuous"
+        },
+        {
+          "surface": "skills/verification-before-completion/SKILL.md",
           "anchor": "## Composite References"
         }
       ],
@@ -1732,6 +1736,58 @@
       "gating_skill": "skills/verification-before-completion/SKILL.md",
       "promoted_by": "issue #1050",
       "cited_by": [
+        {
+          "surface": "skills/verification-before-completion/SKILL.md",
+          "anchor": "#### Run the criterion's own discriminator against the untouched tree before you trust it"
+        },
+        {
+          "surface": "skills/verification-before-completion/SKILL.md",
+          "anchor": "#### A presence pin cannot resist a qualification, and its failure message ratchets against one"
+        },
+        {
+          "surface": "skills/verification-before-completion/SKILL.md",
+          "anchor": "#### A mutation campaign that only touches sites the suite already covers proves nothing"
+        },
+        {
+          "surface": "skills/verification-before-completion/SKILL.md",
+          "anchor": "#### Point the instrument at the real target, and build the negatives first"
+        },
+        {
+          "surface": "skills/verification-before-completion/SKILL.md",
+          "anchor": "#### An attribution that does not reproduce is a citation, not evidence"
+        },
+        {
+          "surface": "skills/verification-before-completion/SKILL.md",
+          "anchor": "#### A demonstration at delivery is not a regression guard"
+        },
+        {
+          "surface": "skills/verification-before-completion/SKILL.md",
+          "anchor": "#### A witness can falsify a universal but never establish one"
+        },
+        {
+          "surface": "skills/verification-before-completion/SKILL.md",
+          "anchor": "#### A phrasing sweep proves nothing about the population its regex cannot express"
+        },
+        {
+          "surface": "skills/verification-before-completion/SKILL.md",
+          "anchor": "#### A bounded read window produces a false absence, and the window gets recorded as the evidence"
+        },
+        {
+          "surface": "skills/verification-before-completion/SKILL.md",
+          "anchor": "#### A red run at deliverable grain says nothing about the deliverable's sub-properties"
+        },
+        {
+          "surface": "skills/verification-before-completion/SKILL.md",
+          "anchor": "#### A coupled-field migration lands half-done and every count still agrees"
+        },
+        {
+          "surface": "skills/verification-before-completion/SKILL.md",
+          "anchor": "#### A differential script baselined on `HEAD` inverts the moment you commit"
+        },
+        {
+          "surface": "skills/verification-before-completion/SKILL.md",
+          "anchor": "#### A verification loop that counts only failures reports green on zero checks run"
+        },
         {
           "surface": "skills/verification-before-completion/SKILL.md",
           "anchor": "## Composite References"
@@ -1746,6 +1802,34 @@
       "cited_by": [
         {
           "surface": "skills/plan-authoring/SKILL.md",
+          "anchor": "#### Establish which executor lane actually failed before moving an instruction to reach it"
+        },
+        {
+          "surface": "skills/plan-authoring/SKILL.md",
+          "anchor": "#### A proof standard can name every polarity and still miss the population none of its exhibits exercises"
+        },
+        {
+          "surface": "skills/plan-authoring/SKILL.md",
+          "anchor": "#### A vacuity answer can name the right verdict and cite blockers the executor can escape"
+        },
+        {
+          "surface": "skills/plan-authoring/SKILL.md",
+          "anchor": "#### Criteria can pin the reader-facing surface completely and miss every programmatic consumer"
+        },
+        {
+          "surface": "skills/plan-authoring/SKILL.md",
+          "anchor": "#### A source-read tag certifies that you looked, not that you looked where the answer lives"
+        },
+        {
+          "surface": "skills/plan-authoring/SKILL.md",
+          "anchor": "#### Specify at the knowledge level you actually have"
+        },
+        {
+          "surface": "skills/plan-authoring/SKILL.md",
+          "anchor": "#### One noun naming two things lets a compliant run satisfy every criterion and do nothing"
+        },
+        {
+          "surface": "skills/plan-authoring/SKILL.md",
           "anchor": "## Composite References"
         }
       ],
@@ -1756,6 +1840,38 @@
       "gating_skill": "skills/adversarial-review/SKILL.md",
       "promoted_by": "issue #1050",
       "cited_by": [
+        {
+          "surface": "skills/adversarial-review/SKILL.md",
+          "anchor": "#### A remedy for a silent defect reproduces that defect inside itself"
+        },
+        {
+          "surface": "skills/adversarial-review/SKILL.md",
+          "anchor": "#### A \"nothing was lost\" check assembled from a partition of its own input cannot fail"
+        },
+        {
+          "surface": "skills/adversarial-review/SKILL.md",
+          "anchor": "#### A proposed guard has two cheap falsifiers nobody runs"
+        },
+        {
+          "surface": "skills/adversarial-review/SKILL.md",
+          "anchor": "#### A mechanism built to guarantee a property fails most often by violating that property"
+        },
+        {
+          "surface": "skills/adversarial-review/SKILL.md",
+          "anchor": "#### A test asserting that a name appears in a script pins nothing"
+        },
+        {
+          "surface": "skills/adversarial-review/SKILL.md",
+          "anchor": "#### When a finding hardens a selector, follow it to the caller's zero-match branch"
+        },
+        {
+          "surface": "skills/adversarial-review/SKILL.md",
+          "anchor": "#### Narrowing a guard by syntax instead of by meaning widens the exemption past the intended class"
+        },
+        {
+          "surface": "skills/adversarial-review/SKILL.md",
+          "anchor": "#### Demoting a signal orphans whatever it was the sole producer of"
+        },
         {
           "surface": "skills/adversarial-review/SKILL.md",
           "anchor": "## Composite References"
@@ -1770,6 +1886,14 @@
       "cited_by": [
         {
           "surface": "skills/implementation-discipline/SKILL.md",
+          "anchor": "#### When one qualifying claim is propagated to many sites, the boilerplate copies are where it turns false"
+        },
+        {
+          "surface": "skills/implementation-discipline/SKILL.md",
+          "anchor": "#### Swapping the subject noun leaves the old predicate, and the sentence lands false"
+        },
+        {
+          "surface": "skills/implementation-discipline/SKILL.md",
           "anchor": "## Composite References"
         }
       ],
@@ -1780,6 +1904,30 @@
       "gating_skill": "skills/test-driven-development/SKILL.md",
       "promoted_by": "issue #1050",
       "cited_by": [
+        {
+          "surface": "skills/test-driven-development/SKILL.md",
+          "anchor": "#### Blast radius comes from what executes a path, not from what selects from it"
+        },
+        {
+          "surface": "skills/test-driven-development/SKILL.md",
+          "anchor": "#### A rule you cannot invoke cannot be defended, however many tests surround it"
+        },
+        {
+          "surface": "skills/test-driven-development/SKILL.md",
+          "anchor": "#### A test that fabricates hostile input can corrupt the aggregate artifact it protects"
+        },
+        {
+          "surface": "skills/test-driven-development/SKILL.md",
+          "anchor": "#### A test docstring can name a check the body never performs"
+        },
+        {
+          "surface": "skills/test-driven-development/SKILL.md",
+          "anchor": "#### CI selects suites by glob minus the quarantine registry, and a file-scope StrictMode in a dot-sourced library reddens the whole run"
+        },
+        {
+          "surface": "skills/test-driven-development/SKILL.md",
+          "anchor": "#### For a CI-only failure, dump the whole decision state in one run"
+        },
         {
           "surface": "skills/test-driven-development/SKILL.md",
           "anchor": "## Composite References"
@@ -1842,6 +1990,22 @@
       "cited_by": [
         {
           "surface": "skills/design-exploration/SKILL.md",
+          "anchor": "#### Decide what an agent judges and what deterministic code checks, and type the boundary between them"
+        },
+        {
+          "surface": "skills/design-exploration/SKILL.md",
+          "anchor": "#### A record format cannot be append-only inside a begin/end marked region"
+        },
+        {
+          "surface": "skills/design-exploration/SKILL.md",
+          "anchor": "#### Grounding errors that all point one way mean the pass was advocacy, not a test"
+        },
+        {
+          "surface": "skills/design-exploration/SKILL.md",
+          "anchor": "#### Before proposing a mechanism for a missed step, ask which standing rule was absent"
+        },
+        {
+          "surface": "skills/design-exploration/SKILL.md",
           "anchor": "## Composite References"
         }
       ],
@@ -1852,6 +2016,10 @@
       "gating_skill": "skills/agent-memory-compaction/SKILL.md",
       "promoted_by": "issue #1050",
       "cited_by": [
+        {
+          "surface": "skills/agent-memory-compaction/SKILL.md",
+          "anchor": "#### Relocating a line to preserve one subject silently preserves every other subject on it"
+        },
         {
           "surface": "skills/agent-memory-compaction/SKILL.md",
           "anchor": "## Composite References"
@@ -1888,6 +2056,14 @@
       "gating_skill": "skills/safe-operations/SKILL.md",
       "promoted_by": "issue #1050",
       "cited_by": [
+        {
+          "surface": "skills/safe-operations/SKILL.md",
+          "anchor": "#### A merge of `main` can falsify a factual claim your branch cites, not just collide on a version"
+        },
+        {
+          "surface": "skills/safe-operations/SKILL.md",
+          "anchor": "#### A search result that omits a long matching line reads as absence"
+        },
         {
           "surface": "skills/safe-operations/SKILL.md",
           "anchor": "## Composite References"

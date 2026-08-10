@@ -38,13 +38,15 @@
       3. The reverse scan's population is the tree (`skills/*/references/`), not the manifest's own
          list of receiving skills, so de-manifesting an exhibit cannot also de-scope the directory
          it sits in.
-      4. `mandate_marker` must be FINDABLE in an agent body, not merely non-blank. It is the one
-         manifest field the whole consumer-type derivation keys off, and validating only its
-         presence left a two-token escape: retune it to a string that appears nowhere and the
-         derived set empties, every lens home reads main-session-only, and an emptied
-         `loading_surfaces` then audits clean. Measured on the real manifest before this defence
-         existed: 43 drift findings to 0, suite still green (PR #1061 review, found independently
-         by two prosecution passes).
+      4. THIS READER OWNS THE MANDATE MARKER. It is the string the whole consumer-type derivation
+         keys off, and while the manifest supplied it there was a two-token escape: point it away
+         from every real load and the derived set empties, every lens home reads main-session-only,
+         and an emptied `loading_surfaces` then audits clean. Measured before this defence existed:
+         43 drift findings to 0, suite still green. Requiring the marker to be merely FINDABLE does
+         not close it - any real string in any agent body ("Read-Only Mode") is findable and derives
+         zero loads - which is why the marker joins the roster states, the verdicts and the phase
+         vocabulary as core-owned, with a manifest that disagrees reported as drift. Found by two
+         prosecution passes; the findability fix was falsified by defense in one pass.
 
     What it deliberately does NOT reach, stated so nobody reads silence as coverage:
 
@@ -108,6 +110,17 @@ $script:LPResolutionFloor = 40
 # promotion check while the declared-state assertion stays green. Raised by the #1055 external
 # review (Codex P2).
 $script:LPRosterStates = @('promoted', 'recall-loss', 'pending')
+
+# The mandate marker, fixed HERE and not taken from the manifest - the fourth item in the same
+# family as the roster states, the verdicts and the phase vocabulary above, and for exactly the
+# same reason. PR #1061's review found the escape twice. The first fix required the manifest's
+# marker to be FINDABLE in an agent body, and defense falsified that inside one pass: findability
+# is not the property that matters. Any real string occurring in any agent body - "Read-Only Mode",
+# "Core Principles" - satisfies findability while deriving ZERO mandated loads, so an emptied
+# loading_surfaces audits clean again and the 43-finding escape reopens unchanged.
+# The property that matters is that the derivation reads the SAME marker the layer-4 assertions do,
+# and the only way the audited artifact cannot move that is for the reader to own it.
+$script:LPMandateMarker = 'Mandated load, unconditional'
 
 function Get-LPField {
     <#
@@ -524,7 +537,11 @@ function Get-LessonPromotionAudit {
 
     # Derived once, from the tree, before any entry is judged (A4.3). Its own problems are drift:
     # a derivation that lost its population must not read as "no subagent consumers anywhere".
-    $derived = Get-LPMandatedSkillSet -RepoRoot $RepoRoot -MandateMarker $mandateMarker
+    if ($mandateMarker -cne $script:LPMandateMarker) {
+        $drift.Add("manifest declares mandate_marker '$mandateMarker'; this reader owns that vocabulary and uses '$($script:LPMandateMarker)'. A marker the audited artifact can move is a marker that can be pointed away from every real load - which empties the consumer-type derivation and makes an emptied loading_surfaces audit clean.")
+    }
+    # DERIVED WITH THE READER'S OWN MARKER, never the manifest's.
+    $derived = Get-LPMandatedSkillSet -RepoRoot $RepoRoot -MandateMarker $script:LPMandateMarker
     $mandatedSkills = $derived.Skills
     foreach ($p in @($derived.Problems)) { $drift.Add($p) }
 
