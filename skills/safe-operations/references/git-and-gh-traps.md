@@ -178,8 +178,8 @@ before assuming the redness is the whole problem.
 `gh api .../actions/workflows`. Measured here 2026-08-10: the one workflow this repository has
 genuinely deleted (`notify-agent-sync.yml`, removed at `c0a6852`) has **no row at all** on that list
 endpoint, while `.github/workflows/auto-create-pr.yml` — a path that appears in no commit on any ref
-— is listed `active`. A `state: deleted` tombstone has been observed only on the single-workflow-
-**by-id** endpoint. Judge by the tree and by the `gh run list` form above.
+— is listed `active`. A `state: deleted` tombstone has been observed only on the **single-workflow
+by-id** endpoint. Judge by the tree and by the `gh run list` form above.
 
 **Scope.** The recognition procedure above is general. The named real blockers are specific to this
 repository and do not exist in an installed plugin copy elsewhere; nothing here licenses dismissing
