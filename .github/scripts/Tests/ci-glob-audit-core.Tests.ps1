@@ -85,12 +85,13 @@ BeforeAll {
             [string]$Path = '', [int]$ElapsedMs = 100, [object]$Class = $null, [string]$ControlRole = '',
             [bool]$SurvivedKill = $false, [int]$Skipped = 0, [int]$Executed = 1,
             [string]$DetailSource = 'structured', [bool]$DescendantHeldOutput = $false,
-            [bool]$SelfModified = $false
+            [bool]$SelfModified = $false, [int]$DrainMs = 0
         )
         if (-not $Path) { $Path = '.github/scripts/Tests/' + $Name }
         return [PSCustomObject]@{
             Name = $Name; State = $State; Reason = $Reason; InPopulation = $InPopulation
             Detail = $Detail; ContentDigest = $Digest; Path = $Path; ElapsedMs = $ElapsedMs
+            DrainMs = $DrainMs; SuiteMs = ($ElapsedMs - $DrainMs)
             BoundSeconds = 300; QuarantineClass = $Class; ControlRole = $ControlRole
             ProcessSurvivedKill = $SurvivedKill; Skipped = $Skipped; Executed = $Executed
             DetailSource = $DetailSource
@@ -108,7 +109,7 @@ BeforeAll {
             DefaultBranch = 'main'; DefaultBranchTip = 'abcdef1'; AncestryCheck = 'same commit'
             ContentDifferences = 'none'; BoundSeconds = 300; ShardCount = 8
             InstrumentBasis = 'abc123'; StartedAt = '2026-01-01T00:00:00Z'
-            RecordFormatVersion = 1
+            RecordFormatVersion = 2
         }
         foreach ($k in $Override.Keys) { $ctx[$k] = $Override[$k] }
         return $ctx
@@ -161,6 +162,43 @@ BeforeAll {
             -WorkDir (Join-Path $script:Scratch 'e2e') `
             -OutputVerbosity 'Normal' `
             -EnvironmentOverrides $Env
+    }
+
+    # The bounded row, produced ON DEMAND and at most once per container.
+    #
+    # Two tests need a row from a suite that never returns, and that row costs
+    # the bound in wall clock. Having the second read a variable the first
+    # happened to leave behind made it depend on the first having run — which
+    # `-Filter`, a re-ordering, or a parallel container all break, and a test
+    # that cannot be run alone is not a test of anything on its own. Memoising
+    # here makes each caller self-sufficient without buying a second hang: the
+    # first to run pays, either can run alone, and neither can silently read a
+    # row the other did not produce.
+    $script:StalledRowCache = $null
+    function script:Get-StalledRow {
+        param([int]$Bound = 6)
+        if ($null -eq $script:StalledRowCache) {
+            $script:StalledRowCache = script:Invoke-Control -FileName 'never-returns.Control.Tests.ps1' `
+                -Bound $Bound -Env @{ CI_GLOB_AUDIT_CONTROLS = '1' }
+        }
+        return $script:StalledRowCache
+    }
+
+    # How many UTF-16 surrogates in this text are not half of a pair. Any
+    # non-zero answer is a cut that landed inside a character, which becomes
+    # U+FFFD the moment the text is written to a UTF-8 artifact.
+    function script:Get-LoneSurrogateCount {
+        param([AllowEmptyString()][string]$Text)
+        $lone = 0
+        for ($i = 0; $i -lt $Text.Length; $i++) {
+            $c = $Text[$i]
+            if ([char]::IsHighSurrogate($c)) {
+                if ($i -eq ($Text.Length - 1) -or -not [char]::IsLowSurrogate($Text[$i + 1])) { $lone++ }
+                else { $i++ }
+            }
+            elseif ([char]::IsLowSurrogate($c)) { $lone++ }
+        }
+        return $lone
     }
 }
 
@@ -388,9 +426,12 @@ Describe 'Detail: what a non-passed row carries instead of a count' {
         $emoji = [string]::new([char[]]@(0xD83D, 0xDE00))
         $text = ('a' * 200) + ($emoji * 50)
         $d = Get-CIGlobAuditDetail -State 'did-not-complete' -StdOut $text -TailChars 61
-        foreach ($ch in $d.Text.ToCharArray()) {
-            if ([char]::IsHighSurrogate($ch) -or [char]::IsLowSurrogate($ch)) { }
-        }
+        # Every surrogate must be half of a PAIR. The loop that used to stand
+        # here had an empty body and asserted nothing at all — scaffolding left
+        # in a file whose own docstring is about fixtures that agree with the
+        # code.
+        script:Get-LoneSurrogateCount -Text $d.Text |
+            Should -Be 0 -Because 'a lone surrogate is the corruption this cut exists to avoid'
         $d.Text | Should -Not -Match "$([char]0xFFFD)"
         # The real discriminator: round-trip through UTF-8, which is what a
         # lone surrogate cannot survive.
@@ -427,6 +468,90 @@ Describe 'Text hygiene: what leaves an unaudited suite and reaches a permanent p
         $plain | Should -BeExactly 'Describing x ok'
         $plain | Should -Not -Match "$([char]27)"
     }
+
+    It 'trims the live capture buffer without splitting a surrogate pair' {
+        # The buffer is written verbatim to the `.log` artifact, and the trim is
+        # at the HEAD — so a cut landing between the halves of a pair leaves a
+        # lone LOW surrogate at position zero, which becomes U+FFFD as soon as
+        # the artifact is encoded. This was the one cut site in the change that
+        # was not made rune-safe while three siblings beside it were.
+        $emoji = [string]::new([char[]]@(0xD83D, 0xDE00))
+        # Every pair straddles an odd offset, so a cut at an odd count is
+        # guaranteed to land inside one.
+        $buf = [System.Text.StringBuilder]::new(($emoji * 40))
+        [void](script:Limit-CIGlobAuditBuffer -Buffer $buf -MaxChars 41)
+
+        $kept = $buf.ToString()
+        $kept.Length | Should -BeLessOrEqual 41 -Because 'the cap is a memory bound and must still hold'
+        script:Get-LoneSurrogateCount -Text $kept | Should -Be 0
+        $kept | Should -Not -Match "$([char]0xFFFD)"
+        # The discriminator a length check cannot give: a lone surrogate is
+        # exactly what a UTF-8 round trip cannot survive.
+        [System.Text.Encoding]::UTF8.GetString([System.Text.Encoding]::UTF8.GetBytes($kept)) | Should -BeExactly $kept
+    }
+
+    It 'keeps the TAIL when it trims, and leaves a buffer inside the cap alone' {
+        # The negative half, twice: a trim that kept the head would discard the
+        # stopping point that classifies a hung suite, and one that fired below
+        # the cap would throw away output nothing asked it to.
+        $buf = [System.Text.StringBuilder]::new('HEADSTART' + ('x' * 20) + 'TAILEND')
+        [void](script:Limit-CIGlobAuditBuffer -Buffer $buf -MaxChars 10)
+        $buf.ToString() | Should -BeExactly 'xxxTAILEND'
+
+        $small = [System.Text.StringBuilder]::new('short')
+        (script:Limit-CIGlobAuditBuffer -Buffer $small -MaxChars 100) | Should -Be 0
+        $small.ToString() | Should -BeExactly 'short'
+    }
+}
+
+Describe 'Capture artifacts: the `.log` files and the record must tell the same story' {
+
+    It 'writes the result-parse-failure note into the artifact, not only into the record' {
+        # That note IS the diagnosis on the one path where it fires, and it was
+        # appended to `$stdErr` AFTER both `.log` files had been written — so a
+        # reader who opened the artifact to find out what the harness observed
+        # got a file that did not mention the only thing it observed.
+        $dir = Join-Path $script:Scratch ('capture-' + [System.Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+        $outPath = Join-Path $dir 'x.out.log'
+        $errPath = Join-Path $dir 'x.err.log'
+        $resultPath = Join-Path $dir 'x.result.json'
+        Set-Content -LiteralPath $resultPath -Value '{ this is not json' -Encoding utf8
+
+        $capture = script:Save-CIGlobAuditCapture -OutPath $outPath -ErrPath $errPath `
+            -StdOut 'some output' -StdErr 'some error' -ResultPath $resultPath -Completed $true
+
+        $capture.HasResult | Should -BeFalse -Because 'a malformed result file is not a result'
+        $capture.StdErr | Should -Match 'result file did not parse'
+        (Get-Content -LiteralPath $errPath -Raw) |
+            Should -Match 'result file did not parse' -Because 'the artifact and the record must agree about what was observed'
+        # Byte-for-byte, not merely both-mention-it.
+        (Get-Content -LiteralPath $errPath -Raw) | Should -BeExactly $capture.StdErr
+        (Get-Content -LiteralPath $outPath -Raw) | Should -BeExactly $capture.StdOut
+    }
+
+    It 'writes exactly what it returns on the ordinary path too, and adds no note there' {
+        # The negative half: a note appended unconditionally would be a false
+        # diagnosis on every well-formed run.
+        $dir = Join-Path $script:Scratch ('capture-ok-' + [System.Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+        $outPath = Join-Path $dir 'x.out.log'
+        $errPath = Join-Path $dir 'x.err.log'
+        $resultPath = Join-Path $dir 'x.result.json'
+        Set-Content -LiteralPath $resultPath -Encoding utf8 -Value (
+            [ordered]@{ passed = 2; failed = 0; skipped = 0; notRun = 0; containerFailed = 0
+                failures = @(); skips = @(); containerErrors = @()
+            } | ConvertTo-Json -Depth 6)
+
+        $capture = script:Save-CIGlobAuditCapture -OutPath $outPath -ErrPath $errPath `
+            -StdOut 'clean' -StdErr '' -ResultPath $resultPath -Completed $true
+
+        $capture.HasResult | Should -BeTrue
+        $capture.Passed | Should -Be 2
+        $capture.StdErr | Should -BeExactly ''
+        (Get-Content -LiteralPath $errPath -Raw -ErrorAction SilentlyContinue) | Should -BeNullOrEmpty
+        (Get-Content -LiteralPath $outPath -Raw) | Should -BeExactly 'clean'
+    }
 }
 
 Describe 'Survival: "the bound fired" and "the slot is free" are two facts' {
@@ -461,6 +586,46 @@ Describe 'Survival: "the bound fired" and "the slot is free" are two facts' {
         $v = Get-CIGlobAuditSurvivalVerdict -ChildExited $true -KillEscalated $false -OutputPipeHeld $false
         $v.SurvivedKill | Should -BeFalse
         $v.DescendantHeldOutput | Should -BeFalse
+    }
+}
+
+Describe 'Duration accounting: how much of a row''s wall clock was the suite?' {
+
+    # Extracted and driven directly for the same reason the survival verdict is:
+    # the condition is a descendant that outlives its parent while holding an
+    # inherited pipe, which is expensive and flaky to manufacture on purpose.
+
+    It 'excludes the post-exit drain from the suite''s own cost, and keeps BOTH figures' {
+        # The reproduced case: the child exited at one second, a descendant held
+        # the pipe, and the drain deadline extended from a stopwatch that keeps
+        # running — so the row recorded ~11,000 ms for a suite that cost ~1,000.
+        $a = Get-CIGlobAuditDurationAccount -TotalMs 11000 -DrainStartedAtMs 1000
+        $a.ElapsedMs | Should -Be 11000 -Because 'the harness really did hold the slot that long; that fact is not edited away'
+        $a.DrainMs | Should -Be 10000
+        $a.SuiteMs | Should -Be 1000 -Because 'this is the figure #1037 sizes shards from'
+    }
+
+    It 'reports no drain at all when the child and its pipe finished together' {
+        # The negative half. A fix that always subtracted something would make
+        # every ordinary row understate its cost.
+        $a = Get-CIGlobAuditDurationAccount -TotalMs 1500 -DrainStartedAtMs $null
+        $a.DrainMs | Should -Be 0
+        $a.SuiteMs | Should -Be 1500
+        $a.SuiteMs | Should -Be $a.ElapsedMs
+    }
+
+    It 'never reports a negative drain when the clock stopped before the deadline was set' {
+        $a = Get-CIGlobAuditDurationAccount -TotalMs 900 -DrainStartedAtMs 1000
+        $a.DrainMs | Should -Be 0
+        $a.SuiteMs | Should -Be 900
+    }
+
+    It 'attributes the whole of a killed row''s overrun to the drain, not to the suite' {
+        # A bounded suite killed at its bound and drained for the grace period:
+        # the suite cost the bound, the extra is the harness waiting for a corpse.
+        $a = Get-CIGlobAuditDurationAccount -TotalMs 16000 -DrainStartedAtMs 6000
+        $a.SuiteMs | Should -Be 6000
+        $a.DrainMs | Should -Be 10000
     }
 }
 
@@ -663,6 +828,107 @@ Describe 'Environment statement and instrument basis' {
             Should -BeFalse
     }
 
+    It 'reports UNKNOWN for a dimension whose observed fact is $null, instead of coercing it to a polarity' {
+        # `-not $null` is $true and `[bool]$null` is $false, so an UNOBSERVED
+        # fact read through either coercion invents a verdict — bypassing the
+        # three-valued `Agrees` introduced to stop exactly that. Reproduced end
+        # to end: a `git identity` row asserting `yes` while its own cells
+        # contradicted each other, certified by a Basis that named a fact which
+        # did not exist. Both directions are covered here: the two dimensions
+        # that agreed on absence and the two that agreed on presence.
+        $cases = @(
+            @{ Key = 'HasToken'; Dimension = 'credential and token availability' }
+            @{ Key = 'IsShallow'; Dimension = 'checkout depth' }
+            @{ Key = 'CredentialsPersisted'; Dimension = 'credential persistence' }
+            @{ Key = 'HasGitIdentity'; Dimension = 'git identity' }
+        )
+        foreach ($case in $cases) {
+            $override = @{}
+            $override[$case.Key] = $null
+            $row = (Get-CIGlobAuditEnvironmentStatement -Facts (script:New-FactSet $override)) |
+                Where-Object { $_.Dimension -eq $case.Dimension }
+
+            $null -eq $row.Agrees |
+                Should -BeTrue -Because "nothing observed '$($case.Key)', so that dimension neither agrees nor disagrees"
+            # The reader-facing discriminator: `yes` and `**no**` are both wrong
+            # here, and only one rendering is right.
+            Format-CIGlobAuditAgreement -Agrees $row.Agrees | Should -Be '**unknown**'
+            # And the Basis must not certify a computation that never happened —
+            # correcting the verdict while leaving "computed: from the observed
+            # X fact" just moves the false statement one column right.
+            $row.Basis | Should -Match 'NOT OBSERVED'
+            $row.Basis | Should -Not -Match '^computed:'
+        }
+    }
+
+    It 'still computes a verdict for every one of those dimensions when the fact IS observed' {
+        # The negative half. A fix that reported `unknown` unconditionally would
+        # satisfy the test above and destroy the four verdicts the parity claim
+        # actually rests on.
+        $present = script:New-FactSet @{ HasToken = $false; IsShallow = $true; CredentialsPersisted = $true; HasGitIdentity = $false }
+        $rows = Get-CIGlobAuditEnvironmentStatement -Facts $present
+        foreach ($dim in @('credential and token availability', 'checkout depth', 'credential persistence', 'git identity')) {
+            $row = $rows | Where-Object { $_.Dimension -eq $dim }
+            $row.Agrees | Should -BeTrue -Because "'$dim' was observed and agrees, which is a computed verdict, not an unknown"
+            $row.Basis | Should -Match '^computed:'
+        }
+        $flipped = Get-CIGlobAuditEnvironmentStatement -Facts (script:New-FactSet @{ HasGitIdentity = $true })
+        ($flipped | Where-Object { $_.Dimension -eq 'git identity' }).Agrees |
+            Should -BeFalse -Because 'an identity the gate does not supply is a real divergence, not an unknown'
+    }
+
+    It 'does not read a non-boolean mirror as a polarity either, which `[bool]''false''` would get backwards' {
+        # `[bool]'false'` is $true in PowerShell. A mirror that arrived as a
+        # string would be coerced to the opposite of what it says, with nothing
+        # in the row telling a reader that happened.
+        $row = (Get-CIGlobAuditEnvironmentStatement -Facts (script:New-FactSet @{ HasGitIdentity = 'nonsense' })) |
+            Where-Object { $_.Dimension -eq 'git identity' }
+        $null -eq $row.Agrees | Should -BeTrue
+        $row.Basis | Should -Match 'not a boolean observation'
+    }
+
+    It 'does NOT change the instrument basis when only the commit count in the checkout-depth PROSE moves' {
+        # The `Audit` cell is written for a reader and embeds a commit count, so
+        # hashing it made 4321 -> 4322 an instrument change: every suite's
+        # observation count reset on a run where one commit landed and nothing
+        # about the instrument moved. M14's exact harm, arriving through the
+        # reader-facing column. Not live at depth 1; live the moment the measure
+        # job gains `fetch-depth: 0`.
+        $a = Get-CIGlobAuditEnvironmentStatement -Facts (script:New-FactSet @{ CheckoutDepth = 'observed: full clone, 4321 commit(s) reachable' })
+        $b = Get-CIGlobAuditEnvironmentStatement -Facts (script:New-FactSet @{ CheckoutDepth = 'observed: full clone, 4322 commit(s) reachable' })
+        (Get-CIGlobAuditInstrumentBasis -EnvironmentStatement $a -BoundSeconds 300) |
+            Should -Be (Get-CIGlobAuditInstrumentBasis -EnvironmentStatement $b -BoundSeconds 300) -Because 'one more commit is not a different instrument'
+    }
+
+    It 'STILL changes the basis when the axis that prose describes actually flips' {
+        # The negative half, and the reason the fix is "hash the structured
+        # mirror" rather than "drop the dimension": a shallow checkout and a
+        # full one are genuinely different instruments for any suite that reads
+        # history, and the same applies to the other three mirrors.
+        $baseline = Get-CIGlobAuditEnvironmentStatement -Facts (script:New-FactSet)
+        $baselineBasis = Get-CIGlobAuditInstrumentBasis -EnvironmentStatement $baseline -BoundSeconds 300
+        foreach ($override in @(
+                @{ IsShallow = $false }, @{ HasToken = $true }, @{ CredentialsPersisted = $false }, @{ HasGitIdentity = $true }
+            )) {
+            $changed = Get-CIGlobAuditEnvironmentStatement -Facts (script:New-FactSet $override)
+            (Get-CIGlobAuditInstrumentBasis -EnvironmentStatement $changed -BoundSeconds 300) |
+                Should -Not -Be $baselineBasis -Because "flipping $($override.Keys -join ',') is an instrument change these observations cannot be pooled across"
+        }
+    }
+
+    It 'distinguishes an UNOBSERVED axis from both of its polarities in the basis' {
+        # A run that could not see an axis is not comparable with one that could,
+        # in either direction, so `unobserved` must hash as its own value rather
+        # than collapsing onto whichever polarity the coercion used to produce.
+        $unobserved = Get-CIGlobAuditEnvironmentStatement -Facts (script:New-FactSet @{ HasGitIdentity = $null })
+        $bases = @(
+            (Get-CIGlobAuditInstrumentBasis -EnvironmentStatement $unobserved -BoundSeconds 300)
+            (Get-CIGlobAuditInstrumentBasis -EnvironmentStatement (Get-CIGlobAuditEnvironmentStatement -Facts (script:New-FactSet @{ HasGitIdentity = $false })) -BoundSeconds 300)
+            (Get-CIGlobAuditInstrumentBasis -EnvironmentStatement (Get-CIGlobAuditEnvironmentStatement -Facts (script:New-FactSet @{ HasGitIdentity = $true })) -BoundSeconds 300)
+        )
+        @($bases | Select-Object -Unique).Count | Should -Be 3
+    }
+
     It 'changes the instrument basis when the bound changes' {
         $env1 = Get-CIGlobAuditEnvironmentStatement -Facts (script:New-FactSet)
         (Get-CIGlobAuditInstrumentBasis -EnvironmentStatement $env1 -BoundSeconds 300) |
@@ -800,14 +1066,90 @@ Describe 'Observation history: what "two observations of the same thing" means' 
         # Such a row was WRITTEN and never read back, so its count restarted at
         # 1 forever — a silent permanent reset keyed on nothing but the shape of
         # a name. Latent today at 253 matching names; not latent for the next one.
-        foreach ($name in @('my suite.Tests.ps1', 'copy (2).Tests.ps1', 'a+b.Tests.ps1')) {
+        foreach ($name in @('my suite.Tests.ps1', 'copy (2).Tests.ps1', 'a+b.Tests.ps1', 'back`tick.Tests.ps1', 'pipe|name.Tests.ps1', 'back\slash.Tests.ps1')) {
             $rows = @(script:New-Row -Name $name -Digest 'd1')
             $map = script:New-InPopulationMap -Rows $rows
             $first = Update-CIGlobAuditHistory -Rows $rows -InstrumentBasis 'i1' -RunId 'r1' -Marker $script:Marker -InPopulationByName $map
             $second = Update-CIGlobAuditHistory -ExistingBody $first.Body -Rows $rows -InstrumentBasis 'i1' -RunId 'r2' -Marker $script:Marker -InPopulationByName $map
             @($second.Entries | Where-Object { $_.Name -eq $name }).Observations |
                 Should -Be 2 -Because "'$name' is a lawful filename and its history must round-trip"
+            # The silent half. The previous shape reset such a row to 1 while
+            # reporting nothing wrong, so a reader could not tell a suite whose
+            # content had genuinely changed from one whose NAME the parser could
+            # not express.
+            $second.MalformedRows |
+                Should -Be 0 -Because "'$name' parsed, so nothing may be reported as unreadable"
+            $second.Body | Should -Not -Match 'did not parse'
         }
+    }
+
+    It 'COUNTS and DISCLOSES a row it drops, for every mode of dropping one' {
+        # The docstring promises a skipped row is "SKIPPED and counted". For the
+        # row-shape mode it was neither: `if ($line -notmatch $rowPattern) {
+        # continue }` dropped the row with no `$malformed++` and no disclosure,
+        # which is what let the reset above be silent. A row inside the table is
+        # a row: it parses, or it is counted and named.
+        $rows = @(script:New-Row -Name 'a.Tests.ps1' -Digest 'd1')
+        $map = script:New-InPopulationMap -Rows $rows
+        $first = Update-CIGlobAuditHistory -Rows $rows -InstrumentBasis 'i1' -RunId 'r1' -Marker $script:Marker -InPopulationByName $map
+
+        # Three ways for a hand-edited row to be unreadable: too few cells, an
+        # unparseable observation count, and an empty name.
+        $mutations = @(
+            @{ Why = 'too few cells'; Body = ($first.Body -replace '(?m)^\| `a\.Tests\.ps1` \| in \|.*$', '| `a.Tests.ps1` | in | d1+i1 |') }
+            @{ Why = 'non-numeric observations'; Body = ($first.Body -replace '(?m)^(\| `a\.Tests\.ps1` \| in \| [^|]+ \| )1( \|)', '${1}one${2}') }
+            @{ Why = 'no name at all'; Body = ($first.Body -replace '(?m)^\| `a\.Tests\.ps1` \|', '|  |') }
+        )
+        foreach ($m in $mutations) {
+            $m.Body | Should -Not -Be $first.Body -Because "the '$($m.Why)' fixture must actually change the body"
+            $second = Update-CIGlobAuditHistory -ExistingBody $m.Body -Rows $rows -InstrumentBasis 'i1' `
+                -RunId 'r2' -Marker $script:Marker -InPopulationByName $map
+            $second.MalformedRows | Should -Be 1 -Because "a row dropped for '$($m.Why)' is still a dropped row"
+            $second.Body | Should -Match 'did not parse'
+        }
+    }
+
+    It 'does not count the outcome-differences table''s own rows as malformed history rows' {
+        # Those rows carry six cells and a suite name, so a parser that finds
+        # rows by name shape swept them in and reported prior rows unreadable
+        # that were never history rows at all — inflating the one number a
+        # reader uses to decide whether to trust the counts.
+        $map = @{ 'a.Tests.ps1' = $true }
+        $r1 = Update-CIGlobAuditHistory -Rows @(script:New-Row -Name 'a.Tests.ps1' -Digest 'd1' -State 'passed') `
+            -InstrumentBasis 'i1' -RunId 'r1' -Marker $script:Marker -InPopulationByName $map
+        $r2 = Update-CIGlobAuditHistory -ExistingBody $r1.Body `
+            -Rows @(script:New-Row -Name 'a.Tests.ps1' -Digest 'd1' -State 'failed') `
+            -InstrumentBasis 'i1' -RunId 'r2' -Marker $script:Marker -InPopulationByName $map
+        @($r2.OutcomeDifferences).Count | Should -Be 1 -Because 'the fixture must actually produce a differences table'
+        $r2.Body | Should -Match '## Outcome differences'
+
+        $r3 = Update-CIGlobAuditHistory -ExistingBody $r2.Body `
+            -Rows @(script:New-Row -Name 'a.Tests.ps1' -Digest 'd1' -State 'failed') `
+            -InstrumentBasis 'i1' -RunId 'r3' -Marker $script:Marker -InPopulationByName $map
+        $r3.MalformedRows | Should -Be 0 -Because 'the only real history row in that body parsed'
+        $r3.Body | Should -Not -Match 'did not parse'
+        $r3.Entries[0].Observations | Should -Be 3
+    }
+
+    It 'says so when a prior body had rows but no header this parser could find' {
+        # Locating the table by its header is what makes counting possible; the
+        # cost is that a body whose header was mangled yields no rows at all.
+        # That is a stated loss rather than a history that merely looks fresh.
+        $rows = @(script:New-Row -Name 'a.Tests.ps1' -Digest 'd1')
+        $map = script:New-InPopulationMap -Rows $rows
+        $first = Update-CIGlobAuditHistory -Rows $rows -InstrumentBasis 'i1' -RunId 'r1' -Marker $script:Marker -InPopulationByName $map
+        $headerless = $first.Body -replace '(?m)^\| suite \| in-population \|.*$', '| suite | WHO KNOWS | basis |'
+        $headerless | Should -Not -Be $first.Body
+
+        $second = Update-CIGlobAuditHistory -ExistingBody $headerless -Rows $rows -InstrumentBasis 'i1' `
+            -RunId 'r2' -Marker $script:Marker -InPopulationByName $map
+        $second.TableUnreadable | Should -BeTrue
+        $second.Body | Should -Match 'no readable suite-table header'
+        $second.Entries[0].Observations | Should -Be 1
+
+        # And the negative half: an ordinary round trip must not raise it.
+        (Update-CIGlobAuditHistory -ExistingBody $first.Body -Rows $rows -InstrumentBasis 'i1' `
+                -RunId 'r2' -Marker $script:Marker -InPopulationByName $map).TableUnreadable | Should -BeFalse
     }
 
     It 'SKIPS a corrupted prior row and reports how many, rather than throwing after the record was persisted' {
@@ -870,7 +1212,7 @@ Describe 'Observation history: what "two observations of the same thing" means' 
     It 'carries the record format version, because column order is not a contract' {
         $h = Update-CIGlobAuditHistory -Rows @(script:New-Row -Name 'a.Tests.ps1') -InstrumentBasis 'i1' -RunId 'r1' `
             -Marker $script:Marker -InPopulationByName @{ 'a.Tests.ps1' = $true }
-        $h.Body | Should -Match 'record_format_version: 1'
+        $h.Body | Should -Match 'record_format_version: 2'
     }
 }
 
@@ -965,7 +1307,7 @@ Describe 'Record composition' {
         $index[0].Marker | Should -Not -Match '12345'
         ($index[0].Body -split "`r?`n")[0] | Should -BeExactly '<!-- ci-glob-audit-index -->'
         $index[0].Body | Should -Match '<!-- ci-glob-audit-record-12345 -->'
-        $index[0].Body | Should -Match 'record_format_version: 1'
+        $index[0].Body | Should -Match 'record_format_version: 2'
     }
 
     It 'merges a new run into the index it was given, newest first, rather than replacing it' {
@@ -1179,6 +1521,57 @@ Describe 'Record composition' {
         $message | Should -Match 'header \d+ codepoints plus block \d+ codepoints' -Because 'a maintainer needs to know which of the two is oversized'
     }
 
+    It 'names that block even when it is the FIRST one, which is the case the guard was written for' {
+        # The guard was reached only after a flush, so `$current -ne $seed` made
+        # it unable to fire for the first block — precisely the "a single block
+        # larger than the cap" case its own docstring describes. Reproduced at
+        # `BodyCap 20000 / DetailCharCap 30000`: one row threw the generic
+        # per-document error and the named guard reported False; two rows fired
+        # it. The three-row test above therefore could not tell the two apart,
+        # so n=1 is pinned separately.
+        $rows = @(script:New-Row -Name 'only.Tests.ps1' -State 'failed' -Detail ('y' * 25000))
+        $message = ''
+        try { script:Invoke-Compose -Rows $rows -Names @($rows.Name) -Extra @{ BodyCap = 20000; DetailCharCap = 30000 } }
+        catch { $message = [string]$_.Exception.Message }
+        $message | Should -Match 'Pagination cannot resolve this' -Because 'one oversized block is oversized whether or not anything preceded it'
+        $message | Should -Match 'header \d+ codepoints plus block \d+ codepoints'
+        $message | Should -Not -Match 'over the 20000 cap' -Because 'the generic per-document throw is the unnamed failure this guard replaced'
+    }
+
+    It 'still paginates a first block that DOES fit, rather than refusing everything' {
+        # The negative half: a guard that threw on every first block would
+        # satisfy the test above and make the composer useless.
+        $rows = 1..40 | ForEach-Object { script:New-Row -Name "f$_.Tests.ps1" -State 'failed' -Detail ('x' * 2500) }
+        $docs = script:Invoke-Compose -Rows @($rows) -Names @($rows.Name)
+        @($docs | Where-Object { $_.Kind -eq 'detail' }).Count | Should -BeGreaterThan 1
+    }
+
+    It 'separates a row''s own cost from the drain the harness spent after it exited' {
+        # `ElapsedMs` absorbs up to the kill grace for a row whose child exited
+        # while a descendant held the pipe: a suite that finished in a second
+        # records ~11,000 ms. The record flagged such a row as contaminating
+        # LATER rows and never said its own duration was inflated — and #1037
+        # sizes shards from these numbers.
+        $rows = @(script:New-Row -Name 'holder.Tests.ps1' -ElapsedMs 11000 -DrainMs 10000 -DescendantHeldOutput $true)
+        $body = (script:Invoke-Compose -Rows $rows -Names @('holder.Tests.ps1'))[0].Body
+        $body | Should -Match '\| 11000 \| 10000 \| 1000 \|' -Because 'both figures must be in the durable record, not one adjusted number'
+        $body | Should -Match 'drain ms'
+        $body | Should -Match 'suite ms'
+        # And the record must SAY which is which, not merely print three numbers.
+        $body | Should -Match "absorbs up to the kill grace of drain"
+    }
+
+    It 'renders a row that never carried the drain figure as unknown, not as zero' {
+        # A shard partial written before the field existed did not measure zero
+        # drain; it measured nothing. Printing `0` there is a number the record
+        # never observed — the same defect as a coerced parity verdict.
+        $legacy = script:New-Row -Name 'legacy.Tests.ps1' -ElapsedMs 4200 |
+            Select-Object -ExcludeProperty DrainMs, SuiteMs
+        $legacy.PSObject.Properties.Match('DrainMs').Count | Should -Be 0 -Because 'the fixture must actually lack the field'
+        $body = (script:Invoke-Compose -Rows @($legacy) -Names @('legacy.Tests.ps1'))[0].Body
+        $body | Should -Match '\| 4200 \| - \| - \|'
+    }
+
     It 'composes a record that says so when no control ran, rather than failing to bind' {
         $docs = $null
         $thrown = $null
@@ -1207,6 +1600,27 @@ Describe 'Record composition' {
             -Names @('z.Tests.ps1')
         $dirty[0].Body | Should -Match 'No non-contention claim is made'
         $dirty[0].Body | Should -Not -Match 'Non-contention rests on'
+    }
+
+    It 'makes NO non-contention claim on a run that measured nothing, where both its guards hold vacuously' {
+        # The zero-row case, which is the zero-partial path's own output — the
+        # path that exists so a run which measured nothing still produces a
+        # record. Both halves of the guard above ("nothing survived its kill",
+        # "nothing held a pipe") are filters over the row set, so an empty row
+        # set satisfies them for free and the record would otherwise assert
+        # non-contention about measurements it never took. That is the same
+        # declaration-instead-of-observation defect the claim was rewritten to
+        # remove, re-entering through the door its own fix opened.
+        $body = (script:Invoke-Compose -Rows @() -Names @())[0].Body
+        $body | Should -Not -Match 'Non-contention rests on'
+        $body | Should -Match 'because this run measured nothing'
+        $body | Should -Match 'not a clean result; it is an absent one'
+
+        # The negative half: a run that DID measure, with nothing surviving,
+        # must still get its claim. Otherwise "withhold everything" would pass.
+        $measured = (script:Invoke-Compose -Rows @(script:New-Row -Name 'a.Tests.ps1') -Names @('a.Tests.ps1'))[0].Body
+        $measured | Should -Match 'Non-contention rests on'
+        $measured | Should -Not -Match 'because this run measured nothing'
     }
 
     It 'reports a suite whose descendant kept the output pipe after it exited' {
@@ -1262,7 +1676,7 @@ Describe 'Record composition' {
 
     It 'carries the record format version in the summary' {
         $body = (script:Invoke-Compose -Rows @(script:New-Row -Name 'a.Tests.ps1') -Names @('a.Tests.ps1'))[0].Body
-        $body | Should -Match '\| record_format_version \| 1 \|'
+        $body | Should -Match '\| record_format_version \| 2 \|'
     }
 }
 
@@ -1405,8 +1819,7 @@ Describe 'End to end: the shipped controls through the shipped execution path' {
         # single-suite version of this test was not enough.
         $bound = 6
 
-        $stalled = script:Invoke-Control -FileName 'never-returns.Control.Tests.ps1' -Bound $bound -Env @{ CI_GLOB_AUDIT_CONTROLS = '1' }
-        $script:StalledRow = $stalled
+        $stalled = script:Get-StalledRow -Bound $bound
         $stalled.State | Should -Be 'did-not-complete'
         $stalled.Completed | Should -BeFalse
         $stalled.ElapsedMs | Should -BeGreaterOrEqual ($bound * 1000)
@@ -1418,15 +1831,28 @@ Describe 'End to end: the shipped controls through the shipped execution path' {
         $returned.KillEscalated | Should -BeFalse
         $returned.State | Should -Not -Be 'did-not-complete'
         $returned.ElapsedMs | Should -BeLessThan ($bound * 1000)
+
+        # The duration account reaches the SHIPPED row, not just its own unit
+        # test — a green library nothing calls is the failure mode this file
+        # exists to prevent. The killed row's overrun past the bound is drain,
+        # and the returning row's cost is its own.
+        foreach ($field in @('DrainMs', 'SuiteMs')) {
+            $stalled.PSObject.Properties.Match($field).Count | Should -Be 1 -Because "the shipped row must carry $field"
+        }
+        $stalled.ElapsedMs | Should -Be ($stalled.SuiteMs + $stalled.DrainMs)
+        $stalled.SuiteMs | Should -BeGreaterOrEqual ($bound * 1000) -Because 'the suite really did run to the bound; the drain is what came after'
+        $returned.SuiteMs | Should -BeLessThan ($bound * 1000)
     }
 
     It 'carries no terminal escape sequences into the durable classifying detail' {
         # Every did-not-complete row's detail is console tail, and Pester colours
         # its output — invisible to a reader, and consuming the per-row budget
-        # R5's classifying text needs. Reuses the bounded row the test above
-        # already paid for rather than spawning a second nine-second hang.
-        $row = $script:StalledRow
-        $row | Should -Not -BeNullOrEmpty -Because 'this assertion reads the row the bound test produced; without it there is nothing under test'
+        # R5's classifying text needs. Shares the bounded row with the test above
+        # through a memoised producer rather than reading a variable that test
+        # happened to leave behind: this one runs alone under `-Filter` too, and
+        # the pair still costs one hang, not two.
+        $row = script:Get-StalledRow
+        $row | Should -Not -BeNullOrEmpty -Because 'without a bounded row there is nothing under test'
         $row.State | Should -Be 'did-not-complete'
         $row.Detail | Should -Not -Match "$([char]27)"
         (Get-Content -LiteralPath $row.StdOutPath -Raw) | Should -Not -Match "$([char]27)"

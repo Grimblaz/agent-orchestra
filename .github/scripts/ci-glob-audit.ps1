@@ -93,7 +93,10 @@ $script:HistoryMarker = '<!-- ci-glob-audit-history -->'
 # that wants "the current record" would otherwise have to enumerate an issue's
 # comments and regex run ids out of HTML comments. This one never moves.
 $script:IndexMarker = '<!-- ci-glob-audit-index -->'
-$script:RecordFormatVersion = 1
+# Must equal the library's $script:CIGlobAuditRecordFormatVersion. Bumped to 2
+# with the drain/suite column split; moving one without the other makes the
+# summary and the history state different shapes for the same run.
+$script:RecordFormatVersion = 2
 
 # The five controls and the terminal state each exists to exhibit. This map is
 # the instrument's self-test: a run where a control did not produce its state is
@@ -243,6 +246,38 @@ function script:Get-CommentBodyByMarker {
     return [PSCustomObject]@{ Status = 'absent'; Body = ''; Detail = '' }
 }
 
+function script:Format-Iso8601 {
+    <#
+        ISO-8601 UTC, always, whatever shape the value arrived in.
+
+        `gh` returns `createdAt` as an ISO-8601 string, but `ConvertFrom-Json`
+        deserialises it to a [datetime] and string interpolation then renders
+        that in the RUNNER'S CULTURE — `08/10/2026 04:30:04` reached the
+        durable record, which is a different date to a reader in most of the
+        world than it is to a reader in the United States. A cross-reader
+        artifact whose whole point is durability cannot carry an ambiguous
+        timestamp.
+
+        A value that is neither a date nor parseable as one is returned
+        VERBATIM rather than coerced: printing a wrong instant is worse than
+        printing the string the API actually sent.
+    #>
+    param([AllowNull()][object]$Value)
+
+    if ($null -eq $Value) { return '' }
+    $inv = [System.Globalization.CultureInfo]::InvariantCulture
+    $fmt = 'yyyy-MM-ddTHH:mm:ssZ'
+    if ($Value -is [datetime]) { return ([datetime]$Value).ToUniversalTime().ToString($fmt, $inv) }
+    if ($Value -is [System.DateTimeOffset]) { return ([System.DateTimeOffset]$Value).ToUniversalTime().ToString($fmt, $inv) }
+    $text = [string]$Value
+    if ([string]::IsNullOrWhiteSpace($text)) { return '' }
+    $parsed = [datetime]::MinValue
+    if ([datetime]::TryParse($text, $inv, [System.Globalization.DateTimeStyles]::RoundtripKind, [ref]$parsed)) {
+        return $parsed.ToUniversalTime().ToString($fmt, $inv)
+    }
+    return $text
+}
+
 function script:Get-GateExpectation {
     <#
         R8(b)'s proof standard names "the gate's own recent runs", so read them
@@ -273,18 +308,30 @@ function script:Get-GateExpectation {
         return "$assertion — **UNVERIFIED at compose time** ($failed), so this expectation is asserted rather than read from the gate's own recent runs. R8(b)'s standard names those runs; the comparison has to be supplied manually in the run account."
     }
 
-    $completed = @($runs | Where-Object { $_.status -eq 'completed' })
-    if ($completed.Count -eq 0) {
-        return "$assertion — **UNVERIFIED at compose time**: ``gh run list --workflow=pester.yml --limit $Limit`` returned no completed run. The gate's recent state is unknown, so a disagreement below may be the gate's own."
+    # The whole projection is inside the degrade, not just the call. Every field
+    # below is read off a JSON object under `Set-StrictMode -Version Latest`, so
+    # a run list that parses but omits one of them throws — and this still runs
+    # BEFORE any persistence, where a throw costs the record rather than the
+    # sentence. Same rule as the invocation above, applied to the reading of the
+    # result as well as to the getting of it.
+    try {
+        $completed = @($runs | Where-Object { $_.PSObject.Properties.Match('status').Count -gt 0 -and $_.status -eq 'completed' })
+        if ($completed.Count -eq 0) {
+            return "$assertion — **UNVERIFIED at compose time**: ``gh run list --workflow=pester.yml --limit $Limit`` returned no completed run. The gate's recent state is unknown, so a disagreement below may be the gate's own."
+        }
+        $green = @($completed | Where-Object { $_.conclusion -eq 'success' })
+        $ids = ($completed | ForEach-Object { [string]$_.databaseId }) -join ', '
+        if ($green.Count -eq $completed.Count) {
+            $mostRecent = script:Format-Iso8601 -Value $completed[0].createdAt
+            return "$assertion. Basis, read at compose time: the gate's own last $($completed.Count) completed ``pester.yml`` run(s) are all ``success`` (run ids $ids), most recent $mostRecent."
+        }
+        $bad = @($completed | Where-Object { $_.conclusion -ne 'success' })
+        $badList = ($bad | ForEach-Object { "$($_.databaseId) ($($_.conclusion))" }) -join ', '
+        return "**the gate itself is not uniformly green**, so ``$assertion`` is NOT the expectation this run may hold the audit to. Basis, read at compose time: of the gate's last $($completed.Count) completed ``pester.yml`` run(s), $($green.Count) are ``success`` and $($bad.Count) are not — $badList. A disagreement below that also fails under the gate is the gate's own state, not audit divergence, and must be checked against those runs before it is attributed to this instrument."
     }
-    $green = @($completed | Where-Object { $_.conclusion -eq 'success' })
-    $ids = ($completed | ForEach-Object { [string]$_.databaseId }) -join ', '
-    if ($green.Count -eq $completed.Count) {
-        return "$assertion. Basis, read at compose time: the gate's own last $($completed.Count) completed ``pester.yml`` run(s) are all ``success`` (run ids $ids), most recent $($completed[0].createdAt)."
+    catch {
+        return "$assertion — **UNVERIFIED at compose time** (``gh run list --workflow=pester.yml`` returned run objects this reader could not project: $($_.Exception.Message -replace '\s+', ' ')), so this expectation is asserted rather than read from the gate's own recent runs. R8(b)'s standard names those runs; the comparison has to be supplied manually in the run account."
     }
-    $bad = @($completed | Where-Object { $_.conclusion -ne 'success' })
-    $badList = ($bad | ForEach-Object { "$($_.databaseId) ($($_.conclusion))" }) -join ', '
-    return "**the gate itself is not uniformly green**, so ``$assertion`` is NOT the expectation this run may hold the audit to. Basis, read at compose time: of the gate's last $($completed.Count) completed ``pester.yml`` run(s), $($green.Count) are ``success`` and $($bad.Count) are not — $badList. A disagreement below that also fails under the gate is the gate's own state, not audit divergence, and must be checked against those runs before it is attributed to this instrument."
 }
 
 switch ($Mode) {
@@ -471,14 +518,44 @@ switch ($Mode) {
         $ordered = @($partials | Sort-Object { [int]$_.shardIndex })
         $facts = @{}
         $noEnvironment = ($partials.Count -eq 0)
+        # A partial that carries no `facts` object at all — an older shape, a
+        # truncated write — must not take the compose job down: this runs before
+        # any persistence, and `$_.facts` on an object without that property is
+        # a terminating error under `Set-StrictMode -Version Latest`. Absence of
+        # the container is read as absence of every key in it, which is what it
+        # is.
+        $hasFactKey = {
+            param($Partial, $Key)
+            ($Partial.PSObject.Properties.Match('facts').Count -gt 0) -and
+            ($null -ne $Partial.facts) -and
+            ($Partial.facts.PSObject.Properties.Match($Key).Count -gt 0)
+        }
+        $unobservedKeys = [System.Collections.Generic.List[string]]::new()
         if (-not $noEnvironment) {
             foreach ($k in $factKeys) {
-                $present = @($ordered | Where-Object { $_.facts.PSObject.Properties.Match($k).Count -gt 0 })
+                $present = @($ordered | Where-Object { & $hasFactKey $_ $k })
+                # THE ZERO CASE IS NOT THE PARTIAL CASE, and saying so matters.
+                # "the environment statement's value for it describes only the
+                # shards that did" is false when NO shard did: there is no
+                # value, and the sentence would tell a reader one exists and is
+                # merely narrow.
+                if ($present.Count -eq 0) {
+                    # $null, NOT a stand-in. A dimension nobody observed has no
+                    # value, and inventing one — a placeholder string, a
+                    # defaulted boolean — is what let the record assert parity
+                    # on cells that visibly contradicted each other, certified
+                    # `computed` by the `checked by` column. The null is the
+                    # structural signal that the statement builder reads as
+                    # genuinely unknown; the problem below is what stops it
+                    # passing in silence.
+                    $unobservedKeys.Add($k)
+                    $facts[$k] = $null
+                    continue
+                }
                 if ($present.Count -ne $ordered.Count) {
-                    $absent = @($ordered | Where-Object { $_.facts.PSObject.Properties.Match($k).Count -eq 0 } | ForEach-Object { [int]$_.shardIndex })
+                    $absent = @($ordered | Where-Object { -not (& $hasFactKey $_ $k) } | ForEach-Object { [int]$_.shardIndex })
                     $problems.Add("shard(s) $($absent -join ', ') observed no '$k' fact; the environment statement's value for it describes only the shards that did.")
                 }
-                if ($present.Count -eq 0) { $facts[$k] = $null; continue }
                 $distinct = @($present | ForEach-Object { [string]$_.facts.$k } | Sort-Object -Unique)
                 if ($distinct.Count -gt 1) { $problems.Add("shards disagree on '$k': $($distinct -join ' | ')") }
                 # Value taken RAW from the reference shard, not as a string: a
@@ -487,6 +564,14 @@ switch ($Mode) {
                 # Comparison above is on the string projection; storage is not.
                 $facts[$k] = $present[0].facts.$k
             }
+        }
+        if ($unobservedKeys.Count -gt 0) {
+            # Loud, and separately from the per-shard message above, because
+            # this is the case where the record has nothing at all to say about
+            # a dimension. It is carried forward as unobserved rather than
+            # filled in; no parity verdict on a dimension fed by one of these
+            # keys may be read as a measurement, whichever way it renders.
+            $problems.Add("no shard observed the fact(s) $(($unobservedKeys | ForEach-Object { "'$_'" }) -join ', ') at all. They are carried into the environment statement as UNOBSERVED rather than given a value, so any dimension they feed carries no parity verdict this run may claim.")
         }
 
         $bounds = @($partials | ForEach-Object { [int]$_.timeoutSeconds } | Sort-Object -Unique)
@@ -515,6 +600,23 @@ switch ($Mode) {
                     Agrees    = $null
                     Basis     = 'not checkable from this run: no environment was observed at all'
                     Note      = 'This run executed no suites it can account for, so it makes no parity claim on any dimension. R8(a) is not discharged by this record; the dimensions are unobserved, not equal.'
+                },
+                # `concurrency` is named EXPLICITLY, and it is not decoration.
+                # The record's timing-integrity section states non-contention
+                # "on the observed concurrency statement", and reads that
+                # statement out of the dimension called `concurrency`. With no
+                # such row it printed the literal `(concurrency not stated)` as
+                # the basis of a claim it was making anyway — a sentence whose
+                # own cited ground says nothing. The claim is still the
+                # composer's to withhold on an empty row set; this row at least
+                # stops the ground it cites from being a placeholder.
+                [PSCustomObject]@{
+                    Dimension = 'concurrency'
+                    Gate      = 'one job, one process, no parallelism'
+                    Audit     = '**no concurrency was observed** — no shard partial reached the compose job, so this run measured no suite, offers no duration, and supports no non-contention claim'
+                    Agrees    = $null
+                    Basis     = 'not checkable from this run: no shard reported the concurrency it ran under'
+                    Note      = 'R7 rests on knowing what else was running while a duration was taken. This run knows nothing about that, and an empty row set is not a quiet runner.'
                 }
             )
             $basis = 'not established — no environment was observed, so no two observations may be pooled with this run'
@@ -529,7 +631,34 @@ switch ($Mode) {
         # record states is read from them rather than asserted over them.
         Add-Member -InputObject $agreement -NotePropertyName 'GateExpectation' `
             -NotePropertyValue (script:Get-GateExpectation) -Force
-        $reachability = Get-CIGlobAuditReachability -Rows $rows -SelectedNames @($doc.population.selectedNames) -TestsRoot $doc.testsRoot
+        # ---- R4, and the difference between clean and unchecked ----
+        # BOTH reachability arms are filters over the row set: the gate arm
+        # selects `did-not-complete` rows whose name the gate selects, the
+        # tests-root arm selects them by path. Over an EMPTY row set both
+        # return empty, `Clean` is $true, and the durable record — the artifact
+        # #993 and #1036 read — prints `clean: True` for a run that measured
+        # nothing. That is the vacuity the parent's own review sustained twice,
+        # reopened on the path the zero-partial branch created: the job exits 2,
+        # but the comment that outlives the job says the property holds.
+        #
+        # So the verdict is WITHHELD rather than computed, and the withholding
+        # is the value the record renders. `Clean` stays truthy deliberately —
+        # the composer's escalate-to-#993 clause fires on a FALSE `Clean`, and
+        # "nothing was checked" must not masquerade as "a stalled suite is
+        # reachable" any more than it may masquerade as clean.
+        $observedNoRows = (@($rows).Count -eq 0)
+        if ($observedNoRows) {
+            $reachability = [PSCustomObject]@{
+                Clean              = 'not established — this run recorded no suite row at all, so both arms ran over an empty set and neither could have found anything'
+                GateReachable      = @()
+                TestsRootReachable = @()
+                StalledCount       = 'not established (no suite row reached this run)'
+            }
+            $problems.Add("R4 reachability is NOT established by this run: no suite row reached the compose job, so the gate-selection arm and the tests-root arm both filtered an empty set. The record withholds `clean` instead of reporting it true — an empty row set satisfies both arms vacuously, which is not the same fact as no reachable `did-not-complete` suite existing.")
+        }
+        else {
+            $reachability = Get-CIGlobAuditReachability -Rows $rows -SelectedNames @($doc.population.selectedNames) -TestsRoot $doc.testsRoot
+        }
         $controlCheck = Test-CIGlobAuditControlExpectation -Rows $rows -Expectations ([hashtable]$script:ControlExpectations)
 
         # ---- the run's own identity, from the run, not from this file ----
@@ -769,7 +898,12 @@ switch ($Mode) {
         # ---- verdict ----
         $failedControls = @($controlCheck | Where-Object { -not $_.Ok })
         if ($failedControls.Count) { $problems.Add("control(s) did not produce their expected terminal state: $(($failedControls | ForEach-Object { $_.Name }) -join ', ')") }
-        if (-not $reachability.Clean) { $problems.Add('a `did-not-complete` suite is reachable by a documented way of running this repository''s tests — escalate to #993') }
+        # `-is [bool]` deliberately: on the withheld path above `Clean` carries
+        # the sentence that says why no verdict was reached, and a truthiness
+        # test over a string would read a withheld verdict as a clean one the
+        # moment somebody made that sentence empty. Only an actual computed
+        # $false escalates.
+        if ($reachability.Clean -is [bool] -and -not $reachability.Clean) { $problems.Add('a `did-not-complete` suite is reachable by a documented way of running this repository''s tests — escalate to #993') }
 
         $nonPassedInPop = @($inPop | Where-Object { $_.State -ne 'passed' })
 

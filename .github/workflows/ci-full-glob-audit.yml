@@ -178,6 +178,16 @@ jobs:
       # render-portfolio.yml already does — the suite-executing jobs above never
       # see it.
       issues: write
+      # R8(b)'s expectation is READ from the gate's own recent runs, and
+      # `gh run list --workflow=pester.yml` hits
+      # GET /repos/{owner}/{repo}/actions/runs. Naming any scope in a
+      # `permissions:` block sets every unnamed scope to `none`, so without
+      # this line the read depends on whether that endpoint is reachable with
+      # `actions: none` on a public repository — a question local verification
+      # with a maintainer PAT cannot answer, and getting it wrong degrades the
+      # expectation to UNVERIFIED silently and permanently in production.
+      # Granting the read removes the uncertainty instead of reasoning about it.
+      actions: read
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
