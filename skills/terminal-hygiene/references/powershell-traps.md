@@ -472,11 +472,12 @@ before the real run finishes — that has happened.
 with a per-outcome tally, and `TOTAL tests (unit: test cases)`. A third line reports reconciliation
 against the caller's selection. A parser keyed on the old shape matches nothing.
 
-**And.** `ExitCode=1` with `TotalFailed=0` is now the NORMAL shape for most red runs, not a
-four-case curiosity: since #1037 a crashed worker, a suite that discovered no tests, a suite whose
-tests were all skipped, and a selected suite that produced no result at all each redden the run
-while failing zero *tests*. The old list — path unresolved, zero discovered, the `MinTestCount`
-floor, a `-DeterminismCheck` flip — still holds and is no longer exhaustive. Read `SuitesNotPassed`
+**And.** `ExitCode=1` with `TotalFailed=0` is no longer a four-case curiosity: since #1037 a crashed
+worker, a suite that discovered no tests, a suite whose tests were all skipped, and a selected suite
+that produced no result at all each redden the run while failing zero *tests* — nothing here measures
+how often each shape occurs, only that all four exist and none is exhaustive with the old list. The
+old list — path unresolved, zero discovered, the `MinTestCount` floor, a `-DeterminismCheck` flip —
+still holds and is no longer exhaustive either. Read `SuitesNotPassed`
 and `SuiteOutcomes`, or `ExitCode`; never `TotalFailed` alone. The widely copied comment in
 `goal-contract-validate-core.ps1` said "THREE distinct situations"; #1037 corrected it there and in
 `Documents/Design/goal-contract-validator.md`, and if you find a fourth copy it is stale.

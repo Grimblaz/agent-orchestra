@@ -116,8 +116,9 @@ The gate predicate
 `TotalFailed -eq 0`, `(TotalPassed + TotalFailed) -gt 0`, and — since issue
 #1037 — `SuitesNotPassed` being zero and `Reconciled` being true when the
 result carries them. Never `TotalFailed` alone. `Invoke-PesterSharded` returns
-`ExitCode=1, TotalFailed=0` on many shapes, and since #1037 that is the
-**normal** shape for most red runs rather than a three-case list: the original
+`ExitCode=1, TotalFailed=0` on many shapes -- since #1037, seven rather than a
+three-case list, though nothing here measures how often each occurs relative
+to an ordinary failing-test red. The original
 three no-run shapes (tests-path-not-found, zero-tests-discovered, the runner's
 own `MinTestCount` floor) plus a crashed worker, a suite that discovered no
 tests, a suite whose tests were all skipped, and a selected suite that produced

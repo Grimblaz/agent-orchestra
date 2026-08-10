@@ -1206,12 +1206,24 @@ throw 'deliberate discovery failure'
             Test-GCSuiteGatePass -Result $legacyRed | Should -BeFalse
         }
 
-        It 'S7c: the suite-level fields survive the process boundary the validator puts them through' {
+        It 'S7c: the suite-level fields are wired in source at both ends of the process boundary (cheap smoke check, not proof)' {
             # D3: the child launcher wrote both fields and the parent's return
             # rebuild dropped them, so the two clauses above were dead on the
-            # only production path while a comment claimed otherwise. Assert
-            # the rebuild carries them, by reading the source of both ends
-            # rather than by trusting the predicate to be reachable.
+            # only production path while a comment claimed otherwise.
+            #
+            # NOT PROOF. Demonstrated by mutation during this chunk's own
+            # review: delete the rebuild's return path entirely (make the
+            # whole nine-property object unreachable dead code) and every
+            # `Should -Match` below still passes, because they match SOURCE
+            # TEXT, not an executed effect -- the exact "a test asserting a
+            # name appears in a script pins nothing" failure mode this
+            # methodology names. The authoritative test is
+            # `goal-contract-validate-core.Tests.ps1`'s "carries
+            # SuitesNotPassed and Reconciled across the real process boundary"
+            # case, which drives Invoke-GCSuitePhase through a real child pwsh
+            # process and asserts on the RETURNED VALUE. Kept here only as a
+            # fast source-presence check that fails loudly (wrong file, wrong
+            # property name) before the slower behavioral test even runs.
             $validatorSource = Get-Content -LiteralPath (Join-Path $script:RepoRoot '.github/scripts/lib/goal-contract-validate-core.ps1') -Raw
 
             # The child writes them...

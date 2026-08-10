@@ -597,10 +597,13 @@ function Get-CIGlobAuditLauncherScript {
         constrained by ValidateSet rather than escaped. The paths are escaped
         (verified against every shape a Linux filesystem allows); an
         unconstrained verbosity string would be one caller away from arbitrary
-        code in the child, and the same pattern already exists unconstrained at
-        `pester-sharded-core.ps1`'s `Get-ShardLauncherScript` (cited by
-        function rather than by line: #1037 moved the line this used to name,
-        and a line number is a citation that goes stale without saying so).
+        code in the child -- the same interpolation shape existed unconstrained
+        at `pester-sharded-core.ps1`'s `Get-ShardLauncherScript` until #1037's
+        review round added the matching `ValidateSet` there too (an external
+        GitHub review and this repository's own internal review independently
+        found the gap; both are now closed). Citing this by function rather
+        than by line on purpose: a line number is a citation that goes stale
+        without saying so, and #1037 already moved the one this used to name.
     #>
     param(
         [Parameter(Mandatory)][string]$SuiteFile,

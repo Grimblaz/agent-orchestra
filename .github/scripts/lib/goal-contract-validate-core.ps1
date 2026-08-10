@@ -1514,8 +1514,9 @@ function Invoke-GCTargetChecks {
 # -----------------------------------------------------------------------------
 # s4: suite invariant -- the green floor (frame-slice s4, AC1/AC3). THE FIX
 # THIS SLICE EXISTS FOR (U1, CRITICAL, stress-test-sustained): Invoke-PesterSharded
-# returns `ExitCode=1, TotalFailed=0` on MANY shapes, and since #1037 that is
-# the NORMAL shape for most red runs rather than a three-case curiosity. The
+# returns `ExitCode=1, TotalFailed=0` on MANY shapes -- since #1037, seven
+# rather than a three-case curiosity, though nothing here measures how often
+# each occurs relative to an ordinary failing-test red. The
 # original three: TestsPath not found, zero .Tests.ps1 files discovered, and
 # the MinTestCount floor (default 200) not met, none of which increments
 # TotalFailed. #1037 added four more, because TotalFailed stopped absorbing the

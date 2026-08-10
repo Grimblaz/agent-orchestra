@@ -1505,6 +1505,46 @@ function Invoke-PesterSharded {
             $result.TotalFailed | Should -Be 0
             Test-GCSuiteGatePass -Result $result | Should -Be $false
         }
+
+        It 'carries SuitesNotPassed and Reconciled across the real process boundary, and the gate actually reads them (D3/#1037 review)' {
+            # Every other stub in this Context returns the pre-#1037 shape --
+            # no SuitesNotPassed, no Reconciliation -- so none of them can
+            # exercise the branch this test exists for. This is the ONLY test
+            # in the repository that puts a present-value #1037 shape through
+            # the real child-pwsh + JSON round trip Invoke-GCSuitePhase
+            # performs, rather than asserting on the source text that carries
+            # it. (An external GitHub review and this repo's own internal
+            # review both flagged that gap independently; this closes it.)
+            script:Assert-GCVFunctionExists -Name 'Invoke-GCSuitePhase'
+            $worktree = script:New-GCStubWorktree -Path (Join-Path $TestDrive 'suite-fields-worktree')
+            $stubLib = Join-Path $worktree '.github/scripts/lib/pester-sharded-core.ps1'
+            @'
+function Invoke-PesterSharded {
+    param([string]$TestsPath, [int]$MinTestCount = 200)
+    # Deliberately ExitCode=0/TotalFailed=0 -- a shape the pre-#1037 clauses
+    # alone would read as green -- so a gate that ignores SuitesNotPassed and
+    # Reconciled cannot be told apart from one that reads them.
+    return [pscustomobject]@{
+        ExitCode        = 0
+        TotalPassed     = 60
+        TotalFailed     = 0
+        WallClockMs     = 4200
+        MissingFiles    = @()
+        FailedFiles     = @()
+        SuitesNotPassed = 3
+        Reconciliation  = [pscustomobject]@{ Ok = $false }
+    }
+}
+'@ | Set-Content -LiteralPath $stubLib -Encoding UTF8
+
+            $result = Invoke-GCSuitePhase -WorktreePath $worktree -TimeoutSeconds 15
+
+            $result.ExitCode | Should -Be 0
+            $result.SuitesNotPassed | Should -Be 3 -Because 'the field the child serialized must survive the parent''s return-object rebuild, not just the JSON file'
+            $result.Reconciled | Should -Be $false -Because 'same for the reconciliation verdict, read off Reconciliation.Ok by the child launcher'
+            Test-GCSuiteGatePass -Result $result | Should -Be $false `
+                -Because 'ExitCode=0 and TotalFailed=0 alone would pass the pre-#1037 clauses -- the gate must be reading the carried fields, not just receiving them'
+        }
     }
 
     Context 'Resolve-GCDiffBase -- explicit-SHA merge-base + no-fetch refusal (s5, AC1/AC2)' {
