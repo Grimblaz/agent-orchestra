@@ -24,7 +24,7 @@
     components (this script writes the ignore entries; the goal-contract
     validator's Test-GCTreeClean reads the resulting `git status`), so it
     lives beside the script's own suite rather than in the validator's suite,
-    which is not registered in .github/workflows/pester.yml's allowlist and
+    which is quarantined out of .github/workflows/pester.yml's selection and
     therefore never runs in CI. A regression test CI never runs cannot deliver
     AC2's stated purpose ("so the coupling cannot silently return").
 

@@ -1514,10 +1514,16 @@ function Invoke-GCTargetChecks {
 # -----------------------------------------------------------------------------
 # s4: suite invariant -- the green floor (frame-slice s4, AC1/AC3). THE FIX
 # THIS SLICE EXISTS FOR (U1, CRITICAL, stress-test-sustained): Invoke-PesterSharded
-# (pester-sharded-core.ps1:84) returns `ExitCode=1, TotalFailed=0` in THREE
-# distinct situations -- TestsPath not found (:100-103), zero .Tests.ps1
-# files discovered (:109-112), and the MinTestCount floor (default 200) not
-# met (:397-400, which sets ExitCode but does NOT increment TotalFailed).
+# returns `ExitCode=1, TotalFailed=0` on MANY shapes -- since #1037, seven
+# rather than a three-case curiosity, though nothing here measures how often
+# each occurs relative to an ordinary failing-test red. The
+# original three: TestsPath not found, zero .Tests.ps1 files discovered, and
+# the MinTestCount floor (default 200) not met, none of which increments
+# TotalFailed. #1037 added four more, because TotalFailed stopped absorbing the
+# suite-level signal: a crashed worker, a suite that discovered no tests, a
+# suite whose tests were all skipped, and a selected suite that produced no
+# result at all -- each reddens the run while failing zero TESTS. Do not treat
+# that list as closed; read ExitCode, or the suite-level fields.
 # Gating the green floor on `TotalFailed -eq 0` alone reports a suite that
 # never ran as PASS -- exactly the false-GREEN defect this validator exists
 # to prevent, reintroduced at this consumer. Test-GCSuiteGatePass is the
@@ -1583,6 +1589,40 @@ function Test-GCSuiteGatePass {
         }
     }
 
+    # Issue #1037 changed what TotalFailed MEANS. It used to absorb one
+    # increment per zero-test file and one per crashed worker, so clause 2
+    # below caught those shapes as a side effect of a miscount. It is now a
+    # test-case count and nothing else -- so a crashed worker reaches here with
+    # TotalFailed = 0, and clause 2 no longer sees it. ExitCode still does, and
+    # clauses 4 and 5 now check the suite-level facts DIRECTLY rather than
+    # inferring them from an inflated number.
+    #
+    # Both new clauses are absent-tolerant: a result from a worktree carrying a
+    # pre-#1037 copy of the runner has neither field, and this predicate must
+    # not start failing closed on a shape it used to accept for good reason.
+    # Present-but-wrong is rejected; absent falls back to the original three.
+    $suitesNotPassed = script:Read-GCSuiteField -Result $Result -Name 'SuitesNotPassed'
+    if ($null -ne $suitesNotPassed -and $suitesNotPassed -ne 0) {
+        return $false
+    }
+    # NOT `[bool]$Result.Reconciled`. `[bool]` on any non-empty string is
+    # $true, so the string 'false' -- which is what a hand-built or
+    # half-serialized result carries -- passed a guard whose comment says
+    # present-but-wrong is rejected. Same class as R10 above, which exists
+    # because a present-but-$null field produced a live false-GREEN.
+    if ($Result.PSObject.Properties.Match('Reconciled').Count -gt 0 -and $null -ne $Result.Reconciled) {
+        $reconciled = $false
+        if ($Result.Reconciled -is [bool]) {
+            $reconciled = [bool]$Result.Reconciled
+        }
+        elseif (-not [bool]::TryParse([string]$Result.Reconciled, [ref]$reconciled)) {
+            # Present but not a boolean at all: a value this pipeline never
+            # writes, so fail closed rather than guess which way it meant.
+            return $false
+        }
+        if (-not $reconciled) { return $false }
+    }
+
     # The three-part gate (U1 CRITICAL fix): ExitCode==0 AND TotalFailed==0
     # AND (Passed+Failed)>0 -- NEVER TotalFailed alone. ExitCode alone
     # already rejects the TestsPath-not-found, zero-discovered, and
@@ -1590,6 +1630,23 @@ function Test-GCSuiteGatePass {
     # (clause 3) is an independent defensive floor against a hypothetical
     # ExitCode=0-but-nothing-ran shape.
     return ($exitCode -eq 0) -and ($totalFailed -eq 0) -and (($totalPassed + $totalFailed) -gt 0)
+}
+
+# Private: read an optional integer field, returning $null when it is absent or
+# unusable rather than silently casting it to 0 -- the same false-GREEN shape
+# R10 closed for ExitCode/TotalFailed, one field along.
+function script:Read-GCSuiteField {
+    param([object]$Result, [string]$Name)
+
+    if ($Result.PSObject.Properties.Match($Name).Count -eq 0) { return $null }
+    $raw = $Result.$Name
+    if ($null -eq $raw) { return $null }
+    $parsed = 0
+    if (-not [int]::TryParse([string]$raw, [ref]$parsed)) {
+        # Present but not a number: treat as a failure signal, not as absent.
+        return -1
+    }
+    return $parsed
 }
 
 # Private: the single fail-closed result shape this section ever returns for
@@ -1600,13 +1657,17 @@ function Test-GCSuiteGatePass {
 function script:New-GCFailClosedSuiteResult {
     param([switch]$TimedOut)
     [pscustomobject]@{
-        ExitCode     = 1
-        TotalPassed  = 0
-        TotalFailed  = 0
-        WallClockMs  = $null
-        MissingFiles = @()
-        FailedFiles  = @()
-        TimedOut     = [bool]$TimedOut
+        ExitCode        = 1
+        TotalPassed     = 0
+        TotalFailed     = 0
+        WallClockMs     = $null
+        MissingFiles    = @()
+        FailedFiles     = @()
+        # Fail-closed on the #1037 fields too, so this shape is rejected by
+        # every clause of the predicate rather than only by ExitCode.
+        SuitesNotPassed = 1
+        Reconciled      = $false
+        TimedOut        = [bool]$TimedOut
     }
 }
 
@@ -1655,6 +1716,17 @@ try {
         WallClockMs  = `$r.WallClockMs
         MissingFiles = @(`$r.MissingFiles)
         FailedFiles  = @(`$r.FailedFiles)
+        # Kept in the SAME ORDER the parent's rebuild reads them. Adding a
+        # field here without adding it there is what made #1037's suite-level
+        # guard dead on arrival: the child wrote both fields, the parent
+        # rebuilt a seven-property object, and the predicate downstream never
+        # saw either one.
+        # Issue #1037: the suite-level facts, carried across the process
+        # boundary because TotalFailed no longer absorbs them. Null when the
+        # worktree holds a pre-#1037 copy of the runner, which
+        # Test-GCSuiteGatePass treats as absent rather than as zero.
+        SuitesNotPassed = `$r.SuitesNotPassed
+        Reconciled      = `$r.Reconciliation.Ok
     }
     `$out | ConvertTo-Json -Compress -Depth 5 | Set-Content -LiteralPath '$($resultFile -replace "'", "''")' -Encoding UTF8
     exit ([int]`$r.ExitCode)
@@ -1704,14 +1776,26 @@ try {
         return script:New-GCFailClosedSuiteResult
     }
 
+    # Issue #1037: the two suite-level fields are carried through, NOT dropped.
+    # The child writes them; this rebuild is where they were being lost, which
+    # made Test-GCSuiteGatePass's clauses 4 and 5 dead on the only production
+    # path while a comment five lines above them claimed the opposite. They
+    # stay absent-tolerant: a worktree holding a pre-#1037 copy of the runner
+    # emits JSON nulls here, and $null must reach the predicate as "absent"
+    # rather than as 0/false.
+    $suitesNotPassed = if ($resultObj.PSObject.Properties.Match('SuitesNotPassed').Count -gt 0) { $resultObj.SuitesNotPassed } else { $null }
+    $reconciled = if ($resultObj.PSObject.Properties.Match('Reconciled').Count -gt 0) { $resultObj.Reconciled } else { $null }
+
     return [pscustomobject]@{
-        ExitCode     = [int]$resultObj.ExitCode
-        TotalPassed  = [int]$resultObj.TotalPassed
-        TotalFailed  = [int]$resultObj.TotalFailed
-        WallClockMs  = $resultObj.WallClockMs
-        MissingFiles = @($resultObj.MissingFiles)
-        FailedFiles  = @($resultObj.FailedFiles)
-        TimedOut     = $false
+        ExitCode        = [int]$resultObj.ExitCode
+        TotalPassed     = [int]$resultObj.TotalPassed
+        TotalFailed     = [int]$resultObj.TotalFailed
+        WallClockMs     = $resultObj.WallClockMs
+        MissingFiles    = @($resultObj.MissingFiles)
+        FailedFiles     = @($resultObj.FailedFiles)
+        SuitesNotPassed = $suitesNotPassed
+        Reconciled      = $reconciled
+        TimedOut        = $false
     }
 }
 

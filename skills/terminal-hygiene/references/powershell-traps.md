@@ -450,24 +450,37 @@ the counting trap; it is the fuller and more careful treatment, and
 
 What follows is what that record does **not** cover.
 
-### Read the right `TOTAL:` line — the runner is re-entrant
+### Read the right run's totals — the runner is re-entrant, and there are two of them
 
 **Trap.** `run-pester-sharded.Tests.ps1` is
-itself a suite file that drives `Invoke-PesterSharded` against temp fixtures — **16** call sites, of
-which `-DeterminismCheck` is the 5th, with eleven more after it. A plain full-suite run therefore
-prints **17** `TOTAL:` lines, only one of which is the real run.
+itself a suite file that drives `Invoke-PesterSharded` against temp fixtures — around thirty call
+sites, of which `-DeterminismCheck` is one. A plain full-suite run therefore prints one `TOTAL`
+block per nested fixture run plus one for the real run, and only the last is the run you started.
+(Issue #1037 added a further batch of nested runs and put this suite on the sequential shard, so
+the count moves; count call sites rather than trusting a number written down here.)
 
 Anchor on the run attribution, not on position: the real run is the one whose line reads
-`run=outer`, and whose `files=N/N` equals the test-directory count. Nested fixture runs report
-`run=nested(depth=1)`. `Determinism check: PASSED` and the min-count `WARNING` are emitted by those
-nested fixtures on every plain run, so grepping for either as evidence is guaranteed-green.
+`run=outer`. Nested fixture runs report `run=nested(depth=1)`. `Determinism check: PASSED` and the
+min-count `WARNING` are emitted by those nested fixtures on every plain run, so grepping for either
+as evidence is guaranteed-green.
 
-A wait-loop keyed on the first `TOTAL:` line to appear will fire on a nested fixture's, minutes
+A wait-loop keyed on the first `TOTAL` line to appear will fire on a nested fixture's, minutes
 before the real run finishes — that has happened.
 
-**And.** `ExitCode=1` with `TotalFailed=0` occurs in **four** situations — path unresolved, zero
-discovered, the `MinTestCount` floor, and a `-DeterminismCheck` flip returning run 1's totals. The
-widely copied comment in `goal-contract-validate-core.ps1` says only three.
+**And the totals changed shape in #1037.** There is no longer one `TOTAL:` line carrying
+`pass=/fail=/files=N/N`. There are two, and they name their units: `TOTAL suites (unit: files)`
+with a per-outcome tally, and `TOTAL tests (unit: test cases)`. A third line reports reconciliation
+against the caller's selection. A parser keyed on the old shape matches nothing.
+
+**And.** `ExitCode=1` with `TotalFailed=0` is no longer a four-case curiosity: since #1037 a crashed
+worker, a suite that discovered no tests, a suite whose tests were all skipped, and a selected suite
+that produced no result at all each redden the run while failing zero *tests* — nothing here measures
+how often each shape occurs, only that all four exist and none is exhaustive with the old list. The
+old list — path unresolved, zero discovered, the `MinTestCount` floor, a `-DeterminismCheck` flip —
+still holds and is no longer exhaustive either. Read `SuitesNotPassed`
+and `SuiteOutcomes`, or `ExitCode`; never `TotalFailed` alone. The widely copied comment in
+`goal-contract-validate-core.ps1` said "THREE distinct situations"; #1037 corrected it there and in
+`Documents/Design/goal-contract-validator.md`, and if you find a fourth copy it is stale.
 
 **Seen in:** #948.
 
@@ -475,8 +488,9 @@ widely copied comment in `goal-contract-validate-core.ps1` says only three.
 
 **Trap.** The reflex diagnosis for a full-suite-only failure is cross-file state leakage. Under this
 repository's runner that explanation is **structurally unavailable**: `pester-sharded-core.ps1` runs
-each `.Tests.ps1` in a separate `pwsh` process (`ForEach-Object -Parallel -ThrottleLimit 8`; a small
-real-git allowlist runs sequentially but still per-process). Mocks cannot leak between files.
+each `.Tests.ps1` in a separate `pwsh` process (`ForEach-Object -Parallel -ThrottleLimit
+$FanOutWidth`; a small real-git allowlist runs sequentially, after the parallel shard, but still
+per-process). Mocks cannot leak between files.
 
 **Why it's silent.** The mislabeled explanation reads as benign — an artifact, not a defect. In the
 filing for #948, "mock leakage under full-suite ordering" survived into the issue *as evidence*.

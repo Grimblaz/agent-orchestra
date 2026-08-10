@@ -8,8 +8,9 @@
 
 .DESCRIPTION
     Decision D2 requires the unit proofs of these criteria to be enforced by
-    continuous integration, in a NEW file so it can join
-    .github/workflows/pester.yml's allowlist without inheriting issue #904's
+    continuous integration, in a NEW file so it is selected by
+    .github/workflows/pester.yml (which runs a glob minus an explicit
+    quarantine — there is no list to join) without inheriting issue #904's
     Linux baggage. Its scoping constraint assigns command composition to this
     tier rather than the real-git integration tier, because the real-git
     obligation attaches to the verdict and rendering is where #904's Linux

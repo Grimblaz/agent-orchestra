@@ -3,7 +3,7 @@
 
 
 # Get-CostTranscriptSlug coverage lives in cost-walker-slug.Tests.ps1, which is
-# registered in .github/workflows/pester.yml. It was split out by issue #908 so
+# selected (not quarantined) by .github/workflows/pester.yml. It was split out by issue #908 so
 # the slug regression runs in CI without importing this suite's Linux-red blocks.
 
 Describe 'Invoke-CostTranscriptWalk' {
