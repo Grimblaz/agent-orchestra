@@ -134,7 +134,8 @@ The GitHub Actions workflow `cost-pattern-presence-check.yml` (`:43`, `:75`) als
 `--jq '.body'`, but in **bash**, where `$( )` yields one string. Not exposed; different language,
 not a PowerShell capture. (The first revision of this file also named
 `copilot-sunset-review.yml` here — that workflow only captures `--jq 'length'` and
-`--jq '.[0].number'`, never `.body`.)
+`--jq '.[0].number'`, never `.body`.) That workflow was removed 2026-08-10 by #844; the audited
+revision is readable at `git show d610bbe:.github/workflows/copilot-sunset-review.yml`.
 
 ## The control: two planted positives
 

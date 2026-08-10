@@ -116,32 +116,82 @@ required gate red. The run was against `b03d6f6`; local HEAD was `6154ee1`. Comb
 error it produced a confident, entirely false green, caught only by a judge pass re-deriving the
 baseline from the merge-base.
 
-### `copilot-sunset-review.yml` is always red, and gates nothing
+### A workflow GitHub cannot parse is red on every push, and invisible where you look for it
 
-**Trap.** `.github/workflows/copilot-sunset-review.yml` shows a failed run in `gh run list` on every
-branch including `main`, on every push. It is not caused by your branch.
+**Trap.** A workflow file that fails GitHub's own YAML load shows a failed run in `gh run list` on
+every branch including `main`, on every push — regardless of what `on:` triggers the file declares,
+because GitHub validates every workflow file on every push. It is not caused by your branch, and it
+does not go away when you rebase.
 
-**How to recognize it.** The run's workflow name falls back to the literal file path rather than its
-declared `name:` — GitHub's signature for a workflow file it could not load. `event` is `push` even
-though the file declares only `schedule` and `workflow_dispatch`.
-`gh api .../actions/runs/{id}/jobs` returns `total_count: 0`, so no job ever starts and
-`gh run view --log-failed` reports "log not found".
+**How to recognize it.** Three signatures, read **together** — no one of them is diagnostic alone:
 
-**It cannot block a merge.** `gh pr checks <PR>` never lists it, so an `UNSTABLE` mergeStateStatus is
-never explained by it. Look at `pester`, `frame-enforce` and `release-gate` for real blockers.
+- The run's workflow name falls back to the literal **file path** rather than its declared `name:`.
+  Not diagnostic by itself: GitHub's workflow-syntax reference says *"If you omit `name`, GitHub
+  displays the workflow file path relative to the root of the repository"* — so a perfectly loadable
+  name-less workflow shows path-as-name too.
+- `event` does not match the file's **declared** triggers — `push` from a file declaring only
+  `schedule` and `workflow_dispatch`. Silent for a file that declares `on: push`, where there is no
+  mismatch to notice; lean on the other two there.
+- `gh api .../actions/runs/{id}/jobs` returns `total_count: 0`, so no job ever starts and
+  `gh run view --log-failed` reports "log not found". This is the signature that carries the
+  diagnosis; a loadable workflow that ran produces jobs.
 
-**Latent risk, separate from the noise.** The workflow's actual purpose is to fire on or after
-2026-08-31 to surface the Copilot retire-or-keep decision. Because GitHub cannot load the file, it
-will never fire. Tracked: **#844** owns the YAML parse failure, **#970** owns the retirement deadline.
+**Two surfaces, and they disagree.** Zero jobs means zero check-runs, so the failure is visible in
+`gh run list` and at check-suite grain and **absent** from `commits/{sha}/check-runs` and
+`gh pr checks`. Both directions of that asymmetry bite:
 
-**Scope.** This entry is specific to this repository. If you are reading it from an installed plugin
-copy in another repository, neither `copilot-sunset-review.yml` nor the named real blockers
-(`pester`, `frame-enforce`, `release-gate`) exist there, and nothing here licenses dismissing a red
-check you actually have. Re-derive the recognition procedure — path-as-name fallback, `event` not
-matching the declared triggers, zero jobs — rather than inheriting the verdict.
+- It usually cannot block a merge — an `UNSTABLE` mergeStateStatus is never explained by it, so look
+  at the checks that actually run (in this repository: `pester`, `frame-enforce`, `release-gate`,
+  `Check cost pattern presence`, plus external bot rows). **The exception is a branch-protection
+  rule or ruleset that requires a status check this workflow was producing**: a required check needs
+  a `successful`, `skipped`, or `neutral` status and this one never reports at all, so the PR sits
+  `BLOCKED` indefinitely — a different state from `UNSTABLE`, and one no amount of re-running fixes.
+- **Absence cannot confirm it is gone.** After *removing* such a file, an absent `gh pr checks` row
+  reads identically to the broken state. After *repairing* one, absence is not the test either: a
+  repaired workflow whose triggers include the event you are inspecting does produce a row, and
+  `gh pr checks` is then exactly the surface that confirms the repair.
 
-**Evidence:** five-plus consecutive red runs from 2026-08-01 (`7f6baa7`, `d5f9611`, `18a28ba`,
-`c43d81d`, `033ed99`), identical on `main`.
+**Confirming a removal took — the command needs three things the obvious form omits.**
+
+```bash
+gh run list --commit <FULL-40-CHAR-SHA> --limit 300 --json workflowName,event,conclusion \
+  --jq '[.[] | select(.workflowName | test("<path-or-declared-name>"))]'
+```
+
+- **The full 40-character SHA.** The runs API filters `head_sha` by exact match and `gh` does not
+  resolve abbreviations, so a short SHA returns an empty list — which reads identically to success.
+  Measured here 2026-08-10: `gh run list --commit d610bbe` → 0 rows; the same command with the full
+  SHA → 54.
+- **A raised `--limit`.** The default 20 truncates. In that same measurement the failing row sat at
+  index 53 of 54, behind `issue_comment` runs that accrue against `main`'s head SHA continuously —
+  so the window closes within hours of a merge.
+- **A match keyed on the `workflowName` field, never a text grep.** `displayTitle` carries commit
+  and PR titles, so grepping raw output for the workflow's own filename matches rows belonging to
+  entirely different workflows whose title happens to mention it.
+
+**The latent cost is separate from the noise.** A file GitHub cannot load never fires, so whatever
+the workflow was scheduled to do silently does not happen — and the permanently-red run trains
+readers to discount CI generally. Neither symptom announces the missed obligation; find its owner
+before assuming the redness is the whole problem.
+
+**Registry rows prove nothing in either direction.** Do not judge a removal by
+`gh api .../actions/workflows`. Measured here 2026-08-10: the one workflow this repository has
+genuinely deleted (`notify-agent-sync.yml`, removed at `c0a6852`) has **no row at all** on that list
+endpoint, while `.github/workflows/auto-create-pr.yml` — a path that appears in no commit on any ref
+— is listed `active`. A `state: deleted` tombstone has been observed only on the **single-workflow
+by-id** endpoint. Judge by the tree and by the `gh run list` form above.
+
+**Scope.** The recognition procedure above is general. The named real blockers are specific to this
+repository and do not exist in an installed plugin copy elsewhere; nothing here licenses dismissing
+a red check you actually have. Re-derive from the three signatures rather than inheriting any
+verdict.
+
+**Seen in:** `.github/workflows/copilot-sunset-review.yml`, which never parsed from the day it landed
+and produced five-plus consecutive red runs from 2026-08-01 (`7f6baa7`, `d5f9611`, `18a28ba`,
+`c43d81d`, `033ed99`), identical on `main`. It was removed 2026-08-10 (#844) rather than repaired,
+and the dated obligation it was going to fire moved to #970. Historical runs of a deleted workflow
+keep returning from the runs API; that is not a live failure. The file's own body is readable at
+`git show d610bbe:.github/workflows/copilot-sunset-review.yml`.
 
 ## Writing to GitHub
 

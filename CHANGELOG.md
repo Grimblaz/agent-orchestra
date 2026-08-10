@@ -4,7 +4,7 @@ All notable changes to agent-orchestra will be documented in this file.
 
 ## [Unreleased]
 
-## [3.21.1] — 2026-08-10
+## [3.21.2] — 2026-08-10
 
 ### Changed
 
@@ -14,6 +14,20 @@ All notable changes to agent-orchestra will be documented in this file.
 - The gate job is bounded with timeout-minutes, and a green check now discloses what it excludes on the pull-request checks surface, with the excluded set and each entry class in the job summary (#1037).
 - run-pester-sharded.Tests.ps1 is promoted out of the CI quarantine - the one entry this change promotes - and carries the regression guard for the above (#1037).
 - terminal-hygiene and several design documents no longer describe the CI gate as a small allowlist or a registered run list; the #948 and performance-audit full-suite totals are marked incomparable with post-correction runs (#1037).
+- The sequential shard now carries two named membership lists rather than one: `Get-RealGitFiles` for suites that mutate git environment state, and `Get-IsolationRequiredFiles` for suites whose assertions a concurrent neighbour can falsify — a tree-state snapshot, or a wall-clock bound calibrated on an idle machine. Fanning the gate out is what created the second class, and the gate's own first run found it by starving a suite past its bound (#1037).
+- Nested runs of the sharded runner no longer emit CI-format error commands, so a deliberate crash fixture inside the runner's own guard suite can no longer put a red failure annotation on a green pull request's checks surface (#1037).
+
+## [3.21.1] — 2026-08-10
+
+### Removed
+
+**A workflow that never once parsed is gone, and the dated obligation it was going to fire now has a human owner** (#844). `.github/workflows/copilot-sunset-review.yml` failed GitHub's YAML load from the day it landed — a bash heredoc written flush-left inside an indented `run: |` block — so it produced zero jobs, never created a check-run, and showed a red run in `gh run list` on every push to every branch including `main`. It was scheduled to fire on 2026-09-01 to surface the Copilot retire-or-keep decision and report whether anyone had asked for the support to be kept; because GitHub could not load it, that would never have happened. Removal was chosen over repair: the tracking issue it would open is already open and filed by hand (#970), the reach-out it exists to detect has not happened through either channel `Documents/Design/copilot-deprecation.md` names, and the docs never promised the automation. #970 was amended first to take the reach-out check directly, on or after 2026-08-31, with both queries recorded — so the listener is only removed once the obligation has an owner.
+
+### Changed
+
+**The always-red-workflow trap is now general, and its verification recipe no longer false-greens** (#844). `skills/safe-operations/references/git-and-gh-traps.md` § "`copilot-sunset-review.yml` is always red, and gates nothing" was live present-tense guidance about a file this release deletes, and it ships to installed plugin copies. It is replaced by a general trap — **a workflow GitHub cannot parse is red on every push, and invisible where you look for it** — keeping the transferable recognition procedure and the two-surface asymmetry, with the removed workflow as its dated exhibit.
+
+Four claims the general version had to earn rather than inherit, each measured against this repository on 2026-08-10 and each one the review found wrong in the first draft. Path-as-name is **not** diagnostic alone: GitHub displays the file path for any workflow that omits `name:`, so the three signatures are conjunctive, and the `event`-mismatch signature is silent for a file that declares `on: push`. "It cannot block a merge" holds only absent a branch-protection rule or ruleset requiring a check the broken workflow was producing — that case sits `BLOCKED` indefinitely, not `UNSTABLE`. Absence confirms nothing after a *removal*, but a *repaired* workflow does produce a `gh pr checks` row, so that surface is exactly what confirms a repair. And the confirm-a-removal command now states the three things the obvious form omits — the full 40-character SHA (the runs API matches `head_sha` exactly, so a short SHA returns an empty list that reads as success: `--commit d610bbe` → 0 rows, full SHA → 54), a raised `--limit` (the failing row sat at index 53 of 54, behind `issue_comment` runs that accrue against `main`'s head continuously), and a match keyed on `workflowName` rather than a text grep (`displayTitle` carries PR titles, so grepping for the filename matches other workflows' rows). Registry rows are now stated to prove nothing in either direction: this repository's one genuine deletion left **no** row on `actions/workflows`, while a path present in no commit on any ref is listed `active`.
 
 ## [3.21.0] — 2026-08-10
 
