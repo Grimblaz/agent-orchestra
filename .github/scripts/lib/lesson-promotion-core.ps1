@@ -363,25 +363,59 @@ function Get-LPMandatedSkillSet {
     )
 
     $set = @{}
-    if ([string]::IsNullOrWhiteSpace($MandateMarker)) { return $set }
+    $problems = [System.Collections.Generic.List[string]]::new()
+    if ([string]::IsNullOrWhiteSpace($MandateMarker)) {
+        return [PSCustomObject]@{ Skills = $set; Problems = @('no mandate_marker declared, so no mandated load can be recognised at all') }
+    }
     $agentDir = Join-Path $RepoRoot 'agents'
-    if (-not (Test-Path -LiteralPath $agentDir -PathType Container)) { return $set }
+    if (-not (Test-Path -LiteralPath $agentDir -PathType Container)) {
+        # An absent population is not "nothing to derive" - it is the derivation losing its only
+        # input. Silence here reads every lens home as main-session-only (PR #1061 review, F5).
+        return [PSCustomObject]@{ Skills = $set; Problems = @("no 'agents' directory at '$RepoRoot', so the consumer-type derivation has no population and would read every lens home as main-session-only") }
+    }
 
-    foreach ($f in @(Get-ChildItem -LiteralPath $agentDir -File -Filter '*.agent.md')) {
-        foreach ($line in @(Get-Content -LiteralPath $f.FullName -Encoding utf8)) {
-            if ($line.IndexOf($MandateMarker, [System.StringComparison]::Ordinal) -lt 0) { continue }
-            # A negator on the same line makes it a permission, not a mandate - the same test the
-            # layer-4 assertions apply, so the derived set cannot disagree with them.
-            $lower = [regex]::Replace($line.ToLowerInvariant(), '\b(?:not|never)\s+(?:only|optional|merely|just|solely)\b', '')
+    # BOTH shapes. `*.agent.md` are the shared bodies; `agents/*.md` are the Claude-native shells,
+    # which CLAUDE.md documents as first-class and which can carry a mandate of their own (F5).
+    $markerSeen = $false
+    foreach ($f in @(Get-ChildItem -LiteralPath $agentDir -File -Filter '*.md')) {
+        $lines = @(Get-Content -LiteralPath $f.FullName -Encoding utf8)
+        # FENCE-AWARE, like every other reader in this file. A mandate quoted inside a fenced
+        # example is an illustration, not a load - and reading it as one produced a home with NO
+        # writable green state, since layer 4 matches against unfenced text (F3).
+        $mask = Get-LPFenceMask -Lines $lines
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($mask[$i]) { continue }
+            if ($lines[$i].IndexOf($MandateMarker, [System.StringComparison]::Ordinal) -lt 0) { continue }
+            $markerSeen = $true
+            # A negator makes it a permission, not a mandate - the same test the layer-4 assertions
+            # apply. Read over the same window as the path search below, so the two agree.
+            $window = $lines[$i]
+            for ($j = $i + 1; $j -lt [Math]::Min($i + 3, $lines.Count); $j++) {
+                if ($mask[$j] -or $lines[$j].Trim() -ceq '') { break }
+                $window += "`n" + $lines[$j]
+            }
+            $lower = [regex]::Replace($window.ToLowerInvariant(), '\b(?:not|never)\s+(?:only|optional|merely|just|solely)\b', '')
             if (@($script:LPLoadNegators | Where-Object { $lower.Contains($_) }).Count -gt 0) { continue }
-            foreach ($mm in [regex]::Matches($line, 'skills/[A-Za-z0-9._-]+/SKILL\.md')) {
+            # Windowed, because a markdown list-continuation splits the marker from the path it
+            # mandates and a single-line search reads that as no mandate at all (F4).
+            foreach ($mm in [regex]::Matches($window, 'skills/[A-Za-z0-9._-]+/SKILL\.md')) {
                 if (-not $set.ContainsKey($mm.Value)) { $set[$mm.Value] = @() }
                 $rel = 'agents/' + $f.Name
                 if ($set[$mm.Value] -cnotcontains $rel) { $set[$mm.Value] = @($set[$mm.Value]) + $rel }
             }
         }
     }
-    return $set
+
+    # THE MARKER MUST BE FINDABLE, not merely non-blank (F1, the one high finding of PR #1061's
+    # review). `mandate_marker` is a manifest field, and the whole unconditional-load layer keys off
+    # it: point it at a string that appears nowhere and the derived set empties, every home reads
+    # main-session-only, and an emptied `loading_surfaces` then audits clean. Reproduced live -
+    # two tokens took the audit from 43 findings to none. Non-blankness was never the property that
+    # mattered; reaching the tree is.
+    if (-not $markerSeen) {
+        $problems.Add("manifest declares mandate_marker '$MandateMarker', which appears in no agent body - a marker that reaches nothing derives an empty consumer-type set and reads every lens home as main-session-only")
+    }
+    return [PSCustomObject]@{ Skills = $set; Problems = @($problems) }
 }
 
 function Get-LessonPromotionAudit {
@@ -476,8 +510,11 @@ function Get-LessonPromotionAudit {
         $drift.Add("roster count anchor says $anchorCount, the manifest carries $($entries.Count) entries (no caller-supplied expected count; this comparison is intra-manifest and cannot catch a consistent edit)")
     }
 
-    # Derived once, from the tree, before any entry is judged (A4.3).
-    $mandatedSkills = Get-LPMandatedSkillSet -RepoRoot $RepoRoot -MandateMarker $mandateMarker
+    # Derived once, from the tree, before any entry is judged (A4.3). Its own problems are drift:
+    # a derivation that lost its population must not read as "no subagent consumers anywhere".
+    $derived = Get-LPMandatedSkillSet -RepoRoot $RepoRoot -MandateMarker $mandateMarker
+    $mandatedSkills = $derived.Skills
+    foreach ($p in @($derived.Problems)) { $drift.Add($p) }
 
     $seen = @{}
     $promotedByChunk = @{}
@@ -558,9 +595,14 @@ function Get-LessonPromotionAudit {
                 # A4.3: the consumer-type limb is DERIVED. A home is main-session-only exactly when
                 # no agent body mandates a load of that skill; when one does, the check refuses the
                 # main-session-only reading and requires the manifest to record the loader. The
-                # relaxation is real - five homes in the delivered tree pass only because of it -
-                # and it is not a hole: adding a mandated load to any of those bodies turns this red
-                # until the manifest records it.
+                # relaxation is real but SMALL, and the size is stated because the first draft of
+                # this comment claimed five and the true number is ONE - `agent-memory-compaction`,
+                # whose single lens has no executing agent body at all. The other seven homes carry
+                # a loader and would pass under the pre-A4.3 rule unchanged. A comment that inflates
+                # what removing a guard buys is the wrong kind of justification (PR #1061, F10).
+                # It is not a hole: adding a mandated load to that body turns this red until the
+                # manifest records it, and a mandate_marker that reaches no agent body is itself
+                # drift, so the derivation cannot be emptied from the manifest side.
                 $ls = Get-LPField $loadingSurfaces $homeRel
                 $mandatingBodies = @(if ($mandatedSkills.ContainsKey($homeRel)) { $mandatedSkills[$homeRel] } else { @() })
                 if ($null -eq $ls) {

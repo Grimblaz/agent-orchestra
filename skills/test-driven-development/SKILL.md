@@ -183,6 +183,8 @@ all members, not only the first or primary record.
 
 ### References
 
+> Note: ## Composite References above is the complete list for this directory and is what the promotion check reads. This older grouping is kept for its per-file commentary and does not include eferences/test-authoring-exhibits.md.
+
 - `references/quality-gates.md` - Mutation and coverage thresholds
 - `references/test-patterns.md` - AAA pattern, parameterized tests, factories
 - `references/anti-patterns.md` - Common anti-patterns to avoid

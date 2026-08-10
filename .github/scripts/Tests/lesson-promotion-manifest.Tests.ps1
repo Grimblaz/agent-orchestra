@@ -721,6 +721,58 @@ description: "Another skill. Use when reconciling a promoted roster against its 
         ($r.DriftDetails -join ' ') | Should -Match 'which the caller.s expected-share map does not declare'
     }
 
+    It 'INDUCED (unreachable-marker class): a mandate_marker that appears in no agent body FAILS' {
+        # The one HIGH finding of PR #1061's review, and the sharpest shape in this file: the A4.3
+        # derivation reads the tree, but its only INPUT is a manifest field. Point mandate_marker at
+        # a string that appears nowhere and the derived set empties, every lens home reads
+        # main-session-only, and an emptied loading_surfaces then audits clean. Reproduced on the
+        # real manifest before the fix: two tokens took 43 drift findings to zero. Non-blankness was
+        # never the property that mattered - reaching the tree is.
+        $r = script:Invoke-ScratchAudit { param($c)
+            $c.Manifest.mandate_marker = 'Mandated load, unconditionally'
+            $c.Manifest.loading_surfaces = [ordered]@{}
+        }
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'which appears in no agent body'
+    }
+
+    It 'INDUCED (absent-population class): no agents directory FAILS rather than deriving an empty set' {
+        $t = script:New-ScratchTree { $c = $args[0]; $c.Manifest.loading_surfaces = [ordered]@{} }
+        Remove-Item -LiteralPath (Join-Path $t.Dir 'agents') -Recurse -Force
+        $r = Get-LessonPromotionAudit -RepoRoot $t.Dir -ManifestPath $t.ManifestPath `
+            -ExpectedRosterCount 2 -ExpectedPromotedByChunk @{ '1' = 1 } -ReceivingSkillDirs @('skills/demo-skill')
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'has no population and would read every lens home as main-session-only'
+    }
+
+    It 'A mandate quoted inside a FENCED block is not read as a live subagent consumer' {
+        # Every other reader in this file is fence-aware. When this one was not, a fenced example
+        # made the home a subagent consumer to the derivation while layer 4 (which matches unfenced
+        # text) refused the loader entry - so the home had NO writable green state, which is the
+        # unsatisfiable shape amendment A4.5 exists to remove, reproduced one function over.
+        $t = script:New-ScratchTree { param($c)
+            $c.Manifest.loading_surfaces = [ordered]@{}
+            Set-Content -LiteralPath $c.AgentPath -Encoding utf8 -Value "# Demo Agent`n`n## Skills Reference`n`n- **Mandated load, unconditional** - load ``skills/other-skill/SKILL.md`` here.`n`nHistorical example, no longer in force:`n`n``````markdown`n- **Mandated load, unconditional** - load ``skills/demo-skill/SKILL.md`` before writing any claim`n```````n"
+        }
+        $r = Get-LessonPromotionAudit -RepoRoot $t.Dir -ManifestPath $t.ManifestPath `
+            -ExpectedRosterCount 2 -ExpectedPromotedByChunk @{ '1' = 1 } -ReceivingSkillDirs @('skills/demo-skill')
+        ($r.DriftDetails -join ' ') | Should -Not -Match 'not main-session-only'
+    }
+
+    It 'A mandate whose marker and skill path wrap onto separate lines IS derived' {
+        # A single-line search reads a markdown list-continuation as no mandate at all, which makes
+        # A4.3's stated safety property ("adding a mandated load turns this red") false for any
+        # mandate long enough to wrap - and several live mandate lines exceed 200 characters.
+        $t = script:New-ScratchTree { param($c)
+            $c.Manifest.loading_surfaces = [ordered]@{}
+            Set-Content -LiteralPath $c.AgentPath -Encoding utf8 -Value "# Demo Agent`n`n## Skills Reference`n`n- **Mandated load, unconditional** -`n  load ``skills/demo-skill/SKILL.md`` before writing any claim`n"
+        }
+        $r = Get-LessonPromotionAudit -RepoRoot $t.Dir -ManifestPath $t.ManifestPath `
+            -ExpectedRosterCount 2 -ExpectedPromotedByChunk @{ '1' = 1 } -ReceivingSkillDirs @('skills/demo-skill')
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'not main-session-only'
+    }
+
     It 'An object with ZERO properties produces findings, not a StrictMode crash' {
         # Regression guard. `$o.PSObject.Properties.Name` throws under StrictMode 3.0 when the
         # property collection is empty, and an empty `loading_surfaces` became a lawful shape the

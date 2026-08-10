@@ -415,7 +415,7 @@ Describe 'marker-transport-core' {
         # Windows-only OS primitive: the fixture below is a `.cmd` batch
         # file (`@echo off` / `exit /b 0`), a Windows-specific external-
         # process shape with no Linux equivalent. None of this suite's
-        # Describe blocks are in pester.yml's current Linux CI allowlist
+        # Describe blocks are selected by pester.yml's glob (no ci-quarantine.json entry)
         # yet, so this is a latent guard against a future Linux run, not
         # an active regression fix.
         BeforeAll {

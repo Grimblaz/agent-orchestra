@@ -138,7 +138,7 @@ These commands establish that the tree is healthy. They are **not** per-criterio
 - [ ] Reviewers assigned
 - [ ] Labels/tags applied
 
-After the PR is open — and before declaring done — read what the reviewers actually posted (§ External review on the pull request). Findings arrive minutes after the PR opens, not at the moment you finish writing it.
+After the PR is open — and before declaring done — read what the reviewers actually posted ([references/completion-account.md](references/completion-account.md) § External review on the pull request). Findings arrive minutes after the PR opens, not at the moment you finish writing it.
 
 ### Before Release
 
@@ -214,7 +214,7 @@ Fourteen ways verification evidence passes while proving nothing. Every one is a
 
 #### A baseline that is not an ancestor makes the differential rule vacuous
 
-Stated in full at [references/completion-account.md](references/completion-account.md) § Which commit may be named as the baseline and in `CLAUDE.md` § What a finished run is true of, property 3 — read the rule there rather than re-deriving it here. That is also this lens's exhibit: its incident detail is already shipped doctrine, so no second copy is written. What this lens adds is the generalisation those two do not make: **the same hole opens wherever an absolute threshold is replaced by a relative one**. Whenever you write a relative rule, ask who picks the reference point and what stops them picking one that makes the comparison trivial.
+Stated in full at [references/completion-account.md](references/completion-account.md) § Which commit may be named as the baseline and in `CLAUDE.md` § What a finished run is true of, property 3 — read the rule there rather than re-deriving it here. **This lens is rule-only** — the one entry in the promotion roster with no exhibit of its own, and the reason is recorded here rather than left implicit: its incident detail is already shipped doctrine at the two surfaces above, so a second copy would be the restatement the cite-don't-restate rule forbids. What this lens adds is the generalisation those two do not make: **the same hole opens wherever an absolute threshold is replaced by a relative one**. Whenever you write a relative rule, ask who picks the reference point and what stops them picking one that makes the comparison trivial.
 
 #### A differential script baselined on `HEAD` inverts the moment you commit
 

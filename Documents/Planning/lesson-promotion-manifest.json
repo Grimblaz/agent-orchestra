@@ -310,7 +310,8 @@
       "lesson": "reference_quoted_text_needs_position_not_heuristic",
       "state": "pending",
       "chunk": 2,
-      "issue": 1050
+      "issue": 1050,
+      "pending_reason": "Withheld by issue #1050: the contradiction procedure returned a `conflict` verdict against shipped doctrine, and parent #1045 amendment A4.5 routes a second contradiction of any kind up rather than resolving it in-chunk. Requested as parent amendment A5 (issue #1045 comment 5244634056); the lens section was removed from the tree rather than shipped beside the sentence it contradicts. Terminal state waits on that ruling."
     },
     {
       "lesson": "reference_boilerplate_propagation_is_where_a_claim_goes_false",
@@ -738,14 +739,15 @@
           "CLAUDE.md",
           "Documents/Design/*.md"
         ],
-        "note": "Already shipped doctrine: this skill's own section \"Which commit may be named as the baseline\" states the rule in full, and CLAUDE.md \"What a finished run is true of\" property 3 repeats it. The lens cites both and adds only the generalisation neither makes."
+        "note": "Already shipped doctrine: this skill's reference file references/completion-account.md section \"Which commit may be named as the baseline\" (moved there from the skill body by issue #1050; the lens body was re-pointed in the same change and this note with it) states the rule in full, and CLAUDE.md \"What a finished run is true of\" property 3 repeats it. The lens cites both and adds only the generalisation neither makes."
       }
     },
     {
       "lesson": "reference_version_collision_invisible_until_merge",
       "state": "pending",
       "chunk": 2,
-      "issue": 1050
+      "issue": 1050,
+      "pending_reason": "Withheld by issue #1050: the contradiction procedure returned a `conflict` verdict against shipped doctrine, and parent #1045 amendment A4.5 routes a second contradiction of any kind up rather than resolving it in-chunk. Requested as parent amendment A5 (issue #1045 comment 5244634056); the lens section was removed from the tree rather than shipped beside the sentence it contradicts. Terminal state waits on that ruling."
     },
     {
       "lesson": "reference_concurrent_merge_falsifies_cited_claims",
