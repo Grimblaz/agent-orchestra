@@ -53,7 +53,13 @@ The procedure behind those properties — **which commit may be named as the bas
 Two rules from it are load-bearing often enough to name here rather than behind the citation, because a run that never opens the reference still has to get them right:
 
 - **The named baseline must be an ancestor of the work being declared done** — never the run's own post-change `HEAD`, which makes every failure "pre-existing" and property 3 vacuous.
-- **Absence of the review assertion is not a third polarity.** An account omitting `adversarial_review_ran` reads as *not run*, never as examined-and-clean.
+- **The account MUST carry the review assertion**, in this form:
+
+```yaml
+adversarial_review_ran: true    # or false
+```
+
+- **Absence of that field is not a third polarity.** An account omitting `adversarial_review_ran` reads as *not run*, never as examined-and-clean. The example above stays in this entryway rather than moving behind the citation: `completion-finish-line.Tests.ps1` reads it from **this live file** on purpose, so that the reader and the documentation cannot drift apart — a fixture holding its own copy of the example is exactly the defect that assertion was written for.
 
 ## Universal Verification Checklist
 
