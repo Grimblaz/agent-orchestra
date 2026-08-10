@@ -51,6 +51,165 @@ $script:CIGlobAuditBodyCap = 65536
 # four apart without opening the suite.
 $script:CIGlobAuditStates = @('passed', 'failed', 'did-not-complete', 'executed-no-tests')
 
+# The record format's own version. A consumer that finds this key can tell a
+# shape it understands from one it does not; a consumer reading a record that
+# carries no version at all has to guess, and column order is not a contract.
+# Bump this when a column moves, a field's meaning changes, or a document kind
+# is added or removed.
+$script:CIGlobAuditRecordFormatVersion = 1
+
+# The stable pointer. Every other marker embeds the run id, which means a
+# consumer cannot ask for "the current record" without enumerating every
+# comment on an issue and regexing run ids out of HTML comments. This one is
+# fixed, upserted, and lists every run newest-first.
+$script:CIGlobAuditIndexMarker = '<!-- ci-glob-audit-index -->'
+
+# THE fact-key list. One list, not three: the producer fills it, the compose step checks every key
+# in it for cross-shard agreement, and the statement builder requires every key in it. Adding a
+# dimension is one edit, and a dimension nobody measured can no longer slip past the agreement check.
+$script:CIGlobAuditFactKeys = @(
+    'ProcessModel', 'Concurrency', 'TokenAvailability', 'CheckoutDepth', 'CredentialPersistence',
+    'GitIdentity', 'WorkingDirectory', 'RunnerImage', 'PowerShellVersion', 'PesterVersion',
+    'YamlModuleVersion', 'HasToken', 'IsShallow', 'CredentialsPersisted', 'HasGitIdentity'
+)
+
+function Get-CIGlobAuditFactKeys { return , @($script:CIGlobAuditFactKeys) }
+
+# ONE detail budget, reconciled end to end, because three different numbers on
+# the same pipeline means two of them are dead work. The launcher collects at
+# most MaxFailures messages of at most MaxMessageChars each; the console-tail
+# fallback keeps at most DetailCharCap; and the composer's per-row cap is that
+# same number. Before this was reconciled the launcher spent up to 25 x 1200
+# characters collecting failure text the composer discarded at 1500, so a suite
+# with many distinct failures surfaced roughly one message and the other
+# twenty-four were computed, serialised, uploaded and thrown away.
+$script:CIGlobAuditDetailCharCap = 3000
+$script:CIGlobAuditMaxFailures = 5
+$script:CIGlobAuditMaxSkips = 5
+$script:CIGlobAuditMaxMessageChars = 500
+
+# How much of a chatty suite's console output is retained in memory while it
+# runs. Tail-preserving: the head is dropped as the buffer fills, because for a
+# suite that never returned the last thing it printed is where it stopped.
+$script:CIGlobAuditConsoleBufferChars = 262144
+
+#region text hygiene — everything captured from an unaudited suite passes through here
+
+function Protect-CIGlobAuditSecret {
+    <#
+    .SYNOPSIS
+        Scrub credential-shaped material out of anything captured from an
+        unaudited suite before it reaches a permanent public surface.
+    .DESCRIPTION
+        189 of the suites this audit runs have never been vetted; the measure
+        job checks out with credential persistence ON, deliberately, for gate
+        parity; and any suite that prints its git config on failure would
+        otherwise publish a bearer token verbatim into a durable public issue
+        comment. Actions' secret masking protects the job log stream — not a
+        body composed in-process and POSTed through `gh`, and not an artifact.
+
+        Replaced with a VISIBLE `[REDACTED:<what>]` rather than removed, so a
+        reader of the record can tell "this row's detail was scrubbed" from
+        "this row printed nothing", which is a distinction R5 rests on.
+    .OUTPUTS
+        [string] the same text with credential-shaped material replaced.
+    #>
+    param([AllowEmptyString()][AllowNull()][string]$Text)
+
+    if ([string]::IsNullOrEmpty($Text)) { return '' }
+
+    $t = $Text
+    # `git config --get-regexp http.*.extraheader` and anything echoing a
+    # .git/config line: the value is the credential, the key is not.
+    $t = [regex]::Replace($t, '(?im)(^|\s)(http\.[^\s=]*\.extraheader)(\s*=\s*|\s+)\S.*$', '$1$2$3[REDACTED:git-extraheader]')
+    # Authorization headers in either scheme, however they were printed.
+    $t = [regex]::Replace($t, '(?i)\bAUTHORIZATION:\s*basic\s+\S+', 'AUTHORIZATION: basic [REDACTED:basic-credential]')
+    $t = [regex]::Replace($t, '(?i)\bAUTHORIZATION:\s*bearer\s+\S+', 'AUTHORIZATION: bearer [REDACTED:bearer-token]')
+    # GitHub token shapes, which travel outside a header just as easily.
+    $t = [regex]::Replace($t, 'gh[pousr]_[A-Za-z0-9]{20,}', '[REDACTED:github-token]')
+    $t = [regex]::Replace($t, 'github_pat_[A-Za-z0-9_]{20,}', '[REDACTED:github-pat]')
+    return $t
+}
+
+function Remove-CIGlobAuditAnsi {
+    <#
+    .SYNOPSIS
+        Strip terminal control sequences from captured console output.
+    .DESCRIPTION
+        Pester colours its output, so every `did-not-complete` row's detail —
+        which is pure console tail — arrives full of `ESC[95m` runs. They are
+        invisible to a reader, they consume the per-row detail budget that R5's
+        classifying text needs, and they count against the body cap.
+
+        Stripped at CAPTURE rather than suppressed at source: setting NO_COLOR
+        or PSStyle in the suite's own process would be an environment
+        divergence from the gate, and R8 treats an avoidable divergence as a
+        failure rather than a tidiness win.
+    #>
+    param([AllowEmptyString()][AllowNull()][string]$Text)
+
+    if ([string]::IsNullOrEmpty($Text)) { return '' }
+    # CSI (colour, cursor) and OSC (title, hyperlink) forms.
+    $t = [regex]::Replace($Text, "`e\[[0-9;:?]*[ -/]*[@-~]", '')
+    $t = [regex]::Replace($t, "`e\][^`a`e]*(`a|`e\\)", '')
+    $t = [regex]::Replace($t, "`e[@-Z\\-_]", '')
+    return $t
+}
+
+function script:Get-CIGlobAuditSafeCut {
+    <#
+    .SYNOPSIS
+        Cut a string to a length without splitting a surrogate pair.
+    .DESCRIPTION
+        A .Substring at a UTF-16 index can leave a lone surrogate, which
+        becomes U+FFFD the moment the body is round-tripped through UTF-8 — a
+        silent corruption in a durable record, in a file that is otherwise
+        careful about astral characters.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Text,
+        [Parameter(Mandatory)][int]$MaxChars,
+        [ValidateSet('Head', 'Tail')][string]$Keep = 'Head'
+    )
+
+    if ($MaxChars -le 0) { return '' }
+    if ($Text.Length -le $MaxChars) { return $Text }
+
+    if ($Keep -eq 'Head') {
+        $end = $MaxChars
+        if ([char]::IsHighSurrogate($Text[$end - 1])) { $end-- }
+        return $Text.Substring(0, $end)
+    }
+
+    $start = $Text.Length - $MaxChars
+    if ([char]::IsLowSurrogate($Text[$start])) { $start++ }
+    return $Text.Substring($start)
+}
+
+function script:Get-CIGlobAuditFence {
+    <#
+    .SYNOPSIS
+        A code fence long enough that the text inside cannot end it early.
+    .DESCRIPTION
+        Captured suite output routinely contains fenced code — this corpus
+        asserts heavily on Markdown documents, and Pester embeds expected and
+        actual text in its messages. A fixed three-backtick fence lets that
+        text close the block and then render its own `###` heading at column
+        zero, which is indistinguishable from a genuine record row. Widening
+        the fence past the longest backtick run inside is what makes the block
+        opaque.
+    #>
+    param([AllowEmptyString()][string]$Text)
+
+    $longest = 0
+    foreach ($m in [regex]::Matches([string]$Text, '`+')) {
+        if ($m.Length -gt $longest) { $longest = $m.Length }
+    }
+    return ('`' * [Math]::Max(3, $longest + 1))
+}
+
+#endregion
+
 #region population
 
 function Get-CIGlobAuditPopulation {
@@ -70,11 +229,17 @@ function Get-CIGlobAuditPopulation {
 
             Selected  UNION  (Quarantined.file  MINUS  StaleQuarantine)
 
-        and it equals the on-disk set ONLY while HasDrift is false: a stale
-        entry naming a file that no longer exists still inflates `Quarantined`,
-        and an unaccounted file is on disk in neither set.
-
         THIS FUNCTION THROWS ON DRIFT, deliberately, and offers no override.
+        Be precise about WHY, because the obvious justification is not the true
+        one: the set identity above holds UNCONDITIONALLY by construction —
+        the stale subtraction already handles the one drift cause that touches
+        it. What drift actually signals is that the registry this measurement
+        is read against is not lint-clean, and a measurement taken from a
+        registry nobody has reconciled is a measurement whose class column
+        (R6's join, the whole reason #1036 can identify its own population)
+        is unreliable. So the refusal is about the registry's fitness as a
+        source, not about the arithmetic.
+
         A fail-closed predicate whose caller carries on regardless is a
         fail-open writer; the only way to make the precondition load-bearing is
         for the derivation to be unavailable without it.
@@ -101,9 +266,11 @@ function Get-CIGlobAuditPopulation {
 
     if ($selection.HasDrift) {
         throw ("ci-glob-audit: refusing to derive a population from a drifted registry. " +
-            "The derivation `Selected + (Quarantined - Stale)` equals the on-disk set only while " +
-            "HasDrift is false, so a drifted tree would yield a population that silently omits or " +
-            "invents suites. Drift: " + ($selection.DriftDetails -join ' | '))
+            "The population identity `Selected + (Quarantined - Stale)` holds unconditionally, so this " +
+            "is not a refusal about the arithmetic: the registry must be lint-clean BEFORE a measurement " +
+            "is taken from it, because every row's quarantine class is read from it and a class read from " +
+            "an unreconciled registry is not evidence about that suite. Reconcile the registry, then " +
+            "re-dispatch. Drift: " + ($selection.DriftDetails -join ' | '))
     }
 
     $classByName = @{}
@@ -298,6 +465,18 @@ function Get-CIGlobAuditDetail {
         blocked before emitting anything leaves nothing to capture. The record
         renders such a row explicitly as nothing-emitted and names it as a row
         #1036 cannot classify, rather than manufacturing text.
+
+        THE RETURN CARRIES ITS PROVENANCE, and that is load-bearing rather than
+        decorative. The two kinds of detail must be truncated from OPPOSITE
+        ENDS: structured messages are joined head-first and the FIRST one is
+        what classifies `linux-red` against `never-ci`, while a console tail's
+        whole value is its last line. A composer that cannot tell them apart
+        has to pick one end and be wrong about the other population — which is
+        precisely the defect that shipped here, keeping the head of a
+        deliberately tail-selected capture.
+    .OUTPUTS
+        [PSCustomObject] Text [string], Source ('structured' | 'console-tail' |
+        'none'), TruncateFrom ('Head' | 'Tail').
     #>
     param(
         [Parameter(Mandatory)][string]$State,
@@ -307,10 +486,12 @@ function Get-CIGlobAuditDetail {
         [string[]]$ContainerErrors = @(),
         [string]$StdOut = '',
         [string]$StdErr = '',
-        [int]$TailChars = 4000
+        [int]$TailChars = 0
     )
 
     Set-StrictMode -Version Latest
+
+    if ($TailChars -le 0) { $TailChars = $script:CIGlobAuditDetailCharCap }
 
     $parts = [System.Collections.Generic.List[string]]::new()
 
@@ -331,12 +512,38 @@ function Get-CIGlobAuditDetail {
         }
     }
 
+    $source = 'structured'
     if ($parts.Count -eq 0) {
+        $source = 'console-tail'
+        # The reason is not decoration here: it is the only thing that can tell
+        # a reader whether the console tail below is the end of a suite that
+        # never returned, or everything a crashed suite managed to print. Both
+        # arrive as an untitled block of console text otherwise.
         $tail = script:Get-CIGlobAuditTail -Text (@($StdErr, $StdOut) -join "`n") -TailChars $TailChars
-        if ($tail) { $parts.Add($tail) }
+        if ($tail) {
+            $lead = if ($Reason) { "console output ($State / $Reason):" } else { "console output ($State):" }
+            $parts.Add($lead)
+            $parts.Add($tail)
+        }
     }
 
-    return (($parts | Select-Object -Unique) -join "`n").Trim()
+    # Ordinal-unique, preserving order. `Select-Object -Unique` is
+    # case-INSENSITIVE, so two genuinely distinct failure lines differing only
+    # in case collapse to one — a silent loss inside the field R5 governs.
+    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    $unique = [System.Collections.Generic.List[string]]::new()
+    foreach ($p in $parts) { if ($seen.Add($p)) { $unique.Add($p) } }
+
+    $text = ($unique -join "`n").Trim()
+    if (-not $text) { $source = 'none' }
+
+    return [PSCustomObject]@{
+        Text         = $text
+        Source       = $source
+        # Structured detail is joined head-first and the first message
+        # classifies; a console tail's stopping point is its last line.
+        TruncateFrom = if ($source -eq 'console-tail') { 'Tail' } else { 'Head' }
+    }
 }
 
 function script:Get-CIGlobAuditTail {
@@ -344,7 +551,7 @@ function script:Get-CIGlobAuditTail {
     if ([string]::IsNullOrWhiteSpace($Text)) { return '' }
     $t = $Text.Trim()
     if ($t.Length -le $TailChars) { return $t }
-    return '...(head elided)... ' + $t.Substring($t.Length - $TailChars)
+    return '...(head elided)... ' + (script:Get-CIGlobAuditSafeCut -Text $t -MaxChars $TailChars -Keep 'Tail')
 }
 
 #endregion
@@ -363,15 +570,32 @@ function Get-CIGlobAuditLauncherScript {
         Container results are counted separately: a throw during discovery
         produces a failed CONTAINER and no failed test, which without this
         would arrive as "completed, nothing ran".
+
+        THE BUDGET IS RECONCILED WITH THE COMPOSER'S. The defaults multiply out
+        to the composer's per-row detail cap rather than to several times it:
+        collecting twenty-five messages the record then discards is work the
+        run pays for at every stage — serialised into the partial JSON,
+        uploaded as an artifact, downloaded, parsed — and then thrown away.
+
+        `$OutputVerbosity` is interpolated into the generated script, so it is
+        constrained by ValidateSet rather than escaped. The paths are escaped
+        (verified against every shape a Linux filesystem allows); an
+        unconstrained verbosity string would be one caller away from arbitrary
+        code in the child, and the same pattern already exists unconstrained at
+        `pester-sharded-core.ps1:347`.
     #>
     param(
         [Parameter(Mandatory)][string]$SuiteFile,
         [Parameter(Mandatory)][string]$ResultFile,
-        [string]$OutputVerbosity = 'Detailed',
-        [int]$MaxFailures = 25,
-        [int]$MaxSkips = 10,
-        [int]$MaxMessageChars = 1200
+        [ValidateSet('None', 'Minimal', 'Normal', 'Detailed', 'Diagnostic')][string]$OutputVerbosity = 'Detailed',
+        [ValidateRange(1, 100)][int]$MaxFailures = 0,
+        [ValidateRange(1, 100)][int]$MaxSkips = 0,
+        [ValidateRange(1, 100000)][int]$MaxMessageChars = 0
     )
+
+    if ($MaxFailures -le 0) { $MaxFailures = $script:CIGlobAuditMaxFailures }
+    if ($MaxSkips -le 0) { $MaxSkips = $script:CIGlobAuditMaxSkips }
+    if ($MaxMessageChars -le 0) { $MaxMessageChars = $script:CIGlobAuditMaxMessageChars }
 
     $suite = $SuiteFile -replace "'", "''"
     $result = $ResultFile -replace "'", "''"
@@ -383,7 +607,12 @@ function Get-CIGlobAuditLauncherScript {
 function Limit-Text([string]`$s) {
     if (-not `$s) { return '' }
     if (`$s.Length -le $MaxMessageChars) { return `$s }
-    return `$s.Substring(0, $MaxMessageChars) + '...(truncated)'
+    # Cut on a rune boundary. A .Substring at a UTF-16 index can leave a lone
+    # surrogate, which becomes U+FFFD once the record is round-tripped through
+    # UTF-8 — silent corruption in a durable artifact.
+    `$end = $MaxMessageChars
+    if ([char]::IsHighSurrogate(`$s[`$end - 1])) { `$end-- }
+    return `$s.Substring(0, `$end) + '...(truncated)'
 }
 try {
     `$cfg = New-PesterConfiguration
@@ -442,6 +671,52 @@ catch {
 "@
 }
 
+function Get-CIGlobAuditSurvivalVerdict {
+    <#
+    .SYNOPSIS
+        "The bound fired" and "the slot is free" are two facts. Given what the
+        harness observed, which of them hold?
+    .DESCRIPTION
+        Extracted from the execution path deliberately, because a decision rule
+        buried inside a process-management loop can only be exercised by
+        producing the very condition it exists to detect — and a surviving
+        orphan is expensive and flaky to manufacture on purpose. Named and pure,
+        it can be driven to every combination directly, which is the difference
+        between a rule that is defended and one that merely looks right.
+
+        THE SECOND SIGNAL IS THE POINT. `-not HasExited` sees only the direct
+        child: Kill($true) walks the tree it can see, so a grandchild spawned
+        after enumeration, or one that double-forks, survives while the direct
+        child's HasExited is true. But such a descendant INHERITED the
+        redirected pipe, so the pipe still being open after the child is gone
+        is evidence of it. Reporting zero survivors on that path is exactly the
+        conflation this audit's docstring claims to have fixed.
+
+        A held pipe WITHOUT a kill is reported separately rather than folded in:
+        nothing survived a kill there, but something the suite started is still
+        running on the runner and will contaminate later rows' durations.
+    .OUTPUTS
+        [PSCustomObject] SurvivedKill, DescendantHeldOutput, Evidence [string].
+    #>
+    param(
+        [Parameter(Mandatory)][bool]$ChildExited,
+        [Parameter(Mandatory)][bool]$KillEscalated,
+        [Parameter(Mandatory)][bool]$OutputPipeHeld
+    )
+
+    $survived = (-not $ChildExited) -or ($KillEscalated -and $OutputPipeHeld)
+    $evidence = if (-not $ChildExited) { 'the direct child was still alive after the kill grace' }
+    elseif ($KillEscalated -and $OutputPipeHeld) { 'the child was gone but a descendant still held the redirected output pipe' }
+    elseif ($OutputPipeHeld) { 'no kill was needed, but a descendant still held the redirected output pipe after the child exited' }
+    else { 'the child exited and its output pipe closed' }
+
+    return [PSCustomObject]@{
+        SurvivedKill         = $survived
+        DescendantHeldOutput = $OutputPipeHeld
+        Evidence             = $evidence
+    }
+}
+
 function Invoke-CIGlobAuditSuite {
     <#
     .SYNOPSIS
@@ -452,13 +727,30 @@ function Invoke-CIGlobAuditSuite {
         contain one.
 
         "The bound fired" and "the slot is free" are TWO FACTS, and the
-        repository's existing killable-process helper conflates them: it
-        reports TimedOut = $true even when the kill threw, and its taskkill
-        fallback is Windows-gated, leaving Linux with none. An orphaned child
-        keeps consuming the runner and contaminates every later row's duration
-        while each row individually looks well-formed. So this function kills
-        the tree, WAITS for the corpse, and reports ProcessSurvivedKill per row
-        — a run in which one survived is not offered as a timing measurement.
+        repository's existing killable-process helper conflates them:
+        `Invoke-GCTreeKillableProcess` at
+        `.github/scripts/lib/goal-contract-validate-core.ps1:1249` reports
+        TimedOut = $true even when Kill($true) threw, and its taskkill fallback
+        at :1295-1304 is $IsWindows-gated, leaving Linux with none. (That is
+        the SECOND independent diagnosis of the same two defects; a pointer
+        back from the helper itself is owed and is tracked as such.) An
+        orphaned child keeps consuming the runner and contaminates every later
+        row's duration while each row individually looks well-formed. So this
+        function kills the tree, WAITS for the corpse, and reports
+        ProcessSurvivedKill per row — a run in which one survived is not
+        offered as a timing measurement.
+
+        `-not $proc.HasExited` IS NOT ENOUGH ON ITS OWN, and the second signal
+        is free. Kill($true) walks the tree it can see; a grandchild spawned
+        after enumeration, or one that double-forks, survives while the direct
+        child's HasExited is true. But a surviving descendant INHERITED THE
+        REDIRECTED PIPE, so the pipe staying open after the child is gone is
+        direct evidence of one. That is why capture here is incremental rather
+        than a ReadToEnd: a ReadToEnd on a pipe an orphan holds never completes
+        and its result is discarded, so on exactly the path the docstring
+        anticipates, everything the suite already printed was thrown away and
+        the row fell through to the nothing-emitted text while it had in fact
+        emitted plenty.
     .OUTPUTS
         [PSCustomObject] one record row (pre-classification fields plus State).
     #>
@@ -467,13 +759,16 @@ function Invoke-CIGlobAuditSuite {
         [Parameter(Mandatory)][string]$SuiteFile,
         [Parameter(Mandatory)][ValidateRange(1, 21600)][int]$TimeoutSeconds,
         [Parameter(Mandatory)][string]$WorkDir,
-        [string]$OutputVerbosity = 'Detailed',
+        [ValidateSet('None', 'Minimal', 'Normal', 'Detailed', 'Diagnostic')][string]$OutputVerbosity = 'Detailed',
         [int]$KillGraceMs = 10000,
-        [int]$DetailTailChars = 4000,
+        [int]$DetailTailChars = 0,
+        [int]$PollMs = 100,
         [hashtable]$EnvironmentOverrides = @{}
     )
 
     Set-StrictMode -Version Latest
+
+    if ($DetailTailChars -le 0) { $DetailTailChars = $script:CIGlobAuditDetailCharCap }
 
     if (-not (Test-Path -LiteralPath $WorkDir)) {
         New-Item -ItemType Directory -Force -Path $WorkDir | Out-Null
@@ -513,46 +808,109 @@ function Invoke-CIGlobAuditSuite {
     $completed = $false
     $killEscalated = $false
     $survivedKill = $false
+    $descendantHeldOutput = $false
     $exitCode = $null
     $stdOut = ''
     $stdErr = ''
 
+    $outBuf = [System.Text.StringBuilder]::new()
+    $errBuf = [System.Text.StringBuilder]::new()
+
     try {
         $null = $proc.Start()
         $proc.StandardInput.Close()
-        # Read both streams asynchronously BEFORE waiting: a child that fills
-        # a redirected pipe buffer blocks forever on write, which would turn
-        # every chatty suite into a fake did-not-complete row.
-        $outTask = $proc.StandardOutput.ReadToEndAsync()
-        $errTask = $proc.StandardError.ReadToEndAsync()
 
-        $completed = $proc.WaitForExit($TimeoutSeconds * 1000)
+        # Incremental, main-thread, bounded. Both streams are pumped from the
+        # start: a child that fills a redirected pipe buffer blocks forever on
+        # write, which would turn every chatty suite into a fake
+        # did-not-complete row. Reading incrementally rather than with a single
+        # ReadToEnd is what keeps the output of a suite whose pipe an orphan
+        # still holds.
+        $outChunk = [char[]]::new(8192)
+        $errChunk = [char[]]::new(8192)
+        $outTask = $null
+        $errTask = $null
+        $outOpen = $true
+        $errOpen = $true
+        $boundMs = [long]$TimeoutSeconds * 1000L
+        $drainDeadlineMs = $null
 
-        if (-not $completed) {
-            $killEscalated = $true
-            try { $proc.Kill($true) } catch { }
-            try { $null = $proc.WaitForExit($KillGraceMs) } catch { }
-            $survivedKill = -not $proc.HasExited
+        while ($true) {
+            if ($outOpen -and $null -eq $outTask) { $outTask = $proc.StandardOutput.ReadAsync($outChunk, 0, $outChunk.Length) }
+            if ($errOpen -and $null -eq $errTask) { $errTask = $proc.StandardError.ReadAsync($errChunk, 0, $errChunk.Length) }
+
+            $pending = [System.Collections.Generic.List[System.Threading.Tasks.Task]]::new()
+            if ($null -ne $outTask) { $pending.Add($outTask) }
+            if ($null -ne $errTask) { $pending.Add($errTask) }
+            if ($pending.Count -gt 0) {
+                try { $null = [System.Threading.Tasks.Task]::WaitAny($pending.ToArray(), $PollMs) } catch { }
+            }
+            else { Start-Sleep -Milliseconds $PollMs }
+
+            if ($null -ne $outTask -and $outTask.IsCompleted) {
+                $n = 0
+                try { $n = [int]$outTask.Result } catch { $n = 0 }
+                if ($n -gt 0) { [void]$outBuf.Append($outChunk, 0, $n) } else { $outOpen = $false }
+                $outTask = $null
+            }
+            if ($null -ne $errTask -and $errTask.IsCompleted) {
+                $n = 0
+                try { $n = [int]$errTask.Result } catch { $n = 0 }
+                if ($n -gt 0) { [void]$errBuf.Append($errChunk, 0, $n) } else { $errOpen = $false }
+                $errTask = $null
+            }
+
+            # Tail-preserving trim. A suite printing megabytes must not be able
+            # to exhaust the runner's memory, and for a suite that never
+            # returned it is the END of the output that classifies.
+            foreach ($buf in @($outBuf, $errBuf)) {
+                if ($buf.Length -gt $script:CIGlobAuditConsoleBufferChars) {
+                    [void]$buf.Remove(0, $buf.Length - $script:CIGlobAuditConsoleBufferChars)
+                }
+            }
+
+            if ((-not $outOpen) -and (-not $errOpen) -and $proc.HasExited) { break }
+
+            if ($null -eq $drainDeadlineMs) {
+                if ($proc.HasExited) {
+                    # Exited, but a stream is still open — a descendant
+                    # inherited the pipe. Bounded drain, then move on.
+                    $drainDeadlineMs = $sw.ElapsedMilliseconds + $KillGraceMs
+                }
+                elseif ($sw.ElapsedMilliseconds -ge $boundMs) {
+                    $killEscalated = $true
+                    try { $proc.Kill($true) } catch { }
+                    $drainDeadlineMs = $sw.ElapsedMilliseconds + $KillGraceMs
+                }
+            }
+            elseif ($sw.ElapsedMilliseconds -ge $drainDeadlineMs) { break }
         }
 
-        # Give the stream readers a bounded chance to drain. Bounded, because a
-        # surviving orphan can hold the pipe open indefinitely and this must not
-        # become the hang it exists to bound.
-        foreach ($t in @($outTask, $errTask)) {
-            try { $null = $t.Wait($KillGraceMs) } catch { }
+        $survival = Get-CIGlobAuditSurvivalVerdict -ChildExited $proc.HasExited `
+            -KillEscalated $killEscalated -OutputPipeHeld ($outOpen -or $errOpen)
+        $descendantHeldOutput = $survival.DescendantHeldOutput
+        $survivedKill = $survival.SurvivedKill
+        $completed = $proc.HasExited -and (-not $killEscalated)
+        if ($completed) {
+            try { $exitCode = $proc.ExitCode } catch { $exitCode = $null }
         }
-        if ($outTask.IsCompletedSuccessfully) { $stdOut = [string]$outTask.Result }
-        if ($errTask.IsCompletedSuccessfully) { $stdErr = [string]$errTask.Result }
-
-        if ($completed) { $exitCode = $proc.ExitCode }
     }
     catch {
-        $stdErr = ($stdErr + "`n" + "ci-glob-audit host: $($_.Exception.Message)").Trim()
+        [void]$errBuf.AppendLine("ci-glob-audit host: $($_.Exception.Message)")
     }
     finally {
         $sw.Stop()
         try { $proc.Dispose() } catch { }
     }
+
+    # SCRUB AT CAPTURE, not at compose. The partial JSON artifacts carry these
+    # same strings, and the measure job holds a live bearer credential in its
+    # checkout's git config for gate parity — so a suite that prints its git
+    # config on failure would publish it into an artifact even if the record
+    # itself were clean. ANSI is stripped here too, so the escapes never
+    # consume the per-row detail budget downstream.
+    $stdOut = Protect-CIGlobAuditSecret -Text (Remove-CIGlobAuditAnsi -Text $outBuf.ToString())
+    $stdErr = Protect-CIGlobAuditSecret -Text (Remove-CIGlobAuditAnsi -Text $errBuf.ToString())
 
     [System.IO.File]::WriteAllText($outPath, $stdOut, [System.Text.UTF8Encoding]::new($false))
     [System.IO.File]::WriteAllText($errPath, $stdErr, [System.Text.UTF8Encoding]::new($false))
@@ -566,8 +924,23 @@ function Invoke-CIGlobAuditSuite {
             $passed = [int]$data.passed; $failed = [int]$data.failed
             $skipped = [int]$data.skipped; $notRun = [int]$data.notRun
             $containerFailed = [int]$data.containerFailed
-            $failures = @($data.failures); $skips = @($data.skips)
-            $containerErrors = @($data.containerErrors | ForEach-Object { [string]$_ })
+            # Structured text from the suite reaches the durable record too, so
+            # it is scrubbed on the same terms as the console capture.
+            $failures = @($data.failures | ForEach-Object {
+                    [PSCustomObject]@{
+                        name    = Protect-CIGlobAuditSecret -Text ([string]$_.name)
+                        message = Protect-CIGlobAuditSecret -Text (Remove-CIGlobAuditAnsi -Text ([string]$_.message))
+                    }
+                })
+            $skips = @($data.skips | ForEach-Object {
+                    [PSCustomObject]@{
+                        name    = Protect-CIGlobAuditSecret -Text ([string]$_.name)
+                        message = Protect-CIGlobAuditSecret -Text (Remove-CIGlobAuditAnsi -Text ([string]$_.message))
+                    }
+                })
+            $containerErrors = @($data.containerErrors | ForEach-Object {
+                    Protect-CIGlobAuditSecret -Text (Remove-CIGlobAuditAnsi -Text ([string]$_))
+                })
             $hasResult = $true
         }
         catch {
@@ -587,25 +960,28 @@ function Invoke-CIGlobAuditSuite {
         -StdOut $stdOut -StdErr $stdErr -TailChars $DetailTailChars
 
     return [PSCustomObject]@{
-        Name               = Split-Path -Leaf $SuiteFile
-        State              = $classification.State
-        Reason             = $classification.Reason
-        ElapsedMs          = [int]$sw.ElapsedMilliseconds
-        BoundSeconds       = $TimeoutSeconds
-        Completed          = $completed
-        ExitCode           = $exitCode
-        Passed             = $passed
-        Failed             = $failed
-        Skipped            = $skipped
-        NotRun             = $notRun
-        Discovered         = $classification.Discovered
-        Executed           = $classification.Executed
-        ContainerFailed    = $containerFailed
-        KillEscalated      = $killEscalated
-        ProcessSurvivedKill = $survivedKill
-        Detail             = $detail
-        StdOutPath         = $outPath
-        StdErrPath         = $errPath
+        Name                 = Split-Path -Leaf $SuiteFile
+        State                = $classification.State
+        Reason               = $classification.Reason
+        ElapsedMs            = [int]$sw.ElapsedMilliseconds
+        BoundSeconds         = $TimeoutSeconds
+        Completed            = $completed
+        ExitCode             = $exitCode
+        Passed               = $passed
+        Failed               = $failed
+        Skipped              = $skipped
+        NotRun               = $notRun
+        Discovered           = $classification.Discovered
+        Executed             = $classification.Executed
+        ContainerFailed      = $containerFailed
+        KillEscalated        = $killEscalated
+        ProcessSurvivedKill  = $survivedKill
+        DescendantHeldOutput = $descendantHeldOutput
+        Detail               = $detail.Text
+        DetailSource         = $detail.Source
+        DetailTruncateFrom   = $detail.TruncateFrom
+        StdOutPath           = $outPath
+        StdErrPath           = $errPath
     }
 }
 
@@ -627,6 +1003,12 @@ function Invoke-CIGlobAuditShard {
         that would let the shard stop early and leave rows unattempted — a
         record in which a suite can appear without having been attempted is
         exactly the shape this whole audit exists to replace.
+
+        THE DIGEST IS TAKEN BEFORE THE SUITE RUNS. Suites execute with write
+        access to the workspace, so a suite that rewrites its own file — or a
+        later shard-mate's — would otherwise be recorded against the content it
+        left behind rather than the content that was executed, and R9's whole
+        comparability axis keys on that digest.
     .OUTPUTS
         [PSCustomObject[]] one row per assigned suite.
     #>
@@ -635,7 +1017,7 @@ function Invoke-CIGlobAuditShard {
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Assignments,
         [Parameter(Mandatory)][ValidateRange(1, 21600)][int]$TimeoutSeconds,
         [Parameter(Mandatory)][string]$WorkDir,
-        [string]$OutputVerbosity = 'Detailed'
+        [ValidateSet('None', 'Minimal', 'Normal', 'Detailed', 'Diagnostic')][string]$OutputVerbosity = 'Detailed'
     )
 
     Set-StrictMode -Version Latest
@@ -649,31 +1031,43 @@ function Invoke-CIGlobAuditShard {
         if ($item.PSObject.Properties.Match('EnvironmentOverrides').Count -gt 0 -and $item.EnvironmentOverrides) {
             foreach ($p in $item.EnvironmentOverrides.PSObject.Properties) { $overrides[$p.Name] = [string]$p.Value }
         }
+        # BEFORE, not after: the suite is about to run with write access to this
+        # workspace, and a digest sampled afterwards describes whatever the
+        # suite left behind rather than what was executed.
+        $digestBefore = Get-CIGlobAuditContentDigest -Path $item.Path
         $row = Invoke-CIGlobAuditSuite -SuiteFile $item.Path -TimeoutSeconds $TimeoutSeconds `
             -WorkDir $WorkDir -OutputVerbosity $OutputVerbosity -EnvironmentOverrides $overrides
+        $digestAfter = Get-CIGlobAuditContentDigest -Path $item.Path
         $enriched = [PSCustomObject]@{
-            Name                = $item.Name
-            Path                = $item.Path
-            InPopulation        = [bool]$item.InPopulation
-            ControlRole         = [string]$item.ControlRole
-            QuarantineClass     = $item.QuarantineClass
-            ContentDigest       = Get-CIGlobAuditContentDigest -Path $item.Path
-            State               = $row.State
-            Reason              = $row.Reason
-            ElapsedMs           = $row.ElapsedMs
-            BoundSeconds        = $row.BoundSeconds
-            Completed           = $row.Completed
-            ExitCode            = $row.ExitCode
-            Passed              = $row.Passed
-            Failed              = $row.Failed
-            Skipped             = $row.Skipped
-            NotRun              = $row.NotRun
-            Discovered          = $row.Discovered
-            Executed            = $row.Executed
-            ContainerFailed     = $row.ContainerFailed
-            KillEscalated       = $row.KillEscalated
-            ProcessSurvivedKill = $row.ProcessSurvivedKill
-            Detail              = $row.Detail
+            Name                 = $item.Name
+            Path                 = $item.Path
+            InPopulation         = [bool]$item.InPopulation
+            ControlRole          = [string]$item.ControlRole
+            QuarantineClass      = $item.QuarantineClass
+            ContentDigest        = $digestBefore
+            # A suite that rewrote its own file between these two samples is a
+            # fact about the workspace a later reader needs, not one to discard.
+            ContentDigestAfter   = $digestAfter
+            SelfModified         = ($digestBefore -ne $digestAfter)
+            State                = $row.State
+            Reason               = $row.Reason
+            ElapsedMs            = $row.ElapsedMs
+            BoundSeconds         = $row.BoundSeconds
+            Completed            = $row.Completed
+            ExitCode             = $row.ExitCode
+            Passed               = $row.Passed
+            Failed               = $row.Failed
+            Skipped              = $row.Skipped
+            NotRun               = $row.NotRun
+            Discovered           = $row.Discovered
+            Executed             = $row.Executed
+            ContainerFailed      = $row.ContainerFailed
+            KillEscalated        = $row.KillEscalated
+            ProcessSurvivedKill  = $row.ProcessSurvivedKill
+            DescendantHeldOutput = $row.DescendantHeldOutput
+            Detail               = $row.Detail
+            DetailSource         = $row.DetailSource
+            DetailTruncateFrom   = $row.DetailTruncateFrom
         }
         Write-Host "    -> $($enriched.State) ($($enriched.Reason)) in $($enriched.ElapsedMs) ms"
         $rows.Add($enriched)
@@ -684,6 +1078,16 @@ function Invoke-CIGlobAuditShard {
 #endregion
 
 #region environment, parity, reachability
+
+function script:Invoke-CIGlobAuditGit {
+    # Declared at file scope, once. Declaring it inside Get-CIGlobAuditRuntimeFacts
+    # redefined a script-scoped function on every call and leaked it into the
+    # dot-sourcing session, which for a library that gets dot-sourced into
+    # sessions that then run other people's code is a real hazard, not a style
+    # point.
+    param([string]$Dir, [string[]]$GitArgs)
+    try { return (& git -C $Dir @GitArgs 2>$null | Out-String).Trim() } catch { return '' }
+}
 
 function Get-CIGlobAuditRuntimeFacts {
     <#
@@ -720,10 +1124,6 @@ function Get-CIGlobAuditRuntimeFacts {
     else { "observed: token(s) PRESENT ($($tokensPresent -join ', '))" }
 
     $gitDir = if ($RepoRoot) { $RepoRoot } else { (Get-Location).Path }
-    function script:Invoke-CIGlobAuditGit {
-        param([string]$Dir, [string[]]$GitArgs)
-        try { return (& git -C $Dir @GitArgs 2>$null | Out-String).Trim() } catch { return '' }
-    }
 
     $isShallow = script:Invoke-CIGlobAuditGit -Dir $gitDir -GitArgs @('rev-parse', '--is-shallow-repository')
     $commitCount = script:Invoke-CIGlobAuditGit -Dir $gitDir -GitArgs @('rev-list', '--count', 'HEAD')
@@ -787,8 +1187,21 @@ function Get-CIGlobAuditEnvironmentStatement {
         the runner's actual PowerShell and module versions appear in no
         workflow file, and a table that reads them off the workflow is a
         transcript of intent rather than a measurement.
+
+        AGREEMENT IS THREE-VALUED, and that is the point of this revision.
+        `$true`, `$false`, and `$null` for "the gate states no value this run
+        can compare against". An earlier shape hard-coded `$true` on five of
+        eleven dimensions, so an out-of-window Pester and an entirely ABSENT
+        powershell-yaml both rendered `agrees: yes` — a claim of parity on a
+        dimension nothing checked, which R8(a) calls a failure. Two of those
+        five turned out to be genuinely checkable (the Pester window is stated
+        in the gate's own YAML; the yaml module's installation is a yes/no),
+        and the other three are honestly unknown rather than quietly agreed.
+        Every row therefore carries the BASIS on which its verdict was reached,
+        so a reader can tell a computed yes from an assumed one.
     .OUTPUTS
-        [PSCustomObject[]] Dimension, Gate, Audit, Agrees, Note.
+        [PSCustomObject[]] Dimension, Gate, Audit, Agrees ($true/$false/$null),
+        Basis, Note.
     #>
     param(
         [Parameter(Mandatory)][hashtable]$Facts
@@ -796,9 +1209,9 @@ function Get-CIGlobAuditEnvironmentStatement {
 
     Set-StrictMode -Version Latest
 
-    foreach ($required in @('ProcessModel', 'Concurrency', 'TokenAvailability', 'CheckoutDepth', 'CredentialPersistence',
-            'GitIdentity', 'WorkingDirectory', 'RunnerImage', 'PowerShellVersion', 'PesterVersion', 'YamlModuleVersion',
-            'HasToken', 'IsShallow', 'CredentialsPersisted', 'HasGitIdentity')) {
+    # Validated against THE fact-key list, not a fourth hand-maintained copy of
+    # it. Adding a dimension is one edit at the top of this file.
+    foreach ($required in (Get-CIGlobAuditFactKeys)) {
         if (-not $Facts.ContainsKey($required)) {
             throw "ci-glob-audit: environment statement is missing observed fact '$required'. A dimension nobody measured is a dimension the parity claim silently skips."
         }
@@ -816,19 +1229,43 @@ function Get-CIGlobAuditEnvironmentStatement {
     $PesterVersion = [string]$Facts['PesterVersion']
     $YamlModuleVersion = [string]$Facts['YamlModuleVersion']
 
+    # The gate's Pester constraint is a stated WINDOW, which makes this the one
+    # module dimension that is genuinely checkable rather than assumed.
+    $pesterFloor = [version]'6.0.0'
+    $pesterCeiling = [version]'6.999.999'
+    $pesterParsed = $null
+    $pesterInWindow = $null
+    if ([version]::TryParse($PesterVersion, [ref]$pesterParsed)) {
+        $pesterInWindow = ($pesterParsed -ge $pesterFloor -and $pesterParsed -le $pesterCeiling)
+    }
+    elseif ($PesterVersion) {
+        # "(not installed)", or anything else that is not a version, is a
+        # resolved value OUTSIDE the gate's window — a divergence, not an
+        # unknown, because the gate's own step installs one.
+        $pesterInWindow = $false
+    }
+    $pesterBasis = if ($null -eq $pesterInWindow) { 'not checked: no audit-side value was resolved' }
+    elseif ($pesterInWindow) { "computed: $PesterVersion falls inside the gate's stated window" }
+    else { "computed: $PesterVersion is NOT inside the gate's stated window >= 6.0.0, <= 6.999.999" }
+
+    $yamlInstalled = -not ([string]::IsNullOrWhiteSpace($YamlModuleVersion) -or $YamlModuleVersion -eq '(not installed)')
+    $psResolved = -not [string]::IsNullOrWhiteSpace($PowerShellVersion)
+
     $rows = @(
         [PSCustomObject]@{
             Dimension = 'runner OS image'
             Gate      = 'constraint: `runs-on: ubuntu-latest` (a label, not an image version)'
-            Audit     = "resolved: $RunnerImage (runs-on: ubuntu-latest)"
-            Agrees    = $true
-            Note      = 'Same label, so the same floating image. The label is the only thing the gate pins; a drifting image is a dimension R9 pools on.'
+            Audit     = "resolved: $RunnerImage"
+            Agrees    = $null
+            Basis     = 'not checkable from this run: the gate pins only a floating label, and the image IT resolved at its own run time is not observable here. R9 pools on this axis, which is why the resolved value is recorded rather than a verdict asserted.'
+            Note      = 'The audit-side value is observed from the runner''s own environment. The gate''s side is deliberately not filled in from this repository''s YAML — a value read off the workflow is a transcript of intent, which R8''s proof standard excludes.'
         },
         [PSCustomObject]@{
             Dimension = 'process model'
             Gate      = 'one Invoke-Pester over all selected suites in a single pwsh process'
             Audit     = $ProcessModel
             Agrees    = $false
+            Basis     = 'computed: structurally divergent by the parent design (B1)'
             Note      = 'Structurally divergent by the parent design (B1): a bound cannot be applied per suite inside one shared process. A duration measured one way does not predict the same suite measured the other.'
         },
         [PSCustomObject]@{
@@ -836,41 +1273,47 @@ function Get-CIGlobAuditEnvironmentStatement {
             Gate      = 'one job, one process, no parallelism'
             Audit     = $Concurrency
             Agrees    = $false
+            Basis     = 'computed: the audit fans out across jobs; the gate does not'
             Note      = 'Divergent, and stated because R7 depends on it: per-suite wall clock is only a usable distribution if nothing else ran on that runner at the same time.'
         },
         [PSCustomObject]@{
             Dimension = 'PowerShell version'
             Gate      = 'constraint: unstated in the workflow; whatever the runner image ships'
             Audit     = $PowerShellVersion
-            Agrees    = $true
-            Note      = 'Both take the image default; neither pins.'
+            Agrees    = $psResolved
+            Basis     = if ($psResolved) { 'computed: the gate imposes NO constraint on this dimension, so any resolved value satisfies it; a value was resolved' } else { 'computed: no audit-side value resolved, so nothing satisfies even an empty constraint' }
+            Note      = 'Both take the image default; neither pins. The verdict here is that an unconstrained dimension cannot be violated — not that the two runners were observed to match, which this run cannot establish.'
         },
         [PSCustomObject]@{
             Dimension = 'Pester version'
             Gate      = 'constraint: window >= 6.0.0, <= 6.999.999 (pester.yml)'
             Audit     = $PesterVersion
-            Agrees    = $true
-            Note      = 'Installed through the same window, so the same floating patch. Within-window drift is a dimension R9 pools on.'
+            Agrees    = $pesterInWindow
+            Basis     = $pesterBasis
+            Note      = 'The gate states an explicit window, so this dimension is checked against it rather than assumed. Within-window drift is still a dimension R9 pools on.'
         },
         [PSCustomObject]@{
             Dimension = 'powershell-yaml version'
-            Gate      = 'constraint: unpinned latest (pester.yml)'
+            Gate      = 'constraint: unpinned latest, INSTALLED by the gate''s own step (pester.yml)'
             Audit     = $YamlModuleVersion
-            Agrees    = $true
-            Note      = 'Installed the same unpinned way. Omitting it would be an avoidable divergence that reddens every suite importing it.'
+            Agrees    = $yamlInstalled
+            Basis     = if ($yamlInstalled) { "computed: resolved to $YamlModuleVersion, satisfying the gate's install-it constraint" } else { 'computed: the module is ABSENT, and the gate installs it — an avoidable divergence' }
+            Note      = 'Omitting it would be an avoidable divergence that reddens every suite importing it, which R8(b) treats as a failure rather than an account. The version itself is unpinned on both sides, so only presence is checkable.'
         },
         [PSCustomObject]@{
             Dimension = 'credential and token availability'
             Gate      = 'no permissions:, no env:, no token in the suite-running step'
             Audit     = $TokenAvailability
             Agrees    = (-not $Facts['HasToken'])
-            Note      = 'Any token this run needs to persist its record is step-scoped away from suite execution. A suite that shells out to `gh` must meet the same nothing the gate gives it.'
+            Basis     = 'computed: from the observed HasToken fact, not from the prose above it'
+            Note      = 'Any token this run needs to persist its record is step-scoped away from suite execution. A suite that shells out to `gh` must meet the same nothing the gate gives it. Scope: this covers a token in the ENVIRONMENT; the credential reachable through the checkout is the next row.'
         },
         [PSCustomObject]@{
             Dimension = 'checkout depth'
             Gate      = 'constraint: bare actions/checkout => fetch-depth 1'
             Audit     = $CheckoutDepth
             Agrees    = [bool]$Facts['IsShallow']
+            Basis     = 'computed: from the observed IsShallow fact'
             Note      = 'Matters for any suite that reads history.'
         },
         [PSCustomObject]@{
@@ -878,25 +1321,45 @@ function Get-CIGlobAuditEnvironmentStatement {
             Gate      = 'constraint: bare actions/checkout => persist-credentials true'
             Audit     = $CredentialPersistence
             Agrees    = [bool]$Facts['CredentialsPersisted']
-            Note      = 'Matters for any suite that runs git against the origin remote.'
+            Basis     = 'computed: from the observed CredentialsPersisted fact'
+            Note      = 'Matters for any suite that runs git against the origin remote. Read this row as parity WITH an exposure, not as reassurance: agreeing with the gate here means both give every suite a usable bearer credential. Everything captured from a suite is scrubbed before it reaches a durable surface for exactly that reason.'
         },
         [PSCustomObject]@{
             Dimension = 'git identity'
             Gate      = 'none supplied by the workflow'
             Audit     = $GitIdentity
             Agrees    = (-not $Facts['HasGitIdentity'])
+            Basis     = 'computed: from the observed HasGitIdentity fact'
             Note      = 'The sharded runner writes a temp global gitconfig for its real-git shard, which is this repository''s own evidence that a class of suites needs one. Neither the gate nor this audit supplies it.'
         },
         [PSCustomObject]@{
             Dimension = 'working directory'
             Gate      = 'constraint: actions/checkout convention ($GITHUB_WORKSPACE)'
             Audit     = $WorkingDirectory
-            Agrees    = $true
-            Note      = ''
+            Agrees    = $null
+            Basis     = 'not checkable from this run: the gate states a convention rather than a path, and this run has no access to the gate''s own $GITHUB_WORKSPACE. Fabricating the gate''s value to make the row comparable is what R8(a) calls a failure.'
+            Note      = 'Recorded because a suite that resolves paths relative to the working directory behaves differently if it moves; the value is observed even though the comparison is not available.'
         }
     )
 
     return , $rows
+}
+
+function Format-CIGlobAuditAgreement {
+    <#
+    .SYNOPSIS
+        Render a three-valued agreement verdict without collapsing `unknown`
+        into either polarity.
+    .DESCRIPTION
+        `$null` rendered through a plain truthiness test reads as `no`, which
+        turns "nothing checked this" into "these differ" — a different false
+        statement, not a fix. Both directions matter: `unknown` counted as
+        agreement is the defect this replaces.
+    #>
+    param([AllowNull()][object]$Agrees)
+    if ($null -eq $Agrees) { return '**unknown**' }
+    if ([bool]$Agrees) { return 'yes' }
+    return '**no**'
 }
 
 function Get-CIGlobAuditGateAgreement {
@@ -948,6 +1411,27 @@ function Get-CIGlobAuditReachability {
 
         Reasoning about blast radius from what SELECTS a suite instead of what
         EXECUTES it is the error; the tests-root arm is the one that catches it.
+
+        BOTH SIDES ARE NORMALISED TO A RELATIVE FORM, and neither is resolved
+        against the filesystem. Two separate reasons, and dropping either one
+        reopens a hole:
+
+          * The shipped pipeline's row `Path` is RELATIVE — Prepare builds it
+            as `Join-Path '.github/scripts/Tests' $name` and Compose re-stamps
+            the same relative string — while an earlier version of this
+            function resolved the root to an ABSOLUTE path and then tested
+            `StartsWith`. That comparison is false for every row the pipeline
+            can produce, forever. It worked in exactly one circumstance: when
+            `Resolve-Path` threw because the root did not exist. All 253
+            in-population suites sit directly under the tests root and the 191
+            quarantined ones are not in `SelectedNames`, so for the population
+            this audit exists to attempt, BOTH arms were dead at once and the
+            record affirmatively printed `clean: True`.
+          * `Resolve-Path` on a row's own `Path` must never be called. This
+            function runs BEFORE any persistence, with no try/catch above it,
+            so a suite deleted between Prepare and Compose would convert a
+            silent false-clean into total record loss — a strictly worse
+            failure than the one being fixed.
     .OUTPUTS
         [PSCustomObject] Clean, GateReachable [string[]], TestsRootReachable [string[]].
     #>
@@ -959,14 +1443,16 @@ function Get-CIGlobAuditReachability {
 
     Set-StrictMode -Version Latest
 
-    $rootFull = try { (Resolve-Path -LiteralPath $TestsRoot).Path } catch { $TestsRoot }
-    $rootFull = $rootFull.TrimEnd('/', '\') + [System.IO.Path]::DirectorySeparatorChar
+    $normRoot = script:ConvertTo-CIGlobAuditComparablePath -Path $TestsRoot
 
     $stalled = @($Rows | Where-Object { $_.State -eq 'did-not-complete' })
     $gateReachable = @($stalled | Where-Object { $SelectedNames -contains $_.Name } | ForEach-Object { $_.Name })
     $rootReachable = @($stalled | Where-Object {
-            $p = [string]$_.Path
-            $p -and $p.StartsWith($rootFull, [System.StringComparison]::OrdinalIgnoreCase)
+            $p = script:ConvertTo-CIGlobAuditComparablePath -Path ([string]$_.Path)
+            $p -and $normRoot -and (
+                $p.Equals($normRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
+                $p.StartsWith($normRoot + '/', [System.StringComparison]::OrdinalIgnoreCase)
+            )
         } | ForEach-Object { $_.Name })
 
     return [PSCustomObject]@{
@@ -975,6 +1461,33 @@ function Get-CIGlobAuditReachability {
         TestsRootReachable = $rootReachable
         StalledCount       = $stalled.Count
     }
+}
+
+function script:ConvertTo-CIGlobAuditComparablePath {
+    <#
+    .SYNOPSIS
+        Put a path into the one form both sides of the reachability comparison
+        can be expressed in, without touching the filesystem.
+    .DESCRIPTION
+        Separator-normalised, leading `./` stripped, trailing separator
+        trimmed, and — only when the value is already rooted — made relative to
+        the current location so an absolute root and a relative row can be
+        compared at all. `Resolve-Path` is deliberately absent: this runs
+        before any persistence and a throw here costs the whole record.
+    #>
+    param([AllowEmptyString()][AllowNull()][string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) { return '' }
+
+    $p = $Path.Replace('\', '/')
+    if ([System.IO.Path]::IsPathRooted($Path)) {
+        $cwd = (Get-Location).Path.Replace('\', '/').TrimEnd('/')
+        if ($cwd -and $p.StartsWith($cwd + '/', [System.StringComparison]::OrdinalIgnoreCase)) {
+            $p = $p.Substring($cwd.Length + 1)
+        }
+    }
+    while ($p.StartsWith('./')) { $p = $p.Substring(2) }
+    return $p.TrimEnd('/')
 }
 
 #endregion
@@ -998,6 +1511,22 @@ function Get-CIGlobAuditInstrumentBasis {
         Hashed over the DIMENSION VALUES rather than a version string, so a new
         dimension added to the statement automatically enters the basis instead
         of silently pooling across it.
+
+        ONE DIMENSION IS EXCLUDED, and the exclusion is narrow on purpose.
+        R9's standard is "parameters that CAN CHANGE A TERMINAL STATE".
+        Concurrency cannot: the audit's shard count varies how many separate
+        RUNNERS are in flight, and each suite still runs alone in its own
+        bounded process on its own machine, so dispatching at 4 shards instead
+        of 8 cannot alter any suite's outcome. Including it reset the
+        observation count to 1 for every suite on a dispatch that changed
+        nothing a suite can see — and that count is what #1036 promotes on.
+
+        NOTHING ELSE IS PRUNED, and specifically not the runner image or the
+        module versions, even though those churn far more often. R9 names a
+        drifting `ubuntu-latest` image as a dimension the basis MUST cover; a
+        basis blind to it pools across exactly the drift the criterion was
+        widened to catch. The frequent-reset cost there is the criterion
+        working, not the criterion misfiring.
     #>
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$EnvironmentStatement,
@@ -1006,9 +1535,12 @@ function Get-CIGlobAuditInstrumentBasis {
 
     Set-StrictMode -Version Latest
 
+    $excluded = @('concurrency')
+
     $parts = [System.Collections.Generic.List[string]]::new()
     $parts.Add("bound=$BoundSeconds")
     foreach ($row in ($EnvironmentStatement | Sort-Object Dimension)) {
+        if ($excluded -contains [string]$row.Dimension) { continue }
         $parts.Add("$($row.Dimension)=$($row.Audit)")
     }
     $text = $parts -join '|'
@@ -1033,12 +1565,31 @@ function Update-CIGlobAuditHistory {
 
         A changed basis RESETS the count to 1 rather than incrementing, because
         the count answers "how many COMPARABLE observations", and the previous
-        basis is retained on the row so the change itself is visible.
+        basis is retained on the row so the change itself is visible — and it
+        is retained ACROSS SUBSEQUENT RUNS, not just the one immediately after
+        the change. Resetting it to `-` the moment the basis stops changing
+        made R9's attribution recoverable for exactly one run and then erased
+        it, which is worse than never recording it because the row still looks
+        complete.
 
-        Format is a fixed-width pipe table parsed back by this same function —
-        a record that cannot be read back is not a history.
+        THIS IS THE ONE STABLE-MARKERED SURFACE, so it carries what a consumer
+        needs to join on rather than the minimum the count needs: the
+        in-population flag (R2 permits an out-of-population row only where the
+        record NAMES it as such, and #1036/#1047 read observation counts from
+        here) and a PER-ROW commit (R6 requires the run AND the commit the
+        observation was taken at — a single header commit is the latest run's,
+        so it is wrong for every retained row).
+
+        Format is a pipe table parsed back by this same function — a record
+        that cannot be read back is not a history. Both halves of that are
+        checked here: a row that will not parse is SKIPPED and counted rather
+        than thrown on (this runs after the record comments are already
+        persisted, so a hand-edited row must not take the process down), and
+        the composed body is cap-checked before it is handed to a caller that
+        would otherwise discover the limit at the API.
     .OUTPUTS
-        [PSCustomObject] Body [string], Entries [object[]].
+        [PSCustomObject] Body [string], Entries [object[]], MalformedRows [int],
+        OutcomeDifferences [object[]].
     #>
     param(
         [AllowEmptyString()][string]$ExistingBody = '',
@@ -1046,66 +1597,152 @@ function Update-CIGlobAuditHistory {
         [Parameter(Mandatory)][string]$InstrumentBasis,
         [Parameter(Mandatory)][string]$RunId,
         [Parameter(Mandatory)][string]$Marker,
-        [string]$Commit = ''
+        [Parameter(Mandatory)][hashtable]$InPopulationByName,
+        [string]$Commit = '',
+        [int]$BodyCap = 0
     )
 
     Set-StrictMode -Version Latest
+    if ($BodyCap -le 0) { $BodyCap = $script:CIGlobAuditBodyCap }
 
     $prior = @{}
+    $malformed = 0
+    # Wide enough for any lawful filename. The previous character class could
+    # not express a space or a parenthesis, so such a row was WRITTEN and never
+    # read back and its count restarted at 1 forever — a silent, permanent
+    # reset keyed on nothing but the shape of a name.
+    $rowPattern = '^\|\s*`?([^|`]+\.Tests\.ps1)`?\s*\|'
     foreach ($line in ($ExistingBody -split "`r?`n")) {
-        if ($line -notmatch '^\|\s*`?([A-Za-z0-9._-]+\.Tests\.ps1)`?\s*\|') { continue }
-        $cells = @($line.Trim('|') -split '\|' | ForEach-Object { $_.Trim().Trim('`') })
-        if ($cells.Count -lt 6) { continue }
+        if ($line -notmatch $rowPattern) { continue }
+        $cells = @($line.Trim() -replace '^\|', '' -replace '\|$', '' -split '\|' | ForEach-Object { $_.Trim().Trim('`').Trim() })
+        if ($cells.Count -lt 8) { $malformed++; continue }
+        $observations = 0
+        if (-not [int]::TryParse($cells[3], [ref]$observations)) { $malformed++; continue }
         $prior[$cells[0]] = [PSCustomObject]@{
-            Name = $cells[0]; Basis = $cells[1]; Observations = [int]$cells[2]
-            LastState = $cells[3]; LastRun = $cells[4]; PriorBasis = $cells[5]
+            Name         = $cells[0]
+            InPopulation = ($cells[1] -eq 'in')
+            Basis        = $cells[2]
+            Observations = $observations
+            LastState    = $cells[4]
+            LastRun      = $cells[5]
+            LastCommit   = $cells[6]
+            PriorBasis   = $cells[7]
         }
     }
 
     $entries = [System.Collections.Generic.List[object]]::new()
+    $differences = [System.Collections.Generic.List[object]]::new()
     foreach ($row in ($Rows | Sort-Object Name)) {
         $basis = "$($row.ContentDigest)+$InstrumentBasis"
         $count = 1
         $priorBasis = '-'
         if ($prior.ContainsKey($row.Name)) {
             $p = $prior[$row.Name]
-            if ($p.Basis -eq $basis) { $count = $p.Observations + 1 }
+            if ($p.Basis -eq $basis) {
+                $count = $p.Observations + 1
+                # Carry it forward. The change this column records happened at
+                # some earlier run; the fact that the basis has been stable
+                # since is not a reason to forget what it changed FROM.
+                $priorBasis = $p.PriorBasis
+            }
             else { $priorBasis = $p.Basis }
+
+            # Claim 23's "behaviour once established" needs a surface, and this
+            # is the only durable one: a suite whose outcome differs from its
+            # last recorded observation is named, with both runs, so a reader
+            # can see order- and instrument-sensitivity instead of inferring it
+            # from two run-scoped comments by hand.
+            if ([string]$p.LastState -ne [string]$row.State) {
+                $differences.Add([PSCustomObject]@{
+                        Name          = $row.Name
+                        PreviousState = [string]$p.LastState
+                        CurrentState  = [string]$row.State
+                        PreviousRun   = [string]$p.LastRun
+                        CurrentRun    = $RunId
+                        Comparable    = ($p.Basis -eq $basis)
+                    })
+            }
         }
+        $inPop = if ($InPopulationByName.ContainsKey([string]$row.Name)) { [bool]$InPopulationByName[[string]$row.Name] } else { [bool]$row.InPopulation }
         $entries.Add([PSCustomObject]@{
-                Name = $row.Name; Basis = $basis; Observations = $count
-                LastState = $row.State; LastRun = $RunId; PriorBasis = $priorBasis
+                Name         = $row.Name
+                InPopulation = $inPop
+                Basis        = $basis
+                Observations = $count
+                LastState    = $row.State
+                LastRun      = $RunId
+                LastCommit   = if ($Commit) { $Commit } else { '-' }
+                PriorBasis   = $priorBasis
             })
     }
 
     # Suites absent from this run keep their rows: the history outlives the runs
     # that produced it, and a suite deleted from disk still has an observation
-    # history a later reader may need.
+    # history a later reader may need. Their commit stays THEIR run's commit.
+    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    foreach ($e in $entries) { [void]$seen.Add([string]$e.Name) }
     foreach ($name in ($prior.Keys | Sort-Object)) {
-        if (-not ($entries | Where-Object { $_.Name -eq $name })) { $entries.Add($prior[$name]) }
+        if (-not $seen.Contains([string]$name)) { $entries.Add($prior[$name]) }
     }
+
+    $sorted = @($entries | Sort-Object Name)
 
     $sb = [System.Text.StringBuilder]::new()
     [void]$sb.AppendLine($Marker)
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine('# Full-glob CI audit — observation history')
     [void]$sb.AppendLine('')
+    [void]$sb.AppendLine("``record_format_version: $script:CIGlobAuditRecordFormatVersion``. Column order is not a contract; this version is. The stable index of every run's record lives at ``$script:CIGlobAuditIndexMarker`` on this same issue.")
+    [void]$sb.AppendLine('')
     [void]$sb.AppendLine("Durable home for the observation count each suite's outcome goes back. Updated in place by every audit run; retention is the issue comment's, not the Actions run's.")
     [void]$sb.AppendLine('')
-    [void]$sb.AppendLine("**Comparability basis** = suite content digest + instrument basis. The instrument basis (``$InstrumentBasis``) hashes the bound and every dimension of the run's environment statement, so a run at a different bound, execution model, image, or module version does NOT pool with an earlier one. A changed basis resets the count to 1 and the previous basis is kept in the last column.")
+    [void]$sb.AppendLine("**Comparability basis** = suite content digest + instrument basis. The instrument basis (``$InstrumentBasis``) hashes the bound and every dimension of the run's environment statement EXCEPT concurrency, which cannot change a suite's terminal state. A run at a different bound, execution model, image, or module version does NOT pool with an earlier one. A changed basis resets the count to 1 and the previous basis is kept in the last column until it is superseded.")
+    [void]$sb.AppendLine('')
+    [void]$sb.AppendLine('**`in-population`** distinguishes a suite the gate enumerates from an out-of-population control. A control accretes observations here like any other row and must never be read as a measurement of the corpus.')
+    [void]$sb.AppendLine('')
+    [void]$sb.AppendLine('**`last commit`** is the commit of the run that produced THAT row''s last observation — not the latest run''s. A row retained from an earlier run keeps its own.')
     [void]$sb.AppendLine('')
     $commitClause = if ($Commit) { ' at commit `' + $Commit + '`' } else { '' }
     [void]$sb.AppendLine("Last updated by run ``$RunId``$commitClause.")
     [void]$sb.AppendLine('')
-    [void]$sb.AppendLine('| suite | basis | observations | last state | last run | previous basis |')
-    [void]$sb.AppendLine('| --- | --- | --- | --- | --- | --- |')
-    foreach ($e in ($entries | Sort-Object Name)) {
-        [void]$sb.AppendLine("| ``$($e.Name)`` | $($e.Basis) | $($e.Observations) | $($e.LastState) | $($e.LastRun) | $($e.PriorBasis) |")
+    if ($malformed -gt 0) {
+        [void]$sb.AppendLine("> **$malformed prior row(s) did not parse and were dropped.** Their observation counts restart at 1. A row that cannot be read back is not history, and silently rebuilding around it would hide that.")
+        [void]$sb.AppendLine('')
+    }
+    if ($differences.Count -gt 0) {
+        [void]$sb.AppendLine('## Outcome differences from the previous observation')
+        [void]$sb.AppendLine('')
+        [void]$sb.AppendLine('Suites whose terminal state is not what this history last recorded. Where the basis is unchanged (`comparable: yes`), the two observations are of the same suite under the same instrument, so the difference is the suite''s own — order-dependence and flakiness both land here, and such a suite''s outcome is not offered as a settled measurement.')
+        [void]$sb.AppendLine('')
+        [void]$sb.AppendLine('| suite | previous state | previous run | current state | current run | comparable |')
+        [void]$sb.AppendLine('| --- | --- | --- | --- | --- | --- |')
+        foreach ($d in ($differences | Sort-Object Name)) {
+            [void]$sb.AppendLine("| ``$($d.Name)`` | $($d.PreviousState) | $($d.PreviousRun) | $($d.CurrentState) | $($d.CurrentRun) | $(if ($d.Comparable) { 'yes' } else { 'no — the instrument or the suite''s content changed' }) |")
+        }
+        [void]$sb.AppendLine('')
+    }
+    [void]$sb.AppendLine('| suite | in-population | basis | observations | last state | last run | last commit | previous basis |')
+    [void]$sb.AppendLine('| --- | --- | --- | --- | --- | --- | --- | --- |')
+    foreach ($e in $sorted) {
+        $pop = if ($e.InPopulation) { 'in' } else { 'ctl' }
+        [void]$sb.AppendLine("| ``$($e.Name)`` | $pop | $($e.Basis) | $($e.Observations) | $($e.LastState) | $($e.LastRun) | $($e.LastCommit) | $($e.PriorBasis) |")
+    }
+
+    $body = $sb.ToString().TrimEnd() + "`n"
+    if (-not (Test-CIGlobAuditBodyFits -Body $body -Cap $BodyCap)) {
+        # The history only grows — rows for deleted suites are retained
+        # forever — so this is the same "discovering the cap mid-run" the
+        # record composer refuses, arriving on the one surface that had no
+        # check at all.
+        throw ("ci-glob-audit: the observation history is $(Measure-CIGlobAuditBody -Body $body) codepoints, over the $BodyCap cap, at $(@($sorted).Count) suite row(s). " +
+            'The history grows monotonically because rows for deleted suites are retained; it needs splitting or pruning before another run can persist it.')
     }
 
     return [PSCustomObject]@{
-        Body    = $sb.ToString().TrimEnd() + "`n"
-        Entries = @($entries | Sort-Object Name)
+        Body               = $body
+        Entries            = $sorted
+        MalformedRows      = $malformed
+        OutcomeDifferences = @($differences | Sort-Object Name)
     }
 }
 
@@ -1122,16 +1759,22 @@ function Measure-CIGlobAuditBody {
         characters measures nearly double its real size and a size guard built
         on it refuses lawful bodies. Emoji in a captured failure message are
         exactly the population that would hit this.
+
+        RUNES, NOT TEXT ELEMENTS. `StringInfo::GetTextElementEnumerator` yields
+        GRAPHEME CLUSTERS, and a grapheme is often several codepoints: a
+        combining sequence measures 1 instead of 2, a ZWJ emoji 1 instead of 3.
+        That under-measures in the fail-OPEN direction — an 80,000-codepoint
+        body reported 40,000 and passed a 65,536 cap — so the pagination loop
+        kept appending while measuring small and the write was rejected
+        mid-run, which is precisely the failure the composer states it exists
+        to make impossible. The previous test passed only because its exhibit
+        was a lone astral character, the one input where grapheme, codepoint
+        and "not a code unit" all agree.
     #>
     param([Parameter(Mandatory)][AllowEmptyString()][string]$Body)
     if ([string]::IsNullOrEmpty($Body)) { return 0 }
-    # Codepoints: enumerate text elements rather than trusting .Length, which
-    # counts UTF-16 code units and therefore reports nearly double for astral
-    # characters. A guard built on .Length refuses lawful bodies, and a captured
-    # failure message containing an emoji is exactly the population that hits it.
-    $enumerator = [System.Globalization.StringInfo]::GetTextElementEnumerator($Body)
     $count = 0
-    while ($enumerator.MoveNext()) { $count++ }
+    foreach ($rune in $Body.EnumerateRunes()) { $count++ }
     return $count
 }
 
@@ -1174,8 +1817,19 @@ function New-CIGlobAuditRecordDocuments {
         The summary never depends on a retention-bounded surface. Full console
         output goes to an artifact as a convenience, and no criterion rests on
         it.
+
+        WHY THERE IS AN INDEX DOCUMENT. Every other marker embeds the run id,
+        so a consumer had no way to ask for "the current record": it had to
+        enumerate every comment on an issue whose number is a workflow_dispatch
+        input, regex run ids out of HTML comments, and order them. The index
+        has a FIXED marker, is upserted, and carries one row per run — the
+        addressable entry point the parent's 1->3 seam needs. It is also the
+        only place that can see across runs, which is where R3(d)'s cross-bound
+        comparison and the reconciliation of a re-attempt's surplus detail
+        documents both live.
     .OUTPUTS
-        [PSCustomObject[]] Marker, Body, Kind ('summary' | 'detail'), Index.
+        [PSCustomObject[]] Marker, Body, Kind ('summary' | 'rows' | 'detail' |
+        'index'), Index.
     #>
     param(
         [Parameter(Mandatory)][hashtable]$RunContext,
@@ -1184,17 +1838,26 @@ function New-CIGlobAuditRecordDocuments {
         [Parameter(Mandatory)][object]$Population,
         [Parameter(Mandatory)][object]$GateAgreement,
         [Parameter(Mandatory)][object]$Reachability,
-        [Parameter(Mandatory)][object[]]$ControlCheck,
-        [int]$DetailCharCap = 1500,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$ControlCheck,
+        [AllowEmptyString()][string]$ExistingIndexBody = '',
+        [int]$DetailCharCap = 0,
         [int]$BodyCap = 0
     )
 
     Set-StrictMode -Version Latest
     if ($BodyCap -le 0) { $BodyCap = $script:CIGlobAuditBodyCap }
+    if ($DetailCharCap -le 0) { $DetailCharCap = $script:CIGlobAuditDetailCharCap }
+
+    if (-not $RunContext.ContainsKey('RecordFormatVersion')) {
+        throw ('ci-glob-audit: RunContext is missing RecordFormatVersion. Column order is not a contract, and a consumer ' +
+            'that cannot tell a shape it understands from one it does not has to guess — which is the seam defect this key closes.')
+    }
+    $formatVersion = [string]$RunContext['RecordFormatVersion']
 
     $runId = [string]$RunContext['RunId']
     $summaryMarker = "<!-- ci-glob-audit-record-$runId -->"
     $detailMarkerFor = { param($i) "<!-- ci-glob-audit-detail-$runId-$i -->" }
+    $rowsMarkerFor = { param($i) "<!-- ci-glob-audit-rows-$runId-$i -->" }
 
     $inPop = @($Rows | Where-Object { $_.InPopulation })
     $outPop = @($Rows | Where-Object { -not $_.InPopulation })
@@ -1207,22 +1870,63 @@ function New-CIGlobAuditRecordDocuments {
         foreach ($row in ($nonPassed | Sort-Object @{ E = { $_.InPopulation }; Descending = $true }, Name)) {
             $detail = [string]$row.Detail
             $emitted = $true
+            $truncationNote = ''
             if ([string]::IsNullOrWhiteSpace($detail)) {
-                $detail = "**Nothing was emitted before the kill.** This suite produced no output and no result at bound $($row.BoundSeconds)s. This is an honest empty, not a discharge: #1036 cannot classify this row from the record."
+                # STATE-CONDITIONAL, because the previous single sentence
+                # asserted a kill and a bound for every non-passed state. A
+                # `failed / no-result-file` row is a child that COMPLETED and
+                # was never bounded or killed; telling a reader it was killed
+                # at a bound is two false statements in a durable record, and
+                # it launders a crash into a hang narrative #1036 then reads.
                 $emitted = $false
+                $detail = if ([string]$row.State -eq 'did-not-complete') {
+                    "**Nothing was emitted before the kill.** This suite produced no output and no result before the bound of $($row.BoundSeconds)s fired. This is an honest empty, not a discharge: #1036 cannot classify this row from the record."
+                }
+                else {
+                    "**Nothing was captured for this row.** The suite's process COMPLETED — state ``$($row.State)``, reason ``$($row.Reason)``; it was neither bounded nor killed — and produced no structured failure message and no console output. This is an honest empty, not a discharge: #1036 cannot classify this row from the record."
+                }
             }
             elseif ($detail.Length -gt $DetailCharCap) {
-                $detail = $detail.Substring(0, $DetailCharCap) + "`n...(detail truncated at $DetailCharCap chars; full console output is in this run's artifact, which no criterion rests on)"
+                # WHICH END IS KEPT DEPENDS ON WHAT THE DETAIL IS, and getting
+                # this wrong in either direction breaks R5 on a different
+                # population. Structured failure messages are joined head-first
+                # and the FIRST one classifies `linux-red` against `never-ci`,
+                # so a blanket tail-keep would degrade the 191-suite population
+                # R5 exists for. A console tail was deliberately selected as a
+                # TAIL because for a suite that never returned the last thing
+                # it printed is where it stopped — and keeping its head, which
+                # is what shipped, systematically discards exactly the stopping
+                # point the tail selection existed to preserve.
+                $keepEnd = script:Get-CIGlobAuditTruncationEnd -Row $row
+                $detail = script:Get-CIGlobAuditSafeCut -Text $detail -MaxChars $DetailCharCap -Keep $keepEnd
+                $truncationNote = if ($keepEnd -eq 'Tail') {
+                    "`n...(the LAST $DetailCharCap characters of the captured console output are kept: for a suite that did not return, the stopping point is what classifies. Full output is in this run's artifact, which no criterion rests on.)"
+                }
+                else {
+                    "`n...(the FIRST $DetailCharCap characters of the structured failure messages are kept: they are joined in order and the first is what classifies. Full output is in this run's artifact, which no criterion rests on.)"
+                }
             }
+            # Widen the fence past anything inside it. Captured suite output
+            # routinely contains fenced code — this corpus asserts heavily on
+            # Markdown documents and Pester embeds expected/actual text in its
+            # messages — and a fixed three-backtick fence lets that text close
+            # the block and render its own `###` heading at column zero,
+            # indistinguishable from a genuine record row. Computed AFTER
+            # truncation, because a cut can change the longest backtick run.
+            $fence = script:Get-CIGlobAuditFence -Text $detail
             $scope = if ($row.InPopulation) { 'in-population' } else { "out-of-population control ($($row.ControlRole))" }
             $block = @(
                 "### ``$($row.Name)`` — $($row.State) ($($row.Reason))",
                 '',
                 "$scope | elapsed $($row.ElapsedMs) ms | bound $($row.BoundSeconds)s | quarantine class $(script:Format-CIGlobAuditClass -Class $row.QuarantineClass -InPopulation $row.InPopulation) | content ``$($row.ContentDigest)``$(if (-not $emitted) { ' | **no output captured**' })",
                 '',
-                '```text',
-                $detail,
-                '```',
+                # Parenthesised deliberately: inside an array literal PowerShell
+                # binds `,` TIGHTER than `+`, so `$fence + 'text', $detail` parses
+                # as `$fence + ('text', $detail)` and silently emits the fence and
+                # the language tag as two separate lines.
+                ($fence + 'text'),
+                ($detail + $truncationNote),
+                $fence,
                 '',
                 ''
             ) -join "`n"
@@ -1236,26 +1940,14 @@ function New-CIGlobAuditRecordDocuments {
                 '',
                 "## Full-glob CI audit — classifying detail (part $i)",
                 '',
-                "Run ``$runId``, commit ``$($RunContext['Commit'])``. Detail for every row whose state is not ``passed``, so a reader can decide ``linux-red`` versus ``never-ci`` without opening the suite. Part of the record whose summary is ``$summaryMarker``.",
+                "``record_format_version: $formatVersion``. Run ``$runId``, commit ``$($RunContext['Commit'])``. Detail for every row whose state is not ``passed``, so a reader can decide ``linux-red`` versus ``never-ci`` without opening the suite. Part of the record whose summary is ``$summaryMarker``; the stable index of all runs is ``$script:CIGlobAuditIndexMarker``.",
                 '',
                 ''
             ) -join "`n"
         }
 
-        $index = 1
-        $current = [System.Text.StringBuilder]::new()
-        [void]$current.Append((& $header $index))
-        foreach ($block in $pending) {
-            $candidate = $current.ToString() + $block
-            if (-not (Test-CIGlobAuditBodyFits -Body $candidate -Cap $BodyCap) -and $current.ToString() -ne (& $header $index)) {
-                $detailDocs.Add([PSCustomObject]@{ Marker = (& $detailMarkerFor $index); Body = $current.ToString().TrimEnd() + "`n"; Kind = 'detail'; Index = $index })
-                $index++
-                $current = [System.Text.StringBuilder]::new()
-                [void]$current.Append((& $header $index))
-            }
-            [void]$current.Append($block)
-        }
-        $detailDocs.Add([PSCustomObject]@{ Marker = (& $detailMarkerFor $index); Body = $current.ToString().TrimEnd() + "`n"; Kind = 'detail'; Index = $index })
+        $detailDocs = script:Split-CIGlobAuditDocument -Blocks $pending -Header $header `
+            -MarkerFor $detailMarkerFor -Kind 'detail' -BodyCap $BodyCap
     }
 
     # ---- summary ----
@@ -1266,11 +1958,14 @@ function New-CIGlobAuditRecordDocuments {
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine("Every suite the per-PR gate enumerates on disk, run on Linux with the quarantine **not** applied. Produced by run ``$runId``; nothing here was hand-written.")
     [void]$sb.AppendLine('')
+    [void]$sb.AppendLine("The stable entry point for every run's record is ``$script:CIGlobAuditIndexMarker`` on this issue — a consumer should resolve that marker rather than enumerating run-keyed comments.")
+    [void]$sb.AppendLine('')
 
     [void]$sb.AppendLine('### Run')
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine('| field | value |')
     [void]$sb.AppendLine('| --- | --- |')
+    [void]$sb.AppendLine("| record_format_version | $formatVersion |")
     foreach ($k in @('RunId', 'RunUrl', 'RunAttempt', 'TriggerEvent', 'Commit', 'Ref', 'DefaultBranch', 'DefaultBranchTip', 'AncestryCheck', 'ContentDifferences', 'BoundSeconds', 'ShardCount', 'InstrumentBasis', 'StartedAt')) {
         if ($RunContext.ContainsKey($k)) { [void]$sb.AppendLine("| $k | $($RunContext[$k]) |") }
     }
@@ -1279,7 +1974,12 @@ function New-CIGlobAuditRecordDocuments {
     [void]$sb.AppendLine('### Population — the gate''s own enumeration, before the quarantine is subtracted')
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine("- Derivation: ``$($Population.DerivationCommand)``")
-    [void]$sb.AppendLine("- ``HasDrift``: **$($Population.HasDrift)** — the derivation is exact only under this precondition, and the run refuses to proceed without it.")
+    # Say what was actually asserted. `HasDrift` here is an ENFORCED
+    # PRECONDITION, not an independent check: the run refuses to derive a
+    # population at all from a drifted registry, so this value could not have
+    # come out any other way and rendering it as evidence overstates it.
+    [void]$sb.AppendLine("- Registry lint: this record exists only because the gate's own selection procedure reported **no drift** when the population was derived; the run refuses outright otherwise. The ``HasDrift`` value below is that enforced precondition restated, not a second, independent check — it could not read anything else here.")
+    [void]$sb.AppendLine("- ``HasDrift`` (as enforced at derivation): **$($Population.HasDrift)**")
     [void]$sb.AppendLine("- Selected $($Population.SelectedCount); quarantine entries $($Population.QuarantinedCount) (unclassified $($Population.UnclassifiedCount)); stale $(@($Population.StaleQuarantine).Count).")
     [void]$sb.AppendLine("- Derived population **$(@($Population.Names).Count)**; in-population rows in this record **$($inPop.Count)**; out-of-population rows **$($outPop.Count)** (named below).")
     $missing = @($Population.Names | Where-Object { $n = $_; -not ($inPop | Where-Object { $_.Name -eq $n }) })
@@ -1302,10 +2002,15 @@ function New-CIGlobAuditRecordDocuments {
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine('Out-of-population suites that exist to exhibit each terminal state through the path the workflow actually runs. A control that did not produce its expected state means the classifier is wrong, not that the corpus changed.')
     [void]$sb.AppendLine('')
-    [void]$sb.AppendLine('| control | expected | observed | ok |')
-    [void]$sb.AppendLine('| --- | --- | --- | --- |')
-    foreach ($c in $ControlCheck) {
-        [void]$sb.AppendLine("| ``$($c.Name)`` | $($c.Expected) | $($c.Observed) | $(if ($c.Ok) { 'yes' } else { '**NO**' }) |")
+    if (@($ControlCheck).Count -eq 0) {
+        [void]$sb.AppendLine('> **No controls were checked in this run.** The instrument therefore has no self-test behind it, and every terminal state below rests on the classifier being right rather than on having been demonstrated. Treat this record as unvalidated.')
+    }
+    else {
+        [void]$sb.AppendLine('| control | expected | observed | ok |')
+        [void]$sb.AppendLine('| --- | --- | --- | --- |')
+        foreach ($c in $ControlCheck) {
+            [void]$sb.AppendLine("| ``$($c.Name)`` | $($c.Expected) | $($c.Observed) | $(if ($c.Ok) { 'yes' } else { '**NO**' }) |")
+        }
     }
     [void]$sb.AppendLine('')
 
@@ -1318,17 +2023,35 @@ function New-CIGlobAuditRecordDocuments {
     [void]$sb.AppendLine("- located beneath the tests root: $(@($Reachability.TestsRootReachable).Count)$(if (@($Reachability.TestsRootReachable).Count) { ' — ' + ($Reachability.TestsRootReachable -join ', ') })")
     [void]$sb.AppendLine("- clean: **$($Reachability.Clean)**$(if (-not $Reachability.Clean) { ' — this is a defect to escalate to #993, not a case to excuse. This chunk has no lawful remedy of its own: reclassifying a suite is #1036''s and adding `timeout-minutes` to the gate is #1037''s.' })")
     [void]$sb.AppendLine('')
+    [void]$sb.AppendLine('Both arms compare NORMALISED RELATIVE paths. The tests-root arm previously resolved the root to an absolute path and prefix-tested a relative row path, which is false for every row this pipeline can produce — so for the quarantined population, where the gate arm is also silent, both arms were dead at once and this line printed `clean: True` regardless.')
+    [void]$sb.AppendLine('')
+
+    # R3(d) needs BOTH sets, not both counts, and each run names its own in
+    # full so two run-scoped records can be compared without re-running
+    # anything. The index document below carries the per-run bound that makes
+    # the comparison meaningful.
+    $stalledRows = @($Rows | Where-Object { $_.State -eq 'did-not-complete' } | Sort-Object Name)
+    [void]$sb.AppendLine("- the full ``did-not-complete`` set at bound $($RunContext['BoundSeconds'])s: $(if ($stalledRows.Count) { (($stalledRows | ForEach-Object { '`' + $_.Name + '`' }) -join ', ') } else { '(empty)' })")
+    [void]$sb.AppendLine('')
 
     [void]$sb.AppendLine('### Environment — per dimension, this run against the gate')
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine('Audit-side values are read from this run, not from the workflow file. Where the gate states a constraint rather than a value, the constraint is what appears — a fabricated exact gate value would read cleaner and be untrue. This statement belongs to this run; it is not inherited.')
     [void]$sb.AppendLine('')
-    [void]$sb.AppendLine('| dimension | gate | this audit run | agrees |')
-    [void]$sb.AppendLine('| --- | --- | --- | --- |')
+    [void]$sb.AppendLine('`agrees` is three-valued. **unknown** means the gate states no value this run can compare against — it is not a soft yes, and it is not a disagreement. The `checked by` column says how each verdict was reached, so an assumed agreement cannot hide among computed ones.')
+    [void]$sb.AppendLine('')
+    [void]$sb.AppendLine('| dimension | gate | this audit run | agrees | checked by |')
+    [void]$sb.AppendLine('| --- | --- | --- | --- | --- |')
     foreach ($d in $EnvironmentStatement) {
-        [void]$sb.AppendLine("| $($d.Dimension) | $($d.Gate) | $($d.Audit) | $(if ($d.Agrees) { 'yes' } else { '**no**' }) |")
+        $basis = if ($d.PSObject.Properties.Match('Basis').Count -gt 0) { [string]$d.Basis } else { '(not stated)' }
+        [void]$sb.AppendLine("| $($d.Dimension) | $($d.Gate) | $($d.Audit) | $(Format-CIGlobAuditAgreement -Agrees $d.Agrees) | $basis |")
     }
     [void]$sb.AppendLine('')
+    $unknownDims = @($EnvironmentStatement | Where-Object { $null -eq $_.Agrees } | ForEach-Object { $_.Dimension })
+    if ($unknownDims.Count -gt 0) {
+        [void]$sb.AppendLine("**$($unknownDims.Count) dimension(s) carry no parity verdict**: $($unknownDims -join ', '). No parity is claimed on these and none may be read into them.")
+        [void]$sb.AppendLine('')
+    }
     foreach ($d in ($EnvironmentStatement | Where-Object { $_.Note })) {
         [void]$sb.AppendLine("- **$($d.Dimension)**: $($d.Note)")
     }
@@ -1361,47 +2084,379 @@ function New-CIGlobAuditRecordDocuments {
     }
 
     $survivors = @($Rows | Where-Object { $_.ProcessSurvivedKill })
+    $pipeHolders = @($Rows | Where-Object {
+            $_.PSObject.Properties.Match('DescendantHeldOutput').Count -gt 0 -and $_.DescendantHeldOutput -and -not $_.ProcessSurvivedKill
+        })
+    $selfModified = @($Rows | Where-Object {
+            $_.PSObject.Properties.Match('SelfModified').Count -gt 0 -and $_.SelfModified
+        })
     [void]$sb.AppendLine('### Timing integrity')
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine('"The bound fired" and "the slot is free" are two facts. A killed suite whose process survived keeps consuming the runner and contaminates every later row''s duration while each row individually looks well-formed.')
     [void]$sb.AppendLine('')
+    [void]$sb.AppendLine('Survival is decided on two signals, because the direct child''s `HasExited` alone cannot see a grandchild that outlived the tree kill: the child still being alive, and — the one that catches an orphan — the redirected output pipe still being held open after the child is gone.')
+    [void]$sb.AppendLine('')
     [void]$sb.AppendLine("- bounded suites whose process survived the kill: **$($survivors.Count)**$(if ($survivors.Count) { ' — ' + (($survivors | ForEach-Object { $_.Name }) -join ', ') + '. The durations in this record are NOT offered as a timing measurement.' })")
+    [void]$sb.AppendLine("- suites that exited while a descendant still held their output pipe: **$($pipeHolders.Count)**$(if ($pipeHolders.Count) { ' — ' + (($pipeHolders | ForEach-Object { $_.Name }) -join ', ') + '. Something these suites started is still running on that runner; later rows'' durations on the same job are contaminated.' })")
+    [void]$sb.AppendLine("- suites whose own file changed while they ran: **$($selfModified.Count)**$(if ($selfModified.Count) { ' — ' + (($selfModified | ForEach-Object { $_.Name }) -join ', ') + '. The digest recorded is the content that was EXECUTED, sampled before the run.' })")
+    [void]$sb.AppendLine('')
+    # CONDITIONAL, because this used to be printed unconditionally as fixed
+    # prose computed from nothing — while the same document, five lines
+    # earlier, could say the durations were not offered as a timing
+    # measurement. Two contradictory statements in one body, and R7's
+    # interpretability clause discharged by a declaration.
+    if ($survivors.Count -eq 0 -and $pipeHolders.Count -eq 0) {
+        $concurrencyRow = @($EnvironmentStatement | Where-Object { $_.Dimension -eq 'concurrency' }) | Select-Object -First 1
+        $concurrencyValue = if ($concurrencyRow) { [string]$concurrencyRow.Audit } else { '(concurrency not stated)' }
+        [void]$sb.AppendLine("- Non-contention rests on the observed concurrency statement and on nothing surviving its kill, both of which hold for this run: $concurrencyValue")
+    }
+    else {
+        [void]$sb.AppendLine('- **No non-contention claim is made for this run.** Something outlived its bound or its parent, so an unknown amount of work overlapped the measurements. #1037 must not treat this run''s durations as a distribution.')
+    }
+    [void]$sb.AppendLine('')
+
+    # ---- R3(d): the cross-bound comparison, from the stable index ----
+    $priorIndexRows = script:Read-CIGlobAuditIndexRows -Body $ExistingIndexBody
+    $otherBoundRows = @($priorIndexRows | Where-Object { [string]$_.Run -ne $runId -and [string]$_.Bound -ne [string]$RunContext['BoundSeconds'] })
+    [void]$sb.AppendLine('### Cross-bound comparison — is the bound doing the classifying?')
+    [void]$sb.AppendLine('')
+    [void]$sb.AppendLine('A bound low enough to sweep slow suites into `did-not-complete` hands the downstream chunk a distribution consisting mostly of the bound value. The check is whether that class materially shrinks at a materially larger bound; if it does, the bound was classifying.')
+    [void]$sb.AppendLine('')
+    if ($otherBoundRows.Count -eq 0) {
+        [void]$sb.AppendLine("- No earlier run at a different bound is recorded in the index yet, so **this comparison is not yet available**. This run's own set is named above; the comparison becomes available once a second run at a materially different bound has posted. Not a discharge — an outstanding obligation.")
+    }
+    else {
+        [void]$sb.AppendLine('| run | bound | `did-not-complete` | this run | delta |')
+        [void]$sb.AppendLine('| --- | ---: | ---: | ---: | ---: |')
+        foreach ($p in $otherBoundRows) {
+            $priorStalled = 0
+            [void][int]::TryParse([string]$p.DidNotComplete, [ref]$priorStalled)
+            [void]$sb.AppendLine("| ``$($p.Run)`` | $($p.Bound) | $priorStalled | $($stalledRows.Count) | $($stalledRows.Count - $priorStalled) |")
+        }
+        [void]$sb.AppendLine('')
+        [void]$sb.AppendLine('Each run''s record names its own `did-not-complete` set in full, so both sets are recoverable from the two comments the index points at.')
+    }
     [void]$sb.AppendLine('')
 
     [void]$sb.AppendLine('### Per-suite rows')
     [void]$sb.AppendLine('')
-    [void]$sb.AppendLine("Elapsed is wall clock for the suite's own process. Nothing else ran on that runner at the same time (see the concurrency dimension above), so these are non-contended measurements.")
+    [void]$sb.AppendLine("Elapsed is wall clock for the suite's own process; read it against the timing-integrity statement above rather than as an unconditional measurement.")
     [void]$sb.AppendLine('')
     if ($detailDocs.Count -gt 0) {
         $lastDetailMarker = if ($detailDocs.Count -gt 1) { ' .. `' + (& $detailMarkerFor $detailDocs.Count) + '`' } else { '' }
         [void]$sb.AppendLine("Classifying detail for every non-``passed`` row is in $($detailDocs.Count) companion comment(s) on this issue, markers ``$(& $detailMarkerFor 1)``$lastDetailMarker.")
         [void]$sb.AppendLine('')
     }
-    [void]$sb.AppendLine('| suite | state | reason | ms | bound | class | skipped | executed | digest | pop |')
-    [void]$sb.AppendLine('| --- | --- | --- | ---: | ---: | --- | ---: | ---: | --- | --- |')
+
+    # ---- the per-suite table paginates, exactly as detail does ----
+    # It did not, and the summary measured 41,111 codepoints of a 65,536 cap at
+    # today's 253 suites — 1.7x the planning estimate, overflowing at roughly
+    # 400. The throw on overflow precedes every persist call with no try/catch
+    # above it, so a corpus-growth threshold turned a red-by-construction audit
+    # into a NO-RECORD audit: not the summary, not the detail documents, not
+    # the observation history. Fixing the codepoint measure (which had been
+    # under-counting) makes every body measure larger, so this had to land in
+    # the same change or the first near-cap record would hit that throw.
+    $tableHeader = @(
+        '| suite | state | reason | ms | bound | class | skipped | executed | digest | pop |',
+        '| --- | --- | --- | ---: | ---: | --- | ---: | ---: | --- | --- |'
+    ) -join "`n"
+    $tableRows = [System.Collections.Generic.List[string]]::new()
     foreach ($r in ($Rows | Sort-Object Name)) {
         $pop = if ($r.InPopulation) { 'in' } else { 'ctl' }
-        [void]$sb.AppendLine("| ``$($r.Name)`` | $($r.State) | $($r.Reason) | $($r.ElapsedMs) | $($r.BoundSeconds) | $(script:Format-CIGlobAuditClass -Class $r.QuarantineClass -InPopulation $r.InPopulation) | $($r.Skipped) | $($r.Executed) | $($r.ContentDigest) | $pop |")
+        $tableRows.Add("| ``$($r.Name)`` | $($r.State) | $($r.Reason) | $($r.ElapsedMs) | $($r.BoundSeconds) | $(script:Format-CIGlobAuditClass -Class $r.QuarantineClass -InPopulation $r.InPopulation) | $($r.Skipped) | $($r.Executed) | $($r.ContentDigest) | $pop |")
     }
-    [void]$sb.AppendLine('')
 
-    $summary = $sb.ToString().TrimEnd() + "`n"
+    $summaryHead = $sb.ToString()
+    $inlineTable = $tableHeader + "`n" + (($tableRows -join "`n")) + "`n"
+    $inlineCandidate = ($summaryHead + $inlineTable).TrimEnd() + "`n"
+
+    $rowsDocs = [System.Collections.Generic.List[object]]::new()
+    $summary = $inlineCandidate
+    if (-not (Test-CIGlobAuditBodyFits -Body $inlineCandidate -Cap $BodyCap)) {
+        $rowsHeaderFor = {
+            param($i)
+            @(
+                (& $rowsMarkerFor $i),
+                '',
+                "## Full-glob CI audit — per-suite rows (part $i)",
+                '',
+                "``record_format_version: $formatVersion``. Run ``$runId``, commit ``$($RunContext['Commit'])``. The per-suite table for the record whose summary is ``$summaryMarker``; split out because it no longer fits alongside the summary. The stable index of all runs is ``$script:CIGlobAuditIndexMarker``.",
+                '',
+                $tableHeader,
+                ''
+            ) -join "`n"
+        }
+        $rowsDocs = script:Split-CIGlobAuditDocument -Blocks @($tableRows | ForEach-Object { $_ + "`n" }) `
+            -Header $rowsHeaderFor -MarkerFor $rowsMarkerFor -Kind 'rows' -BodyCap $BodyCap
+
+        $lastRowsMarker = if ($rowsDocs.Count -gt 1) { ' .. `' + (& $rowsMarkerFor $rowsDocs.Count) + '`' } else { '' }
+        $pointer = @(
+            "The per-suite table did not fit alongside this summary and is in $($rowsDocs.Count) companion comment(s) on this issue, markers ``$(& $rowsMarkerFor 1)``$lastRowsMarker. Every row of the population is there; none was dropped to make the summary fit.",
+            ''
+        ) -join "`n"
+        $summary = ($summaryHead + $pointer).TrimEnd() + "`n"
+    }
+
     if (-not (Test-CIGlobAuditBodyFits -Body $summary -Cap $BodyCap)) {
         $summarySize = Measure-CIGlobAuditBody -Body $summary
-        # Refuse rather than write a body GitHub will reject or a silently
-        # truncated one. Discovering the cap mid-run is exactly the failure this
-        # composer exists to make impossible, and a partial record read as whole
-        # is worse than a loud stop.
-        throw "ci-glob-audit: composed summary is $summarySize codepoints, over the $BodyCap cap. The per-suite table itself no longer fits; the record shape needs splitting before this run can persist."
+        # Only now. The per-suite table has already been paginated out, so this
+        # is the genuinely irreducible case — the summary's own prose no longer
+        # fits — and refusing is right: a partial record read as whole is worse
+        # than a loud stop, and this cannot be reached by corpus growth alone.
+        throw ("ci-glob-audit: composed summary is $summarySize codepoints, over the $BodyCap cap, WITH the per-suite table already " +
+            'paginated into separate documents. What no longer fits is the summary''s own narrative sections; the record shape needs splitting before this run can persist.')
     }
 
-    $docs = @([PSCustomObject]@{ Marker = $summaryMarker; Body = $summary; Kind = 'summary'; Index = 0 }) + @($detailDocs)
+    $docs = [System.Collections.Generic.List[object]]::new()
+    $docs.Add([PSCustomObject]@{ Marker = $summaryMarker; Body = $summary; Kind = 'summary'; Index = 0 })
+    foreach ($d in $rowsDocs) { $docs.Add($d) }
+    foreach ($d in $detailDocs) { $docs.Add($d) }
+
+    $indexDoc = script:New-CIGlobAuditIndexDocument -ExistingBody $ExistingIndexBody -RunContext $RunContext `
+        -Rows $Rows -SummaryMarker $summaryMarker `
+        -RowsMarkers @($rowsDocs | ForEach-Object { $_.Marker }) `
+        -DetailMarkers @($detailDocs | ForEach-Object { $_.Marker }) `
+        -FormatVersion $formatVersion -BodyCap $BodyCap
+    $docs.Add($indexDoc)
+
     foreach ($d in $docs) {
         if (-not (Test-CIGlobAuditBodyFits -Body $d.Body -Cap $BodyCap)) {
             throw "ci-glob-audit: composed document '$($d.Marker)' is $(Measure-CIGlobAuditBody -Body $d.Body) codepoints, over the $BodyCap cap."
         }
     }
     return , @($docs)
+}
+
+function script:Get-CIGlobAuditTruncationEnd {
+    <#
+    .SYNOPSIS
+        Which end of this row's detail must survive truncation.
+    .DESCRIPTION
+        Three tiers, most authoritative first, because a row can reach the
+        composer from the shipped path (which stamps its provenance), from a
+        partial JSON written by an older shard, or hand-built. Never infer from
+        state alone where provenance exists: a `failed / no-result-file` row's
+        detail IS a console tail, so a state-only rule gets that population
+        backwards.
+    #>
+    param([Parameter(Mandatory)][object]$Row)
+
+    if ($Row.PSObject.Properties.Match('DetailTruncateFrom').Count -gt 0 -and $Row.DetailTruncateFrom) {
+        $v = [string]$Row.DetailTruncateFrom
+        if ($v -eq 'Head' -or $v -eq 'Tail') { return $v }
+    }
+    if ($Row.PSObject.Properties.Match('DetailSource').Count -gt 0 -and [string]$Row.DetailSource -eq 'console-tail') { return 'Tail' }
+    if ([string]$Row.State -eq 'did-not-complete') { return 'Tail' }
+    return 'Head'
+}
+
+function script:Split-CIGlobAuditDocument {
+    <#
+    .SYNOPSIS
+        Paginate a list of blocks into as many capped documents as they need.
+    .DESCRIPTION
+        Shared by the detail documents and the per-suite table, so the two
+        cannot drift apart in their handling of the cap.
+
+        THE RESEEDED DOCUMENT IS RE-TESTED. The previous loop appended a block
+        unconditionally after flushing and re-seeding, so a single block larger
+        than the cap was written into an empty document and caught only by the
+        final per-document check — which throws, losing the whole record. That
+        was unreachable at the shipped detail cap, but the cap is a parameter,
+        which made the invariant both undocumented and one argument away.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Blocks,
+        [Parameter(Mandatory)][scriptblock]$Header,
+        [Parameter(Mandatory)][scriptblock]$MarkerFor,
+        [Parameter(Mandatory)][string]$Kind,
+        [Parameter(Mandatory)][int]$BodyCap
+    )
+
+    $docs = [System.Collections.Generic.List[object]]::new()
+    $index = 1
+    $seed = (& $Header $index)
+    $current = [System.Text.StringBuilder]::new()
+    [void]$current.Append($seed)
+
+    foreach ($block in $Blocks) {
+        $candidate = $current.ToString() + $block
+        if (-not (Test-CIGlobAuditBodyFits -Body $candidate -Cap $BodyCap) -and $current.ToString() -ne $seed) {
+            $docs.Add([PSCustomObject]@{ Marker = (& $MarkerFor $index); Body = $current.ToString().TrimEnd() + "`n"; Kind = $Kind; Index = $index })
+            $index++
+            $seed = (& $Header $index)
+            $current = [System.Text.StringBuilder]::new()
+            [void]$current.Append($seed)
+            # Re-test against the FRESH document. If one block cannot fit on
+            # its own, no amount of further pagination will help and the caller
+            # must hear about it here, named, rather than through a generic
+            # over-cap throw after everything else has been composed.
+            if (-not (Test-CIGlobAuditBodyFits -Body ($seed + $block) -Cap $BodyCap)) {
+                throw ("ci-glob-audit: a fresh $Kind document does not fit the $BodyCap-codepoint cap even carrying a single block — " +
+                    "header $(Measure-CIGlobAuditBody -Body $seed) codepoints plus block $(Measure-CIGlobAuditBody -Body $block) codepoints. " +
+                    'Pagination cannot resolve this; the per-block budget is too large for the cap.')
+            }
+        }
+        [void]$current.Append($block)
+    }
+    $docs.Add([PSCustomObject]@{ Marker = (& $MarkerFor $index); Body = $current.ToString().TrimEnd() + "`n"; Kind = $Kind; Index = $index })
+    return , @($docs)
+}
+
+function script:Read-CIGlobAuditIndexRows {
+    <#
+    .SYNOPSIS
+        Parse an existing index body back into its rows.
+    .DESCRIPTION
+        The index is upserted, so the composer must be able to read its own
+        prior output. Tolerant: a row it cannot parse is skipped rather than
+        thrown on, because this runs before persistence and losing the whole
+        record to one hand-edited line is the worse failure.
+    #>
+    param([AllowEmptyString()][AllowNull()][string]$Body)
+
+    $rows = [System.Collections.Generic.List[object]]::new()
+    if ([string]::IsNullOrWhiteSpace($Body)) { return , @($rows) }
+
+    foreach ($line in ($Body -split "`r?`n")) {
+        if ($line -notmatch '^\|\s*`([^`|]+)`\s*\|') { continue }
+        $cells = @($line.Trim() -replace '^\|', '' -replace '\|$', '' -split '\|' | ForEach-Object { $_.Trim() })
+        if ($cells.Count -lt 12) { continue }
+        $run = $cells[0].Trim('`').Trim()
+        if ($run -eq 'run' -or $run -match '^-+$') { continue }
+        $rows.Add([PSCustomObject]@{
+                Run             = $run
+                RunUrl          = $cells[1]
+                Commit          = $cells[2].Trim('`').Trim()
+                Bound           = $cells[3]
+                Shards          = $cells[4]
+                Passed          = $cells[5]
+                Failed          = $cells[6]
+                DidNotComplete  = $cells[7]
+                ExecutedNoTests = $cells[8]
+                RecordMarker    = $cells[9]
+                RowsMarkers     = $cells[10]
+                DetailMarkers   = $cells[11]
+                Notes           = if ($cells.Count -ge 13) { $cells[12] } else { '-' }
+            })
+    }
+    return , @($rows)
+}
+
+function script:New-CIGlobAuditIndexDocument {
+    <#
+    .SYNOPSIS
+        The stable pointer: one row per run, newest first, under a marker that
+        carries no run id.
+    .DESCRIPTION
+        Upserted rather than posted, and merged with whatever the caller read
+        back, so a consumer resolves ONE marker to reach any run's record
+        instead of enumerating an issue's comments and regexing run ids out of
+        HTML comments.
+
+        It also reconciles a re-attempt. Detail markers are indexed per part,
+        so a re-run of the same run id that produces two parts where the first
+        produced three leaves `...-3` on the issue, unreferenced, while the
+        summary advertises parts 1..2. Nothing here can delete a comment — that
+        is the caller's — but the surplus markers are NAMED in this run's row,
+        so an orphan is visible rather than silently authoritative-looking.
+
+        The index only grows, so it is trimmed from the OLDEST end when it
+        approaches the cap rather than throwing. Losing the ability to address
+        the newest record because the oldest runs are still listed would invert
+        the whole point of the document.
+    #>
+    param(
+        [AllowEmptyString()][string]$ExistingBody = '',
+        [Parameter(Mandatory)][hashtable]$RunContext,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Rows,
+        [Parameter(Mandatory)][string]$SummaryMarker,
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$RowsMarkers,
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$DetailMarkers,
+        [Parameter(Mandatory)][string]$FormatVersion,
+        [Parameter(Mandatory)][int]$BodyCap
+    )
+
+    $runId = [string]$RunContext['RunId']
+    # No @() wrapper: the helper already comma-wraps, so re-wrapping an empty
+    # result yields a one-element array holding an empty array — which then
+    # flows into a property access as a non-row object.
+    $prior = script:Read-CIGlobAuditIndexRows -Body $ExistingBody
+
+    $counts = @{}
+    foreach ($state in $script:CIGlobAuditStates) {
+        $counts[$state] = @($Rows | Where-Object { $_.State -eq $state }).Count
+    }
+
+    $detailCell = if ($DetailMarkers.Count) { ($DetailMarkers -join ', ') } else { '(none)' }
+    $rowsCell = if ($RowsMarkers.Count) { ($RowsMarkers -join ', ') } else { '(inline in the summary)' }
+
+    $notes = '-'
+    $selfRow = @($prior | Where-Object { [string]$_.Run -eq $runId }) | Select-Object -First 1
+    if ($selfRow) {
+        $priorDetail = @([string]$selfRow.DetailMarkers -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -and $_ -ne '(none)' })
+        $priorRows = @([string]$selfRow.RowsMarkers -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -and $_ -notmatch '^\(' })
+        $orphans = @(@($priorDetail + $priorRows) | Where-Object { $DetailMarkers -notcontains $_ -and $RowsMarkers -notcontains $_ })
+        if ($orphans.Count -gt 0) {
+            $notes = "re-attempt of this run id produced fewer documents; **$($orphans.Count) superseded comment(s) are orphaned on this issue and must be ignored or deleted**: $($orphans -join ', ')"
+        }
+    }
+
+    $newRow = [PSCustomObject]@{
+        Run             = $runId
+        RunUrl          = [string]$RunContext['RunUrl']
+        Commit          = [string]$RunContext['Commit']
+        Bound           = [string]$RunContext['BoundSeconds']
+        Shards          = [string]$RunContext['ShardCount']
+        Passed          = [string]$counts['passed']
+        Failed          = [string]$counts['failed']
+        DidNotComplete  = [string]$counts['did-not-complete']
+        ExecutedNoTests = [string]$counts['executed-no-tests']
+        RecordMarker    = $SummaryMarker
+        RowsMarkers     = $rowsCell
+        DetailMarkers   = $detailCell
+        Notes           = $notes
+    }
+
+    $merged = [System.Collections.Generic.List[object]]::new()
+    $merged.Add($newRow)
+    foreach ($p in $prior) { if ([string]$p.Run -ne $runId) { $merged.Add($p) } }
+
+    $render = {
+        param($rowsToRender, $trimmed)
+        $b = [System.Text.StringBuilder]::new()
+        [void]$b.AppendLine($script:CIGlobAuditIndexMarker)
+        [void]$b.AppendLine('')
+        [void]$b.AppendLine('# Full-glob CI audit — index of runs')
+        [void]$b.AppendLine('')
+        [void]$b.AppendLine("``record_format_version: $FormatVersion``. **This marker is stable and carries no run id.** Resolve it to find any run's record; every other marker in this family embeds a run id and cannot be addressed without enumerating the issue's comments.")
+        [void]$b.AppendLine('')
+        [void]$b.AppendLine('Newest first. `bound` is what makes the cross-bound comparison possible: two runs at materially different bounds are what tells a reader whether the bound was classifying rather than the suites.')
+        [void]$b.AppendLine('')
+        [void]$b.AppendLine("The observation history lives at ``<!-- ci-glob-audit-history -->`` on this same issue and is keyed per suite rather than per run.")
+        [void]$b.AppendLine('')
+        if ($trimmed -gt 0) {
+            [void]$b.AppendLine("> **$trimmed oldest run row(s) were dropped** to keep this document inside the $BodyCap-codepoint cap. Their record comments still exist on this issue; only their index entry is gone.")
+            [void]$b.AppendLine('')
+        }
+        [void]$b.AppendLine('| run | run url | commit | bound | shards | passed | failed | did-not-complete | executed-no-tests | record | rows | detail | notes |')
+        [void]$b.AppendLine('| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- | --- |')
+        foreach ($r in $rowsToRender) {
+            [void]$b.AppendLine("| ``$($r.Run)`` | $($r.RunUrl) | ``$($r.Commit)`` | $($r.Bound) | $($r.Shards) | $($r.Passed) | $($r.Failed) | $($r.DidNotComplete) | $($r.ExecutedNoTests) | $($r.RecordMarker) | $($r.RowsMarkers) | $($r.DetailMarkers) | $($r.Notes) |")
+        }
+        return $b.ToString().TrimEnd() + "`n"
+    }
+
+    $trimmed = 0
+    $body = & $render $merged $trimmed
+    while (-not (Test-CIGlobAuditBodyFits -Body $body -Cap $BodyCap) -and $merged.Count -gt 1) {
+        $merged.RemoveAt($merged.Count - 1)
+        $trimmed++
+        $body = & $render $merged $trimmed
+    }
+
+    return [PSCustomObject]@{ Marker = $script:CIGlobAuditIndexMarker; Body = $body; Kind = 'index'; Index = 0 }
 }
 
 function script:Format-CIGlobAuditClass {

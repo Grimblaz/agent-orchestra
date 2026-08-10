@@ -59,13 +59,23 @@ jobs:
       - name: Derive the population once, from the gate's own selection procedure
         id: derive
         shell: pwsh
+        # Through `env:`, never interpolated into the script body. A
+        # `workflow_dispatch` input is an untyped string, so `8; <command>`
+        # spliced into a `run:` block is expanded by the expression evaluator
+        # before PowerShell ever parses it. Same pattern, and the same
+        # digits-only check, as phase-containment-region-guard.yml.
+        env:
+          SHARD_COUNT: ${{ inputs.shard_count }}
         run: |
+          if ($env:SHARD_COUNT -notmatch '^[0-9]+$') {
+            throw "shard_count must be digits only; got '$($env:SHARD_COUNT)'."
+          }
           # Derived ONCE and handed to every job. Re-deriving per job would work
           # today and drift the first time two jobs saw different trees; more
           # importantly, the one-to-one check downstream has to compare the
           # record against a population somebody can point at.
           ./.github/scripts/ci-glob-audit.ps1 -Mode Prepare `
-            -ShardCount ${{ inputs.shard_count }} `
+            -ShardCount ([int]$env:SHARD_COUNT) `
             -OutFile ci-glob-audit-population.json
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
@@ -110,16 +120,30 @@ jobs:
 
       - name: Attempt this shard's suites, one process at a time
         shell: pwsh
+        # Both values reach the script through `env:` and are validated before
+        # use, for the reason the prepare job states. `matrix.shard` comes from
+        # this workflow's own prepare output rather than from the dispatcher,
+        # but it is routed and checked the same way: a value's provenance is
+        # not a property the reader of a `run:` block can see.
+        env:
+          SHARD_INDEX: ${{ matrix.shard }}
+          TIMEOUT_SECONDS: ${{ inputs.timeout_seconds }}
         run: |
+          if ($env:SHARD_INDEX -notmatch '^[0-9]+$') {
+            throw "shard index must be digits only; got '$($env:SHARD_INDEX)'."
+          }
+          if ($env:TIMEOUT_SECONDS -notmatch '^[0-9]+$') {
+            throw "timeout_seconds must be digits only; got '$($env:TIMEOUT_SECONDS)'."
+          }
           # No GH_TOKEN here, deliberately: pester.yml declares no permissions
           # block, no env block and no token, so a suite that shells out to `gh`
           # must meet the same nothing under the audit that it meets in the gate.
           ./.github/scripts/ci-glob-audit.ps1 -Mode Shard `
             -PopulationFile ci-glob-audit-population.json `
-            -ShardIndex ${{ matrix.shard }} `
-            -TimeoutSeconds ${{ inputs.timeout_seconds }} `
+            -ShardIndex ([int]$env:SHARD_INDEX) `
+            -TimeoutSeconds ([int]$env:TIMEOUT_SECONDS) `
             -WorkDir "$env:RUNNER_TEMP/ci-glob-audit" `
-            -OutFile "ci-glob-audit-partial-${{ matrix.shard }}.json"
+            -OutFile "ci-glob-audit-partial-$($env:SHARD_INDEX).json"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         if: always()
@@ -176,10 +200,17 @@ jobs:
 
       - name: Compose, check and persist
         shell: pwsh
+        # This is the step that holds the token and `issues: write`, so it is
+        # the one where splicing an untyped dispatch input into the script body
+        # matters most. Through `env:`, digits-checked, and only then cast.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RECORD_ISSUE: ${{ inputs.record_issue }}
         run: |
+          if ($env:RECORD_ISSUE -notmatch '^[0-9]+$') {
+            throw "record_issue must be digits only; got '$($env:RECORD_ISSUE)'."
+          }
           ./.github/scripts/ci-glob-audit.ps1 -Mode Compose `
             -PopulationFile ci-glob-audit-population.json `
             -PartialsDir partials `
-            -Issue ${{ inputs.record_issue }}
+            -Issue ([int]$env:RECORD_ISSUE)

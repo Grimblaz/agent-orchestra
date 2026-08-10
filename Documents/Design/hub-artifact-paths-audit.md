@@ -1,6 +1,6 @@
 <!-- audit-meta
-last-verified: f14a059979eca297d9c7e329923c866dd7e0b4d6
-generated-at: 2026-08-10T01:23:57Z
+last-verified: 0f5728e859b9bcd20d3b22124f15c926d1621b29
+generated-at: 2026-08-10T02:49:13Z
 -->
 
 ## Purpose
@@ -260,6 +260,19 @@ Copilot always reads from the source tree in the hub repo. This dual-resolved be
   - `.github/scripts/plan-tree-state-verification.ps1`
   - `.github/scripts/grounding-evidence-corpus-check.ps1`
 - **notes**: Root-level hook and utility scripts under .github/scripts/. Claude loads from plugin-cache; Copilot runs from source-tree. Missing script produces visible-warning because the hook that calls it will report an error but does not block the pipeline.
+
+### `.github/scripts/audit-controls/*`
+
+- **claude_resolves**: source-tree
+- **copilot_resolves**: source-tree
+- **requires_version_bump**: false
+- **experience**: hard-failure
+- **examples**:
+  - `.github/scripts/audit-controls/passes.Control.Tests.ps1`
+  - `.github/scripts/audit-controls/fails.Control.Tests.ps1`
+  - `.github/scripts/audit-controls/never-returns.Control.Tests.ps1`
+  - `.github/scripts/audit-controls/README.md`
+- **notes**: Deliberately misbehaving Pester suites (issue #1035) the full-glob CI audit runs against itself to prove it can tell its four terminal states (passed, failed, executed-no-tests, did-not-complete) apart. Live outside .github/scripts/Tests/ on purpose: never-returns.Control.Tests.ps1 deliberately never returns, and Invoke-Pester .github/scripts/Tests/ (the command the contributor instructions and PR template prescribe) is recursive and quarantine-blind, so a non-returning suite beneath that root would hang a contributor's pre-PR run where no job ceiling exists. Nothing in the repository enumerates this directory for execution; ci-glob-audit.ps1 -Mode Prepare is handed each control's path explicitly and throws immediately if one is absent (hard failure, no fallback). Hub-repo CI only, invoked by ci-full-glob-audit.yml; not a plugin distribution entry point and not distributed to consumer repos, matching the .github/workflows/*.yml resolution model.
 
 ### `.github/scripts/lib/*.ps1`
 
