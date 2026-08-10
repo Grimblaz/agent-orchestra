@@ -45,13 +45,16 @@ BeforeAll {
     # Roster size: parent #1045 Amendment A1 (45 -> 46 after two same-day admissions).
     $script:ExpectedRosterCount = 46
     # Per-chunk promoted share: parent #1045 § Walking-skeleton lens list, as partitioned by A1.
-    # Chunk 1 takes 19. Chunk 2 was ASSIGNED 27 and promoted 25: two of its lessons returned a
-    # `conflict` verdict against shipped doctrine and, under parent #1045 amendment A4.5, a second
-    # contradiction of any kind routes up rather than being resolved in-chunk. Those two stay
-    # `pending` against issue #1050 until the parent rules, and their lens sections were removed
-    # rather than shipped beside the sentences they contradict. Chunk 3 adds its own row when it
-    # lands. An ABSENT key is the quiet escape - the audit iterates only the keys handed to it, so
-    # a chunk promoting under a key nobody declared would be counted by nothing.
+    # Chunk 1 takes 19. Chunk 2 was ASSIGNED 27 and promoted 25. The other two returned a `conflict`
+    # verdict against shipped doctrine, and parent #1045 amendment A4.5 routes a second contradiction
+    # of any kind up rather than resolving it in-chunk - requested as A5 and unruled at chunk 2
+    # delivery. Their lens sections were removed from the tree rather than shipped beside the
+    # sentences they contradict, and the two entries passed to CHUNK 3 (#1051) under the parent's
+    # section chunk-sequence, which assigns chunk 3 "any roster entries not yet terminal". So 25 is
+    # the whole of chunk 2's promoted share, not a reduced one: no chunk-2 row is non-terminal.
+    # Chunk 3 adds its own promoted count here when it lands. An ABSENT key is the quiet escape -
+    # the audit iterates only the keys handed to it, so a chunk promoting under a key nobody
+    # declared would be counted by nothing.
     $script:ExpectedPromotedByChunk = @{ '1' = 19; '2' = 25 }
     # The skills this promotion effort receives into. A references/ file appearing in any of these
     # needs a manifest row; directories outside the set belong to other skills and predate this

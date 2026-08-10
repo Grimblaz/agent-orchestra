@@ -309,9 +309,9 @@
     {
       "lesson": "reference_quoted_text_needs_position_not_heuristic",
       "state": "pending",
-      "chunk": 2,
-      "issue": 1050,
-      "pending_reason": "Withheld by issue #1050: the contradiction procedure returned a `conflict` verdict against shipped doctrine, and parent #1045 amendment A4.5 routes a second contradiction of any kind up rather than resolving it in-chunk. Requested as parent amendment A5 (issue #1045 comment 5244634056); the lens section was removed from the tree rather than shipped beside the sentence it contradicts. Terminal state waits on that ruling."
+      "chunk": 3,
+      "issue": 1051,
+      "pending_reason": "Assigned to chunk 2 (#1050); not promoted there. The contradiction procedure returned a `conflict` verdict against shipped doctrine, and parent #1045 amendment A4.5 routes a second contradiction of any kind up rather than resolving it in-chunk - requested as amendment A5 (#1045 comment 5244634056) and UNRULED at chunk 2 delivery. Chunk 2 removed the lens section from the tree rather than shipping it beside the sentence it contradicts, and passed the entry to chunk 3 under parent section chunk-sequence, which assigns it \"any roster entries not yet terminal\". Chunk 3 reads the A5 ruling and takes the entry to a terminal state; it must not promote on its own authority while A5 is open."
     },
     {
       "lesson": "reference_boilerplate_propagation_is_where_a_claim_goes_false",
@@ -745,9 +745,9 @@
     {
       "lesson": "reference_version_collision_invisible_until_merge",
       "state": "pending",
-      "chunk": 2,
-      "issue": 1050,
-      "pending_reason": "Withheld by issue #1050: the contradiction procedure returned a `conflict` verdict against shipped doctrine, and parent #1045 amendment A4.5 routes a second contradiction of any kind up rather than resolving it in-chunk. Requested as parent amendment A5 (issue #1045 comment 5244634056); the lens section was removed from the tree rather than shipped beside the sentence it contradicts. Terminal state waits on that ruling."
+      "chunk": 3,
+      "issue": 1051,
+      "pending_reason": "Assigned to chunk 2 (#1050); not promoted there. The contradiction procedure returned a `conflict` verdict against shipped doctrine, and parent #1045 amendment A4.5 routes a second contradiction of any kind up rather than resolving it in-chunk - requested as amendment A5 (#1045 comment 5244634056) and UNRULED at chunk 2 delivery. Chunk 2 removed the lens section from the tree rather than shipping it beside the sentence it contradicts, and passed the entry to chunk 3 under parent section chunk-sequence, which assigns it \"any roster entries not yet terminal\". Chunk 3 reads the A5 ruling and takes the entry to a terminal state; it must not promote on its own authority while A5 is open."
     },
     {
       "lesson": "reference_concurrent_merge_falsifies_cited_claims",
