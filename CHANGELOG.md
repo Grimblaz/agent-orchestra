@@ -4,6 +4,14 @@ All notable changes to agent-orchestra will be documented in this file.
 
 ## [Unreleased]
 
+## [3.21.1] — 2026-08-10
+
+### Removed
+
+**A workflow that never once parsed is gone, and the dated obligation it was going to fire now has a human owner** (#844). `.github/workflows/copilot-sunset-review.yml` failed GitHub's YAML load from the day it landed — a bash heredoc written flush-left inside an indented `run: |` block — so it produced zero jobs, never created a check-run, and showed a red run in `gh run list` on every push to every branch including `main`. It was scheduled to fire on 2026-09-01 to surface the Copilot retire-or-keep decision and report whether anyone had asked for the support to be kept; because GitHub could not load it, that would never have happened. Removal was chosen over repair: the tracking issue it would open is already open and filed by hand (#970), the reach-out it exists to detect has not happened through either channel `Documents/Design/copilot-deprecation.md` names, and the docs never promised the automation. #970 was amended first to take the reach-out check directly, on or after 2026-08-31, with both queries recorded — so the listener is only removed once the obligation has an owner.
+
+`skills/safe-operations/references/git-and-gh-traps.md` § "`copilot-sunset-review.yml` is always red, and gates nothing" was live present-tense guidance about that file and ships to installed plugin copies. It is replaced by a general trap — **a workflow GitHub cannot parse is red on every push, and invisible where you look for it** — which keeps the transferable recognition procedure (path-as-name fallback, `event` not matching the declared triggers, zero jobs) and adds the surface asymmetry both ways: zero jobs means the failure is absent from `check-runs` and `gh pr checks`, so it can neither block a merge nor be confirmed gone from those surfaces. The removed workflow stays as the dated exhibit.
+
 ## [3.21.0] — 2026-08-10
 
 ### Added

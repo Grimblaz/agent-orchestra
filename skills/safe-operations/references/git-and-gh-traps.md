@@ -116,32 +116,48 @@ required gate red. The run was against `b03d6f6`; local HEAD was `6154ee1`. Comb
 error it produced a confident, entirely false green, caught only by a judge pass re-deriving the
 baseline from the merge-base.
 
-### `copilot-sunset-review.yml` is always red, and gates nothing
+### A workflow GitHub cannot parse is red on every push, and invisible where you look for it
 
-**Trap.** `.github/workflows/copilot-sunset-review.yml` shows a failed run in `gh run list` on every
-branch including `main`, on every push. It is not caused by your branch.
+**Trap.** A workflow file that fails GitHub's own YAML load shows a failed run in `gh run list` on
+every branch including `main`, on every push — regardless of what `on:` triggers the file declares,
+because GitHub validates every workflow file on every push. It is not caused by your branch, and it
+does not go away when you rebase.
 
-**How to recognize it.** The run's workflow name falls back to the literal file path rather than its
-declared `name:` — GitHub's signature for a workflow file it could not load. `event` is `push` even
-though the file declares only `schedule` and `workflow_dispatch`.
-`gh api .../actions/runs/{id}/jobs` returns `total_count: 0`, so no job ever starts and
-`gh run view --log-failed` reports "log not found".
+**How to recognize it.** Three signatures together:
 
-**It cannot block a merge.** `gh pr checks <PR>` never lists it, so an `UNSTABLE` mergeStateStatus is
-never explained by it. Look at `pester`, `frame-enforce` and `release-gate` for real blockers.
+- The run's workflow name falls back to the literal **file path** rather than its declared `name:` —
+  GitHub's signature for a file it could not load. Every loadable workflow shows its declared name.
+- `event` is `push` even when the file declares only `schedule` and `workflow_dispatch`.
+- `gh api .../actions/runs/{id}/jobs` returns `total_count: 0`, so no job ever starts and
+  `gh run view --log-failed` reports "log not found".
 
-**Latent risk, separate from the noise.** The workflow's actual purpose is to fire on or after
-2026-08-31 to surface the Copilot retire-or-keep decision. Because GitHub cannot load the file, it
-will never fire. Tracked: **#844** owns the YAML parse failure, **#970** owns the retirement deadline.
+**Two surfaces, and they disagree.** Zero jobs means zero check-runs, so the failure is visible in
+`gh run list` and at check-suite grain and **absent** from `commits/{sha}/check-runs` and
+`gh pr checks`. Both directions of that asymmetry bite:
 
-**Scope.** This entry is specific to this repository. If you are reading it from an installed plugin
-copy in another repository, neither `copilot-sunset-review.yml` nor the named real blockers
-(`pester`, `frame-enforce`, `release-gate`) exist there, and nothing here licenses dismissing a red
-check you actually have. Re-derive the recognition procedure — path-as-name fallback, `event` not
-matching the declared triggers, zero jobs — rather than inheriting the verdict.
+- It cannot block a merge — an `UNSTABLE` mergeStateStatus is never explained by it. Look at the
+  checks that actually run (in this repository: `pester`, `frame-enforce`, `release-gate`).
+- **It cannot be confirmed gone from `gh pr checks` either.** After removing or repairing such a
+  file, an absent row reads identically to the broken state. Verify from `gh run list --commit
+  <sha>` on a real post-merge commit, never from `check-runs`, `gh pr checks`, or the diff.
 
-**Evidence:** five-plus consecutive red runs from 2026-08-01 (`7f6baa7`, `d5f9611`, `18a28ba`,
-`c43d81d`, `033ed99`), identical on `main`.
+**The latent cost is separate from the noise.** A file GitHub cannot load never fires, so whatever
+the workflow was scheduled to do silently does not happen — and the permanently-red run trains
+readers to discount CI generally. Neither symptom announces the missed obligation; find its owner
+before assuming the redness is the whole problem.
+
+**Scope.** The recognition procedure above is general. The named real blockers (`pester`,
+`frame-enforce`, `release-gate`) are specific to this repository and do not exist in an installed
+plugin copy elsewhere; nothing here licenses dismissing a red check you actually have. Re-derive from
+the three signatures — path-as-name fallback, `event` not matching the declared triggers, zero jobs —
+rather than inheriting any verdict.
+
+**Seen in:** `.github/workflows/copilot-sunset-review.yml`, which never parsed from the day it landed
+and produced five-plus consecutive red runs from 2026-08-01 (`7f6baa7`, `d5f9611`, `18a28ba`,
+`c43d81d`, `033ed99`), identical on `main`. It was removed 2026-08-10 (#844) rather than repaired,
+and the dated obligation it was going to fire moved to #970. Historical runs of a deleted workflow
+keep returning from the runs API, and the raw `actions/workflows` API keeps a `state: deleted`
+tombstone row — neither is a live failure.
 
 ## Writing to GitHub
 
