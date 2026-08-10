@@ -169,6 +169,8 @@ Then run the repository validation command required by the current task.
 
 Two ways an edit that is correct in one file lands false in the next. Both bite during the *mechanical* half of a change — the propagation, the sweep, the rename — which is exactly where attention is lowest. Incident detail sits in [references/implementation-exhibits.md](references/implementation-exhibits.md).
 
+### When you are propagating a claim across sites, or swapping a term across a migration
+
 #### When one qualifying claim is propagated to many sites, the boilerplate copies are where it turns false
 
 A remedy that fixes an over-broad claim by copying a qualifying sentence to every affected file usually reproduces its own defect one level down: the qualifier states a property that holds at *some* of the sites, and uniform phrasing is precisely what erases the fact that decided where. The discriminator is sharp and worth checking for directly — **every variant hand-written for its site tends to be correct, and every boilerplate copy tends to be wrong**, because writing per site forces you to name the site's own case. So before propagating any qualifying sentence to N sites: list the sites, ask *what makes this true here*, and confirm that property actually holds there. If the answer differs, split the sentence into the universal part and the conditional part, state the conditioning variable as a table in one home, and have each site say which case it is in. Watch the direction of the error too — the copy is most harmful at the site the analysis itself flagged as the sharp one. Exhibit: [references/implementation-exhibits.md](references/implementation-exhibits.md) § A clause that was false at 11 of 15 sites.

@@ -96,7 +96,7 @@ The directional pattern across that draft is the part that generalizes as a fact
 
 *Cited from § A demonstration at delivery is not a regression guard.*
 
-#986's AC4 required a diagnostic predicate to be "demonstrably able to fail on every axis it reports," proved by three positive controls run against modified copies and recorded on the issue. The run did exactly that. The three controls passed.
+Issue #986's AC4 required a diagnostic predicate to be "demonstrably able to fail on every axis it reports," proved by three positive controls run against modified copies and recorded on the issue. The run did exactly that. The three controls passed.
 
 The controls were a one-time manual artifact. Nothing in the tree re-ran them. The review then found three separate inputs — `- [see body](x.md)`, a `*` bullet, and an unparseable link — that already reached `RESULT: clean` against a defective index, on the very axes the recorded controls had certified as working. Each control had been planted at a point where the check was strong.
 

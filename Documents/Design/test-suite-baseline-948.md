@@ -361,9 +361,13 @@ report a false green:
 ## What this record does and does not guarantee
 
 The restored green is a **Windows** green from one workstation. None of the six failing
-files is in CI's `pester.yml` allowlist, and the large majority of `.github/scripts/Tests/`
-has never been measured on Linux — so nothing outside a local full-suite run will detect
-the next regression of this kind. Promoting more files into CI is issue #672; the process
+files was selected by CI at the time, and the large majority of `.github/scripts/Tests/`
+had never been measured on Linux — so nothing outside a local full-suite run would detect
+the next regression of this kind. *(Corrected under issue #1050: this read "is in CI's`
+pester.yml` allowlist". The allowlist was retired by PR #988 in favour of a glob minus
+`.github/scripts/Tests/ci-quarantine.json`; measured at `ec7bc60`, 64 of 255 suites are
+CI-selected, so the forward-looking clause is false for those 64 and is put in the past tense
+here rather than left standing.)* Promoting more files into CI is issue #672; the process
 rule that stops the next regression is issue #949. Neither is funded by this work.
 
 Treat this as a snapshot, not a guarantee.

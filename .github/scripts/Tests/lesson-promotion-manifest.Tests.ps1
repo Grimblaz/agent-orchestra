@@ -623,6 +623,7 @@ description: "Another skill. Use when reconciling a promoted roster against its 
             Set-Content -LiteralPath $c.SkillPath -Encoding utf8 -Value ($body -replace 'The core sentence a reader has to reach in this section\.', 'The core sentence a reader has to reach in this section. See skills/project-references/SKILL.md for sidecars.')
         }
         ($r.DriftDetails -join ' ') | Should -Not -Match 'project-references'
+        ($r.DriftDetails -join ' | ') | Should -BeExactly '' -Because 'a fixture this test calls lawful must be drift-FREE, not merely free of one substring'
     }
 
     # --- Verdicts ------------------------------------------------------------------------------
@@ -662,6 +663,7 @@ description: "Another skill. Use when reconciling a promoted roster against its 
             $c.Manifest.entries[0].checked_against['resolution'] = 'The stale allowlist sentence at skills/terminal-hygiene/SKILL.md:36 was corrected in this change.'
         }
         ($r.DriftDetails -join ' ') | Should -Not -Match 'conflict'
+        ($r.DriftDetails -join ' | ') | Should -BeExactly '' -Because 'a fixture this test calls lawful must be drift-FREE, not merely free of one substring'
     }
 
     It 'INDUCED (resolution-without-conflict class): a resolution beside a clean verdict FAILS' {
@@ -709,6 +711,8 @@ description: "Another skill. Use when reconciling a promoted roster against its 
             -ExpectedRosterCount 2 -ExpectedPromotedByChunk @{ '1' = 1 } -ReceivingSkillDirs @('skills/demo-skill')
         ($r.DriftDetails -join ' ') | Should -Not -Match 'unconditional loader'
         ($r.DriftDetails -join ' ') | Should -Not -Match 'not main-session-only'
+        @($r.DriftDetails).Count | Should -Be 1 -Because 'this fixture strips the mandate marker from the tree, so exactly ONE unrelated finding is expected - pinning the count stops a second, real regression hiding behind it'
+        ($r.DriftDetails -join ' | ') | Should -Match 'which appears in no agent body'
     }
 
     It 'INDUCED (undeclared-chunk class): a promoted share under a chunk key the caller never declared FAILS' {
@@ -778,6 +782,7 @@ description: "Another skill. Use when reconciling a promoted roster against its 
         $r = Get-LessonPromotionAudit -RepoRoot $t.Dir -ManifestPath $t.ManifestPath `
             -ExpectedRosterCount 2 -ExpectedPromotedByChunk @{ '1' = 1 } -ReceivingSkillDirs @('skills/demo-skill')
         ($r.DriftDetails -join ' ') | Should -Not -Match 'not main-session-only'
+        ($r.DriftDetails -join ' | ') | Should -BeExactly '' -Because 'a fixture this test calls lawful must be drift-FREE, not merely free of one substring'
     }
 
     It 'A mandate whose marker and skill path wrap onto separate lines IS derived' {
@@ -827,6 +832,7 @@ description: "Another skill. Use when reconciling a promoted roster against its 
         $r = Get-LessonPromotionAudit -RepoRoot $t.Dir -ManifestPath $t.ManifestPath `
             -ExpectedRosterCount 2 -ExpectedPromotedByChunk @{ '1' = 1 } -ReceivingSkillDirs @('skills/demo-skill')
         ($r.DriftDetails -join ' ') | Should -Not -Match 'not main-session-only'
+        ($r.DriftDetails -join ' | ') | Should -BeExactly '' -Because 'a fixture this test calls lawful must be drift-FREE, not merely free of one substring'
     }
 
     It 'An illustrative skill path with no mandate marker does NOT make a home a subagent consumer' {
@@ -837,6 +843,8 @@ description: "Another skill. Use when reconciling a promoted roster against its 
         $r = Get-LessonPromotionAudit -RepoRoot $t.Dir -ManifestPath $t.ManifestPath `
             -ExpectedRosterCount 2 -ExpectedPromotedByChunk @{ '1' = 1 } -ReceivingSkillDirs @('skills/demo-skill')
         ($r.DriftDetails -join ' ') | Should -Not -Match 'not main-session-only'
+        @($r.DriftDetails).Count | Should -Be 1 -Because 'this fixture strips the mandate marker from the tree, so exactly ONE unrelated finding is expected - pinning the count stops a second, real regression hiding behind it'
+        ($r.DriftDetails -join ' | ') | Should -Match 'which appears in no agent body'
     }
 
     # --- Composite-convention deferral arm (parent #1045 amendments A3 and A4.4) ------------------
@@ -863,6 +871,7 @@ description: "Another skill. Use when reconciling a promoted roster against its 
         $r = Get-LessonPromotionAudit -RepoRoot $t.Dir -ManifestPath $t.ManifestPath `
             -ExpectedRosterCount 2 -ExpectedPromotedByChunk @{ '1' = 1 } -ReceivingSkillDirs @('skills/demo-skill')
         ($r.DriftDetails -join ' ') | Should -Not -Match 'Composite References'
+        ($r.DriftDetails -join ' | ') | Should -BeExactly '' -Because 'a fixture this test calls lawful must be drift-FREE, not merely free of one substring'
     }
 
     It 'A skill NOT carrying the convention is judged by the manifest registry alone' {
@@ -871,6 +880,7 @@ description: "Another skill. Use when reconciling a promoted roster against its 
         # base fixture has no Composite References section at all.
         $r = script:Invoke-ScratchAudit { }
         ($r.DriftDetails -join ' ') | Should -Not -Match 'Composite References'
+        ($r.DriftDetails -join ' | ') | Should -BeExactly '' -Because 'a fixture this test calls lawful must be drift-FREE, not merely free of one substring'
     }
 
     It 'INDUCED (unreproducible-provenance class): a machine-local path recorded as a searched surface FAILS' {

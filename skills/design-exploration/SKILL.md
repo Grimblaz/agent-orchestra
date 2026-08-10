@@ -298,6 +298,8 @@ pwsh {plugin-root}/skills/session-memory-contract/scripts/persist-phase-ledger.p
 
 Four ways a design converges on something defensible and wrong. Incident detail sits in [references/design-exhibits.md](references/design-exhibits.md), cited per lens.
 
+### When a design is choosing a mechanism, grounding an option, or fixing a format or a detection rule
+
 #### Before proposing a mechanism for a missed step, ask which standing rule was absent
 
 When the problem is "the process did not happen", the reflex is a mechanism — an enforcer, a detector, a hook, a wired sequence — and this repository has **measured** that the reflex loses. Knowledge delivered as guidance has prevented defects that the same knowledge delivered as a graded check did not, and a long list of obligations is a recorded failure mode here rather than a fix. Assume the executor is capable and under-informed, not careless: the usual real gap is that **success was never defined where the executor reads**, and the fix is a short standing statement. So before offering any mechanism, ask *what standing rule would have made this obviously incomplete, and does one exist?* If none does, **that absence is the finding**. Watch for the better-shaped variant too — an existing rule that is *unfollowable* rather than missing, typically an absolute where a differential is needed; repairing it is smaller than adding one. Run the classification gate's second leg honestly against shipped doctrine first; a proper re-audit often collapses a load-bearing gate to routine because the doctrine already settled the shape. Exhibit: [references/design-exhibits.md](references/design-exhibits.md) § Three doctrine records that already settled the shape.

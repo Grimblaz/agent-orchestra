@@ -373,6 +373,8 @@ Read it before reporting CI state, before claiming a failure is pre-existing, be
 
 Two ways the tools you establish facts with report an absence that is not there. Both produce a *false negative* — the direction that gets written down as evidence, because nothing in the output says the answer was truncated or has moved.
 
+### When a tool's own output is the evidence for an absence, or a merge has moved what you cite
+
 #### A search result that omits a long matching line reads as absence
 
 The search tool collapses long matching lines to `[Omitted long matching line]` (and `[Omitted long context line]`), and a load-bearing match hides there while the result set reads as "not found". This is worst exactly where it costs most — a check for whether something already exists, where a false absence licenses building it again from scratch. **When a result set contains any omitted line anywhere near the thing you are checking for, read that exact line or range directly before asserting absence.** Do not conclude "not present" from a result set that contains omitted lines, and do not propose build-from-scratch on one. The same discipline covers the neighbouring cases: a bounded read window and a hand-picked term set both produce absences that the output does not label as bounded. Exhibit: [references/search-and-merge-traps.md](references/search-and-merge-traps.md) § An omitted long line that read as absence.

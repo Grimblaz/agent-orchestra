@@ -140,9 +140,12 @@ The test uses anchored literal assertions with non-capturing groups and no
 order-dependent gap-chain regexes — deliberately different from the
 gap-chain style used elsewhere (e.g. `branch-authority-gate-contract.Tests.ps1`),
 because the regex-timeout concern that motivates gap-chain guarding does not
-apply to these hardcoded, non-backtracking literals. It is registered in the
-`.github/workflows/pester.yml` allowlist, so a missing or drifted rule fails a
-PR rather than only a local run.
+apply to these hardcoded, non-backtracking literals. It is selected by CI — `pester.yml`
+selects by glob minus `.github/scripts/Tests/ci-quarantine.json` and this suite
+carries no quarantine entry — so a missing or drifted rule fails a PR rather than
+only a local run. *(Corrected under issue #1050: this read "registered in the
+`.github/workflows/pester.yml` allowlist". The allowlist was retired by PR #988;
+the enforcement outcome is unchanged, only the mechanism that produces it.)*
 
 ## Verification Approach
 
