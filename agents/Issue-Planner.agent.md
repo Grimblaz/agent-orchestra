@@ -60,7 +60,7 @@ Cycle through the phases below iteratively based on user input.
 
 ## 2. Discovery
 
-Load `skills/plan-authoring/SKILL.md` for the reusable discovery workflow, CE Gate input handling, and stress-test preparation. Dispatch a read-only subagent to gather context, identify blockers, identify the customer-facing surface and CE Gate method, and avoid drafting the full plan during discovery.
+**Mandated load, unconditional** — Load `skills/plan-authoring/SKILL.md` for the reusable discovery workflow, CE Gate input handling, and stress-test preparation. Dispatch a read-only subagent to gather context, identify blockers, identify the customer-facing surface and CE Gate method, and avoid drafting the full plan during discovery.
 
 ## 3. Alignment
 

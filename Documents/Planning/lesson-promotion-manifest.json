@@ -15,6 +15,7 @@
     "recall-loss",
     "pending"
   ],
+  "mandate_marker": "Mandated load, unconditional",
   "specificity_floor": {
     "min_length": 24,
     "min_content_words": 3,
@@ -129,6 +130,8 @@
       "chunk": 1,
       "issue": 1049,
       "kind": "lens",
+      "fires_in": "review",
+      "identity": "name-keyed",
       "home": "skills/adversarial-review/SKILL.md",
       "anchor": "#### A remedy for a silent defect reproduces that defect inside itself",
       "triggers": [
@@ -147,7 +150,7 @@
       "checked_against": {
         "verdict": "clean",
         "surfaces": [
-          "C:\\Users\\Micah",
+          "skills/adversarial-review/SKILL.md",
           "CLAUDE.md",
           "Documents/Design/*.md"
         ],
@@ -172,6 +175,8 @@
       "chunk": 1,
       "issue": 1049,
       "kind": "lens",
+      "fires_in": "plan",
+      "identity": "name-keyed",
       "home": "skills/plan-authoring/SKILL.md",
       "anchor": "#### A proof standard can name every polarity and still miss the population none of its exhibits exercises",
       "triggers": [
@@ -190,7 +195,7 @@
       "checked_against": {
         "verdict": "clean",
         "surfaces": [
-          "C:\\Users\\Micah",
+          "skills/plan-authoring/SKILL.md",
           "CLAUDE.md",
           "Documents/Design/*.md"
         ],
@@ -203,13 +208,15 @@
       "chunk": 1,
       "issue": 1049,
       "kind": "lens",
+      "fires_in": "review",
+      "identity": "name-keyed",
       "home": "skills/adversarial-review/SKILL.md",
       "anchor": "#### A \"nothing was lost\" check assembled from a partition of its own input cannot fail",
       "triggers": [
         {
           "surface": "skills/adversarial-review/SKILL.md",
           "surface_kind": "description",
-          "text": "prosecuting a remedy for the defect class it closes"
+          "text": "judging whether a proposed guard or a substring pin actually holds"
         },
         {
           "surface": "skills/adversarial-review/SKILL.md",
@@ -221,7 +228,7 @@
       "checked_against": {
         "verdict": "clean",
         "surfaces": [
-          "C:\\Users\\Micah",
+          "skills/adversarial-review/SKILL.md",
           "CLAUDE.md",
           "Documents/Design/*.md"
         ],
@@ -240,6 +247,8 @@
       "chunk": 1,
       "issue": 1049,
       "kind": "lens",
+      "fires_in": "review",
+      "identity": "name-keyed",
       "home": "skills/adversarial-review/SKILL.md",
       "anchor": "#### A proposed guard has two cheap falsifiers nobody runs",
       "triggers": [
@@ -258,7 +267,7 @@
       "checked_against": {
         "verdict": "clean",
         "surfaces": [
-          "C:\\Users\\Micah",
+          "skills/adversarial-review/SKILL.md",
           "CLAUDE.md",
           "Documents/Design/*.md"
         ],
@@ -271,6 +280,8 @@
       "chunk": 1,
       "issue": 1049,
       "kind": "lens",
+      "fires_in": "completion",
+      "identity": "name-keyed",
       "home": "skills/verification-before-completion/SKILL.md",
       "anchor": "#### Run the criterion's own discriminator against the untouched tree before you trust it",
       "triggers": [
@@ -289,7 +300,7 @@
       "checked_against": {
         "verdict": "clean",
         "surfaces": [
-          "C:\\Users\\Micah",
+          "skills/verification-before-completion/SKILL.md",
           "CLAUDE.md",
           "Documents/Design/*.md"
         ],
@@ -308,6 +319,8 @@
       "chunk": 1,
       "issue": 1049,
       "kind": "lens",
+      "fires_in": "review",
+      "identity": "2026-08-09",
       "home": "skills/adversarial-review/SKILL.md",
       "anchor": "#### A test asserting that a name appears in a script pins nothing",
       "triggers": [
@@ -326,7 +339,7 @@
       "checked_against": {
         "verdict": "clean",
         "surfaces": [
-          "C:\\Users\\Micah",
+          "skills/adversarial-review/SKILL.md",
           "CLAUDE.md",
           "Documents/Design/*.md"
         ],
@@ -345,6 +358,8 @@
       "chunk": 1,
       "issue": 1049,
       "kind": "lens",
+      "fires_in": "completion",
+      "identity": "2026-08-09",
       "home": "skills/verification-before-completion/SKILL.md",
       "anchor": "#### A mutation campaign that only touches sites the suite already covers proves nothing",
       "triggers": [
@@ -363,7 +378,7 @@
       "checked_against": {
         "verdict": "clean",
         "surfaces": [
-          "C:\\Users\\Micah",
+          "skills/verification-before-completion/SKILL.md",
           "CLAUDE.md",
           "Documents/Design/*.md"
         ],
@@ -382,13 +397,15 @@
       "chunk": 1,
       "issue": 1049,
       "kind": "lens",
+      "fires_in": "completion",
+      "identity": "2026-08-09",
       "home": "skills/verification-before-completion/SKILL.md",
       "anchor": "#### Point the instrument at the real target, and build the negatives first",
       "triggers": [
         {
           "surface": "skills/verification-before-completion/SKILL.md",
           "surface_kind": "description",
-          "text": "making an absence claim, a universal claim, or a one-time demonstration offered as a standing guarantee"
+          "text": "designing a mutation campaign or red-run evidence"
         },
         {
           "surface": "skills/verification-before-completion/SKILL.md",
@@ -400,7 +417,7 @@
       "checked_against": {
         "verdict": "clean",
         "surfaces": [
-          "C:\\Users\\Micah",
+          "skills/verification-before-completion/SKILL.md",
           "CLAUDE.md",
           "Documents/Design/*.md"
         ],
@@ -413,6 +430,8 @@
       "chunk": 1,
       "issue": 1049,
       "kind": "lens",
+      "fires_in": "completion",
+      "identity": "name-keyed",
       "home": "skills/verification-before-completion/SKILL.md",
       "anchor": "#### A baseline that is not an ancestor makes the differential rule vacuous",
       "triggers": [
@@ -431,7 +450,7 @@
       "checked_against": {
         "verdict": "cite",
         "surfaces": [
-          "C:\\Users\\Micah",
+          "skills/verification-before-completion/SKILL.md",
           "CLAUDE.md",
           "Documents/Design/*.md"
         ],
@@ -456,6 +475,8 @@
       "chunk": 1,
       "issue": 1049,
       "kind": "lens",
+      "fires_in": "plan",
+      "identity": "name-keyed",
       "home": "skills/plan-authoring/SKILL.md",
       "anchor": "#### A vacuity answer can name the right verdict and cite blockers the executor can escape",
       "triggers": [
@@ -474,7 +495,7 @@
       "checked_against": {
         "verdict": "cite",
         "surfaces": [
-          "C:\\Users\\Micah",
+          "skills/plan-authoring/SKILL.md",
           "CLAUDE.md",
           "Documents/Design/*.md"
         ],
@@ -487,6 +508,8 @@
       "chunk": 1,
       "issue": 1049,
       "kind": "lens",
+      "fires_in": "plan",
+      "identity": "name-keyed",
       "home": "skills/plan-authoring/SKILL.md",
       "anchor": "#### Criteria can pin the reader-facing surface completely and miss every programmatic consumer",
       "triggers": [
@@ -505,7 +528,7 @@
       "checked_against": {
         "verdict": "clean",
         "surfaces": [
-          "C:\\Users\\Micah",
+          "skills/plan-authoring/SKILL.md",
           "CLAUDE.md",
           "Documents/Design/*.md"
         ],
@@ -542,6 +565,8 @@
       "chunk": 1,
       "issue": 1049,
       "kind": "lens",
+      "fires_in": "completion",
+      "identity": "name-keyed",
       "home": "skills/verification-before-completion/SKILL.md",
       "anchor": "#### A demonstration at delivery is not a regression guard",
       "triggers": [
@@ -560,7 +585,7 @@
       "checked_against": {
         "verdict": "clean",
         "surfaces": [
-          "C:\\Users\\Micah",
+          "skills/verification-before-completion/SKILL.md",
           "CLAUDE.md",
           "Documents/Design/*.md"
         ],
@@ -579,6 +604,8 @@
       "chunk": 1,
       "issue": 1049,
       "kind": "lens",
+      "fires_in": "completion",
+      "identity": "name-keyed",
       "home": "skills/verification-before-completion/SKILL.md",
       "anchor": "#### A witness can falsify a universal but never establish one",
       "triggers": [
@@ -597,7 +624,7 @@
       "checked_against": {
         "verdict": "clean",
         "surfaces": [
-          "C:\\Users\\Micah",
+          "skills/verification-before-completion/SKILL.md",
           "CLAUDE.md",
           "Documents/Design/*.md"
         ],
@@ -616,6 +643,8 @@
       "chunk": 1,
       "issue": 1049,
       "kind": "lens",
+      "fires_in": "completion",
+      "identity": "name-keyed",
       "home": "skills/verification-before-completion/SKILL.md",
       "anchor": "#### A bounded read window produces a false absence, and the window gets recorded as the evidence",
       "triggers": [
@@ -634,7 +663,7 @@
       "checked_against": {
         "verdict": "clean",
         "surfaces": [
-          "C:\\Users\\Micah",
+          "skills/verification-before-completion/SKILL.md",
           "CLAUDE.md",
           "Documents/Design/*.md"
         ],
@@ -647,6 +676,8 @@
       "chunk": 1,
       "issue": 1049,
       "kind": "lens",
+      "fires_in": "completion",
+      "identity": "name-keyed",
       "home": "skills/verification-before-completion/SKILL.md",
       "anchor": "#### A red run at deliverable grain says nothing about the deliverable's sub-properties",
       "triggers": [
@@ -665,7 +696,7 @@
       "checked_against": {
         "verdict": "clean",
         "surfaces": [
-          "C:\\Users\\Micah",
+          "skills/verification-before-completion/SKILL.md",
           "CLAUDE.md",
           "Documents/Design/*.md"
         ],
@@ -690,6 +721,8 @@
       "chunk": 1,
       "issue": 1049,
       "kind": "lens",
+      "fires_in": "plan",
+      "identity": "name-keyed",
       "home": "skills/plan-authoring/SKILL.md",
       "anchor": "#### Specify at the knowledge level you actually have",
       "triggers": [
@@ -708,7 +741,7 @@
       "checked_against": {
         "verdict": "cite",
         "surfaces": [
-          "C:\\Users\\Micah",
+          "skills/plan-authoring/SKILL.md",
           "CLAUDE.md",
           "Documents/Design/*.md"
         ],
@@ -727,6 +760,8 @@
       "chunk": 1,
       "issue": 1049,
       "kind": "lens",
+      "fires_in": "plan",
+      "identity": "name-keyed",
       "home": "skills/plan-authoring/SKILL.md",
       "anchor": "#### One noun naming two things lets a compliant run satisfy every criterion and do nothing",
       "triggers": [
@@ -745,7 +780,7 @@
       "checked_against": {
         "verdict": "cite",
         "surfaces": [
-          "C:\\Users\\Micah",
+          "skills/plan-authoring/SKILL.md",
           "CLAUDE.md",
           "Documents/Design/*.md"
         ],
@@ -770,6 +805,8 @@
       "chunk": 1,
       "issue": 1049,
       "kind": "lens",
+      "fires_in": "review",
+      "identity": "name-keyed",
       "home": "skills/adversarial-review/SKILL.md",
       "anchor": "#### Demoting a signal orphans whatever it was the sole producer of",
       "triggers": [
@@ -788,7 +825,7 @@
       "checked_against": {
         "verdict": "clean",
         "surfaces": [
-          "C:\\Users\\Micah",
+          "skills/adversarial-review/SKILL.md",
           "CLAUDE.md",
           "Documents/Design/*.md"
         ],
@@ -807,6 +844,8 @@
       "chunk": 1,
       "issue": 1049,
       "kind": "lens",
+      "fires_in": "completion",
+      "identity": "name-keyed",
       "home": "skills/verification-before-completion/SKILL.md",
       "anchor": "#### A differential script baselined on `HEAD` inverts the moment you commit",
       "triggers": [
@@ -825,7 +864,7 @@
       "checked_against": {
         "verdict": "clean",
         "surfaces": [
-          "C:\\Users\\Micah",
+          "skills/verification-before-completion/SKILL.md",
           "CLAUDE.md",
           "Documents/Design/*.md"
         ],

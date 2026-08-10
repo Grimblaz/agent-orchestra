@@ -300,6 +300,8 @@ The first four object to vagueness, staleness, and unverified assumption. Of the
 
 Nine ways verification evidence passes while proving nothing. Every one is an escape from this repository's own review record, and every one survived the checklists above — a checklist asks whether you produced evidence, and these ask whether the evidence could ever have come out negative.
 
+**Headroom, stated because the next addition is the one that crosses silently.** This file is 495 lines against the 500-line structural limit, and the suite that would enforce that limit is quarantined. A tenth lens does not fit here: move this section to a `references/` file first, and give it a manifest exhibit row when you do.
+
 ### When you are naming a baseline commit for a differential suite claim
 
 #### A baseline that is not an ancestor makes the differential rule vacuous

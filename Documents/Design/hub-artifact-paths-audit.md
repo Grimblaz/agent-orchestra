@@ -1,6 +1,6 @@
 <!-- audit-meta
-last-verified: f14a059979eca297d9c7e329923c866dd7e0b4d6
-generated-at: 2026-08-10T02:52:31Z
+last-verified: c4a7adc51844c4f2b5c555fcbd914a3b443aa417
+generated-at: 2026-08-10T04:19:58Z
 -->
 
 ## Purpose
@@ -270,7 +270,7 @@ Copilot always reads from the source tree in the hub repo. This dual-resolved be
 - **examples**:
   - `.github/scripts/lib/cost-walker-copilot.ps1`
   - `.github/scripts/lib/frame-credit-ledger-core.ps1`
-- **notes**: Shared library scripts loaded by root hook scripts under .github/scripts/lib/. Sourced as dependencies at runtime; missing lib script propagates as a visible-warning from the calling hook.
+- **notes**: Shared library scripts under .github/scripts/lib/. The family's dominant member is a dependency of a root hook script, sourced at runtime, where a missing lib script propagates as a visible-warning from the calling hook — that is what claude_resolves, experience and requires_version_bump above describe. The family is NOT uniform in that respect, and saying so is cheaper than a second family: a hub-only member such as .github/scripts/lib/lesson-promotion-core.ps1 (#1049) is dot-sourced from the SOURCE TREE by a Pester suite that never runs in a consumer install, is never resolved from the plugin cache, and its absence is a CI test failure rather than a hook warning. Read the row as the hook-loaded case; check the member before relying on it for a hub-only library.
 
 ### `.github/scripts/Tests/*.Tests.ps1`
 

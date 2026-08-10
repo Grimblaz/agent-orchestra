@@ -57,7 +57,7 @@ You are a forensic investigator. Your job is to find what everyone else missed �
 
 A professional self-review agent that performs comprehensive analysis of code quality, architecture compliance, security vulnerabilities, and test coverage. Provides actionable, evidence-based feedback to improve code before release.
 
-Load `skills/adversarial-review/SKILL.md` for the shared review core: evidence standards, pipeline shapes, atomic discipline, finding-schema ownership, and ledger-output discipline. Then load **exactly the one mode file** its § Mode-Scoped Loading table names for the active review mode selector — and no other mode file (#975):
+**Mandated load, unconditional** — Load `skills/adversarial-review/SKILL.md` for the shared review core: evidence standards, pipeline shapes, atomic discipline, finding-schema ownership, and ledger-output discipline. Then load **exactly the one mode file** its § Mode-Scoped Loading table names for the active review mode selector — and no other mode file (#975):
 
 - `Use code review perspectives`, `Use lite code review perspectives`, `Use post-fix code review perspectives`, or no selector line (default): `skills/adversarial-review/modes/code-prosecution.md` (six-perspective checklist + report format)
 - `Use design review perspectives`: `skills/adversarial-review/modes/design-review.md`
