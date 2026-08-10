@@ -1,6 +1,6 @@
 ---
 name: test-driven-development
-description: "Test-Driven Development workflow guidance, quality standards, and practical patterns. Use when writing tests first, implementing to pass tests, validating quality gates, or refactoring safely. DO NOT USE FOR: debugging existing failures (use systematic-debugging), React component test patterns (use ui-testing), E2E browser tests (use webapp-testing), randomized property verification (use property-based-testing), or architecture evaluation and design decisions (use software-architecture)"
+description: "Test-Driven Development workflow guidance, quality standards, and practical patterns. Use when writing tests first, implementing to pass tests, validating quality gates, or refactoring safely; also when placing a hazardous or non-returning test file, when changing CI suite selection or a dot-sourced runner library, when a suite passes locally and fails only on CI, when claiming a rule is covered by the surrounding tests, when writing a test docstring that names a cross-surface invariant, and when writing a test that fabricates hostile input. DO NOT USE FOR: debugging existing failures (use systematic-debugging), React component test patterns (use ui-testing), E2E browser tests (use webapp-testing), randomized property verification (use property-based-testing), or architecture evaluation and design decisions (use software-architecture)"
 ---
 
 <!-- platform-assumptions: markdown skill guidance for VS Code custom agents in Agent Orchestra; assumes tests are authored against repo-defined commands, architecture rules, and quality thresholds. -->
@@ -164,6 +164,14 @@ all members, not only the first or primary record.
 
 <reference_index>
 
+## Composite References
+
+- [references/anti-patterns.md](references/anti-patterns.md): test anti-patterns and what to write instead
+- [references/commands.md](references/commands.md): per-stack test invocation commands
+- [references/quality-gates.md](references/quality-gates.md): the quality-gate tiers and what each one asserts
+- [references/test-patterns.md](references/test-patterns.md): reusable test shapes for the common cases
+- [references/test-authoring-exhibits.md](references/test-authoring-exhibits.md): the incident detail behind § Test-Authoring Lenses — the placements, leaks, false greens and undefended rules each lens was extracted from
+
 ## Reference Files
 
 ### Workflows
@@ -201,6 +209,36 @@ all members, not only the first or primary record.
 # Run mutation testing (PIT)
 ./gradlew pitest
 ```
+
+## Test-Authoring Lenses
+
+> **Authoritative source**: which lessons are promoted here, what anchor each one lives at, and the trigger text that has to reach a reader are recorded in `Documents/Planning/lesson-promotion-manifest.json`. `.github/scripts/Tests/lesson-promotion-manifest.Tests.ps1` is what stops this section and that manifest drifting apart, and it is the suite a red comes from. **Renaming a heading below is a migration, not a regression** — update that lesson's `anchor` in the manifest in the same commit as the rename. A red naming an anchor you just renamed is reporting a manifest row left behind, not a lost lens.
+
+Six ways a suite is green about the wrong thing. Incident detail sits in [references/test-authoring-exhibits.md](references/test-authoring-exhibits.md), cited per lens.
+
+#### Blast radius comes from what executes a path, not from what selects from it
+
+Before placing anything hazardous — a deliberately non-returning control suite, a fixture that must never be collected — **grep for what runs that path, not for what filters it**. A selector and an executor are different things, and safety is a property of the executors. Checking every selector in the repository and finding them all non-recursive and all agreeing on a file count reads as safety while the consumers that would actually hang were never in the searched set: directory-level test invocations, the commands documented in contributor instructions and pull-request templates, baseline-capture helpers. Pester's directory discovery is **recursive**, so a subdirectory placement that the non-recursive gate glob never yields still lands inside the loop every contributor runs before opening a pull request, on a machine with no job ceiling to stop it. And a quarantine entry cannot rescue it: **the registry binds the gate's *selection*, not a raw directory run**, so an entry protects CI and leaves every human exposed. Only outside the tests root is actually safe; the convention that has kept this from biting is that fixtures under that root do not carry the suite suffix. Exhibit: [references/test-authoring-exhibits.md](references/test-authoring-exhibits.md) § A "safe" placement inside the pre-PR command.
+
+#### CI selects suites by glob minus the quarantine registry, and a file-scope StrictMode in a dot-sourced library reddens the whole run
+
+Suite selection here is a **glob minus `.github/scripts/Tests/ci-quarantine.json`**, not an allowlist — there is nothing to forget to update, and skipping a suite means adding an entry with a `class` and a `reason`. Keep the classes distinct: never-measured backlog, measured-failing (which requires an issue number, because a temporary exclusion with no ticket is a permanent one that has not admitted it), and structurally-cannot-run. Collapsing them is how a registry becomes a graveyard nobody reads. The trap that ships alongside: **a file-scope `Set-StrictMode` in a library the workflow dot-sources leaks into the entire Pester run**, because the workflow dot-sources and then invokes in the same session — so strictness applies to every suite executed afterwards and reddens subsystems the change never touched. A library dot-sourced by a *runner* sets strictness **inside its functions**; file scope is only safe for libraries dot-sourced inside a `BeforeAll`, where the blast radius is one file. The verification method worth reusing for any of this: **do not approximate a workflow locally — extract its own `run:` block from the YAML and execute those exact bytes** in a fresh process, swapping the exit-on-failure setting for pass-through. A hand-rolled approximation dot-sources in a different order and misses exactly this class. Exhibit: [references/test-authoring-exhibits.md](references/test-authoring-exhibits.md) § A StrictMode leak that reddened 218 untouched tests.
+
+#### For a CI-only failure, dump the whole decision state in one run
+
+One hypothesis per round-trip is the slow, wrong method: each narrow assertion comes back clean and kills its hypothesis without pointing anywhere. Push a temporary block that dumps **everything the decision reads plus the product's own output**, unconditionally, written so it lands in the log whether or not the assertion fails. Capture, roughly in value order: the product's own log lines (usually decisive — the executor naming which branch it took ends the search instantly); every probe's exit code *and* its stdout, not just the boolean you derive from it; the identity facts side by side (the SHAs and refs the decision compares); tool versions and relevant configuration; and whether the mocks were reached at all, since an empty call log is a loud signal. Two traps this method catches: **a shim that only works on one platform makes tests pass for the wrong reason** — every fixture expecting a decline still passes when the tool is simply unavailable, so assert the mock was actually invoked; and a cherry-pick can reproduce a source commit's exact SHA when tree, parent, message, author and committer-second all match, so the branch has zero unique commits and the test silently exercises another path. General rule: a test depending on an unasserted precondition reports the *downstream* symptom — pin the precondition and the failure names itself. Exhibit: [references/test-authoring-exhibits.md](references/test-authoring-exhibits.md) § Three CI round-trips against one dump.
+
+#### A rule you cannot invoke cannot be defended, however many tests surround it
+
+If a rule lives inline — a `Where-Object` block, a condition inside a long function — and the only path reaching it runs behind a worker-runspace boundary, a fail-open `catch`, or a guard with conjuncts you cannot satisfy hermetically, then **no test can drive it**: reverting the rule leaves the whole repository green. That is not "covered by the surrounding tests", it is undefended, and prose saying it "moved in lockstep" reads as defended. **Before claiming a rule is defended, revert it in a scratch tree and run everything — per rule, not per file.** A rule with no reachable red state gets one of exactly two things: **extraction into a named, callable unit** the real code path then calls, or an explicit written record that it ships undefended. The bigger harness is not the fix; testability is a design property of where you put the rule, not of how many tests you wrote. Exhibit: [references/test-authoring-exhibits.md](references/test-authoring-exhibits.md) § A reverted rule that left 23 tests green.
+
+#### A test docstring can name a check the body never performs
+
+When a docstring names a cross-surface invariant, check the body actually **reads both surfaces**. A test that enumerates a constant it also authored is self-consistent by construction and can never fail for the reason its documentation gives — and the unwritten check is usually exactly what would have caught the defect sitting next to it, so the overclaim and the gap are one hole seen from two sides. Read the canonical source at runtime instead of typing out a hashtable. The corollary that rides along: an **absence-assertion set is only as good as its enumeration** — pinning that three moved sections are gone while silently omitting a fourth means a re-addition passes everything. And always run the negative control: after fixing, restore the pre-fix file and confirm the new tests actually fail against it; a test that passes both before and after is correctly identified as covering already-working behaviour, not as evidence. Exhibit: [references/test-authoring-exhibits.md](references/test-authoring-exhibits.md) § A docstring that named a check the body never ran.
+
+#### A test that fabricates hostile input can corrupt the aggregate artifact it protects
+
+When the property under test is a property of the **whole run's output**, a test that fabricates an adversarial input can satisfy itself and break that property at the same time — unit-level green says nothing, and only the aggregate re-run shows it. Before writing such a test, ask: *does this test run inside the artifact whose aggregate property I am protecting?* If yes, resolve the adversarial cases through the **pure helper** so nothing is emitted, and keep only end-to-end cases whose output is indistinguishable from a legitimate participant. Watch the harness too, not just your code: a runner that echoes the path of every file it executes will inject a record-shaped string into the same log from a **fixture directory name**, which is the reading hazard the criterion existed to remove, emitted from a line the code never wrote. And check the aggregate rather than the unit — where a criterion is stated over a whole run, the verification has to be a whole run. Exhibit: [references/test-authoring-exhibits.md](references/test-authoring-exhibits.md) § A test that stamped six false records into its own run.
 
 ## Gotchas
 

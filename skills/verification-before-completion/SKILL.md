@@ -1,6 +1,6 @@
 ---
 name: verification-before-completion
-description: "Evidence-based verification checklist before marking work complete. Use before PRs, releases, marking tickets done, or any \"I'm finished\" declaration; also when naming a baseline commit for a differential suite claim, when designing a mutation campaign or red-run evidence, and when making an absence claim, a universal claim, or a one-time demonstration offered as a standing guarantee. DO NOT USE FOR: post-merge cleanup or archival (use post-pr-review) or processing GitHub review comments (use code-review-intake)."
+description: "Evidence-based verification checklist before marking work complete. Use before PRs, releases, marking tickets done, or any \"I'm finished\" declaration; also when naming a baseline commit for a differential suite claim, when designing a mutation campaign or red-run evidence, when making an absence claim, a universal claim, or a one-time demonstration offered as a standing guarantee, when attributing a measurement or claiming a sweep or verification loop is complete, and when stating what a check or a CI suite will do about a change. DO NOT USE FOR: post-merge cleanup or archival (use post-pr-review) or processing GitHub review comments (use code-review-intake)."
 ---
 
 # Verification Before Completion
@@ -14,6 +14,11 @@ Systematic verification process to ensure work is truly complete.
 - Before declaring a feature complete
 - Before releases or deployments
 - Anytime you think "I'm done"
+
+## Composite References
+
+- [references/completion-account.md](references/completion-account.md): the completion account's procedure — baseline-commit constraint, marker family and write primitive, the `adversarial_review_ran` assertion and its reader, the rejection list, pre-existing-failure routing, and the external-review trigger
+- [references/verification-exhibits.md](references/verification-exhibits.md): the incident detail behind § Verification Lenses — measured numbers, named artifacts, and the failure sequences each lens was extracted from
 
 ## Core Principle
 
@@ -39,119 +44,16 @@ Five properties hold of a run **declaring itself done** — the act, not a lane 
 4. **A fix that closes a finding is itself re-validated before the account closes.** A fix cycle is never itself the completion signal.
 5. **A stopped run reads as stopped** — in the lane's typed halt-report shape, never free prose that a reader could mistake for completion.
 
-In this repository they are also stated in `CLAUDE.md` § What a finished run is true of, which is read live at session start; this section is their depth. The two copies are one statement and must move together — a parity test pins them, because an unpinned "they move together" claim is the two-surfaces-disagreeing shape this file's own differential rule exists to prevent, and the first draft's copies had already diverged by the time they shipped.
+In this repository they are also stated in `CLAUDE.md` § What a finished run is true of, which is read live at session start. The two copies are one statement and must move together — a parity test pins them, because an unpinned "they move together" claim is the two-surfaces-disagreeing shape this file's own differential rule exists to prevent, and the first draft's copies had already diverged by the time they shipped.
 
-### Which commit may be named as the baseline
+**How** a run makes each property true is its own choice. Three things are not: the account exists, it outlives the session that wrote it, and it carries a review assertion that would read false had no review run.
 
-Property 3 is only as good as the commit it measures against, and the first draft left that unconstrained — which made the whole rule vacuously satisfiable (issue #998 review, finding M13, sustained).
+The procedure behind those properties — **which commit may be named as the baseline**, where the account is written and with which primitive, the required `adversarial_review_ran` assertion and the reader that acts on it, what the guidance rejects, how a pre-existing failure is routed, and the external-review trigger — is [references/completion-account.md](references/completion-account.md). The properties above are the statement; that file is only their elaboration, and it restates none of them.
 
-**The named baseline must be an ancestor of the work being declared done** — the branch point, the merge base with the target branch, or any commit that predates this change. It may never be the run's own post-change `HEAD`.
+Two rules from it are load-bearing often enough to name here rather than behind the citation, because a run that never opens the reference still has to get them right:
 
-Without that constraint there is a reading in which every clause of property 3 is met and nothing is checked: a run that broke the suite names its own current commit as the baseline, every failure is then "present at that baseline and still present now", each is dispositioned as pre-existing and routed, and the account truthfully reports **"failures this change added: 0."** That is not a strained reading — it is the *natural* one, because the suite runner's own `RUN ATTRIBUTION` line emits `commit=` as the run's current commit, so a run transcribing it into the baseline slot names exactly the wrong commit and still reads compliant. The absolute rule this replaced had no such reading; restoring it would have been a regression disguised as a rewrite.
-
-**How** a run makes each property true is its own choice. Three things are not: the account exists, it outlives the session that wrote it, and it carries the review assertion below.
-
-### Where the account lives
-
-Every artifact the review pipeline leaves that carries finding-level content is keyed on a pull request, and a conductorless run reviews *before* one exists — so an account left format-free has nowhere to land and the only surviving copy is the transcript. The account is therefore persisted as an **issue-keyed durable marker**, written through the repository's existing marker-write primitive like every other marker family: `<!-- completion-account-{ID} -->`, where `{ID}` is the issue number. The issue is the one identifier that exists before a pull request does. See `skills/session-memory-contract/references/handoff-markers.md` for the family's row.
-
-An account held only in the session transcript, in a scratch file, or in a working-tree path does not satisfy the durability obligation above: a later reader on a different machine, after the worktree is deleted, must still be able to retrieve it.
-
-Write it with the shared primitive — never a hand-composed `gh issue comment`, for the same reason every other registered family is written this way. **What that rule buys is a single audited writer — not protection from `updated_at` advancement**; the primitive's own transport performs the identical whole-body PATCH. That is worth knowing here in particular, because this family is `upsert-in-place`: revising an account from `adversarial_review_ran: false` to `true` re-writes the whole comment and advances the timestamp of every family sitting beside it. See `skills/session-memory-contract/references/handoff-markers.md` § What the write-path rule buys. Invoke it like this:
-
-```bash
-pwsh skills/session-memory-contract/scripts/persist-marker.ps1 -Family completion-account -TargetSurface issue -Owner {owner} -Repo {repo} -Number {ID} -Marker '<!-- completion-account-{ID} -->' -BodyFile .tmp/completion-account-{ID}.md
-```
-
-Two things that refuse the write before any network call, both of them easy to hit:
-
-- **`-Owner` and `-Repo` are mandatory.** Omitting either fails parameter binding, not the write.
-- **`-BodyFile` must resolve inside the repository scratch root `.tmp/`.** A path outside it is refused.
-
-And two things the payload itself must satisfy:
-
-- **The marker is the body's first line.** Payload hygiene refuses a candidate whose own-family marker sits anywhere else.
-- **The body must not carry another registered family's marker at the start of any line.** This one is easy to trip precisely because an account is *narrative about the run's own pipeline artifacts* — and a fenced block does not save you, because every marker reader is a raw-text scan rather than a semantic parse. The repository already has the remedy and it is not "indent it": render marker mentions **inertly**, stripping the HTML-comment delimiters so the pattern has nothing to anchor on. See `skills/session-memory-contract/references/handoff-markers.md` § Writing about markers safely, which states the hazard, names `Format-InertMarkerLabel`, and gives the worked form. Write `` `phase-containment-ledger-{ID}` ``, never the delimited literal at column zero.
-
-The family declares **no validator adapter**, so nothing about the account's *own* shape is refused: an account with no review assertion, or a false one, still writes and is then flagged by the reader rather than blocked. That is deliberate — an account that cannot be written is worse than one that can be read and found wanting. But note the boundary carefully: the universal cross-family hygiene above runs regardless of that null adapter, so "no validator" does not mean "anything writes."
-
-### The required review assertion, and its two polarities
-
-The account MUST carry this field:
-
-```yaml
-adversarial_review_ran: true    # or false
-```
-
-Two polarities, both lexically present, and **absence is not a third**: an account omitting the field reads as *not run*, never as clean. Silence must not be readable as examined-and-clean.
-
-This exists because property 1 is quantified over the findings a review produced. A run that dispatches no review produces no findings, so "every finding traces to an outcome" is vacuously true over the empty set and the run can write a closed-looking account without a review having happened. A single sentence forbidding that would be administered by the same run writing the claim — a hope, not a check. The assertion is what a reader other than the author can act on.
-
-`Read-CompletionAccount` (`skills/verification-before-completion/scripts/completion-account-core.ps1`) is that reader. It is **warn-only**: it never blocks a write and never fails a run.
-
-**Who runs it, and when.** A reader nobody invokes is not a check — it is the same hope one layer down, and this repository has already measured that shape: a stated-once terminal obligation shipped into three skills emitted **zero** across three consecutive reviews, and the recorded remedy was a warn-only reader-side *sweep*. So the trigger is named here rather than left to be inferred:
-
-```bash
-# Read the account for issue {ID}, with the comment author carried through.
-pwsh -c ". skills/verification-before-completion/scripts/completion-account-core.ps1; \
-  Get-CompletionAccountFromComments -Id {ID} \
-    -Comments (gh issue view {ID} --json comments --jq '.comments' | ConvertFrom-Json)"
-```
-
-Run it **whenever you pick up an issue that has been worked before** — resuming a paused run, opening a follow-up, or reviewing someone else's finished work. `Get-CompletionAccountFromComments` selects the account by its family marker (never by concatenating every comment, which would let any unrelated comment supply the assertion), reports `Found: $false` when there is none, and surfaces the comment's author because a record recognised by shape alone does not authenticate itself. Everything it returns is advisory.
-
-### What the guidance rejects
-
-An account is nonconforming when any of these holds. Each is a rejection, not a suggestion:
-
-- **No review is accounted for.** The account carries `adversarial_review_ran: false`, or omits the field entirely, or claims `true` while naming no findings-to-outcome trace and no explicit "ran and returned nothing" result. A run that dispatched no adversarial review cannot write a conforming account.
-- **An external review posted findings the account never mentions.** Property 1 is quantified over the findings *a review* produced — not over the findings this run's own panel produced. A pull request carrying review comments holds findings that were produced and reached nobody, so an account written over them is closed-looking for exactly the reason an unreviewed account is: it is true over the wrong set. See § External review on the pull request for the trigger and for the distinction that keeps the check honest.
-- **A finding has no outcome that survived the judge.** Every finding the review produced traces to a fix commit or to a dismissal carrying its reason. A finding that simply stops being mentioned is not dispositioned.
-- **A fix closes a finding with no post-fix re-validation.** A fix cycle is never itself the completion signal. This repository's own record is that a fix introduced a new defect in three of five rounds on one issue and in three consecutive rounds on another, so an account closing on the fix commit alone certifies work nothing re-checked. **This clause is a restatement, not a new rule**, and saying so matters: the Insufficient Evidence list already rejects such an account under *"Evidence that the change is present offered as evidence that it is sufficient — a diff, a field that was added"*, and an independent reader applying the pre-#998 text alone reached NONCONFORMING on exactly this artifact. What this clause adds is location and grain — the general evidence principle now also appears where a run writes its *account*, and names the fix case explicitly — not a rejection that was previously unavailable.
-- **The account says nothing at all about the suite.** An account that discharges every other property and is silent on suite state is incomplete. Distinct from the differential rule below, which governs how a *stated* suite result is judged.
-- **A pre-existing failure is carried silently.** A failure present at the named baseline and still present now must be both *named* and *routed*. An account that names one but routes it nowhere has left it in the account and nowhere else; one that routes it without saying so leaves the next reader unable to tell it was ever seen.
-- **A stopped run's artifact could be read as completion.** A run that stops leaves the lane's typed halt-report shape (`skills/goal-run/schemas/goal-halt-report.schema.json`), not free prose. Neither artifact may be readable as the other.
-
-### Routing a pre-existing failure
-
-The differential rule takes a baseline failure *off* the blocking path, which only helps if something else picks it up. Routing is what does, and it is available on both paths:
-
-- **With an interactive surface**: the failure enters the `§2e Filing Approval Gate` batch (`skills/safe-operations/SKILL.md` § 2e) as a proposal, and an approved proposal files through `Add-FollowUpIssue.ps1` with provenance and a parent — never a bare `gh issue create`.
-- **Without one** (an unattended run has no one to ask): §2e's headless fallback lawfully **queues** the proposal and files nothing. A queued proposal discharges the routing obligation. It has to: otherwise an unattended run would be simultaneously obliged to file and unable to lawfully do so, and the rule would be unfollowable in exactly the way the absolute rule it replaces was.
-
-Both outcomes are reachable today; what changed is that the failure is no longer a blocker instead.
-
-### External review on the pull request
-
-A run that opened a pull request has published its work to reviewers that answer on their own schedule. Those answers are findings, and property 1 does not distinguish them from the run's own.
-
-**Why this needs a named trigger and not just the rejection clause above.** `/review-github` already ingests and adjudicates external review properly — the gap is that nothing tells a run to invoke it. It is opt-in and manually triggered, and a conductor-side step would not close the gap either: the bare `/goal` lane runs no conductor at all. The obligation therefore lives here, where every lane reads it, and carries its trigger with it — this file's own record is that a stated-once terminal obligation shipped into three skills emitted **zero** across three consecutive reviews.
-
-**Measured cost of not doing this** (PR #1023, 2026-08-08, all times UTC): the PR opened at 18:08; three findings posted at 18:11 and five more at 18:14 — all eight available **seven minutes** in. The run pushed its next commit at 19:46 without reading them, and closed them at 20:51, a full extra round later. That run had already completed a 5-pass prosecution panel, defense, judge, and **two** further post-fix adversarial passes: 27 internal findings, 23 sustained. The eight external findings were disjoint from every one of them and were sustained 8/8 through proxy prosecution → defense → judge, including a **high** — a duplicated policy region that made the checker report `clean` over a contradicting policy — whose defect class the internal panel had found and fixed at one call site while never sweeping for the other two.
-
-**Before declaring done, when the run opened or pushed to a pull request:**
-
-```bash
-# THREE distinct collections. A reviewer may use any of them, and reading two of
-# the three is how a review with findings reads as a review with none.
-gh api "repos/{owner}/{repo}/pulls/{PR}/comments"  --paginate --jq '.[] | "\(.created_at) \(.user.login) inline \(.path):\(.line)"'
-gh api "repos/{owner}/{repo}/pulls/{PR}/reviews"   --paginate --jq '.[] | select(.body != "") | "\(.submitted_at) \(.user.login) review-summary \(.state)"'
-gh api "repos/{owner}/{repo}/issues/{PR}/comments" --paginate --jq '.[] | "\(.created_at) \(.user.login) top-level"'
-```
-
-**All three, and paginated — both corrections came from a reviewer on this very section, which is the argument for the rule in miniature.** The first revision listed only inline threads and top-level comments. `gh` keeps submitted-review bodies in a third collection entirely, so a reviewer who puts a finding *only* in its review summary is invisible to both — and `skills/code-review-intake/SKILL.md` already requires review summaries in the ingested ledger, so the trigger has to actually fetch them. `--paginate` is the same class of gap one level down: `skills/safe-operations/SKILL.md` records that an unpaginated read caps out and can shadow the record on a busy thread.
-
-State the exposure honestly, because the check this section describes is the one that would have to catch it: on PR #1023 the two-command pair happened to reach **every** reviewer, since each had also commented inline or top-level — no reviewer was exclusive to `reviews`. So this is a **latent** gap, not a demonstrated miss, and it is recorded that way rather than dressed up with an exhibit that does not reproduce. What the pair genuinely does not return is the review-summary *body* — the object carrying, on that PR, one reviewer's "diff exceeds the review limit" verdict, which is a finding about coverage that a completion account needs and neither other collection holds.
-
-Findings from this route are ingested through `skills/code-review-intake/SKILL.md` — as proxy prosecution over the ingested ledger, never as conductor-side merit judgments — and their dispositions then travel in the same account as everything else.
-
-**The distinction that keeps this honest: an empty result is not a clean review.** Reviewers post asynchronously, so "no comments" minutes after opening a PR and "no comments after the reviewer finished" are different states, and only the second says anything. Check whether the review actually reported — `gh pr checks {PR}` names bots that are still `pending`, and several post a summary comment when they finish. Record which of the three the run is in, because collapsing them is how an unread review becomes an examined-and-clean claim:
-
-- **findings present** → ingest and disposition them
-- **reviewer finished, no findings** → an accounted-for review that returned nothing, in the words property 2 requires
-- **reviewer not finished, or none configured** → say that, and say the account is closing without it
-
-The last is a lawful close, not a failure. A reviewer that never answers cannot block a run; an account that quietly reads its silence as approval is what this clause forbids.
+- **The named baseline must be an ancestor of the work being declared done** — never the run's own post-change `HEAD`, which makes every failure "pre-existing" and property 3 vacuous.
+- **Absence of the review assertion is not a third polarity.** An account omitting `adversarial_review_ran` reads as *not run*, never as examined-and-clean.
 
 ## Universal Verification Checklist
 
@@ -298,33 +200,33 @@ The first four object to vagueness, staleness, and unverified assumption. Of the
 
 > **Authoritative source**: which lessons are promoted here, what anchor each one lives at, and the trigger text that has to reach a reader are recorded in `Documents/Planning/lesson-promotion-manifest.json`. `.github/scripts/Tests/lesson-promotion-manifest.Tests.ps1` is what stops this section and that manifest drifting apart, and it is the suite a red comes from. **Renaming a heading below is a migration, not a regression** — update that lesson's `anchor` in the manifest in the same commit as the rename. A red naming an anchor you just renamed is reporting a manifest row left behind, not a lost lens.
 
-Nine ways verification evidence passes while proving nothing. Every one is an escape from this repository's own review record, and every one survived the checklists above — a checklist asks whether you produced evidence, and these ask whether the evidence could ever have come out negative.
+Fourteen ways verification evidence passes while proving nothing. Every one is an escape from this repository's own review record, and every one survived the checklists above — a checklist asks whether you produced evidence, and these ask whether the evidence could ever have come out negative.
 
-**Headroom, stated because the next addition is the one that crosses silently.** This file is 495 lines against the 500-line structural limit, and the suite that would enforce that limit is quarantined. A tenth lens does not fit here: move this section to a `references/` file first, and give it a manifest exhibit row when you do.
+**How this section grows, corrected — the note that stood here pointed the wrong way.** It said a tenth lens does not fit and that the remedy was to move this section to a `references/` file. That remedy is the one extraction the standing check forbids: `lesson-promotion-core.ps1` reds a `kind: lens` whose home is a `references/` path, because a lens that stops loading has been archived rather than promoted. The extraction that creates room is the **inverse** — reference-shaped procedure moves out and the lenses stay, which is what § The Completion Account did to reach [references/completion-account.md](references/completion-account.md). Room for a lens comes from moving its *incident detail* into an exhibit and citing it, never from moving the lens.
 
 ### When you are naming a baseline commit for a differential suite claim
 
 #### A baseline that is not an ancestor makes the differential rule vacuous
 
-Stated in full at § Which commit may be named as the baseline and in `CLAUDE.md` § What a finished run is true of, property 3 — read the rule there rather than re-deriving it here. What this lens adds is the generalisation those two do not make: **the same hole opens wherever an absolute threshold is replaced by a relative one**. Whenever you write a relative rule, ask who picks the reference point and what stops them picking one that makes the comparison trivial.
+Stated in full at [references/completion-account.md](references/completion-account.md) § Which commit may be named as the baseline and in `CLAUDE.md` § What a finished run is true of, property 3 — read the rule there rather than re-deriving it here. That is also this lens's exhibit: its incident detail is already shipped doctrine, so no second copy is written. What this lens adds is the generalisation those two do not make: **the same hole opens wherever an absolute threshold is replaced by a relative one**. Whenever you write a relative rule, ask who picks the reference point and what stops them picking one that makes the comparison trivial.
 
 #### A differential script baselined on `HEAD` inverts the moment you commit
 
-A verification script that reads the "before" side with `git show HEAD:<file>` is correct only until the work is committed. After that, `HEAD` *is* the changed tree, so every "this text was absent pre-change and is present now" assertion compares the new tree against itself. The loud direction is a false red — 25 checks went red at once on #939 that way. The dangerous direction is silent: a check written as "the defect is *gone* now" passes vacuously against a baseline that never had it. Pin the base to an explicit SHA in a named variable, say in a comment why it is pinned, and grep for **every** `git show HEAD:` when repointing — one missed read is enough. A fix round needs a second pinned baseline too: the reviewed commit, so each fix check asserts the defect existed at the commit the reviewer saw.
+A verification script that reads the "before" side with `git show HEAD:<file>` is correct only until the work is committed. After that, `HEAD` *is* the changed tree, so every "this text was absent pre-change and is present now" assertion compares the new tree against itself. The loud direction is a false red — 25 checks went red at once on #939 that way. The dangerous direction is silent: a check written as "the defect is *gone* now" passes vacuously against a baseline that never had it. Pin the base to an explicit SHA in a named variable, say in a comment why it is pinned, and grep for **every** `git show HEAD:` when repointing — one missed read is enough. A fix round needs a second pinned baseline too: the reviewed commit, so each fix check asserts the defect existed at the commit the reviewer saw. Exhibit: [references/verification-exhibits.md](references/verification-exhibits.md) § A script that inverted on its own commit.
 
 #### Run the criterion's own discriminator against the untouched tree before you trust it
 
-A proof standard goes vacuous the same way a test does. Before shipping a criterion that says "X and Y differ", build X and Y at the **unmodified** baseline and confirm the comparison comes out negative. On #969 it did not: all three review lenses built the criterion's own two corpora at unmodified `HEAD` and got the difference the criterion demanded, because the two inputs differed in more than the one variable under test — the denominator, the partition membership, and the exclusion note all moved too. The tell is exactly that: **what else differs between X and Y for reasons unrelated to the work?** If anything does, the criterion is measuring that instead. Hold everything constant except the property being discriminated, and name the span being compared.
+A proof standard goes vacuous the same way a test does. Before shipping a criterion that says "X and Y differ", build X and Y at the **unmodified** baseline and confirm the comparison comes out negative. On #969 it did not: all three review lenses built the criterion's own two corpora at unmodified `HEAD` and got the difference the criterion demanded, because the two inputs differed in more than the one variable under test — the denominator, the partition membership, and the exclusion note all moved too. The tell is exactly that: **what else differs between X and Y for reasons unrelated to the work?** If anything does, the criterion is measuring that instead. Hold everything constant except the property being discriminated, and name the span being compared. Exhibit: [references/verification-exhibits.md](references/verification-exhibits.md) § A criterion its own baseline already satisfied.
 
 ### When you are designing a mutation campaign or red-run evidence
 
 #### A mutation campaign that only touches sites the suite already covers proves nothing
 
-"22 mutations, each turns exactly one test red" reads as strong evidence and can be almost worthless. On #1018 that campaign came back 22 of 22 red, and a reviewer running **six** mutations found **four** that turned *zero* tests red — because the sites had been chosen, unconsciously, from the code the tests were written against. Pick sites from the **deliverable**, not from the test file: enumerate what ships, then ask which of it any test would notice changing. Mutate **both** polarities of every comparison you introduced, not just "remove the guard". Mutate the **prose** when the prose is the deliverable, and mutate rows a *later* fix added rather than only those present when the pins were written. An all-red campaign is the floor, not the verdict — state how the sites were chosen. And a mutation that comes back **green is a finding about the evidence**, never one that "did not apply": it reports that something ships which no assertion holds, which is the most informative result the campaign can produce. Record it against the check rather than dropping it as inapplicable.
+"22 mutations, each turns exactly one test red" reads as strong evidence and can be almost worthless. On #1018 that campaign came back 22 of 22 red, and a reviewer running **six** mutations found **four** that turned *zero* tests red — because the sites had been chosen, unconsciously, from the code the tests were written against. Pick sites from the **deliverable**, not from the test file: enumerate what ships, then ask which of it any test would notice changing. Mutate **both** polarities of every comparison you introduced, not just "remove the guard". Mutate the **prose** when the prose is the deliverable, and mutate rows a *later* fix added rather than only those present when the pins were written. An all-red campaign is the floor, not the verdict — state how the sites were chosen. And a mutation that comes back **green is a finding about the evidence**, never one that "did not apply": it reports that something ships which no assertion holds, which is the most informative result the campaign can produce. Record it against the check rather than dropping it as inapplicable. Exhibit: [references/verification-exhibits.md](references/verification-exhibits.md) § A campaign that was 22 of 22 red and nearly worthless.
 
 #### A red run at deliverable grain says nothing about the deliverable's sub-properties
 
-Deleting a whole deliverable in a scratch copy removes the one salient literal its pin asserts, so the pin fires and the red run looks conclusive. Its *other* claims — what it is conditioned on, where its output lands, who can reach it — were never separately asserted, so each stays independently deletable. On #973 four deliverables "proved" held, and mutation at sub-property grain came back 64 of 64 green three times over. **Enumerate the claims a criterion makes, not the features it adds, and mutate once per claim**: if only this clause vanished, which assertion goes red? Two shapes always worth mutating separately — a conditioning clause ("when the target is X"), whose deletion silently widens scope, and a named landing surface ("the answer lands in Y"), whose deletion sends the output nowhere while every other pin stays green.
+Deleting a whole deliverable in a scratch copy removes the one salient literal its pin asserts, so the pin fires and the red run looks conclusive. Its *other* claims — what it is conditioned on, where its output lands, who can reach it — were never separately asserted, so each stays independently deletable. On #973 four deliverables "proved" held, and mutation at sub-property grain came back 64 of 64 green three times over. **Enumerate the claims a criterion makes, not the features it adds, and mutate once per claim**: if only this clause vanished, which assertion goes red? Two shapes always worth mutating separately — a conditioning clause ("when the target is X"), whose deletion silently widens scope, and a named landing surface ("the answer lands in Y"), whose deletion sends the output nowhere while every other pin stays green. Exhibit: [references/verification-exhibits.md](references/verification-exhibits.md) § Four deliverables proved, 64 sub-property mutations green.
 
 ### When you are making an absence claim, a universal claim, or a one-time demonstration offered as a standing guarantee
 
@@ -332,19 +234,43 @@ Deleting a whole deliverable in a scratch copy removes the one salient literal i
 
 Proof standards get derived by asking what a convincing *demonstration* would look like. That instinct is right for existentials and wrong for universals, and an executor grades against the proof standard — so a criterion stating "no X anywhere" with a one-fixture proof standard is passable by a run that built one fixture. Partition criteria by logical form **before** writing any proof standard. Existential claims take demonstration-shaped proof. Universal claims take a **standing check that executes the quantifier on every run**, not the transcript of it holding once. Value-domain claims are exercised over the whole domain — absent, `false` and `true` are three cases, and a standard testing only *absent* rewards the scrupulous run and catches only the omitting one.
 
-And every absence claim ships a **planted positive control, planted where the search is weakest**. "No X found" and "nothing looked for X" are the same evidence otherwise — but a plant in the shape the search was built around only proves the search can return *something*. On #977 an audit ran three phrasings, planted a positive of the form the phrasings were written for, saw all three flag it, and published "no second instance"; review then found five missed sites, all of a shape every phrasing's regex was structurally blind to. Before planting, ask: **what shape would my search miss, and is that what I am about to plant?**
+And every absence claim ships a **planted positive control, planted where the search is weakest**. "No X found" and "nothing looked for X" are the same evidence otherwise — but a plant in the shape the search was built around only proves the search can return *something*. On #977 an audit ran three phrasings, planted a positive of the form the phrasings were written for, saw all three flag it, and published "no second instance"; review then found five missed sites, all of a shape every phrasing's regex was structurally blind to. Before planting, ask: **what shape would my search miss, and is that what I am about to plant?** Exhibit: [references/verification-exhibits.md](references/verification-exhibits.md) § A control planted where the search was already strong.
 
 #### A bounded read window produces a false absence, and the window gets recorded as the evidence
 
-`Read` with `offset`/`limit` bounds the evidence, not the question; nothing in the output says "the window ended here." On #968 a context read as lines 250–339 produced an "uncovered" finding whose covering block opens at line **340**, and the resulting evidence row cited the window and was tagged verified — the error laundered into a certification before any reviewer saw it. For an **absence** claim, never bound the read: grep the whole file, or the whole tree. Counting claims need a mechanical count over the full span, not an eyeball over a window. And note the directional tell, which is the real lesson: grounding errors run in the direction that favours the conclusion you are arguing for, so audit absence claims for that bias specifically.
+`Read` with `offset`/`limit` bounds the evidence, not the question; nothing in the output says "the window ended here." On #968 a context read as lines 250–339 produced an "uncovered" finding whose covering block opens at line **340**, and the resulting evidence row cited the window and was tagged verified — the error laundered into a certification before any reviewer saw it. For an **absence** claim, never bound the read: grep the whole file, or the whole tree. Counting claims need a mechanical count over the full span, not an eyeball over a window. And note the directional tell, which is the real lesson: grounding errors run in the direction that favours the conclusion you are arguing for, so audit absence claims for that bias specifically. Exhibit: [references/verification-exhibits.md](references/verification-exhibits.md) § A window that became the evidence.
 
 #### A demonstration at delivery is not a regression guard
 
-*"Run controls at delivery and record the output"* buys one dated observation, satisfiable by a transcript — and the property it certifies starts decaying the moment the criterion is satisfied, with no signal. *"Ship a regression guard that exercises each axis against a modified copy"* buys the property over time and costs barely more to write. On #986 the delivery controls passed and review then found three inputs already reaching `clean` on a defective index, on the very axes those controls had certified — because each control had been planted where the check was strong. Ask at criterion-authoring time: **after this run ends, what re-checks this?** If the answer is "a person re-reading an issue comment", the criterion bought a demo, not a guard. This is a *plan*-phase fix, not a review-phase one: a criterion is what the executor builds to.
+*"Run controls at delivery and record the output"* buys one dated observation, satisfiable by a transcript — and the property it certifies starts decaying the moment the criterion is satisfied, with no signal. *"Ship a regression guard that exercises each axis against a modified copy"* buys the property over time and costs barely more to write. On #986 the delivery controls passed and review then found three inputs already reaching `clean` on a defective index, on the very axes those controls had certified — because each control had been planted where the check was strong. Ask at criterion-authoring time: **after this run ends, what re-checks this?** If the answer is "a person re-reading an issue comment", the criterion bought a demo, not a guard. This is a *plan*-phase fix, not a review-phase one: a criterion is what the executor builds to. Exhibit: [references/verification-exhibits.md](references/verification-exhibits.md) § Controls that passed while three inputs reached clean.
 
 #### Point the instrument at the real target, and build the negatives first
 
-Two checks that beat unit-level test-first at catching the expensive defects, because their unit is a population and a specification rather than a function. **Run it against the real target on day one**: fixtures are shaped by the same understanding that shaped the code, so they agree with it. On #1018 a fix was correct and never reached the population it existed for — identity-keying and name-keying are the same operation when every identity is unbound, which is true of 100% of the live corpus, and thirty seconds pointing the instrument at that corpus would have shown it. **Build each acceptance criterion's negative construction before the implementation**: built last, negatives get shaped to fit what you wrote rather than to the criterion. Standing caveat — this is one session's evidence; the phase-containment ledger is the instrument for whether it is systemic, and no lane changes on n=1.
+Two checks that beat unit-level test-first at catching the expensive defects, because their unit is a population and a specification rather than a function. **Run it against the real target on day one**: fixtures are shaped by the same understanding that shaped the code, so they agree with it. On #1018 a fix was correct and never reached the population it existed for — identity-keying and name-keying are the same operation when every identity is unbound, which is true of 100% of the live corpus, and thirty seconds pointing the instrument at that corpus would have shown it. **Build each acceptance criterion's negative construction before the implementation**: built last, negatives get shaped to fit what you wrote rather than to the criterion. Standing caveat — this is one session's evidence; the phase-containment ledger is the instrument for whether it is systemic, and no lane changes on n=1. Exhibit: [references/verification-exhibits.md](references/verification-exhibits.md) § A fix that never reached the population it existed for.
+
+### When you are attributing a measurement, or claiming a sweep or verification loop is complete
+
+#### An attribution that does not reproduce is a citation, not evidence
+
+The *attributed* obligation is not "name a method" — it is **name a method that reproduces**. Before writing a provenance line, run the exact command you are about to claim and check the numbers come out; the failure mode is a derivation reconstructed after the fact, whose clauses are each individually checkable and collectively never executed, so anyone re-running it gets a different set and either calls the brief wrong or silently substitutes their own. The companion half is the completeness claim riding on it: an enumeration is only ever complete with respect to **the phrasings you happened to choose**, so state such a count as a **floor**, write the criterion over the claim rather than over the list, and require the next reader to try a phrasing you did not. Worked numbers in [references/verification-exhibits.md](references/verification-exhibits.md) § An attribution that did not reproduce.
+
+#### A phrasing sweep proves nothing about the population its regex cannot express
+
+A completeness sweep run with several deliberately different phrasings, diffed against a baseline tree so neither half can be narrowed to suit the result, is still bounded by what its patterns can *reach*. Ask what shapes the regex is structurally blind to, not what synonyms you forgot. Three recur: **table cells**, where the noun and its threshold sit in different pipe-delimited columns and no prose pattern spans them; **an interposed word**, where `all tests **still** pass` defeats `all\s+tests\s+pass`, so allow a bounded gap; and any construction separating subject from predicate. And when a reviewer cites a line that is already correct, check the **file**, not the line — the real residual usually sits elsewhere in it. Detail in [references/verification-exhibits.md](references/verification-exhibits.md) § A sweep that stayed incomplete for three rounds.
+
+#### A verification loop that counts only failures reports green on zero checks run
+
+Absence of failures and absence of checks are indistinguishable when the only assertion is a zero count. A loop that increments `$bad` on the failure path and prints `"validated N items, invalid: 0"` prints exactly that when every iteration threw — the `N` comes from the input list, not from work done, and under `Set-StrictMode` a wrong parameter name makes the increment unreachable while the script still exits 0. Every verification loop asserts a **positive** count (`ok -eq total -and ok -gt 0`), increments on the success path, and sets `$ErrorActionPreference = 'Stop'` so a binding error aborts rather than silently skipping. When a harness prints green immediately after a wall of red, treat the green as the suspect. See [references/verification-exhibits.md](references/verification-exhibits.md) § A loop that validated nothing.
+
+#### A coupled-field migration lands half-done and every count still agrees
+
+When a migration must rewrite two fields that only mean anything together, a count-grain post-check passes on either half-done state: the corpus is all present, all parseable, all schema-valid, and asserting the wrong thing. Assert **each half separately** and **re-parse** rather than recount — a recount ("29 rows now say X") is satisfied by a corpus no reader can use. The mechanism that splits the halves is usually smaller than the migration: an anchored `(?m)…[ \t]*$` replace silently no-ops on a CRLF body because `$` matches before the `\n` and `\r` is not in `[ \t]`, while its unanchored sibling applies fine. Write `[ \t]*\r?$`. And note which evidence was weaker: the "more realistic" live-body probe normalised the line endings away, so only the fixture reproduced it. Exhibit: [references/verification-exhibits.md](references/verification-exhibits.md) § A migration that validated and counted while half-done.
+
+### When you are stating what a check or a CI suite will do
+
+#### A presence pin cannot resist a qualification, and its failure message ratchets against one
+
+Never write what a check will do without opening it — `sed -n` the assertion line first. A `Should -Match 'some phrase'` is a **presence** pin over a file or an extracted section, so **appending a qualification leaves it green**: the assertion cannot express "unqualified", only that the phrase is somewhere in the text. What turns it red is breaking the literal — bolding it, italicising a word inside it, rewording — which is markup interposition one layer down from the grep problem above. The consequence worth carrying: a presence pin whose `-Because` message says *"must preserve the X framing"* is a **one-way ratchet**, telling a future editor by a red test to keep the absolute and telling them nothing at all to keep the qualification. So when a plan records that a qualification "ships undefended", ask whether the guard is *absent* or *adversarial* — those are different records and only one is what a design usually means. Worked case in [references/verification-exhibits.md](references/verification-exhibits.md) § A pin that was predicted backwards in both directions.
 
 ## Verification Log Template
 

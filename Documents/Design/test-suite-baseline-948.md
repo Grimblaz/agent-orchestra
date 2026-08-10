@@ -367,3 +367,44 @@ the next regression of this kind. Promoting more files into CI is issue #672; th
 rule that stops the next regression is issue #949. Neither is funded by this work.
 
 Treat this as a snapshot, not a guarantee.
+
+## Structural suites measured against the promotion tranche (issue #1050, 2026-08-10)
+
+Recorded here rather than in a pull request, so a reader arriving from the standing-audit work
+under #993 reaches it without needing to know which pull request landed the tranche.
+
+Issue #1050 (chunk 2 of umbrella #1045) added ten files under `skills/*/references/` and lens
+sections to nine skill bodies. Two structural suites judge that kind of surface. Both were
+invoked directly against the delivered tree and against the pre-change baseline `ec7bc60`:
+
+| Suite | Quarantine class | Delivered | Baseline `ec7bc60` |
+| --- | --- | --- | --- |
+| `composite-skill-structure.Tests.ps1` | `unclassified` (quarantined; does not run in CI) | 3 passed, 0 failed | 3 passed, 0 failed |
+| `audit-docs-mechanical.Tests.ps1` | not quarantined; runs in CI | 33 passed, 0 failed | 33 passed, 0 failed |
+
+**The composite suite's result is a constant, not a signal, and must not be read as one.** Its
+skill set is a closed five-element literal — `calibration-pipeline`, `code-review-intake`,
+`customer-experience`, `parallel-execution`, `validation-methodology` — which shares **no member**
+with #1050's ten receiving skills. Nothing that chunk did could have changed that 3/0, so quoting
+it as evidence the delivered surfaces are structurally sound would be evidence that could not have
+come out negative. It is recorded only to say what the suite reports today.
+
+**The discriminating measurement is the mechanical auditor, which can respond.** Run against the
+repository root, it reports 68 not-pass checks at the delivered tree and **68 at the baseline** —
+`A2=2 A9=1 B2=2 B5=63` in both. #1050 added ten files to that auditor's population and zero
+findings: all four of its net-new reference files over the 100-line B5 threshold carry a table of
+contents, and the six under it are exempt. That count could have gone to 72.
+
+Two pre-existing states the tranche did not repair, named rather than absorbed:
+
+- **`B2` on `skills/plan-authoring/SKILL.md`.** Already failing the 500-line limit at the baseline
+  at 813 lines; the tranche moved it to **825**. The count stays 2 because both were already
+  failing. The file's own declared lens-section budget (40 lines / 8,000 characters) *is* respected
+  at 36 lines / 7,980 characters.
+- **`B5` on thirteen pre-existing files** across these skills, including four in `references/`
+  directories that predate the tranche. A4.4 scopes repair away from #1050 deliberately: the
+  directories it creates are conformant on delivery, and the ones it inherited are recorded here.
+
+**What the CI-visible half actually asserts.** `audit-docs-mechanical.Tests.ps1` runs in CI but
+asserts only `A2` failures, so its green says nothing about `B2` or `B5` over the tree. The 63 `B5`
+and 2 `B2` findings above are visible to anyone who runs the auditor and invisible to the gate.

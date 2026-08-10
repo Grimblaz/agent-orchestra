@@ -1,6 +1,6 @@
 ---
 name: agent-memory-compaction
-description: "Compaction policy for an agent memory store's recall index, plus the sweep it runs on: the rules a compaction may not break, how an entry leaves and where that exit is recorded, the slate procedure and its dispositions, the size budget the index is held to, and a re-runnable check. Use when compacting, pruning, or repairing a memory index, or when running or preparing a sweep of a store. DO NOT USE FOR: individual memory entries; session-state or handoff markers (use session-memory-contract); repository docs (use documentation-finalization)."
+description: "Compaction policy for an agent memory store's recall index, plus the sweep it runs on: the rules a compaction may not break, how an entry leaves and where that exit is recorded, the slate procedure and its dispositions, the size budget the index is held to, and a re-runnable check. Use when compacting, pruning, or repairing a memory index, when running or preparing a sweep of a store, or when relocating a line that carries several linked subjects. DO NOT USE FOR: individual memory entries; session-state or handoff markers (use session-memory-contract); repository docs (use documentation-finalization)."
 ---
 
 <!-- markdownlint-disable-file MD038 MD041 -->
@@ -19,6 +19,12 @@ description: "Compaction policy for an agent memory store's recall index, plus t
 - A **sweep** is being run, or prepared: the owner-present slate where entries are dispositioned, exits are recorded, deferrals expire, and the store's destinations are measured. See *The sweep, and the records it writes* below.
 
 Not this skill: `session-memory-contract` owns durable session state and cross-session handoff markers. This skill owns one file — a memory store's recall index — what may be removed from it, and how big it is allowed to be.
+
+## Composite References
+
+- [references/store-records.md](references/store-records.md): the record shapes a store writes — slate rows, ledger rows, and their field contracts
+- [references/sweep-procedure.md](references/sweep-procedure.md): the sweep's own procedure, its dispositions, and the order they are applied in
+- [references/compaction-exhibits.md](references/compaction-exhibits.md): the incident detail behind § Compaction Lenses — the sweep each lens was extracted from and the checks that passed while it was wrong
 
 ## What this is for
 
@@ -298,6 +304,16 @@ pwsh skills/agent-memory-compaction/scripts/Test-MemoryIndexPolicy.ps1 -IndexPat
 The check reads; it never writes. It has no trigger and no schedule — nothing invokes it but a person or a session that chooses to.
 
 Its regression suite is `.github/scripts/Tests/memory-index-policy.Tests.ps1`, which exercises each axis against modified copies — the property that keeps the axes able to fail.
+
+## Compaction Lenses
+
+> **Authoritative source**: which lessons are promoted here, what anchor each one lives at, and the trigger text that has to reach a reader are recorded in `Documents/Planning/lesson-promotion-manifest.json`. `.github/scripts/Tests/lesson-promotion-manifest.Tests.ps1` is what stops this section and that manifest drifting apart, and it is the suite a red comes from. **Renaming a heading below is a migration, not a regression** — update that lesson's `anchor` in the manifest in the same commit as the rename. A red naming an anchor you just renamed is reporting a manifest row left behind, not a lost lens.
+
+One way a sweep completes, checks clean on every aggregate it has, and leaves acts undone.
+
+#### Relocating a line to preserve one subject silently preserves every other subject on it
+
+When a bulk operation's unit of **decision** is the subject but its unit of **edit** is the line, the two disagree wherever a line is mixed — so re-homing a pointer line to keep one entry hot carries along every other entry that line names, including ones whose disposition authorised removal. The result is entries holding an executed ledger record, an archive line, **and** a live pointer at once. Every aggregate check passes: the index is under budget, the checker returns clean, hookless subjects and unattributed notes are zero, and the partition check reports nothing unaccounted — because the strays are lawful pointers with intact hooks, and the partition asks whether anything left *without* a record, never whether everything *with* a record actually left. **Write the check at the decision grain and assert set equality, not a count** — a count can match exactly while several acts have not happened. Run it in all three directions: removal-authorising dispositions still present in the index (want 0), keep-hot entries missing from the index (want 0), demoted subjects missing from the archive (want 0). The fix shape is to rebuild the line from its subject segments keeping only the survivors, each hook verbatim — and do not shorten a surviving hook while you are in there, because that is trimming and trimming is never a size-reduction move. Exhibit: [references/compaction-exhibits.md](references/compaction-exhibits.md) § Five entries with a ledger record and a live pointer.
 
 ## Gotchas
 

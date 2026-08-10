@@ -5,7 +5,8 @@
     "class: unclassified = never measured on Linux, a BACKLOG that should shrink to zero.",
     "class: linux-red    = measured failing on the CI platform. Temporary, so an issue number is REQUIRED.",
     "class: never-ci     = structurally cannot run in CI (live gh, network, interactive terminal). Permanent and legitimate.",
-    "Enforced by .github/scripts/Tests/ci-suite-registration.Tests.ps1, which fails if any suite on disk is neither run nor listed here."
+    "Enforced by .github/scripts/Tests/ci-suite-registration.Tests.ps1, which fails if any suite on disk is neither run nor listed here.",
+    "Readings of quarantined structural suites against specific delivered trees are collected in Documents/Design/test-suite-baseline-948.md; see its section on the promotion tranche (issue #1050) for what composite-skill-structure.Tests.ps1 reports today and why that result is a constant rather than a signal."
   ],
   "quarantine": [
     {

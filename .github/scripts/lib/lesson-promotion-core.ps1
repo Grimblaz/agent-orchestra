@@ -67,6 +67,28 @@ $script:LPLoadNegators = @(
 
 $script:LPDeclaredVerdicts = @('clean', 'cite', 'conflict')
 
+# The phases a lens may declare it fires in, fixed HERE and not read from the manifest, for the same
+# reason the roster states are (parent #1045 amendment A4.6). This field was called a declared enum
+# by the design and had no assertion behind it anywhere, which is how the shipped rows diverged from
+# the design's own list for a whole chunk and its review without anything noticing. The three words
+# chunk 1 shipped govern - `plan` already agrees with the phase vocabulary in
+# skills/calibration-pipeline/schemas/phase-containment.schema.json, and `completion` matches the
+# receiving skill's own section name - so the declaration was corrected to them rather than 19 rows
+# being rewritten against no validator.
+$script:LPDeclaredFiresIn = @(
+    'completion', 'plan', 'review', 'implementation', 'test-authoring',
+    'tooling', 'compaction', 'design', 'release'
+)
+
+# Parent #1045 amendment A4.5. A promoted `conflict` was drift outright, while the contradiction
+# procedure describes a state that has to be recordable: a shipped sentence the promoted lesson
+# itself falsified, corrected in the same change. Every writable value failed - `conflict` red,
+# an invented value red as out-of-vocabulary, `clean` forbidden by the procedure - and the cheap
+# resolution was to widen the enum and delete the fixture, which removes a guard while looking like
+# a passing build. So the model gains a companion instead: a contradiction CARRYING its resolution
+# ships, a contradiction WITHOUT one stays red.
+$script:LPResolutionFloor = 40
+
 # The roster's three states, fixed HERE rather than taken from the manifest (parent #1045
 # amendment A2.1). Reading the set from the artifact under audit is the manifest-authority defect
 # one level up: only `promoted` gets meaningful handling, so adding a fourth string to BOTH an
@@ -85,7 +107,13 @@ function Get-LPField {
     param([Parameter(Mandatory)][AllowNull()]$Object, [Parameter(Mandatory)][string]$Name, $Default = $null)
     if ($null -eq $Object) { return $Default }
     if ($Object -isnot [psobject]) { return $Default }
-    if ($Object.PSObject.Properties.Name -cnotcontains $Name) { return $Default }
+    # Enumerated one property at a time rather than as `.Properties.Name`. Member enumeration over
+    # an EMPTY property collection throws under StrictMode 3.0 ("The property 'Name' cannot be found
+    # on this object"), and an object with no properties became a lawful shape here the moment A4.3
+    # allowed `loading_surfaces` to be empty - every home main-session-only. The guard against a
+    # missing property was itself throwing on the emptiest object it could be handed.
+    $names = @($Object.PSObject.Properties | ForEach-Object { $_.Name })
+    if ($names -cnotcontains $Name) { return $Default }
     $v = $Object.$Name
     if ($null -eq $v) { return $Default }
     return $v
@@ -308,6 +336,54 @@ function Test-LPMandateIsUnconditional {
     return , @($problems | Select-Object -Unique)
 }
 
+function Get-LPMandatedSkillSet {
+    <#
+        The set of skills that some agent body actually mandates a load of, DERIVED FROM THE TREE.
+
+        Parent #1045 amendment A4.3. The design states reachability per consumer type and scopes the
+        layer-4 mandated load to lenses whose consumers are SUBAGENTS; the check chunk 1 shipped
+        required a loader of every skill home unconditionally, which is stricter than the design and
+        leaves two receiving skills with no executing agent body at all only two moves: re-home away
+        from the phase they name, or add a mandated load to a body that does not do the work - which
+        the drift text elsewhere in this file calls booking reach without providing it.
+
+        DERIVED, never declared. The first proposal had the manifest carry the consumer type, and
+        all three review lenses independently found the same two defects: it asserts nothing the
+        check does not already require of every entry, and it hands the audited artifact control of
+        its own audit.
+
+        Reads the MANDATE-MARKER-BEARING load set, not a bare name search: an agent body can name a
+        skill path illustratively - an example adapter path, a cross-reference - and a name grep
+        would read that as a consumer. The marker is what distinguishes a load this file is willing
+        to call unconditional.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$MandateMarker
+    )
+
+    $set = @{}
+    if ([string]::IsNullOrWhiteSpace($MandateMarker)) { return $set }
+    $agentDir = Join-Path $RepoRoot 'agents'
+    if (-not (Test-Path -LiteralPath $agentDir -PathType Container)) { return $set }
+
+    foreach ($f in @(Get-ChildItem -LiteralPath $agentDir -File -Filter '*.agent.md')) {
+        foreach ($line in @(Get-Content -LiteralPath $f.FullName -Encoding utf8)) {
+            if ($line.IndexOf($MandateMarker, [System.StringComparison]::Ordinal) -lt 0) { continue }
+            # A negator on the same line makes it a permission, not a mandate - the same test the
+            # layer-4 assertions apply, so the derived set cannot disagree with them.
+            $lower = [regex]::Replace($line.ToLowerInvariant(), '\b(?:not|never)\s+(?:only|optional|merely|just|solely)\b', '')
+            if (@($script:LPLoadNegators | Where-Object { $lower.Contains($_) }).Count -gt 0) { continue }
+            foreach ($mm in [regex]::Matches($line, 'skills/[A-Za-z0-9._-]+/SKILL\.md')) {
+                if (-not $set.ContainsKey($mm.Value)) { $set[$mm.Value] = @() }
+                $rel = 'agents/' + $f.Name
+                if ($set[$mm.Value] -cnotcontains $rel) { $set[$mm.Value] = @($set[$mm.Value]) + $rel }
+            }
+        }
+    }
+    return $set
+}
+
 function Get-LessonPromotionAudit {
     <#
         Audits one manifest against the live tree it describes.
@@ -400,6 +476,9 @@ function Get-LessonPromotionAudit {
         $drift.Add("roster count anchor says $anchorCount, the manifest carries $($entries.Count) entries (no caller-supplied expected count; this comparison is intra-manifest and cannot catch a consistent edit)")
     }
 
+    # Derived once, from the tree, before any entry is judged (A4.3).
+    $mandatedSkills = Get-LPMandatedSkillSet -RepoRoot $RepoRoot -MandateMarker $mandateMarker
+
     $seen = @{}
     $promotedByChunk = @{}
     foreach ($e in $entries) {
@@ -449,6 +528,14 @@ function Get-LessonPromotionAudit {
         $homeRel = [string](Get-LPField $e 'home' '')
         $anchor = [string](Get-LPField $e 'anchor' '')
         if ([string]::IsNullOrWhiteSpace($kind)) { $drift.Add("promoted lesson '$name' carries no kind") }
+
+        # A4.6. The field the design calls a declared enum, actually asserted. Without this a value
+        # outside the declaration passes unremarked, which is exactly how the shipped vocabulary and
+        # the declared one diverged for a whole chunk.
+        $firesIn = [string](Get-LPField $e 'fires_in' '')
+        if ($script:LPDeclaredFiresIn -cnotcontains $firesIn) {
+            $drift.Add("promoted lesson '$name' declares fires_in '$firesIn', which is not one of $($script:LPDeclaredFiresIn -join ', ')")
+        }
         if ([string]::IsNullOrWhiteSpace($homeRel)) { $drift.Add("promoted lesson '$name' carries no home"); continue }
         if ([string]::IsNullOrWhiteSpace($anchor)) { $drift.Add("promoted lesson '$name' carries no anchor") }
 
@@ -468,9 +555,18 @@ function Get-LessonPromotionAudit {
                 $drift.Add("lesson '$name' is recorded as a lens but its home '$homeRel' is not a loading surface (a skill body or an agent body)")
             }
             elseif ($homeRel -clike 'skills/*') {
+                # A4.3: the consumer-type limb is DERIVED. A home is main-session-only exactly when
+                # no agent body mandates a load of that skill; when one does, the check refuses the
+                # main-session-only reading and requires the manifest to record the loader. The
+                # relaxation is real - five homes in the delivered tree pass only because of it -
+                # and it is not a hole: adding a mandated load to any of those bodies turns this red
+                # until the manifest records it.
                 $ls = Get-LPField $loadingSurfaces $homeRel
+                $mandatingBodies = @(if ($mandatedSkills.ContainsKey($homeRel)) { $mandatedSkills[$homeRel] } else { @() })
                 if ($null -eq $ls) {
-                    $drift.Add("lesson '$name' is a lens in '$homeRel', which the manifest records no unconditional loader for")
+                    if ($mandatingBodies.Count -gt 0) {
+                        $drift.Add("lesson '$name' is a lens in '$homeRel', which the manifest records no unconditional loader for, while the tree carries a mandated load of it from $($mandatingBodies -join ', ') - a home with a subagent consumer is not main-session-only")
+                    }
                 }
                 elseif (@(Get-LPField $ls 'loads_unconditionally_from' @()).Count -lt 1) {
                     $drift.Add("lesson '$name' is a lens in '$homeRel', whose loads_unconditionally_from list is empty - declaring the skill with no loader books layer-4 reach without providing it")
@@ -578,6 +674,16 @@ function Get-LessonPromotionAudit {
             $got = if ($promotedByChunk.ContainsKey([string]$k)) { [int]$promotedByChunk[[string]$k] } else { 0 }
             if ($got -ne $want) {
                 $drift.Add("chunk $k is expected to have promoted $want lessons, the manifest records $got - a promoted share cannot be reduced by relabelling its entries")
+            }
+        }
+        # Both directions. Iterating only the caller's keys leaves the quietest escape in this file
+        # open: a chunk that promotes N lessons under a key NOBODY DECLARED is counted by nothing,
+        # while the roster still totals and every surviving row still checks out. An absent key is
+        # not a mismatched one, so the loop above cannot see it - the mutation that removes a chunk
+        # key entirely came back green until this clause existed.
+        foreach ($k in $promotedByChunk.Keys) {
+            if (-not $ExpectedPromotedByChunk.ContainsKey([string]$k)) {
+                $drift.Add("the manifest records $($promotedByChunk[$k]) promoted lessons under chunk $k, which the caller's expected-share map does not declare - a chunk with no count anchor is a promoted share nothing counts")
             }
         }
     }
@@ -725,10 +831,23 @@ function Get-LessonPromotionAudit {
     foreach ($skillRel in $receiving) {
         $refDir = Join-Path (Join-Path $RepoRoot ($skillRel -replace '/', [System.IO.Path]::DirectorySeparatorChar)) 'references'
         if (-not (Test-Path -LiteralPath $refDir -PathType Container)) { continue }
+
+        # A4.4 / parent A3, the deferral arm. Where a receiving skill carries the repository's
+        # `## Composite References` convention, THAT section is the citation surface the design named
+        # and the check reads it: every file in the directory has to be listed there, so a reader
+        # arriving at the skill sees the whole set rather than whichever files a lens happened to
+        # cite. Where the convention is absent the manifest-carried registry governs alone, exactly
+        # as A3 provides - reading an absent convention would be a check with no population.
+        $skillMd = Join-Path (Join-Path $RepoRoot ($skillRel -replace '/', [System.IO.Path]::DirectorySeparatorChar)) 'SKILL.md'
+        $composite = Get-LPSection -Path $skillMd -Anchor '## Composite References'
+
         foreach ($f in @(Get-ChildItem -LiteralPath $refDir -File -Recurse)) {
             $rel = ($skillRel + '/references/' + $f.FullName.Substring($refDir.Length).TrimStart('\', '/')) -replace '\\', '/'
             if ($exhibitFiles -cnotcontains $rel) {
                 $drift.Add("'$rel' sits in a receiving references directory with no manifest row")
+            }
+            if ($null -ne $composite -and -not (Test-LPContains -Haystack $composite.UnfencedText -Needle ($rel -replace "^$([regex]::Escape($skillRel))/", ''))) {
+                $drift.Add("'$rel' is not named in '$skillRel/SKILL.md' section 'Composite References', which that skill carries - a skill that adopts the convention lists every file in its references directory there")
             }
         }
     }
@@ -772,7 +891,20 @@ function Get-LessonPromotionAudit {
             $drift.Add("promoted lesson '$name' records verdict '$verdict', which is not one of $($script:LPDeclaredVerdicts -join ', ')")
         }
         if ($verdict -ceq 'conflict') {
-            $drift.Add("promoted lesson '$name' records a 'conflict' verdict; a lesson contradicting shipped doctrine does not ship - it routes up")
+            # A4.5: the contradiction is expressible, its resolution is not optional. A `resolution`
+            # that is absent, blank, or too short to name what was corrected leaves this red - which
+            # is the state the pre-amendment check reached for EVERY conflict, now narrowed to the
+            # unresolved one rather than deleted.
+            $resolution = [string](Get-LPField $ca 'resolution' '')
+            if ([string]::IsNullOrWhiteSpace($resolution)) {
+                $drift.Add("promoted lesson '$name' records a 'conflict' verdict with no resolution; a lesson contradicting shipped doctrine ships only when it carries the correction it made, otherwise it routes up")
+            }
+            elseif ($resolution.Trim().Length -lt $script:LPResolutionFloor) {
+                $drift.Add("promoted lesson '$name' records a 'conflict' resolution of $($resolution.Trim().Length) characters, below the floor of $script:LPResolutionFloor - a resolution that does not name the surface corrected is a label, not a resolution")
+            }
+        }
+        elseif (-not [string]::IsNullOrWhiteSpace([string](Get-LPField $ca 'resolution' ''))) {
+            $drift.Add("promoted lesson '$name' records a resolution under a '$verdict' verdict; a resolution is what makes a contradiction shippable and means nothing beside any other verdict")
         }
         $surfaces = @(Get-LPField $ca 'surfaces' @())
         if ($surfaces.Count -lt 1) { $drift.Add("promoted lesson '$name' records no searched surfaces for its verdict") }

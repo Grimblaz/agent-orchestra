@@ -45,8 +45,14 @@ BeforeAll {
     # Roster size: parent #1045 Amendment A1 (45 -> 46 after two same-day admissions).
     $script:ExpectedRosterCount = 46
     # Per-chunk promoted share: parent #1045 § Walking-skeleton lens list, as partitioned by A1.
-    # Chunk 1 takes 19; chunks 2 and 3 add their own rows here when they land.
-    $script:ExpectedPromotedByChunk = @{ '1' = 19 }
+    # Chunk 1 takes 19. Chunk 2 was ASSIGNED 27 and promoted 25: two of its lessons returned a
+    # `conflict` verdict against shipped doctrine and, under parent #1045 amendment A4.5, a second
+    # contradiction of any kind routes up rather than being resolved in-chunk. Those two stay
+    # `pending` against issue #1050 until the parent rules, and their lens sections were removed
+    # rather than shipped beside the sentences they contradict. Chunk 3 adds its own row when it
+    # lands. An ABSENT key is the quiet escape - the audit iterates only the keys handed to it, so
+    # a chunk promoting under a key nobody declared would be counted by nothing.
+    $script:ExpectedPromotedByChunk = @{ '1' = 19; '2' = 25 }
     # The skills this promotion effort receives into. A references/ file appearing in any of these
     # needs a manifest row; directories outside the set belong to other skills and predate this
     # manifest, which is not the registry for them.
@@ -56,6 +62,10 @@ BeforeAll {
         'skills/adversarial-review'
         'skills/terminal-hygiene'
         'skills/safe-operations'
+        'skills/implementation-discipline'
+        'skills/test-driven-development'
+        'skills/design-exploration'
+        'skills/agent-memory-compaction'
     )
 
     $script:Live = Get-LessonPromotionAudit -RepoRoot $script:RepoRoot -ManifestPath $script:ManifestPath `
@@ -621,10 +631,173 @@ description: "Another skill. Use when reconciling a promoted roster against its 
         ($r2.DriftDetails -join ' ') | Should -Match 'records no checked_against verdict'
     }
 
-    It 'INDUCED (shipped-conflict class): a lesson recorded as conflicting with doctrine FAILS' {
+    It 'INDUCED (unresolved-conflict class): a conflict verdict carrying NO resolution FAILS' {
+        # Re-pointed, not deleted (parent #1045 amendment A4.5). Before that amendment EVERY
+        # conflict was drift, which made the state the contradiction procedure describes -
+        # a shipped sentence the promoted lesson itself falsified, corrected in the same change -
+        # unwritable in any value the vocabulary admits. The cheap resolution was to widen the enum
+        # and delete this fixture; the guard survives instead, narrowed to the unresolved case.
         $r = script:Invoke-ScratchAudit { param($c) $c.Manifest.entries[0].checked_against.verdict = 'conflict' }
         $r.HasDrift | Should -BeTrue
-        ($r.DriftDetails -join ' ') | Should -Match 'does not ship - it routes up'
+        ($r.DriftDetails -join ' ') | Should -Match 'with no resolution'
+    }
+
+    It 'INDUCED (stub-resolution class): a conflict whose resolution is too short to name what moved FAILS' {
+        $r = script:Invoke-ScratchAudit { param($c)
+            $c.Manifest.entries[0].checked_against.verdict = 'conflict'
+            $c.Manifest.entries[0].checked_against['resolution'] = 'fixed it'
+        }
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'is a label, not a resolution'
+    }
+
+    It 'A conflict verdict carrying its resolution is LAWFUL - the amendment is a narrowing, not a removal' {
+        # The other polarity. Without this the two tests above are satisfied by a check that reds on
+        # every conflict, which is the pre-amendment behaviour wearing new message text.
+        $r = script:Invoke-ScratchAudit { param($c)
+            $c.Manifest.entries[0].checked_against.verdict = 'conflict'
+            $c.Manifest.entries[0].checked_against['resolution'] = 'The stale allowlist sentence at skills/terminal-hygiene/SKILL.md:36 was corrected in this change.'
+        }
+        ($r.DriftDetails -join ' ') | Should -Not -Match 'conflict'
+    }
+
+    It 'INDUCED (resolution-without-conflict class): a resolution beside a clean verdict FAILS' {
+        $r = script:Invoke-ScratchAudit { param($c)
+            $c.Manifest.entries[0].checked_against['resolution'] = 'A resolution long enough to clear the floor but attached to no contradiction at all.'
+        }
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'means nothing beside any other verdict'
+    }
+
+    # --- fires_in vocabulary (parent #1045 amendment A4.6) ---------------------------------------
+
+    It 'INDUCED (undeclared-phase class): a fires_in value outside the declaration FAILS' {
+        # The real defect A4.6 records is not which words won: it is that a field the design calls a
+        # declared enum had NO assertion behind it, so the shipped vocabulary and the declared one
+        # diverged for a whole chunk and its review without anything noticing. This is that
+        # assertion. A green run over conforming rows is not evidence it exists; only this red is.
+        $r = script:Invoke-ScratchAudit { param($c) $c.Manifest.entries[0].fires_in = 'planning' }
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match "declares fires_in 'planning', which is not one of"
+    }
+
+    It 'INDUCED (undeclared-phase class): a promoted entry with fires_in removed FAILS' {
+        $r = script:Invoke-ScratchAudit { param($c) $c.Manifest.entries[0].Remove('fires_in') }
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match "declares fires_in ''"
+    }
+
+    # --- Derived consumer type (parent #1045 amendment A4.3) -------------------------------------
+    #
+    # The limb is DERIVED FROM THE TREE, never declared in the manifest. These three run as one
+    # argument and are worth reading together, because either half alone is misleading: the first
+    # shows the relaxation is real, the second and third show it is not a hole.
+
+    It 'A lens home no agent body mandates is LAWFUL with no loader entry - the main-session-only reading' {
+        $t = script:New-ScratchTree { param($c)
+            $c.Manifest.loading_surfaces = [ordered]@{}
+            # Strip the mandate from the body, so the tree says nothing loads this skill into a
+            # subagent. Under the pre-amendment check this state was red and the only escapes were
+            # re-homing away from the phase the skill names, or adding a mandated load to a body
+            # that does not do the work.
+            Set-Content -LiteralPath $c.AgentPath -Encoding utf8 -Value "# Demo Agent`n`n## Skills Reference`n`n- Nothing is mandated here.`n"
+        }
+        $r = Get-LessonPromotionAudit -RepoRoot $t.Dir -ManifestPath $t.ManifestPath `
+            -ExpectedRosterCount 2 -ExpectedPromotedByChunk @{ '1' = 1 } -ReceivingSkillDirs @('skills/demo-skill')
+        ($r.DriftDetails -join ' ') | Should -Not -Match 'unconditional loader'
+        ($r.DriftDetails -join ' ') | Should -Not -Match 'not main-session-only'
+    }
+
+    It 'INDUCED (undeclared-chunk class): a promoted share under a chunk key the caller never declared FAILS' {
+        # The quietest escape this chunk could have created. The per-chunk loop iterates the
+        # CALLER's keys, so a chunk promoting lessons under a key nobody declared is counted by
+        # nothing at all - the roster still totals and every surviving row still checks out. An
+        # absent key is not a mismatched one, so this needs its own clause and its own mutation:
+        # setting the key to a wrong NUMBER exercises a different branch entirely.
+        $t = script:New-ScratchTree { }
+        $r = Get-LessonPromotionAudit -RepoRoot $t.Dir -ManifestPath $t.ManifestPath `
+            -ExpectedRosterCount 2 -ExpectedPromotedByChunk @{ '9' = 0 } -ReceivingSkillDirs @('skills/demo-skill')
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'which the caller.s expected-share map does not declare'
+    }
+
+    It 'An object with ZERO properties produces findings, not a StrictMode crash' {
+        # Regression guard. `$o.PSObject.Properties.Name` throws under StrictMode 3.0 when the
+        # property collection is empty, and an empty `loading_surfaces` became a lawful shape the
+        # moment A4.3 allowed every home to be main-session-only - so the missing-property guard was
+        # itself throwing on the emptiest object it could be handed. Found by running the amendment's
+        # own new tests, not by reading the diff.
+        $probe = '{}' | ConvertFrom-Json
+        { Get-LPField $probe 'anything' } | Should -Not -Throw
+        Get-LPField $probe 'anything' 'fallback' | Should -BeExactly 'fallback'
+    }
+
+    It 'INDUCED (asserted-consumer-type class): a mandated load in the tree with NO loader entry FAILS' {
+        # The same manifest as the test above - only the tree differs. That is the whole point of
+        # deriving: the manifest cannot buy itself the main-session-only reading, because the
+        # predicate is not one of its fields.
+        $t = script:New-ScratchTree { param($c) $c.Manifest.loading_surfaces = [ordered]@{} }
+        $r = Get-LessonPromotionAudit -RepoRoot $t.Dir -ManifestPath $t.ManifestPath `
+            -ExpectedRosterCount 2 -ExpectedPromotedByChunk @{ '1' = 1 } -ReceivingSkillDirs @('skills/demo-skill')
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'a home with a subagent consumer is not main-session-only'
+        ($r.DriftDetails -join ' ') | Should -Match 'agents/Demo\.agent\.md'
+    }
+
+    It 'A load line carrying a permission phrase does NOT make a home a subagent consumer' {
+        # The derived set reads the mandate-marker-bearing loads and applies the same negator test
+        # the layer-4 assertions do, so the two cannot disagree about what counts as unconditional.
+        $t = script:New-ScratchTree { param($c)
+            $c.Manifest.loading_surfaces = [ordered]@{}
+            Set-Content -LiteralPath $c.AgentPath -Encoding utf8 -Value "# Demo Agent`n`n## Skills Reference`n`n- **Mandated load, unconditional** - you may load ``skills/demo-skill/SKILL.md`` if relevant`n"
+        }
+        $r = Get-LessonPromotionAudit -RepoRoot $t.Dir -ManifestPath $t.ManifestPath `
+            -ExpectedRosterCount 2 -ExpectedPromotedByChunk @{ '1' = 1 } -ReceivingSkillDirs @('skills/demo-skill')
+        ($r.DriftDetails -join ' ') | Should -Not -Match 'not main-session-only'
+    }
+
+    It 'An illustrative skill path with no mandate marker does NOT make a home a subagent consumer' {
+        $t = script:New-ScratchTree { param($c)
+            $c.Manifest.loading_surfaces = [ordered]@{}
+            Set-Content -LiteralPath $c.AgentPath -Encoding utf8 -Value "# Demo Agent`n`n## Skills Reference`n`n- For example, an adapter may live at ``skills/demo-skill/SKILL.md``.`n"
+        }
+        $r = Get-LessonPromotionAudit -RepoRoot $t.Dir -ManifestPath $t.ManifestPath `
+            -ExpectedRosterCount 2 -ExpectedPromotedByChunk @{ '1' = 1 } -ReceivingSkillDirs @('skills/demo-skill')
+        ($r.DriftDetails -join ' ') | Should -Not -Match 'not main-session-only'
+    }
+
+    # --- Composite-convention deferral arm (parent #1045 amendments A3 and A4.4) ------------------
+
+    It 'INDUCED (unlisted-composite class): a references file missing from a skill that CARRIES the convention FAILS' {
+        $t = script:New-ScratchTree { param($c)
+            $body = Get-Content -LiteralPath $c.SkillPath -Raw -Encoding utf8
+            # Adopt the convention, but list nothing.
+            $body = $body -replace '## Traps', "## Composite References`n`n- nothing is listed here`n`n## Traps"
+            Set-Content -LiteralPath $c.SkillPath -Encoding utf8 -Value $body
+        }
+        $r = Get-LessonPromotionAudit -RepoRoot $t.Dir -ManifestPath $t.ManifestPath `
+            -ExpectedRosterCount 2 -ExpectedPromotedByChunk @{ '1' = 1 } -ReceivingSkillDirs @('skills/demo-skill')
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match "is not named in 'skills/demo-skill/SKILL.md' section 'Composite References'"
+    }
+
+    It 'A skill carrying the convention and listing every file is LAWFUL' {
+        $t = script:New-ScratchTree { param($c)
+            $body = Get-Content -LiteralPath $c.SkillPath -Raw -Encoding utf8
+            $body = $body -replace '## Traps', "## Composite References`n`n- [references/demo-exhibit.md](references/demo-exhibit.md): the demo traps`n`n## Traps"
+            Set-Content -LiteralPath $c.SkillPath -Encoding utf8 -Value $body
+        }
+        $r = Get-LessonPromotionAudit -RepoRoot $t.Dir -ManifestPath $t.ManifestPath `
+            -ExpectedRosterCount 2 -ExpectedPromotedByChunk @{ '1' = 1 } -ReceivingSkillDirs @('skills/demo-skill')
+        ($r.DriftDetails -join ' ') | Should -Not -Match 'Composite References'
+    }
+
+    It 'A skill NOT carrying the convention is judged by the manifest registry alone' {
+        # A3's other arm, and the reason the check does not simply demand the convention everywhere:
+        # reading a convention no receiving skill carries would be a check with no population. The
+        # base fixture has no Composite References section at all.
+        $r = script:Invoke-ScratchAudit { }
+        ($r.DriftDetails -join ' ') | Should -Not -Match 'Composite References'
     }
 
     It 'INDUCED (unreproducible-provenance class): a machine-local path recorded as a searched surface FAILS' {
