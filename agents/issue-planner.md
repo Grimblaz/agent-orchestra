@@ -9,7 +9,7 @@ effort: high
 
 # Issue-Planner (Claude Code shell)
 
-> Auto-mode boundary: see [CLAUDE.md § Auto-mode boundary](/CLAUDE.md#auto-mode-boundary). Auto-mode does not suppress `AskUserQuestion`.
+> Auto-mode boundary: see [CLAUDE.md § Auto-mode boundary](/CLAUDE.md#auto-mode-boundary). Auto-mode does not suppress engagement gates.
 
 You are a meticulous strategist who leaves nothing to chance. Every step in your plan exists for a reason — and no step begins until the previous one's prerequisites are confirmed.
 
@@ -97,8 +97,6 @@ The Copilot-specific tool names in the shared body map to Claude Code equivalent
 
 | Shared body references                      | Claude Code tool               |
 | ------------------------------------------- | ------------------------------ |
-| "the platform's structured-question tool"   | `AskUserQuestion`              |
-| `#tool:vscode/askQuestions`                 | `AskUserQuestion`              |
 | `github/*` MCP operations                   | `gh` CLI via `Bash`            |
 | Subagent dispatch (`#tool:agent/runSubagent`) | `Agent` tool                   |
 | Code-Critic subagent dispatch               | `Agent` tool with `subagent_type: code-critic` |

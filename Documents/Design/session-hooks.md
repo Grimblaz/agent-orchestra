@@ -1,5 +1,14 @@
 # Design: Session Hooks
 
+> **Mechanism superseded by issue #1003.** Where this document names a specific tool for
+> surfacing a decision — `AskUserQuestion`, `#tool:vscode/askQuestions`, "the structured-question
+> tool" — that naming no longer describes current behavior. The repository specifies **no**
+> presentation mechanism; the agent chooses per turn. The **obligations** these decisions record
+> — that the gate fires, that it carries its mandatory options, that a pacing directive cannot
+> suppress it — are unchanged and still binding. The mechanism references are left in place
+> because this is a dated decision record: rewriting them would make the document describe a
+> decision that was not the one taken. Read them as history, not instruction.
+
 > **Current state — Issue #409**: hook-based delivery returned, but now through plugin-distributed hook files rather than workspace-discovered `.github/hooks/session-cleanup.json`. Claude-format installs use `hooks/hooks.json`; Copilot-format installs use root `hooks.json` because Copilot does not define `${CLAUDE_PLUGIN_ROOT}`. The `session-startup` skill remains the agent-side contract for consuming injected `additionalContext`, preserving the run-once marker `/memories/session/session-startup-check-complete.md`, and keeping manual detector runs available. The plugin-release-hygiene `PostToolUse` hook now ships through the same plugin-distributed architecture. Historical context below is preserved so the earlier hook → instruction → skill eras remain traceable.
 >
 > Claude Code startup also includes a Claude-only Step 7b plugin drift backstop. Before reading the cached marketplace version, Step 7b attempts `claude plugin marketplace update` with a 5-second timeout. Timeout, non-zero exit, or unavailable `claude` emits `marketplace freshness check failed — using cached view` and continues from cache without retrying freshness; local-path non-git and dirty/detached classifications suppress that generic emit because their remediation is more specific. Headless runs perform the same freshness attempt and fail-open emission, suppressing only the post-drift stop/continue prompt. The later `claude plugin update agent-orchestra@agent-orchestra --yes` path keeps its separate 30-second timeout and retry behavior. Step 7b shares the existing Step 4 run-once marker; no second marker is introduced. Version 2.5.2 is the cache-invalidation release for this startup surface.
@@ -107,7 +116,7 @@ Full adversarial-review trail, incident detail, and stress-test findings live on
    - **Opt-in cleanup**: the detector reports findings only; cleanup runs only after user confirmation.
 7. After that first automatic startup check, the `session-startup` skill records `/memories/session/session-startup-check-complete.md` regardless of whether cleanup will later be accepted, declined, or skipped.
 8. The `session-startup` skill surfaces `additionalContext` describing what needs cleanup (branch signal leads when both fire).
-9. Agent asks user via `vscode/askQuestions`: context reflects which signal(s) fired and asks whether to run the fenced cleanup block.
+9. Agent asks the user: context reflects which signal(s) fired and asks whether to run the fenced cleanup block.
 10. If confirmed → runs only the fenced commands. All cleanup — including current/tracking-file, sibling worktree, and orphan branch cleanup — goes through `post-merge-cleanup.ps1`, invoked as a composite `pwsh ... post-merge-cleanup.ps1 -SiblingWorktrees @(...) -OrphanBranches @(...)` call (composite invocation eliminates per-command permission prompts; see issue #500).
 11. Cleanup remains opt-in. Current-worktree inline commands are manual instructions that must be run from another checkout.
 12. Claude Code then runs Step 7b under the same startup run-once marker. Before reading cached marketplace state, it attempts `claude plugin marketplace update` for up to 5 seconds.
@@ -151,7 +160,7 @@ Added alongside the portability fix to close a gap found in the post-PR review o
 | `hooks/hooks.json` | Claude-format plugin-distributed hook configuration carrying `SessionStart` and `PostToolUse` | **Active** — introduced in issue #409 |
 | `hooks.json` | Copilot-format plugin-distributed hook configuration carrying `SessionStart` and `PostToolUse` via explicit cache-root resolution | **Active** — introduced in issue #409 |
 | `skills/session-startup/SKILL.md` | Current agent-side protocol for consuming hook-injected startup context; preserves run-once, fail-open, manual fallback, opt-in cleanup, and Claude-only Step 7b drift-check semantics | Active |
-| `skills/session-startup/platforms/claude.md` | Claude-specific startup invocation notes, including AskUserQuestion labels and marketplace freshness behavior | Active |
+| `skills/session-startup/platforms/claude.md` | Claude-specific startup invocation notes, including the canonical option labels and marketplace freshness behavior | Active |
 | `skills/session-startup/scripts/session-cleanup-detector.ps1` | Startup cleanup detector for current branches, issue-scoped tracking files, sibling worktrees, and orphan branches; persistent calibration paths are excluded; emits cleanup commands without env-var requirements | Active — updated (issue #185, migrated to skill path in issue #360, expanded for Claude worktrees in issue #452) |
 | `skills/session-startup/scripts/post-merge-cleanup.ps1` | Archives tracking files, deletes local/remote branch (squash-merge-aware via tree-equivalence detection), syncs default branch, removes sibling worktrees via the honest outcome enum | Active — migrated to skill path in issue #360, squash-merge detection added in issue #513, evidence-gated eligibility + honest removal-outcome reporting added in issue #889 |
 | `skills/session-startup/scripts/session-startup-git-helpers.ps1` | Shared primitives dot-sourced by both the detector and the executor: `Test-WorktreeBranchRemovalEligible` (evidence-ladder eligibility), `Test-WorktreeIsPrimary` (primary-worktree guard), `Get-WorktreeRemovalOutcome`/`Get-WorktreeRemovalOutcomeMessage` (honest outcome enum), plus the persistent-tracking exclusion registry accessor (issue #656) | Active — introduced in issue #366/#367 (skills migration), squash-merge tree-equivalence added in issue #513, exclusion registry added in issue #656, evidence-gated eligibility + primary guard + honest outcome enum added in issue #889 |

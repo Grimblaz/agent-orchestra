@@ -113,7 +113,7 @@ Plugin processes are the default chat experience. Natural-language requests matc
 
 Slash commands diverge between Claude (`commands/*.md`) and Copilot (`.github/prompts/*.prompt.md`); the `nl_intent_routing` table carries both column names so the canonical command name is platform-portable.
 
-**First match per command-family** per conversation uses structured `AskUserQuestion` with options `Run /X for this (Recommended)`, `Continue as raw chat`, and `Don't ask again for this command-family this conversation`; Claude confirmation phrasing should use `Run /X?`. Subsequent same-family matches use inline confirmation: `Routing to /X — say /raw to opt out, otherwise proceed.`
+**First match per command-family** per conversation asks explicitly, with options `Run /X for this (Recommended)`, `Continue as raw chat`, and `Don't ask again for this command-family this conversation`; Claude confirmation phrasing should use `Run /X?`. Subsequent same-family matches use inline confirmation: `Routing to /X — say /raw to opt out, otherwise proceed.`
 
 **Tier hint**: When a proposed command's `model:` frontmatter differs from the user-session model, append a one-line tier hint, e.g. `Will run on sonnet + high per command frontmatter.`
 

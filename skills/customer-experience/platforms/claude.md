@@ -1,5 +1,5 @@
 # Platform — Claude Code
 
-> Auto-mode boundary: see [CLAUDE.md § Auto-mode boundary](/CLAUDE.md#auto-mode-boundary). Auto-mode does not suppress `AskUserQuestion`.
+> Auto-mode boundary: see [CLAUDE.md § Auto-mode boundary](/CLAUDE.md#auto-mode-boundary). Auto-mode does not suppress engagement gates.
 
-When `customer-experience` requires a user-facing structured question, Claude Code agents invoke the `AskUserQuestion` tool with the customer-framed prompt and the 2–3 option labels the skill's methodology specifies. The returned option label is what the skill's recommendation-path logic branches on.
+When `customer-experience` requires a user-facing question, present the customer-framed prompt and the 2–3 option labels the skill's methodology specifies; how you present it is your call per turn. The option the user picks is what the skill's recommendation-path logic branches on.

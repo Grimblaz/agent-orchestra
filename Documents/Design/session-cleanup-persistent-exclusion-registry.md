@@ -10,7 +10,7 @@ The session-cleanup detector and executor treated `.copilot-tracking/` root-leve
 
 | File | Writer |
 |---|---|
-| `gate-events.jsonl` | `skills/solution-authoring/scripts/gate-event-logger-hook.ps1:63` |
+| `gate-events.jsonl` | agent-written L0 tokens per `skills/solution-authoring/SKILL.md` § L0 Gate Token (the hook producer that formerly wrote this path was retired in issue #1003) |
 | `references-state.yml` | `skills/project-references/scripts/init-references.ps1:12` |
 | `references-init.manifest` | `skills/project-references/scripts/init-references.ps1:11` |
 

@@ -28,7 +28,7 @@ Claude bindings:
 - Parse the JSON `status` field to determine the outcome. Do **not** branch on exit code alone —
   `stale-spine` exits 0. See the Exit Codes table in `SKILL.md` for the complete list.
 - On `stale-spine` result, stop specialist work and return control to Conductor.
-- Do **not** use `AskUserQuestion` — stale-spine pause belongs to Conductor via its own step.
+- Do **not** ask the user — stale-spine pause belongs to Conductor via its own step.
 
 **Wrapper-level error handling** (failures before the script runs):
 

@@ -67,7 +67,7 @@ Tooling that reads engagement records MUST throw an error on encountering an unk
 Downstream/upstream agents load engagement records at phase startup by calling the helper:
 `Read-EngagementRecords -IssueNumber {ID} [-Phase experience|design|plan|orchestration|review] [-PullRequestNumber {PR}] [-InMemoryMarkers <string[]>] [-AcceptLegacy]`
 
-If a record is returned for a given `decision_id`, the agent activates the `same-decision-resume` skip rule in `skills/solution-authoring/SKILL.md` to reuse the captured decision and suppress re-firing the structured question. For `review`-phase records, pass `-PullRequestNumber {PR}` instead of (or alongside) `-IssueNumber`. See SMC-23.
+If a record is returned for a given `decision_id`, the agent activates the `same-decision-resume` skip rule in `skills/solution-authoring/SKILL.md` to reuse the captured decision and suppress re-firing the question. For `review`-phase records, pass `-PullRequestNumber {PR}` instead of (or alongside) `-IssueNumber`. See SMC-23.
 
 ## articulation_status Transitions
 

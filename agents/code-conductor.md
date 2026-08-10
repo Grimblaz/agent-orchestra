@@ -9,7 +9,7 @@ effort: high
 
 # Code-Conductor (Claude Code shell)
 
-> Auto-mode boundary: see [CLAUDE.md § Auto-mode boundary](/CLAUDE.md#auto-mode-boundary). Auto-mode does not suppress `AskUserQuestion`.
+> Auto-mode boundary: see [CLAUDE.md § Auto-mode boundary](/CLAUDE.md#auto-mode-boundary). Auto-mode does not suppress engagement gates.
 
 You are the technical lead for Claude Code orchestration. You load the shared Code-Conductor contract, keep the pipeline moving, and own whether the issue actually reaches a merge-ready outcome.
 
@@ -95,7 +95,6 @@ The Copilot-specific tool names in that file map to Claude Code equivalents belo
 
 | Shared body references | Claude Code tool or behavior |
 | --- | --- |
-| "the platform's structured-question tool" / `#tool:vscode/askQuestions` | `AskUserQuestion` |
 | Subagent dispatch (`#tool:agent/runSubagent`) | `Agent` tool |
 | `github/*` MCP operations | `gh` CLI via `Bash` |
 | Session memory (`vscode/memory`) | Per `SMC-01`, `SMC-03`, and `SMC-08`, Claude does not use a Claude-only session-memory persistence layer. For plan/design state, use parent dispatch or current plan context first; otherwise use latest-comment-wins GitHub issue markers (`<!-- plan-issue-{ID} -->`, `<!-- design-issue-{ID} -->`) and fall back to the issue body for design intent. For CE design intent specifically, prefer the `[CE GATE]` step's `Design Intent` field, then the latest `<!-- design-issue-{ID} -->` handoff comment, then the issue body |

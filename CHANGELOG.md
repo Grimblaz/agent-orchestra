@@ -6,6 +6,22 @@ All notable changes to agent-orchestra will be documented in this file.
 
 ## [3.19.0] — 2026-08-09
 
+### Changed
+
+**The repository no longer tells agents *how* to ask** (#1003, split out of #986). A standing operator instruction says the agent should choose how to surface a decision; the repository said the opposite in the place agents read it, and had since 2026-07-04. `CLAUDE.md` asserted "**D3 — `AskUserQuestion` is unconditional**", and `agents/Code-Conductor.agent.md` went further — "**Zero-tolerance rule: plain-text questions are forbidden.**" Those are gone. Every place that named a mechanism for surfacing a decision either **deletes** it (the line only named a tool) or is **rewritten mechanism-neutrally** (the line carried a contract). Nothing Claude loads now requires a named tool, requires prose, or forbids prose — the ten `skills/*/platforms/copilot.md` files still name `vscode/askQuestions`, and are left to expire with the frozen platform. The nine agent shells keep `AskUserQuestion` in `tools:` frontmatter — removing the grant would make the mechanism *unavailable*, which is the opposite of unspecified.
+
+**The engagement gates are untouched.** They still fire unconditionally, still carry their mandatory options, and pacing directives still cannot suppress them. What changed is only the presentation, which is now the agent's call per turn. `CLAUDE.md`'s D3 becomes "**the engagement gate is unconditional**" — which is more correct than what it replaced, since D3 was always about the *gate*, and the old wording conflated the gate with one way of showing it.
+
+**Every contract that rode a mechanism sentence survives, in mechanism-neutral wording**: the `<=4`/`>4` batching rule (`design-exploration`), the second, uncapped batching rule (`upstream-onboarding`), the mandatory `Decline engagement — proceed without classification` option, the second mandatory-option contract on `/orchestra:review-judge`, the token-emitted-before-asking ordering that `window_position: pre-ask` records, the four canonical session-startup option labels, goal-run's unattended guarantee, the #786 gate-vs-question distinction, and the plan-approval obligation.
+
+**Two inversions are corrected rather than carried forward.** `skills/session-startup/SKILL.md`'s D3-regression verification recipe defined "the agent did not fire the tool" as a regression — under mechanism-silence that *is* the correct behavior, so it now checks that the standards check reaches you as an explicit, answerable question in whatever form the agent chose. And `auto-mode-boundary.Tests.ps1`'s anti-contradiction patterns were keyed on the tool name; left alone they would have become structurally unmatchable — a guard file that no longer guards. They are re-pointed at the gate.
+
+### Removed
+
+**The L1 `PostToolUse` gate-event logger is retired** (#1003). It matched one tool name, so it has no reliable trigger once the repository specifies no mechanism — and its output (`memories/session/gate-events-s-*.jsonl`) had not been written since 2026-07-18 in any case; the live stream was already entirely agent-written L0. `Resolve-GateSessionKey` moved out of the retired hook to `skills/solution-authoring/scripts/Resolve-GateSessionKey.ps1` **first**, because the four L0 writers interpolate `{session_key}` into the log filename and needed the derivation reachable without the producer. L2 is unaffected — the reconciler reads L0 only and never consumed L1 events. Corroboration is therefore no longer available at all: L0 is a self-report with nothing checking it, which is the accepted cost of the retirement, not an oversight. `gate-hook-contract.Tests.ps1` was **split, not deleted** — its eight non-hook assertions (including the #556 "must stay GREEN" schema guard and the only live contract on `gate-reconciliation-core.ps1`) are unchanged, and the four hook-specific ones are re-pointed into six: three assert the retirement held, and three follow `Resolve-GateSessionKey` to its new home by *invoking* it (its primary branch, its fallback rung, and the degenerate-input guard). Fourteen assertions in total, up from twelve.
+
+## [3.20.0] — 2026-08-10
+
 ### Added
 
 Lesson-promotion manifest, standing check, and 19 promoted maintainer lessons: verification-before-completion, plan-authoring, and adversarial-review gain lens sections and description triggers; the three validating agent bodies gain unconditional mandated loads; terminal-hygiene's description now names the PowerShell-language conditions where its traps file bites (#1049).

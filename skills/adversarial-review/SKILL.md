@@ -60,7 +60,7 @@ Prosecution findings may include `requires_pipeline_pause: { reason: artifact-mi
 
 ## Atomic Pipeline Discipline
 
-When an adapter's `integrity-contract.atomic` value is `true`, the caller must run prosecution through the terminal stage as one uninterrupted pipeline. Between prosecution and the terminal stage, do not surface interim findings for action, do not edit files or mutate the working tree, and do not ask questions, including `AskUserQuestion` or equivalent engagement prompts.
+When an adapter's `integrity-contract.atomic` value is `true`, the caller must run prosecution through the terminal stage as one uninterrupted pipeline. Between prosecution and the terminal stage, do not surface interim findings for action, do not edit files or mutate the working tree, and do not ask the user anything, in any form — no engagement prompts of any kind.
 
 The retry exception is limited to re-running the same failed stage when a tool, model, or transport failure prevents the stage artifact from being produced. The retry must not change scope, dispatch edits, or ask the user for a decision.
 

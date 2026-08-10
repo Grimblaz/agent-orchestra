@@ -19,7 +19,7 @@ The three upstream agents (Experience-Owner, Solution-Designer, Issue-Planner) s
 Introduce a single shared skill, `upstream-onboarding`, that user-invocable upstream agents (Experience-Owner, Solution-Designer, Issue-Planner) and Code-Conductor load when receiving an issue-referencing request. The skill has two responsibilities:
 
 1. **Scaled context brief**: renders a brief oriented to the current phase's starting point — required core always present (one-line summary, scope tier, blocking questions), conditional sections (inherited decisions, standards concerns, constraints) omitted when empty.
-2. **Standards check**: evaluates inherited work against the active agent's anchor standards, cites the specific violated standard by skill path + rule name, quotes the offending text, and presents a corrective approach as a structured question with a strong recommendation.
+2. **Standards check**: evaluates inherited work against the active agent's anchor standards, cites the specific violated standard by skill path + rule name, quotes the offending text, and presents a corrective approach with a strong recommendation.
 
 ## Rejected Alternatives
 
@@ -55,7 +55,7 @@ Each upstream agent applies the standards check through its own lens. The lenses
 
 ## Relationship to `provenance-gate` (historical)
 
-This design originally sequenced `upstream-onboarding` after `provenance-gate` on cold pickups, deferring to the gate's stop outcomes. After this design landed, the gate was retired (the two-stage cold-pickup self-classification was unintuitive in practice) and its responsibilities were collapsed into `upstream-onboarding`. The skill now serves as the single opening-phase protocol regardless of whether the developer is cold-picking-up the issue or already briefed; the brief is descriptive (no upfront question to answer), and the standards check uses targeted structured questions only when concerns actually fire.
+This design originally sequenced `upstream-onboarding` after `provenance-gate` on cold pickups, deferring to the gate's stop outcomes. After this design landed, the gate was retired (the two-stage cold-pickup self-classification was unintuitive in practice) and its responsibilities were collapsed into `upstream-onboarding`. The skill now serves as the single opening-phase protocol regardless of whether the developer is cold-picking-up the issue or already briefed; the brief is descriptive (no upfront question to answer), and the standards check asks only when concerns actually fire.
 
 ## Resume Variant (#633)
 

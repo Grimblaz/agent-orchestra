@@ -1,5 +1,14 @@
 # Design: Experience-Owner Agent
 
+> **Mechanism superseded by issue #1003.** Where this document names a specific tool for
+> surfacing a decision — `AskUserQuestion`, `#tool:vscode/askQuestions`, "the structured-question
+> tool" — that naming no longer describes current behavior. The repository specifies **no**
+> presentation mechanism; the agent chooses per turn. The **obligations** these decisions record
+> — that the gate fires, that it carries its mandatory options, that a pacing directive cannot
+> suppress it — are unchanged and still binding. The mechanism references are left in place
+> because this is a dated decision record: rewriting them would make the document describe a
+> decision that was not the one taken. Read them as history, not instruction.
+
 ## Summary
 
 The Experience-Owner agent bookends the pipeline with a customer-experience lens. It has two phases: an **upstream framing phase** (before design begins) and a **downstream evidence-capture phase** (at CE Gate, delegated by Code-Conductor). This design introduces Experience-Owner as a seventh user-facing agent and extracts CE Gate scenario definition and execution from Solution-Designer and Code-Conductor respectively.
@@ -60,7 +69,7 @@ Experience-Owner frames the customer problem before design begins:
 4. **Design Intent Reference** — distills the CE Gate `Design Intent` field for the `[CE GATE]` plan step
 5. **Surface Readiness Assessment** — Identifies which tools are available for the surface under change
 6. **Persists output** — Posts a comment to the GitHub issue with the `<!-- experience-owner-complete-{ID} -->` marker
-7. **Interactivity** — Decision-by-decision confirmation using `#tool:vscode/askQuestions`; hub-mode budget 2–3 calls. See `### Collaboration Pattern` in the agent file.
+7. **Interactivity** — Decision-by-decision confirmation; hub-mode budget 2–3 questions. See `### Collaboration Pattern` in the agent file.
 
 ---
 

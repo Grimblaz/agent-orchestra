@@ -9,7 +9,7 @@ Run only the Code-Critic prosecution stage and return the resulting prosecution 
 
 **Pre-flight**:
 
-1. Resolve the review target from the arguments or the active PR context. If neither is available, use the `AskUserQuestion` tool.
+1. Resolve the review target from the arguments or the active PR context. If neither is available, ask for one.
 2. Gather the diff, linked issue or plan context, and any prior review notes that should travel with the prosecution prompt.
 
 **Review-state persistence**:

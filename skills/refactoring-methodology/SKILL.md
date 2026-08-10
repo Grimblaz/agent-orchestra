@@ -135,7 +135,7 @@ Refactor-Specialist will:
 - Re-architecting multiple systems/modules as part of a small feature/bugfix
 - Wide refactors that require updating many call sites unrelated to the original change
 
-**Decision rule (guardrail)**: If refactoring would expand beyond the PR's change intent (e.g., many unrelated files, new cross-cutting abstractions, or broad API changes), pause and escalate via `#tool:vscode/askQuestions` with options (including capturing as a `tech-debt` issue for a separate, dedicated PR) and a recommended choice.
+**Decision rule (guardrail)**: If refactoring would expand beyond the PR's change intent (e.g., many unrelated files, new cross-cutting abstractions, or broad API changes), pause and escalate with options (including capturing as a `tech-debt` issue for a separate, dedicated PR) and a recommended choice.
 
 ## Related Guidance
 

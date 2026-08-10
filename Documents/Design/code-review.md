@@ -1,5 +1,14 @@
 # Design: Code Review Process
 
+> **Mechanism superseded by issue #1003.** Where this document names a specific tool for
+> surfacing a decision — `AskUserQuestion`, `#tool:vscode/askQuestions`, "the structured-question
+> tool" — that naming no longer describes current behavior. The repository specifies **no**
+> presentation mechanism; the agent chooses per turn. The **obligations** these decisions record
+> — that the gate fires, that it carries its mandatory options, that a pacing directive cannot
+> suppress it — are unchanged and still binding. The mechanism references are left in place
+> because this is a dated decision record: rewriting them would make the document describe a
+> decision that was not the one taken. Read them as history, not instruction.
+
 ## Summary
 
 Two complementary improvements to the code review workflow: (1) an exhaustive-scan requirement for migration-type issues that prevents missed file references, and (2) standardization on `vscode/askQuestions` as the correct VS Code 1.110+ tool name for all agent questioning, with explicit frontmatter declarations.

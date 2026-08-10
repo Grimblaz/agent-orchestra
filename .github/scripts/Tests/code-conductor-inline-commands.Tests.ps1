@@ -100,12 +100,12 @@ Describe 'Code-Conductor inline commands contract' {
             $content | Should -Match '(?is)review github' -Because '/review-github must contain "review github" routing literal'
             $content | Should -Match '(?is)skills/code-review-intake/SKILL\.md' -Because '/review-github must reference code-review-intake skill'
             $content | Should -Match '(?is)gh pr view' -Because '/review-github must use gh pr view to resolve PR context'
-            $content | Should -Match '(?is)AskUserQuestion' -Because '/review-github must use AskUserQuestion for missing PR number'
+            $content | Should -Match '(?is)ask the user for a PR number' -Because '/review-github must ask for a missing PR number rather than falling through'
             $content | Should -Match '(?is)\$PR_NUMBER' -Because '/review-github must reference $PR_NUMBER variable'
             $content | Should -Match '(?is)ARGUMENTS:\s*\$ARGUMENTS' -Because '/review-github must pass $ARGUMENTS to the body'
         }
 
-        It 'documents all three AskUserQuestion fallback conditions' {
+        It 'documents all three ask-for-a-PR-number fallback conditions' {
             $content = Get-Content -Path $script:ReviewGithubCommandPath -Raw -ErrorAction Stop
 
             $content | Should -Match '(?is)no PR for the current branch' -Because '/review-github must document the no-PR fallback condition'

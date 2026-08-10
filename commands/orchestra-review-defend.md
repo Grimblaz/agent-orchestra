@@ -9,7 +9,7 @@ Run only the Code-Critic defense stage against an existing prosecution ledger an
 
 **Pre-flight**:
 
-1. Require a prosecution ledger in the supplied arguments or conversation context. If it is missing, use the `AskUserQuestion` tool.
+1. Require a prosecution ledger in the supplied arguments or conversation context. If it is missing, ask for one.
 2. Gather any review target context that the defense pass needs for counter-evidence verification.
 
 **Review-state persistence**:

@@ -1,5 +1,14 @@
 # Design: Named Decisions Write-Discipline & Engagement-Record Emission
 
+> **Mechanism superseded by issue #1003.** Where this document names a specific tool for
+> surfacing a decision — `AskUserQuestion`, `#tool:vscode/askQuestions`, "the structured-question
+> tool" — that naming no longer describes current behavior. The repository specifies **no**
+> presentation mechanism; the agent chooses per turn. The **obligations** these decisions record
+> — that the gate fires, that it carries its mandatory options, that a pacing directive cannot
+> suppress it — are unchanged and still binding. The mechanism references are left in place
+> because this is a dated decision record: rewriting them would make the document describe a
+> decision that was not the one taken. Read them as history, not instruction.
+
 **Domain**: Upstream Pipeline State Preservation & Cognitive-Surrender Prevention  
 **Status**: Current  
 **Implemented in**: Issue #576  
@@ -195,11 +204,13 @@ The `solution-authoring` classification gate is enforced through three layers ad
 
 ### L0 — Gate self-report token
 
-At each gate decision point, the agent emits a classification-decision token to the session event log (`memories/session/gate-events-{key}.jsonl`). Schema: `skills/solution-authoring/schemas/gate-decision-token.schema.json`. The `outcome` field (`asked | gate-fails | declined | same-decision-resume | greenfield-defer`) is the discriminator between lawful skips and potential silent skips. The `issue_number` field scopes tokens to their originating issue. The `window_position` field (`pre-ask | disposition | judge-merge`) maps to the three gate firing surfaces unified by `d-scope-boundary`.
+At each gate decision point, the agent emits a classification-decision token to the session event log (`memories/session/gate-events-{key}.jsonl`). Schema: `skills/solution-authoring/schemas/gate-decision-token.schema.json`. The `outcome` field (`asked | gate-fails | declined | same-decision-resume | greenfield-defer`) is the discriminator between lawful skips and potential silent skips. The `issue_number` field scopes tokens to their originating issue. The `window_position` field (`pre-ask | disposition | judge-merge`) maps to the three gate firing surfaces unified by `d-scope-boundary`. Since issue #1003 this is the *only* producer of the stream.
 
-### L1 — PostToolUse event logger (corroboration)
+### L1 — PostToolUse event logger (retired, issue #1003)
 
-A PostToolUse hook (`skills/solution-authoring/scripts/gate-event-logger-hook.ps1`) fires on `AskUserQuestion` (Claude) and `vscode/askQuestions` (Copilot) and appends corroboration events. The `Resolve-GateSessionKey` helper ensures the hook and validator use an identical key (AC12). L1 is designed for Claude; Copilot empirical confirmation is pending (see SMC-21).
+L1 was a `PostToolUse` hook (`skills/solution-authoring/scripts/gate-event-logger-hook.ps1`) matching `^(AskUserQuestion|vscode/askQuestions)$`, which appended corroboration events whenever that specific tool fired. **It was retired in issue #1003 and there is no hook-driven producer of this stream any more.** A hook keyed to one presentation mechanism has no reliable trigger once the surfaces Claude loads specify no mechanism for surfacing a decision. That reason is scoped: the matcher's Copilot half (`vscode/askQuestions`) does still have a mandated trigger in the ten frozen `skills/*/platforms/copilot.md` files, so it is the second reason that carries the retirement on its own — the hook's output (`memories/session/gate-events-s-*.jsonl`) had not been written to since 2026-07-18, and the live stream was already entirely agent-written L0.
+
+What survived the retirement: the `Resolve-GateSessionKey` key derivation moved to `skills/solution-authoring/scripts/Resolve-GateSessionKey.ps1`, because the L0 writers interpolate `{session_key}` into the log filename and needed it reachable without the producer. **L2 is unaffected** — the reconciler reads L0 tokens only (`gate-reconciliation-core.ps1`), so it never consumed L1 events. Corroboration is therefore no longer available at all: L0 is a self-report with nothing checking it, which is the accepted cost of the retirement rather than an oversight.
 
 ### L2 — Warn-only reconciliation validator
 
@@ -207,7 +218,7 @@ A PostToolUse hook (`skills/solution-authoring/scripts/gate-event-logger-hook.ps
 
 ### L3 — Missed-gate Code-Critic perspective
 
-A seventh prosecution perspective in `agents/Code-Critic.agent.md` audits for load-bearing artifact-decisions with no corresponding L0 gate token — the "never-surfaced" class that L0/L1/L2 cannot detect. Category: `missed-gate`, severity: medium.
+A seventh prosecution perspective in `agents/Code-Critic.agent.md` audits for load-bearing artifact-decisions with no corresponding L0 gate token — the "never-surfaced" class that L0 and L2 cannot detect (nor could L1 before its retirement). Category: `missed-gate`, severity: medium.
 
 ### Design decision: detection-at-review (not prevention-at-persist)
 

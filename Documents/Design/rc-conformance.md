@@ -33,7 +33,7 @@ The RC conformance gate is embedded in Code-Conductor's "Execute Each Step" loop
    - Fail: `RC conformance: ❌ {N} of {M} AC items divergent` + bullet list describing each gap in customer-outcome terms (RC expectation vs. actual)
 5. **Skip**: when the step's RC block has no "Acceptance Criteria" / "AC" section
 6. **On fail**: classify as `rc-divergence` and route per the correction protocol below
-7. **Budget**: 1 dedicated correction cycle, outside the main 3-cycle convergence budget; if unresolved after 1 cycle, escalate via `#tool:vscode/askQuestions` with unresolved AC items and recommended options
+7. **Budget**: 1 dedicated correction cycle, outside the main 3-cycle convergence budget; if unresolved after 1 cycle, escalate with unresolved AC items and recommended options
 8. **Fidelity scope**: targets obvious divergences only; subtle logic bugs remain the domain of Tier 4 adversarial review and CE Gate
 
 ### Triage Taxonomy (Code-Conductor)

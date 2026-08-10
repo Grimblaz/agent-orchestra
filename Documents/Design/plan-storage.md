@@ -25,7 +25,7 @@ The `Primary` `/memories/session` layer below is scoped to the VS Code/Copilot s
 
 1. Session memory — `view /memories/session/plan-issue-{ID}.md`
 2. GitHub issue comment — search for `<!-- plan-issue-{ID} -->` marker
-3. Escalate via `vscode/askQuestions` if neither source found
+3. Escalate to the user if neither source found
 
 ---
 
