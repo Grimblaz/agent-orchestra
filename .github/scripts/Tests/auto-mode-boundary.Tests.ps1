@@ -54,12 +54,36 @@ Describe 'auto-mode boundary contract' {
             'auto-mode means don''t ask'
         )
 
-        # Negative-lookbehind patterns: tolerate citation prose "does not suppress `AskUserQuestion`"
-        # and "does not silence `AskUserQuestion`" while catching contradictory bare and backtick-wrapped forms.
-        # The \s+`? makes the patterns match both "suppress AskUserQuestion" and "suppress `AskUserQuestion`".
+        # Issue #1003 re-pointed these from the tool name to the gate: the repository no longer
+        # specifies a presentation mechanism, so the property worth guarding is that nothing
+        # claims auto-mode suppresses the GATE. Left keyed on the tool name they would have
+        # become structurally unmatchable — a guard file that no longer guards.
+        #
+        # Shape, after the #1003 review sustained findings M8 and M9 against the first draft:
+        #   $script:GateNegator — a negative lookbehind over the ordinary negation heads, with
+        #     room for one intervening word ("must not silently suppress"). .NET supports
+        #     variable-length lookbehind, so this is expressible directly.
+        #   $script:GateObject  — the object, covering inflected nouns, the hyphenated register
+        #     the repo actually prefers ("engagement-gate"), an optional article, optional
+        #     backticks, and the bare "the gate" form.
+        #   verb                — inflected (suppress / suppresses / suppressed / suppressing),
+        #     because the most natural declarative form of the regression is the inflected one.
+        #
+        # KNOWN LIMIT, stated rather than left to be discovered: a lookbehind cannot see past a
+        # multi-word subject, so a sentence that negates in SUBJECT position with a noun phrase
+        # longer than one word evades it — "No pacing directive may suppress an engagement gate."
+        # is a true statement this pattern reports. One-word subject negation ("Nothing may
+        # suppress...") is tolerated. Both polarities of that boundary are pinned in the
+        # self-tests below, so the limit is a checked property and not a surprise.
+        $script:GateNegator = '(?<!\b(?:does not|do not|cannot|can not|must not|may not|shall not|will not|never|not|no|nothing)\s(?:\w+\s)?)'
+        $script:GateObject  = '(?:the\s+|a\s+|an\s+|any\s+|this\s+|that\s+|these\s+|those\s+)?`?(?:engagement[- ](?:gate|checkpoint)s?|methodology checkpoints?|gates?)`?'
+
+        $script:SuppressPattern = "(?i)$($script:GateNegator)suppress(?:es|ed|ing)?\s+$($script:GateObject)"
+        $script:SilencePattern  = "(?i)$($script:GateNegator)silenc(?:e|es|ed|ing)\s+$($script:GateObject)"
+
         $script:ForbiddenPatterns = @(
-            '(?<!does not )suppress\s+`?AskUserQuestion`?',
-            '(?<!Auto-mode does not )silence\s+`?AskUserQuestion`?'
+            $script:SuppressPattern,
+            $script:SilencePattern
         )
 
         $script:RiskyCommandWhitelist = @(
@@ -225,52 +249,60 @@ Describe 'auto-mode boundary contract' {
     # ─────────────────────────────────────────────────────────────
     Describe 'forbidden-phrase regex self-tests' {
 
-        It 'tolerates the citation prose "Auto-mode does not suppress AskUserQuestion"' {
-            $safe = 'Auto-mode does not suppress AskUserQuestion.'
-            $safe | Should -Not -Match '(?<!does not )suppress\s+`?AskUserQuestion`?' `
-                -Because 'negative lookbehind must allow the citation prose'
+        # Every case is exercised against the SAME pattern strings the scan uses
+        # ($script:SuppressPattern / $script:SilencePattern), so a change to the pattern
+        # cannot silently diverge from what these tests claim about it.
+
+        It 'catches every contradictory phrasing in the positive battery' {
+            $mustCatch = @(
+                'The agent should suppress engagement gates in auto-mode.',
+                'Auto-mode suppresses engagement gates.',
+                'agents should suppress `engagement gates` in auto-mode.',
+                'Auto-mode suppresses the gate.',
+                'auto-mode suppresses engagement checkpoints',
+                'In auto-mode, suppress the engagement-gate question.',
+                'Agents may suppress the engagement gate when pacing.',
+                'auto-mode suppressed engagement gates',
+                'Agents should silence engagement gates when mode is auto.',
+                'Agents should silence `engagement gates` when mode is auto.',
+                'Auto-mode silences the engagement gate.'
+            )
+            foreach ($case in $mustCatch) {
+                $caught = ($case -match $script:SuppressPattern) -or ($case -match $script:SilencePattern)
+                $caught | Should -BeTrue -Because "the guard must catch: $case"
+            }
         }
 
-        It 'catches the bare contradictory phrase "The agent should suppress AskUserQuestion in auto-mode"' {
-            $bad = 'The agent should suppress AskUserQuestion in auto-mode.'
-            $bad | Should -Match '(?<!does not )suppress\s+`?AskUserQuestion`?' `
-                -Because 'regex must catch bare suppress without the negation prefix'
+        It 'tolerates every lawful negated phrasing in the negative battery' {
+            $mustNotCatch = @(
+                'Auto-mode does not suppress engagement gates.',
+                'Auto-mode does not suppress `engagement gates`.',
+                'Pacing directives cannot suppress engagement gates.',
+                'Agents must not suppress engagement gates.',
+                'Do not suppress engagement gates.',
+                'A pacing directive never suppresses the engagement gate.',
+                'Agents may not silently suppress engagement gates.',
+                'Nothing may suppress an engagement gate.',
+                'Auto-mode does not silence engagement gates in any mode.',
+                'Auto-mode does not silence `engagement gates` in any mode.',
+                'pacing directives do not suppress orchestration touchpoints'
+            )
+            foreach ($case in $mustNotCatch) {
+                $caught = ($case -match $script:SuppressPattern) -or ($case -match $script:SilencePattern)
+                $caught | Should -BeFalse -Because "the guard must not fire on lawful prose: $case"
+            }
         }
 
-        It 'catches the backtick-wrapped contradictory phrase "suppress `AskUserQuestion` in auto-mode"' {
-            $bad = 'agents should suppress `AskUserQuestion` in auto-mode.'
-            $bad | Should -Match '(?<!does not )suppress\s+`?AskUserQuestion`?' `
-                -Because 'regex must catch backtick-wrapped suppress (the canonical codebase form)'
-        }
+        It 'pins the known subject-negation limit in both directions (#1003 M9)' {
+            # Tolerated: one-word negating subject.
+            ('Nothing may suppress an engagement gate.' -match $script:SuppressPattern) |
+                Should -BeFalse -Because 'a one-word negating subject is within lookbehind reach'
 
-        It 'tolerates "Auto-mode does not suppress `AskUserQuestion`"' {
-            $safe = 'Auto-mode does not suppress `AskUserQuestion`.'
-            $safe | Should -Not -Match '(?<!does not )suppress\s+`?AskUserQuestion`?' `
-                -Because 'negative lookbehind must allow the backtick-wrapped negated form'
-        }
-
-        It 'tolerates "Auto-mode does not silence AskUserQuestion"' {
-            $safe = 'Auto-mode does not silence AskUserQuestion in any mode.'
-            $safe | Should -Not -Match '(?<!Auto-mode does not )silence\s+`?AskUserQuestion`?' `
-                -Because 'negative lookbehind must allow the negated form'
-        }
-
-        It 'catches bare "silence AskUserQuestion"' {
-            $bad = 'Agents should silence AskUserQuestion when mode is auto.'
-            $bad | Should -Match '(?<!Auto-mode does not )silence\s+`?AskUserQuestion`?' `
-                -Because 'regex must catch bare silence form'
-        }
-
-        It 'catches backtick-wrapped "silence `AskUserQuestion`"' {
-            $bad = 'Agents should silence `AskUserQuestion` when mode is auto.'
-            $bad | Should -Match '(?<!Auto-mode does not )silence\s+`?AskUserQuestion`?' `
-                -Because 'regex must catch backtick-wrapped silence form'
-        }
-
-        It 'tolerates "Auto-mode does not silence `AskUserQuestion`"' {
-            $safe = 'Auto-mode does not silence `AskUserQuestion` in any mode.'
-            $safe | Should -Not -Match '(?<!Auto-mode does not )silence\s+`?AskUserQuestion`?' `
-                -Because 'negative lookbehind must allow the backtick-wrapped negated form'
+            # NOT tolerated: multi-word negating subject. This is the documented limit, and it is
+            # asserted so the boundary is a checked property. If a future pattern change closes
+            # it, this assertion goes red and the KNOWN LIMIT comment above must be updated with it.
+            ('No pacing directive may suppress an engagement gate.' -match $script:SuppressPattern) |
+                Should -BeTrue -Because 'the lookbehind cannot see past a multi-word negating subject; the limit is documented above'
         }
     }
 

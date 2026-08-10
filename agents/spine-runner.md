@@ -26,7 +26,6 @@ After loading, follow everything under its `## Core Principles`, `## Role`, `## 
 | Shared body references | Claude Code tool or behavior |
 | --- | --- |
 | `execute/getTerminalOutput`, `execute/runInTerminal` | `Bash` |
-| `vscode/askQuestions` | `AskUserQuestion` |
 | `vscode` | No direct Claude equivalent; use the available Claude Code file, shell, question, and browser surfaces for the specific action |
 | `read` | `Read` |
 | `edit` | `Edit`, `Write` |

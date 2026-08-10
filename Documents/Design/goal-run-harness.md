@@ -30,8 +30,8 @@ adversarial review, capped fix cycles, and PR creation, all without a live
 human answering questions mid-run. It is the second of two pipelines Agent Orchestra ships alongside
 `/orchestrate` (see HOW-IT-WORKS.md's comparison table): where the conducted
 pipeline pauses at engagement gates and waits for an answer, goal-run has no
-mechanism to ask one, so every point that would otherwise raise
-`AskUserQuestion` produces a typed halt instead.
+mechanism to ask one, so every point that would otherwise escalate to the
+operator produces a typed halt instead.
 
 The one command, `/goal-run {issue}`, is deliberately **both launcher and
 resumer**. Every invocation inspects only durable GitHub-and-worktree

@@ -1,5 +1,14 @@
 # Agent Audit for Issue #369 — Claude Phase 1 Upstream Agents
 
+> **Mechanism superseded by issue #1003.** Where this document names a specific tool for
+> surfacing a decision — `AskUserQuestion`, `#tool:vscode/askQuestions`, "the structured-question
+> tool" — that naming no longer describes current behavior. The repository specifies **no**
+> presentation mechanism; the agent chooses per turn. The **obligations** these decisions record
+> — that the gate fires, that it carries its mandatory options, that a pacing directive cannot
+> suppress it — are unchanged and still binding. The mechanism references are left in place
+> because this is a dated decision record: rewriting them would make the document describe a
+> decision that was not the one taken. Read them as history, not instruction.
+
 Audit of `Experience-Owner`, `Solution-Designer`, and `Issue-Planner` agent bodies to classify every section as one of:
 
 - **identity** — keep verbatim in the agent body (personality, role, pipeline, boundaries)

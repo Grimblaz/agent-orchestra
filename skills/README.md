@@ -66,7 +66,7 @@ This keeps prompts concise while preserving depth when needed.
 | `session-startup` | Automatic startup cleanup guard for new conversations | ✅ Included |
 | `skill-creator` | Guide for creating new skills with proper frontmatter format | ✅ Included |
 | `software-architecture` | Clean Architecture, SOLID principles, and architectural decision guidance | ✅ Included |
-| `solution-authoring` | Reusable engagement-gate methodology for content-authoring structured questions in upstream phases. Use when classifying a decision as load-bearing or routine, authoring a decision brief, handling an override or decline, capturing articulation, or evaluating skip rules. DO NOT USE FOR: GitHub setup, completion-marker ownership, or adversarial review pipeline orchestration. | ✅ Included |
+| `solution-authoring` | Reusable engagement-gate methodology for content-authoring decisions in upstream phases. Use when classifying a decision as load-bearing or routine, authoring a decision brief, handling an override or decline, capturing articulation, or evaluating skip rules. DO NOT USE FOR: GitHub setup, completion-marker ownership, or adversarial review pipeline orchestration. | ✅ Included |
 | `specification-authoring` | Structured authoring guidance for formal specifications | ✅ Included |
 | `step-commit` | Discrete validated-step commit workflow for Code-Conductor | ✅ Included |
 | `subagent-env-handshake` | Claude subagent environment-handshake contract for tree-grounded claims | ✅ Included |

@@ -138,7 +138,7 @@ Describe '4-body load directive' {
             }
         }
 
-        $script:NewDirectiveSubstring = 'Load `skills/solution-authoring/SKILL.md` first and follow its protocol before any subsequent skill fires a structured question'
+        $script:NewDirectiveSubstring = 'Load `skills/solution-authoring/SKILL.md` first and follow its protocol before any subsequent skill fires an engagement gate'
         $script:OldFormPrefix = 'When this user-invocable agent receives a request referencing an existing GitHub issue, load `skills/upstream-onboarding/SKILL.md`'
     }
 

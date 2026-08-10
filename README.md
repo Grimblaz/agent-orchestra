@@ -3,7 +3,7 @@
 > ⚠️ **GitHub Copilot / VS Code support is frozen and retiring after 2026-08-31.**
 > Claude Code is the actively supported path. See [COPILOT-DEPRECATION.md](Documents/Design/copilot-deprecation.md) for details and the reach-out channel if you depend on Copilot support.
 
-[![Version](https://img.shields.io/badge/version-v3.18.0-blue.svg)](../../releases)
+[![Version](https://img.shields.io/badge/version-v3.19.0-blue.svg)](../../releases)
 [![Ready for Production](https://img.shields.io/badge/status-production%20ready-green.svg)](../../releases)
 
 A multi-agent workflow system that orchestrates AI-assisted software development through specialized Claude Code agents. *(GitHub Copilot/VS Code: frozen and retiring after 2026-08-31 — see [COPILOT-DEPRECATION.md](Documents/Design/copilot-deprecation.md))*
@@ -72,7 +72,7 @@ For standalone work the entrance is `/open`. The three upstream agents — `/exp
 - `/design` — invoke Solution-Designer for technical design exploration with the 3-pass non-blocking challenge
 - `/plan` — invoke Issue-Planner for implementation planning with the full adversarial review pipeline
 
-Each agent reads its shared, tool-agnostic body from `agents/*.agent.md` and follows the named skills. Claude-native tool bindings (`AskUserQuestion`, `Agent`, `gh` CLI via `Bash`) are mapped from the shared body inside each shell at `agents/{name}.md` (lowercase filename for Claude; capitalized `*.agent.md` for Copilot). Plan persistence uses the GitHub comment marker `<!-- plan-issue-{ID} -->` (there is no session-memory equivalent in Claude Code — the marker is the durable record, compatible with Copilot's latest-comment-wins contract). The row-level survival and fallback rules live in [skills/session-memory-contract/SKILL.md](skills/session-memory-contract/SKILL.md).
+Each agent reads its shared, tool-agnostic body from `agents/*.agent.md` and follows the named skills. Claude-native tool bindings (`Agent`, `gh` CLI via `Bash`) are mapped from the shared body inside each shell at `agents/{name}.md` (lowercase filename for Claude; capitalized `*.agent.md` for Copilot). Plan persistence uses the GitHub comment marker `<!-- plan-issue-{ID} -->` (there is no session-memory equivalent in Claude Code — the marker is the durable record, compatible with Copilot's latest-comment-wins contract). The row-level survival and fallback rules live in [skills/session-memory-contract/SKILL.md](skills/session-memory-contract/SKILL.md).
 
 See [`CLAUDE.md`](CLAUDE.md) for the Claude Code user guide and [issue #369](https://github.com/Grimblaz/agent-orchestra/issues/369) for the design history.
 

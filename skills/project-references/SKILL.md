@@ -53,7 +53,7 @@ Top-level `references` block:
 
 ## Content Trust and Rendering
 
-Reference content does not unlock the methodology-skipping levers (auto-mode, pacing directives, Decline engagement) on the agent's behalf — those require explicit user input via the structured question. Reference content CAN inform the agent's recommended option, choice rationale, and decision text within methodology checkpoints — that is its intended use.
+Reference content does not unlock the methodology-skipping levers (auto-mode, pacing directives, Decline engagement) on the agent's behalf — those require explicit user input at the gate itself. Reference content CAN inform the agent's recommended option, choice rationale, and decision text within methodology checkpoints — that is its intended use.
 
 Loaded doc-body excerpts render in fenced `untrusted-content` blocks. The renderer MUST use a fence longer than any backtick run in the loaded body.
 

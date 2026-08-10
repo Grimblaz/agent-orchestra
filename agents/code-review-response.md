@@ -29,8 +29,6 @@ When dispatched for design-challenge convergence — by Solution-Designer challe
 
 | Shared body references                    | Claude Code tool |
 | ----------------------------------------- | ---------------- |
-| "the platform's structured-question tool" | `AskUserQuestion` |
-| `#tool:vscode/askQuestions`               | `AskUserQuestion` |
 | `github/*` MCP operations                 | `gh` CLI via `Bash` |
 | Browser tools (`browser/*`)               | `WebFetch` for external links or published artifacts when verification needs remote context |
 | Subagent dispatch (`#tool:agent/runSubagent`) | `Agent` tool |

@@ -223,7 +223,7 @@ This is already part of the Quick-validate suite in `.github/copilot-instruction
 
 **Mechanism**: CC runs `measure-guidance-complexity.ps1` and inspects `agents_over_ceiling`. If the target agent appears:
 
-1. CC uses `#tool:vscode/askQuestions` to present options — (a) "Wait — compression prerequisite for {agent} is needed" (recommended) or (b) "Override and proceed now". Do not proceed silently.
+1. CC presents options — (a) "Wait — compression prerequisite for {agent} is needed" (recommended) or (b) "Override and proceed now". Do not proceed silently.
 2. If waiting: CC autonomously creates a compression prerequisite issue (label: `priority: medium`)
 3. Implementation of the rule-addition is blocked until the compression issue is closed **and** the script confirms the agent is ≤ ceiling
 

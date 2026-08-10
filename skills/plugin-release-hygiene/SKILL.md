@@ -73,11 +73,11 @@ Use this shape for the first proposal in a conversation:
 
 > This edit touches `{path}`, which is cache-keyed by version. Proposing bump `{current}` -> `{next}` (`patch`: entry-point change so cached installs pick it up). Override if you wanted a different increment level.
 
-Keep the reason to one line and keep the option labels short enough for a structured-question surface.
+Keep the reason to one line and keep each option label to a few words, so the four choices stay scannable side by side.
 
 ### 4. Structured Override
 
-Offer exactly four choices through the platform's structured-question tool:
+Offer exactly four choices:
 
 - `Patch`
 - `Minor`

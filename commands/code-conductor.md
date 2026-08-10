@@ -21,7 +21,7 @@ Resolve and read `agents/Code-Conductor.agent.md` before adopting the role. Use 
 
 **Pre-flight — empty task guard**:
 
-If `$ARGUMENTS` is empty or whitespace-only, use the `AskUserQuestion` tool to ask the user what task to route. Do not adopt the Conductor body with no task.
+If `$ARGUMENTS` is empty or whitespace-only, ask the user what task to route. Do not adopt the Conductor body with no task.
 
 **Inline execution**:
 

@@ -88,7 +88,7 @@ On failure:
 1. Warn in conversation output
 2. Increment a consecutive-failure counter (tracked in conversation context)
 3. Reset the counter to zero after any successful step commit.
-4. If the consecutive-failure counter reaches ≥2, escalate via the platform's structured question tool (see `platforms/` for invocation details):
+4. If the consecutive-failure counter reaches ≥2, escalate to the user:
 
    > Step commits failing repeatedly — check hooks/git state. Continue without auto-commits?
    >

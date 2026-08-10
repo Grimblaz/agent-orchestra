@@ -49,7 +49,7 @@
           "classification": {
             "type": "string",
             "enum": ["load-bearing", "routine"],
-            "description": "Whether this finding was load-bearing (required AskUserQuestion) or routine (recorded silently)."
+            "description": "Whether this finding was load-bearing (asked before disposition) or routine (recorded silently)."
           },
           "internal_match": {
             "type": "object",

@@ -370,11 +370,11 @@ This section splits two previously-conflated rules — marker emission and the m
 - After the `<!-- review-judge-produced-{PR} -->` sentinel is confirmed written
 - Even when no finding was judge-sustained this pass — per the M9 coverage semantics above (§ Scope, around line 277: "coverage means measurement, not presence"), a zero-sustained pass still emits both markers, with `entries: []` on the dispositions marker
 
-**Disposition gate** (the `AskUserQuestion` / maintainer-interaction step, classification into routine vs load-bearing) fires only when there are findings to disposition:
+**Disposition gate** (the maintainer-interaction step, classification into routine vs load-bearing) fires only when there are findings to disposition:
 
 - Over the judge-sustained findings from the `<!-- judge-rulings ... -->` block
 - Only for sustained findings (`judge_ruling: sustained`); defense-sustained findings (`judge_ruling: defense-sustained`) are skipped silently (not disposition-gated)
-- When there are zero judge-sustained findings, no finding enters classification and `AskUserQuestion` never fires this pass — but marker emission (above) still runs
+- When there are zero judge-sustained findings, no finding enters classification and the gate never fires this pass — but marker emission (above) still runs
 
 ### Classification
 
@@ -424,7 +424,7 @@ At reconciliation time — with **both** the internal prosecution ledger (this P
 
 ### Routine Findings — Silent Recording
 
-For routine findings, the agent records the disposition silently in the `review-dispositions-{PR}` accumulator without firing an `AskUserQuestion`. Use `schema_version: 4` (current emission format); write `severity`, `stage`, and `reviewer_source` (the reviewer identity or class that produced the finding — use `local` for pipeline-native prosecution/defense/judge findings; external identities are resolved per § `reviewer_source` Lookup Order above) for all entries, `internal_match` for external-source entries (§ `internal_match` Writer Rule above), and include `ac_cross_check` for any `dismiss` or `defer` entry with severity ≥ medium. Remember the PR-level `external_sources_reconciled` field once per posted marker (§ `internal_match` Writer Rule above; § Persistence — Ordering below shows the full marker shape):
+For routine findings, the agent records the disposition silently in the `review-dispositions-{PR}` accumulator without asking the maintainer. Use `schema_version: 4` (current emission format); write `severity`, `stage`, and `reviewer_source` (the reviewer identity or class that produced the finding — use `local` for pipeline-native prosecution/defense/judge findings; external identities are resolved per § `reviewer_source` Lookup Order above) for all entries, `internal_match` for external-source entries (§ `internal_match` Writer Rule above), and include `ac_cross_check` for any `dismiss` or `defer` entry with severity ≥ medium. Remember the PR-level `external_sources_reconciled` field once per posted marker (§ `internal_match` Writer Rule above; § Persistence — Ordering below shows the full marker shape):
 
 > **Pre-condition**: for any `dismiss` entry with severity ≥ medium, run the AC cross-check (see § AC Cross-Check — Blocking Pre-Condition) before writing this entry.
 
@@ -443,7 +443,7 @@ For routine findings, the agent records the disposition silently in the `review-
 
 The agent chooses `incorporate` or `dismiss` based on the judge ruling direction. Routine findings do not fire the gate; they feed directly into the accumulator.
 
-### Load-Bearing Findings — AskUserQuestion
+### Load-Bearing Findings — the disposition question
 
 For load-bearing findings, render an **escalation-tier decision brief** (three required elements, all present before the option list):
 
@@ -451,7 +451,7 @@ For load-bearing findings, render an **escalation-tier decision brief** (three r
 2. **Decision setup → the conflict**: why this finding's proposed change conflicts with or extends beyond the current state.
 3. **Conditional misconception → customer failure mode**: the concrete failure the engineer would cause by taking the wrong path.
 
-Then fire `AskUserQuestion` with options:
+Then ask, with exactly these options:
 
 - `Incorporate — apply the fix` (Recommended if prosecution was sustained on strong evidence)
 - `Dismiss — the finding does not warrant a change`
@@ -483,7 +483,7 @@ This example's `reviewer_source: local` means no `internal_match` is written (pi
 When an engineer selects `Escalate`:
 
 1. Record `disposition: escalate` in the entry.
-2. Emit a concise escalation note inline (not a structured question): `Finding {finding_id} escalated — recommend filing a follow-up issue for: {finding title}. Proceeding without implementing this finding.`
+2. Emit a concise escalation note inline (not a question): `Finding {finding_id} escalated — recommend filing a follow-up issue for: {finding title}. Proceeding without implementing this finding.`
 3. Do NOT implement the finding in the current PR. The current work continues; the escalated finding is noted for tracking.
 4. Record the `escalate` outcome faithfully in `review-dispositions-{PR}` and in the L0 gate-decision token.
 
@@ -541,13 +541,13 @@ When the AC cross-check returns `routed: defer` (because `result: no-match` or `
 
 The agent MUST follow this sequence instead:
 
-1. **Emit a loud inline note** (not `AskUserQuestion` — this is a guard, not a user question): `⚠️ Finding {finding_id} deferred without AC coverage (ac_cross_check.result: {result}) — mandatory proposal required.`
+1. **Emit a loud inline note** (not a question — this is a guard, not a decision the maintainer makes): `⚠️ Finding {finding_id} deferred without AC coverage (ac_cross_check.result: {result}) — mandatory proposal required.`
 
 2. **Enter a mandatory proposal** into the `§2e Filing Approval Gate` batch (`skills/safe-operations/SKILL.md` § 2e), pre-checked and recommended-approve, annotated `AC-uncovered defer`. The canonical title uses `ConvertTo-CanonicalFollowupTitle`. The proposal body MUST include the finding title, the judge ruling, and the `ac_cross_check` YAML block — this payload travels into the durable drop record if the maintainer drops the proposal. This is mandatory regardless of the finding's classification tier — routine findings that lack AC coverage still enter the gate as a proposal.
 
 3. **Record in the accumulator** with `disposition: defer`, the `ac_cross_check` object, and `disposition_rationale` that cites the `no-match`/`no-ac-section` outcome and references the gate proposal (and the resulting issue URL once the maintainer approves it and it is filed).
 
-The loud guard does not apply when `routed: force-accept` (high-confidence AC match) or `routed: disposition-gate` (ambiguous match fires `AskUserQuestion` normally). It applies only to the `routed: defer` arm.
+The loud guard does not apply when `routed: force-accept` (high-confidence AC match) or `routed: disposition-gate` (ambiguous match fires the disposition question normally). It applies only to the `routed: defer` arm.
 
 **Low-severity exemption applies here too**: findings with severity `low` are exempt from this guard (the low-severity exemption from the blocking pre-condition applies throughout this section).
 
@@ -574,7 +574,7 @@ At the start of the disposition pass, call `Read-EngagementRecords -Phase review
 
 For each finding in the current judge-sustained set, check whether its `stable_finding_key` appears in the prior record:
 
-- **Match found** → `same-decision-resume` skip: reuse the prior `engineer_choice`, log `Reusing prior {stable_finding_key}: {engineer_choice}`, do not fire `AskUserQuestion`.
+- **Match found** → `same-decision-resume` skip: reuse the prior `engineer_choice`, log `Reusing prior {stable_finding_key}: {engineer_choice}`, do not ask again.
 - **No match** → run the gate normally.
 
 This enables re-review of a PR without re-asking for findings already dispositioned.
@@ -629,7 +629,7 @@ Write in this order (atomic marker first, engagement-record second). `skills/ses
    >
    > **In-session schema audit is now pre-write and blocking (893-D3 amendment, s9)**: `persist-marker.ps1`'s `review-dispositions` family validator adapter invokes `.github/scripts/lib/review-dispositions-validator-core.ps1` **in-process, via the call operator (`&`), with mandatory try/catch containment** — never as a `pwsh -File` subprocess (the original 893-D3 subprocess design is superseded; a subprocess cannot bind that script's `-InMemoryMarkers` array parameter without hitting the recorded #866 flattening trap, since `-InMemoryMarkers` is a top-level array parameter). Any finding the validator returns is converted into a hard pre-write refusal on this write path: v4 schema violations (e.g., missing `ac_cross_check` on dismiss/defer entries at severity ≥ medium, or a missing `reviewer_source`) are refused with the offending field named, before any network write. This is a property of the `persist-marker.ps1` write path only — the standalone validator script's own read-side warn-only contract (SMC-23 detection-at-review) is unchanged for any other caller.
 
-2. **`<!-- engagement-record-review-{PR} -->`** — Post as a separate PR comment (not the same comment as review-dispositions), via a hand-composed `gh pr comment` call — **not** `persist-marker.ps1` (see the known v1 registry gap noted above this list). Payload follows `skills/engagement-record-emission/SKILL.md` shape at `schema_version: 4`, `phase: review`. Load-bearing findings that fired `AskUserQuestion` appear in `load_bearing_decisions[]` with their `engineer_choice` and `audit_rationale`. Routine findings do not appear in the engagement-record.
+2. **`<!-- engagement-record-review-{PR} -->`** — Post as a separate PR comment (not the same comment as review-dispositions), via a hand-composed `gh pr comment` call — **not** `persist-marker.ps1` (see the known v1 registry gap noted above this list). Payload follows `skills/engagement-record-emission/SKILL.md` shape at `schema_version: 4`, `phase: review`. Load-bearing findings that fired the disposition question appear in `load_bearing_decisions[]` with their `engineer_choice` and `audit_rationale`. Routine findings do not appear in the engagement-record.
 
    The engagement-record carries the `same-decision-resume` identity; the review-dispositions carries the per-finding outcome record. Never merge the two into a single comment.
 

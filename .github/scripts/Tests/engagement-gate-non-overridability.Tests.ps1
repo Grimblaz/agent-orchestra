@@ -215,7 +215,7 @@ Describe 'engagement-gate non-overridability clauses' {
             -Heading 'Plan Approval Prompt Format' `
             -Marker '<!-- plan-authoring-non-overridability:begin -->'
 
-        $promptFormat | Should -Match ([regex]::Escape('structured-question options')) `
+        $promptFormat | Should -Match ([regex]::Escape('The approval prompt must offer')) `
             -Because 'the prompt-format section itself must document the option set contract'
         $promptFormat | Should -Match ([regex]::Escape('explicit approval option')) `
             -Because 'the prompt-format section must require an approval option'

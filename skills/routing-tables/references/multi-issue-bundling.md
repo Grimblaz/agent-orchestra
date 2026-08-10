@@ -6,7 +6,7 @@ Extracted detail supporting `agents/Code-Conductor.agent.md` § Multi-Issue Bund
 
 Classify each issue separately using the Scope Classification Gate rubric. The bundle adopts the **highest-scope tier** (if any issue requires full pipeline, run full pipeline for all).
 
-**Bundle rule**: the bundle announces (no question) only when EVERY bundled issue's outcome is determined — list each issue's tier and the deciding criteria, followed by the 'highest-scope-wins' bundle tier. If ANY bundled issue is indeterminate, the existing single combined question fires for the whole bundle unchanged: present all issue classifications in a single `#tool:vscode/askQuestions` call — do not make separate per-issue prompts, formatting the recommendation as a list entry per issue showing recommended tier and the key criterion driving the classification, followed by the 'highest-scope-wins' bundle tier.
+**Bundle rule**: the bundle announces (no question) only when EVERY bundled issue's outcome is determined — list each issue's tier and the deciding criteria, followed by the 'highest-scope-wins' bundle tier. If ANY bundled issue is indeterminate, the existing single combined question fires for the whole bundle unchanged: present all issue classifications in a single question — do not make separate per-issue prompts, formatting the recommendation as a list entry per issue showing recommended tier and the key criterion driving the classification, followed by the 'highest-scope-wins' bundle tier.
 
 ## Agent Selection dispatch notes
 

@@ -224,7 +224,7 @@ Describe 'Atomic adversarial pipeline structural contract' {
             $skill | Should -Match '(?m)^## Atomic Pipeline Discipline\s*$'
             $skill | Should -Match '(?is)(no[- ]surfacing|must not surface|do not surface)'
             $skill | Should -Match '(?is)(no[- ]edits|must not edit|do not edit|working-tree edits are forbidden)'
-            $skill | Should -Match '(?is)(no[- ]questions|must not ask|do not ask|AskUserQuestion is forbidden)'
+            $skill | Should -Match '(?is)(no[- ]questions|must not ask|do not ask)'
             $skill | Should -Match '(?is)retry\s+exception'
             $skill | Should -Match '(?is)prosecutor[- ]set\s+interrupt\s+exception'
         }
@@ -357,12 +357,17 @@ Describe 'Atomic adversarial pipeline structural contract' {
             $dispatcher | Should -Match 'subagent_type:\s*code-review-response'
         }
 
-        It 'does not allow structured questions inside the atomic prosecution-to-defense window' {
+        It 'does not allow the run to ask the user inside the atomic prosecution-to-defense window' {
             $dispatcher = script:Read-RepoText -Path $script:DispatcherPath
             $window = script:Get-SentinelWindow -Text $dispatcher -Begin '<!-- adversarial-prosecution-dispatch-begin -->' -End '<!-- adversarial-defense-dispatch-end -->'
 
             $window | Should -Not -BeNullOrEmpty
-            $window | Should -Not -Match 'AskUserQuestion'
+            # #1003 M22: the object is what matters, and the negation must not be swallowed.
+            # `(?<!not )` keeps a future *prohibition* inside the window ("do not ask the user
+            # anything") from reddening this assertion, which the unqualified widening would
+            # have done — a ratchet against correct text. An affirmative instruction to ask,
+            # or a bare tool name, still trips it.
+            $window | Should -Not -Match '(?i)(AskUserQuestion|(?<!\bnot )\bask(?:s|ing)? the (user|operator|maintainer)(?! nothing))'
             $dispatcher | Should -Match '(?is)sub[- ]skill.*indirection.*boundary|known.*indirection.*boundary|boundary.*sub[- ]skill'
         }
 

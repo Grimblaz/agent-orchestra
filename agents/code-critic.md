@@ -93,8 +93,6 @@ The Copilot-specific tool names in that file map to Claude Code equivalents belo
 
 | Shared body references                    | Claude Code tool |
 | ----------------------------------------- | ---------------- |
-| "the platform's structured-question tool" | `AskUserQuestion` |
-| `#tool:vscode/askQuestions`               | `AskUserQuestion` |
 | `github/*` MCP operations                 | `gh` CLI via `Bash` |
 | Browser tools (`browser/*`)               | Prefer `WebFetch` for external pages; when live browser evidence is required, the granted `mcp__Claude_Preview__*` / `mcp__claude-in-chrome__*` tools are **read-only**: reading page/DOM/console/network content and taking screenshots are permitted, but navigate, click, fill, form input, `preview_eval`, or any other action that mutates the shared parent browser session are NOT permitted for this shell; if only mutating access would answer the question, surface the limitation instead of inventing coverage |
 | Subagent dispatch (`#tool:agent/runSubagent`) | `Agent` tool |
