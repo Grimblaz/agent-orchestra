@@ -289,6 +289,19 @@ families:
     notes: "Pester test files. Absent tests produce visible-warning in CI (tests are
       skipped or the suite reports fewer cases) but do not block agent dispatch."
 
+  ".github/scripts/Tests/*.json":
+    claude_resolves: plugin-cache
+    copilot_resolves: source-tree
+    requires_version_bump: true
+    experience: visible-warning
+    examples:
+      - .github/scripts/Tests/ci-quarantine.json
+    notes: "Data files the Pester tests root carries alongside its suites — today just the
+      CI suite-selection quarantine registry, which decides which suites the per-PR gate
+      runs. Its absence is deliberately NOT treated as an empty quarantine by
+      ci-suite-selection-core.ps1: the selection procedure reports drift instead, so a
+      missing registry surfaces as a visible CI failure rather than a silently widened run."
+
   ".github/scripts/Tests/fixtures/*.ps1":
     claude_resolves: plugin-cache
     copilot_resolves: source-tree

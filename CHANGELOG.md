@@ -4,6 +4,28 @@ All notable changes to agent-orchestra will be documented in this file.
 
 ## [Unreleased]
 
+## [3.19.0] — 2026-08-09
+
+### Added
+
+**The whole Pester corpus can now be measured on Linux, on demand** (#1035, chunk 1 of 4 under designed parent #993). Three quarters of this repository's test corpus had never executed on the CI platform and nobody knew whether it could: the per-PR gate runs a glob minus a quarantine — 62 of 253 suites at this commit — and 189 of the 191 quarantined entries carry class `unclassified`, meaning nobody ever decided to exclude them. `.github/workflows/ci-full-glob-audit.yml` runs all of them, deliberately ignoring the quarantine, and lands a per-suite record durable enough for the three chunks that follow to read.
+
+**It gates nothing and it is red by construction.** Dispatch-only, no `schedule:` trigger (the recurring standing audit is #1047's), and `pester.yml`'s selection is untouched. Ignoring the quarantine means the audit fails whenever any suite fails, which is the expected state from day one — so the record is persisted *before* anything makes the job red, and a red job is never a reason a record is absent.
+
+**Four terminal states, not three.** `passed` / `failed` / `did-not-complete` / `executed-no-tests`. The fourth is load-bearing and the existing sharded runner gets it wrong in both directions: it counts a zero-discovery file as a failure while an all-skipped file reaches exit 0 with a zero failure count and reads as green. `ConvertTo-CIGlobAuditState` separates them, and a `passed` row now asserts that a test actually **executed** — not that an exit code was zero — and records how many were skipped, so a suite that passed one test and skipped nine is visible rather than clean-looking.
+
+**A bound, because nothing under `.github/` had one.** `Start-Process -Wait` takes none and no workflow set `timeout-minutes`, so a suite that never returns occupied its slot to GitHub's 360-minute ceiling — and this audit attempts exactly the population most likely to contain one. Each suite now runs in its own bounded child process. "The bound fired" and "the slot is free" are treated as two facts: the runner kills the tree, waits for the corpse, and reports `ProcessSurvivedKill` per row, because an orphan keeps consuming the runner and contaminates every later row's duration while each row individually looks well-formed.
+
+**Failure detail, not counts.** A row saying `fail=3` cannot tell #1036 whether a suite has a Linux path bug or needs a live `gh`. Every non-`passed` row carries structured failure messages (or, for a suite that never returned, the tail of what it printed before the kill). A row with genuinely nothing to capture says so explicitly and is named as one #1036 cannot classify — an honest empty, not a discharge.
+
+**Five deliberately misbehaving controls** under `.github/scripts/audit-controls/`, one per terminal state, checked against their expected state on every run: a control that stops producing its state means the classifier is wrong. They live outside the tests root on purpose — one never returns, and `Invoke-Pester .github/scripts/Tests/`, which the contributor instructions and the pull-request template both prescribe, is recursive and quarantine-blind, so a non-returning suite anywhere beneath that root hangs a contributor's pre-PR run where no job ceiling exists. It is additionally interlocked behind a `CI_GLOB_AUDIT_CONTROLS=1` variable the audit sets on that one child process, not job-wide — an extra variable in the shared environment would itself be an avoidable divergence from the gate.
+
+**Parity is stated per dimension and observed, never declared.** Eleven dimensions — runner image, process model, concurrency, PowerShell and module versions, token availability, checkout depth, credential persistence, git identity, working directory — each with the gate's value (a *constraint* where the gate only states one) against this run's, read from the run's own metadata rather than from the workflow file. The process model and concurrency are recorded as divergent because they structurally are. Separately, the audit's outcome on the 62 suites the gate already selects is compared against the gate's, since that is the only check that can catch an *avoidable* divergence — one that passes an honest per-dimension statement while making every outcome garbage.
+
+**Two observations count as observations of the same thing only if the suite's content and the instrument were the same.** The observation history is keyed on a content digest plus an instrument basis that hashes the bound and every environment dimension, so a `did-not-complete` at one bound does not pool with a `passed` at four times it, and a suite rewritten between runs does not report two observations. A changed basis resets the count and keeps the previous one on the row.
+
+The record is composed against GitHub's 65,536-codepoint comment cap with the arithmetic done up front rather than discovered mid-run: classifying detail spills into further comments rather than being truncated to fit, and codepoints are counted as codepoints (an emoji in a failure message cannot fake an overflow). New `Documents/Design/hub-artifact-paths-classification.yml` family for `.github/scripts/Tests/*.json`, which the quarantine registry had always belonged to. 56 Pester tests in `.github/scripts/Tests/ci-glob-audit-core.Tests.ps1`, six of which drive the shipped controls through the shipped execution path in a real child process — the bound in particular cannot be demonstrated by any in-process assertion.
+
 ## [3.18.0] — 2026-08-09
 
 ### Changed

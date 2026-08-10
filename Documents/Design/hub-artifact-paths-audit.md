@@ -1,6 +1,6 @@
 <!-- audit-meta
-last-verified: 18a28ba1b3c7125f70c76890a9996f50e49fd82a
-generated-at: 2026-08-02T18:41:45Z
+last-verified: f14a059979eca297d9c7e329923c866dd7e0b4d6
+generated-at: 2026-08-10T01:23:57Z
 -->
 
 ## Purpose
@@ -271,6 +271,16 @@ Copilot always reads from the source tree in the hub repo. This dual-resolved be
   - `.github/scripts/lib/cost-walker-copilot.ps1`
   - `.github/scripts/lib/frame-credit-ledger-core.ps1`
 - **notes**: Shared library scripts loaded by root hook scripts under .github/scripts/lib/. Sourced as dependencies at runtime; missing lib script propagates as a visible-warning from the calling hook.
+
+### `.github/scripts/Tests/*.json`
+
+- **claude_resolves**: plugin-cache
+- **copilot_resolves**: source-tree
+- **requires_version_bump**: true
+- **experience**: visible-warning
+- **examples**:
+  - `.github/scripts/Tests/ci-quarantine.json`
+- **notes**: Data files the Pester tests root carries alongside its suites — today just the CI suite-selection quarantine registry, which decides which suites the per-PR gate runs. Its absence is deliberately NOT treated as an empty quarantine by ci-suite-selection-core.ps1: the selection procedure reports drift instead, so a missing registry surfaces as a visible CI failure rather than a silently widened run.
 
 ### `.github/scripts/Tests/*.Tests.ps1`
 
