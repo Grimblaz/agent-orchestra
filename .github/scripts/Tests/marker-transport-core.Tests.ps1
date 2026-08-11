@@ -482,9 +482,11 @@ exit /b 0
     Context 'Console.OutputEncoding UTF-8 pin (CE Gate #893 live-run fix, S1/S3(a))' -Skip:(-not $IsWindows) {
         # Windows-only OS primitive: the fixture below is a `.cmd` batch
         # file (`@echo off` / `type` / `exit /b 0`), a Windows-specific
-        # external-process shape with no Linux equivalent. None of this
-        # suite's Describe blocks are selected by pester.yml today (this
-        # suite is quarantined out of it), so this is a latent guard, not an active fix.
+        # external-process shape with no Linux equivalent. This suite WAS
+        # quarantined out of pester.yml when that was written, which made this a
+        # latent guard; #1036 promoted it, so pester.yml selects it on every
+        # pull request now and the -Skip:(-not $IsWindows) guard is what keeps
+        # this Context off the Linux runner. Active, not latent.
         BeforeAll {
             $script:EncodingSavedPath = $env:PATH
         }

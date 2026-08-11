@@ -3429,12 +3429,19 @@ Describe 'Get-PhaseContainmentHistory — issue #876 F1: default CachePath const
     It 'does not throw a null-binding error building the default CachePath when $env:TEMP is unset and no -CachePath is supplied' {
         # Only Windows conventionally sets $env:TEMP; PowerShell Core on
         # Linux/macOS leaves it unset by default. A prior version called
-        # `Join-Path ([System.IO.Path]::GetTempPath()) "..."` for the default CachePath, which
-        # throws a terminating parameter-binding error the instant
-        # $env:TEMP is $null -- reproducible even on this Windows host once
-        # the variable is cleared (confirmed manually).
+        # `Join-Path $env:TEMP "..."` for the default CachePath, which throws a
+        # terminating parameter-binding error the instant $env:TEMP is $null --
+        # reproducible even on this Windows host once the variable is cleared
+        # (confirmed manually).
         # [System.IO.Path]::GetTempPath() resolves TMPDIR/TEMP/TMP
         # cross-platform without ever needing $env:TEMP directly.
+        #
+        # THIS COMMENT IS NOT A CANDIDATE FOR THE $env:TEMP SWEEP. Issue #1036
+        # replaced every `Join-Path $env:TEMP` in this file mechanically and hit
+        # this one too, rewriting the description of the DEFECT into a
+        # description of the REMEDY -- so the comment claimed GetTempPath()
+        # throws when $env:TEMP is null, two lines above recommending it. The
+        # occurrence above exists to name the broken form; leave it alone.
         function global:gh {
             param([Parameter(ValueFromRemainingArguments = $true)]$Args)
             $global:LASTEXITCODE = 0

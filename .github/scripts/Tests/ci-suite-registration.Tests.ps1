@@ -86,17 +86,54 @@ Describe 'CI suite selection: the live tree' {
         # and an issue on every class whose exclusion is expected to end. It is
         # a restatement of HasDrift over exactly the entry-level rules, kept
         # separate so a failure names the registry rather than the tree.
+        # The enums come from the LIBRARY, not from literals retyped here. A
+        # copy would turn this live assertion red for a conforming registry the
+        # day a lawful fourth class is added, training the next author to edit
+        # the literal rather than read the guard — which is the defect this file
+        # argues against for pinned counts further down.
+        $legal = $script:CIQuarantineClasses
+        $ticketed = $script:CIQuarantineIssueRequiredClasses
+        $legal | Should -Not -BeNullOrEmpty -Because 'the library must actually export the class set this test reads'
+        $ticketed | Should -Not -BeNullOrEmpty -Because 'the library must actually export the issue-required set this test reads'
+
+        $examined = 0
         foreach ($e in $script:Live.Quarantined) {
-            [string]$e.class | Should -BeIn @('linux-red', 'never-ci', 'no-signal') -Because "$($e.file) must carry a class that is a decision about a measured suite"
+            [string]$e.class | Should -BeIn $legal -Because "$($e.file) must carry a class that is a decision about a measured suite"
             [string]$e.reason | Should -Not -BeNullOrEmpty -Because "$($e.file) must say why it is skipped"
-            if ([string]$e.class -in @('linux-red', 'no-signal')) {
+            if ([string]$e.class -in $ticketed) {
                 $hasIssue = ($e.PSObject.Properties.Match('issue').Count -gt 0) -and -not [string]::IsNullOrWhiteSpace([string]$e.issue)
                 $hasIssue | Should -BeTrue -Because "$($e.file) is class '$($e.class)', whose exclusion is expected to end, so something must be tracking that ending"
             }
+            $examined++
         }
+
+        # A foreach over an empty collection runs zero assertions and reports
+        # green, so the coverage is asserted rather than assumed. An EMPTY
+        # registry is a lawful end state here — #1047 is expected to keep
+        # shrinking it — so this is deliberately not a "greater than zero"
+        # floor; it is the statement that whatever the registry holds, this
+        # test looked at all of it.
+        $examined | Should -Be $script:Live.Quarantined.Count -Because 'every entry in the registry must have been examined, and an empty registry must report zero examined rather than silently skipping a populated one'
     }
 
-    It 'no suite beneath the tests root is absent from the gate for any other reason (T6 coverage)' {
+    It 'every suite the gate ENUMERATES is either selected or admitted by a live registry entry (T6 coverage)' {
+        # TWO LIMITS, STATED, because an earlier revision of this test was
+        # titled "no suite beneath the tests root is absent from the gate for
+        # any other reason" and could not deliver that universal:
+        #
+        #   1. The enumeration is NON-RECURSIVE (ci-suite-selection-core.ps1's
+        #      Get-ChildItem -Filter, no -Recurse), so a suite in a SUBDIRECTORY
+        #      of the tests root is absent from the gate, produces no drift, and
+        #      is invisible here. audit-controls/README.md records the same fact.
+        #   2. Name comparison is `-notcontains`, which is CASE-INSENSITIVE,
+        #      while CI's filesystem is case-SENSITIVE. An entry differing only
+        #      in case excludes the suite it names on Linux while reporting no
+        #      stale entry and no drift.
+        #
+        # Both are properties of the selection library that predate this test
+        # and neither is closed here. What this asserts is the narrower true
+        # thing: over the population the gate actually enumerates, every absent
+        # suite is absent on an entry the registry admits.
         # The gate selects by SUBTRACTION, so `selected = onDisk - registry`
         # holds by construction and proves nothing on its own. What this asserts
         # is the part that does not: that every subtracted name is subtracted by
@@ -106,14 +143,14 @@ Describe 'CI suite selection: the live tree' {
         $admitted = @(
             $script:Live.Quarantined |
                 Where-Object {
-                    [string]$_.class -in @('linux-red', 'never-ci', 'no-signal') -and
+                    [string]$_.class -in $script:CIQuarantineClasses -and
                     -not [string]::IsNullOrWhiteSpace([string]$_.reason)
                 } |
                 ForEach-Object { [string]$_.file }
         )
         $onDiskNames = @(Get-ChildItem -LiteralPath $script:TestsRoot -Filter '*.Tests.ps1' -File | ForEach-Object { $_.Name })
         $absentButNotAdmitted = @($onDiskNames | Where-Object { $script:Live.SelectedNames -notcontains $_ -and $admitted -notcontains $_ })
-        $absentButNotAdmitted | Should -BeNullOrEmpty -Because 'a suite absent from the gate on an entry the registry no longer admits is exactly the silent exclusion this registry replaced an allowlist to prevent'
+        $absentButNotAdmitted | Should -BeNullOrEmpty -Because 'over the population the gate enumerates, a suite absent on an entry the registry no longer admits is the silent exclusion this registry replaced an allowlist to prevent'
     }
 
     It 'the one exemption the registry cannot express is stated rather than silent (T6 disclosure)' {
@@ -128,7 +165,19 @@ Describe 'CI suite selection: the live tree' {
         Test-Path -LiteralPath $controlsRoot | Should -BeTrue -Because 'the exemption is a real directory, not a story about one'
         $controls = @(Get-ChildItem -LiteralPath $controlsRoot -Filter '*.Tests.ps1' -File | ForEach-Object { $_.Name })
         $controls.Count | Should -BeGreaterThan 0
+
+        # Keyed on the CONTROL NAMING CONVENTION found beneath the tests root,
+        # not on the list of controls still sitting in audit-controls/. An
+        # earlier revision iterated the latter, which detects a COPY into the
+        # tests root and is structurally blind to the MOVE its own comment
+        # claims to guard: a moved control drops out of the collection being
+        # iterated, so nothing checks it. That matters most for the one control
+        # that never returns — beneath the tests root it would be selected by
+        # the glob with no registry entry and hold the gate to its timeout.
         $onDiskNames = @(Get-ChildItem -LiteralPath $script:TestsRoot -Filter '*.Tests.ps1' -File | ForEach-Object { $_.Name })
+        $strays = @($onDiskNames | Where-Object { $_ -like '*.Control.Tests.ps1' })
+        $strays | Should -BeNullOrEmpty -Because 'an audit control beneath the tests root is selected by the glob with no registry entry; the controls are exempt by living OUTSIDE that root, and one of them never returns'
+
         foreach ($c in $controls) {
             $onDiskNames | Should -Not -Contain $c -Because "$c is exempt from the gate by living outside the tests root; beneath it, it would need a registry entry like any other suite"
         }

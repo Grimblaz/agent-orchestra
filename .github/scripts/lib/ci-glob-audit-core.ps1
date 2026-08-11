@@ -117,7 +117,12 @@ function Protect-CIGlobAuditSecret {
         Scrub credential-shaped material out of anything captured from an
         unaudited suite before it reaches a permanent public surface.
     .DESCRIPTION
-        189 of the suites this audit runs have never been vetted; the measure
+        This audit runs the WHOLE corpus, quarantine included, so it executes
+        suites the per-PR gate does not — and it did so when 189 of them had
+        never been vetted anywhere. #1036 has since promoted 176 of those into
+        the gate, but this scrubber's premise is unchanged: the audit's
+        population is by construction wider than the gate's, so it will always
+        be running something less exercised than the gated set. The measure
         job checks out with credential persistence ON, deliberately, for gate
         parity; and any suite that prints its git config on failure would
         otherwise publish a bearer token verbatim into a durable public issue
@@ -1675,11 +1680,12 @@ function Get-CIGlobAuditReachability {
             function resolved the root to an ABSOLUTE path and then tested
             `StartsWith`. That comparison is false for every row the pipeline
             can produce, forever. It worked in exactly one circumstance: when
-            `Resolve-Path` threw because the root did not exist. All 253
-            in-population suites sit directly under the tests root and the 191
-            quarantined ones are not in `SelectedNames`, so for the population
-            this audit exists to attempt, BOTH arms were dead at once and the
-            record affirmatively printed `clean: True`.
+            `Resolve-Path` threw because the root did not exist. Every
+            in-population suite sits directly under the tests root, and at the
+            time this was written the 191 quarantined ones were not in
+            `SelectedNames` (issue #1036 has since cut that to 14), so for the
+            population this audit exists to attempt, BOTH arms were dead at once
+            and the record affirmatively printed `clean: True`.
           * `Resolve-Path` on a row's own `Path` must never be called. This
             function runs BEFORE any persistence, with no try/catch above it,
             so a suite deleted between Prepare and Compose would convert a
@@ -2347,9 +2353,11 @@ function New-CIGlobAuditRecordDocuments {
                 # WHICH END IS KEPT DEPENDS ON WHAT THE DETAIL IS, and getting
                 # this wrong in either direction breaks R5 on a different
                 # population. Structured failure messages are joined head-first
-                # and the FIRST one classifies `linux-red` against `never-ci`,
-                # so a blanket tail-keep would degrade the 191-suite population
-                # R5 exists for. A console tail was deliberately selected as a
+                # and the FIRST one classifies a failure into its quarantine
+                # class, so a blanket tail-keep would degrade the population R5
+                # exists for — 191 suites when this was written, 14 after issue
+                # #1036, and whatever the audit's own wider population is on any
+                # given run. A console tail was deliberately selected as a
                 # TAIL because for a suite that never returned the last thing
                 # it printed is where it stopped — and keeping its head, which
                 # is what shipped, systematically discards exactly the stopping
@@ -2623,7 +2631,8 @@ function New-CIGlobAuditRecordDocuments {
 
     # ---- the per-suite table paginates, exactly as detail does ----
     # It did not, and the summary measured 41,111 codepoints of a 65,536 cap at
-    # today's 253 suites — 1.7x the planning estimate, overflowing at roughly
+    # the 253 suites on disk when that was measured — 1.7x the planning
+    # estimate, overflowing at roughly
     # 400. The throw on overflow precedes every persist call with no try/catch
     # above it, so a corpus-growth threshold turned a red-by-construction audit
     # into a NO-RECORD audit: not the summary, not the detail documents, not

@@ -45,9 +45,13 @@
 # is not wrong -- its bound is deliberately mutation-proven -- so the fix is to
 # give it back the conditions it was calibrated under rather than to loosen it.
 #
-# NOT open here: re-deriving membership for the whole corpus. That question
-# arrives with #1036's ~188 promotions, and it now arrives with a named third
-# class rather than as a surprise.
+# Membership for the whole corpus was re-derived when #1036 landed, which is
+# what an earlier revision of this comment deferred. #1036 promoted 176 suites,
+# scanned all of them for the three hazards these lists name, took six
+# candidates to a contention experiment, and moved the two below that failed it.
+# The scan is static and cannot see a hazard reached through a helper it does
+# not recognise, so a clean result there is not proof of absence. Ongoing
+# re-derivation as the corpus changes belongs to #1047's standing audit.
 # ---------------------------------------------------------------------------
 function Get-RealGitFiles {
     [CmdletBinding()]
@@ -91,10 +95,12 @@ function Get-IsolationRequiredFiles {
         # failure would arrive on a stranger's pull request looking like a defect
         # in whatever they touched.
         'orchestra-spine-command.Tests.ps1',
-        # Wall-clock bound over REAL git work: asserts a 50-commit batch
-        # completes inside 3s, and that a 50-commit run is sub-linear against a
-        # smaller one. The ratio assertion is scale-invariant and would survive
-        # contention; the absolute bounds are what a neighbour can starve.
+        # Wall-clock bounds over REAL git work, two of them: a five-residual-
+        # commit run inside 3s (:266) and a fifty-commit run inside 5s (:293),
+        # plus a sub-linearity ratio between them (:295). The ratio is
+        # scale-invariant and would survive contention; the two absolute bounds
+        # are what a neighbour can starve, and the tighter of them is the 3s one
+        # over five commits rather than the 5s one over fifty.
         # Measured by #1036 alongside the promotion: 16 of 16 alone, 14 of 16
         # with the box saturated. It supplies its own git identity per command,
         # so it does NOT belong on the real-git list -- isolation is the reason,

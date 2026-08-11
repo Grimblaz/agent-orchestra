@@ -23,8 +23,13 @@
     small scratch fixture directory (not the whole on-disk corpus) — each
     Invoke-Pester6BaselineCapture call spawns a fresh pwsh process, so this
     file is slower than a pure-unit test file but still runs in low-single-
-    digit seconds per call. It is intentionally quarantined out of pester.yml's
-    CI selection (per the plan's non-goal: s2 does not touch pester.yml); CI
+    digit seconds per call. It WAS intentionally quarantined out of pester.yml's
+    CI selection (per the plan's non-goal: s2 does not touch pester.yml), and
+    #1036 promoted it on the measurement showing it green on Linux, so it now
+    runs on every pull request. That reversal is safe rather than lucky: T2
+    self-skips when fewer than two Pester majors are installed, which is exactly
+    the CI condition described below, so promotion does not turn T2 red — it
+    runs the rest of the file and skips the one case CI cannot satisfy. CI
     installs only a single pinned Pester major via pester.yml, and T2's
     honoring proof needs at least two distinct installed majors to be
     meaningful.

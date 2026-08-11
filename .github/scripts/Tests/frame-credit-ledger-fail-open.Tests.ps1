@@ -245,6 +245,27 @@ function global:gh {
         return '{"owner":{"login":"example"},"name":"example"}'
     }
 
+    # --body-file FIRST. Find-OrUpsertComment posts new comments through a temp
+    # file, so the --body branch below matches such a call BY PREFIX while
+    # [Array]::IndexOf finds no literal '--body' element and the captured body
+    # stays empty. Latent here only because nothing asserts UpsertBody today;
+    # the identical shape silently disarmed a CONTROL test in a sibling suite,
+    # which is why it is closed rather than left armed (#1036).
+    if (`$joined -match '(issue|pr) comment \d+ .*--body-file') {
+        if (`$global:FailCommentPost) {
+            `$global:LASTEXITCODE = 1
+            return ''
+        }
+        `$global:UpsertCalled = `$true
+        `$idx = [Array]::IndexOf(`$Args, '--body-file')
+        if (`$idx -ge 0 -and `$idx + 1 -lt `$Args.Count) {
+            `$bodyFile = [string]`$Args[`$idx + 1]
+            if (Test-Path -LiteralPath `$bodyFile) { `$global:UpsertBody = Get-Content -LiteralPath `$bodyFile -Raw }
+        }
+        `$global:LASTEXITCODE = 0
+        return 'https://github.com/example/example/pull/429#issuecomment-1'
+    }
+
     if (`$joined -match '(issue|pr) comment \d+ --body') {
         if (`$global:FailCommentPost) {
             `$global:LASTEXITCODE = 1

@@ -23,10 +23,14 @@
     Issue #929 AC2 — the integration claim, as a matched pair. AC2 spans two
     components (this script writes the ignore entries; the goal-contract
     validator's Test-GCTreeClean reads the resulting `git status`), so it
-    lives beside the script's own suite rather than in the validator's suite,
-    which is quarantined out of .github/workflows/pester.yml's selection and
-    therefore never runs in CI. A regression test CI never runs cannot deliver
-    AC2's stated purpose ("so the coupling cannot silently return").
+    lives beside the script's own suite rather than in the validator's suite.
+    The original reason was that the validator's suite was quarantined out of
+    .github/workflows/pester.yml and therefore never ran in CI, and a regression
+    test CI never runs cannot deliver AC2's stated purpose ("so the coupling
+    cannot silently return"). #1036 promoted that suite, so both now run on
+    every pull request and that reason has expired. The placement stands on the
+    reason that outlived it: the claim belongs beside the component that writes
+    the entries, and duplicating it would be two sources of truth.
 
       T10 – after the shipped script has run, a tree whose only content beyond
             the committed tree is the goal-run runtime-state pair reads back

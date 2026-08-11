@@ -345,6 +345,19 @@ function global:gh {
         return '$IssueCommentsJson'
     }
 
+    # --body-file FIRST -- see the note in frame-credit-ledger-fail-open. The
+    # --body branch matches a --body-file call by prefix and captures nothing.
+    if (`$joined -match '(issue|pr) comment \d+ .*--body-file') {
+        `$global:UpsertCalled = `$true
+        `$idx = [Array]::IndexOf(`$Args, '--body-file')
+        if (`$idx -ge 0 -and `$idx + 1 -lt `$Args.Count) {
+            `$bodyFile = [string]`$Args[`$idx + 1]
+            if (Test-Path -LiteralPath `$bodyFile) { `$global:UpsertBody = Get-Content -LiteralPath `$bodyFile -Raw }
+        }
+        `$global:LASTEXITCODE = 0
+        return 'https://github.com/example/example/pull/429#issuecomment-1'
+    }
+
     if (`$joined -match '(issue|pr) comment \d+ --body') {
         `$global:UpsertCalled = `$true
         `$idx = [Array]::IndexOf(`$Args, '--body')
