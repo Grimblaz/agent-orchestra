@@ -116,20 +116,6 @@ Describe 'Composite skill structure contract' {
         }
     }
 
-    It 'T7 INDUCTION — DELIBERATE FAILURE, REVERTED IN THE NEXT COMMIT (#1036)' {
-        # This suite was NOT selected by the gate before #1036: at commit 3e39c91
-        # the live selection procedure returns 65 names and this is not among
-        # them, and it carried a quarantine entry. #1036 promoted it. So a
-        # failure induced HERE can only redden the check through the expansion
-        # this chunk delivers -- an induction in an already-selected suite would
-        # prove the old gate and discharge nothing.
-        #
-        # It also must not redden the check by making the REGISTRY malformed,
-        # which aborts the job before any suite runs and proves nothing. This is
-        # an ordinary failing assertion inside a suite the gate now executes.
-        $true | Should -BeFalse -Because 'T7 control: a change that breaks a newly-gated suite must redden the per-PR check'
-    }
-
     It 'prevents the composite entry skills from inlining the extracted methodology headings back into SKILL.md' {
         foreach ($skill in $script:CompositeSkills) {
             foreach ($pattern in $skill.DisallowedHeadingPatterns) {
