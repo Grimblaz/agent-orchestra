@@ -212,7 +212,7 @@ Describe 'Population: the gate''s own enumeration, before the quarantine is subt
 
     It 'is the union of selected and non-stale quarantined suites, not just the selected set' {
         $t = script:New-FixtureTree -Files @('a.Tests.ps1', 'b.Tests.ps1', 'c.Tests.ps1') -Quarantine @(
-            [ordered]@{ file = 'b.Tests.ps1'; class = 'unclassified'; reason = 'never registered'; issue = $null }
+            [ordered]@{ file = 'b.Tests.ps1'; class = 'no-signal'; reason = 'every test skipped'; issue = 970 }
             [ordered]@{ file = 'c.Tests.ps1'; class = 'linux-red'; reason = 'fails on linux'; issue = 904 }
         )
         $pop = Get-CIGlobAuditPopulation -TestsRoot $t.Dir -QuarantinePath $t.QuarantinePath
@@ -235,7 +235,9 @@ Describe 'Population: the gate''s own enumeration, before the quarantine is subt
 
     It 'REFUSES to derive a population from a drifted registry, with no override' {
         $t = script:New-FixtureTree -Files @('a.Tests.ps1') -Quarantine @(
-            [ordered]@{ file = 'gone.Tests.ps1'; class = 'unclassified'; reason = 'deleted long ago'; issue = $null }
+            # A legal class, deliberately: STALENESS must be the only drift cause
+            # here, or this test would pass for a reason it does not name.
+            [ordered]@{ file = 'gone.Tests.ps1'; class = 'never-ci'; reason = 'deleted long ago'; issue = $null }
         )
         # A fail-closed predicate whose caller could carry on regardless would
         # be a fail-open writer, so there is deliberately no -AllowDrift switch.
@@ -250,7 +252,7 @@ Describe 'Population: the gate''s own enumeration, before the quarantine is subt
         # only exact under no-drift says something untrue about why the run is
         # refusing, on the one surface a maintainer reads when it fires.
         $t = script:New-FixtureTree -Files @('a.Tests.ps1') -Quarantine @(
-            [ordered]@{ file = 'gone.Tests.ps1'; class = 'unclassified'; reason = 'deleted'; issue = $null }
+            [ordered]@{ file = 'gone.Tests.ps1'; class = 'never-ci'; reason = 'deleted'; issue = $null }
         )
         $message = ''
         try { Get-CIGlobAuditPopulation -TestsRoot $t.Dir -QuarantinePath $t.QuarantinePath }
