@@ -44,10 +44,22 @@ BeforeAll {
     # Discover installed Pester versions to drive the RequiredVersion-honoring
     # tests without hardcoding version numbers that may drift after this
     # migration completes.
+    #
+    # ONE VERSION PER MAJOR, highest within each. T2's contract — stated in this
+    # file's .DESCRIPTION and in T2's own skip message — is about two distinct
+    # MAJORS, because that is what makes "the child imported what was pinned"
+    # observable rather than coincidental. A list of full versions does not
+    # deliver that: with 6.2.0, 6.1.0 and 5.7.1 installed, the top two share a
+    # major, so T2 would probe two 6.x builds while its message claims it is
+    # comparing majors, and would count 6.2.0/6.1.0 as satisfying a gate written
+    # for 6.x/5.x.
     $script:InstalledVersions = @(
         Get-Module -Name Pester -ListAvailable |
             Select-Object -ExpandProperty Version |
             Sort-Object -Descending -Unique |
+            Group-Object -Property Major |
+            ForEach-Object { $_.Group | Sort-Object -Descending | Select-Object -First 1 } |
+            Sort-Object -Descending |
             ForEach-Object { $_.ToString() }
     )
 

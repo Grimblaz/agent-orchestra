@@ -118,7 +118,7 @@ function Protect-CIGlobAuditSecret {
         unaudited suite before it reaches a permanent public surface.
     .DESCRIPTION
         This audit runs the WHOLE corpus, quarantine included, so it executes
-        suites the per-PR gate does not — and it did so when 189 of them had
+        suites the per-PR gate does not — and it did so when 188 of them had
         never been vetted anywhere. #1036 has since promoted 176 of those into
         the gate, but this scrubber's premise is unchanged: the audit's
         population is by construction wider than the gate's, so it will always

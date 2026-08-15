@@ -2,10 +2,12 @@
 #
 # The per-PR gate (pester.yml) runs a glob MINUS a quarantine, and the figure
 # moves as chunks land — derive it from `Get-CISuiteSelection` rather than
-# reading a number here. When this workflow shipped the split was 65 selected of
-# 255 on disk, with 188 of the 190 quarantine entries carrying class
-# `unclassified`, meaning nobody had ever decided to exclude them and nothing
-# had ever executed them on this platform.
+# reading a number here. At issue #1036's branch point (3e39c91) the split was
+# 65 selected of 255 on disk, with 188 of the 190 quarantine entries carrying
+# class `unclassified`, meaning nobody had ever decided to exclude them and
+# nothing had ever executed them on this platform. (Those are branch-point
+# figures, not this file's ship-time ones: at 0f3c824, where it shipped, the
+# split was 63 of 254 with 189 of 191.)
 #
 # THAT BACKLOG IS GONE. This workflow measured all of them, #1036 spent the
 # measurement, and `unclassified` was retired outright: every surviving entry is

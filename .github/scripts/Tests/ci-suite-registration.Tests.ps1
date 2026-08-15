@@ -75,7 +75,7 @@ Describe 'CI suite selection: the live tree' {
         # This assertion replaces one that could not fail. It read
         # `UnclassifiedCount -BeGreaterOrEqual 0` and `-BeLessOrEqual` the size
         # of the set it is a subset of: a tautology and a structural bound, both
-        # green over a registry of 189 unmeasured entries. Issue #1035 measured
+        # green over a registry of 188 unmeasured entries. Issue #1035 measured
         # the whole corpus on Linux and #1036 spent that measurement, so the
         # honest assertion is now available and is the one that stands.
         $script:Live.UnclassifiedCount | Should -Be 0 -Because 'the `unclassified` class was retired by #1036; an entry still carrying it rests on nobody having measured the suite, which is no longer true of any suite here'
@@ -95,14 +95,20 @@ Describe 'CI suite selection: the live tree' {
         $ticketed = $script:CIQuarantineIssueRequiredClasses
         $legal | Should -Not -BeNullOrEmpty -Because 'the library must actually export the class set this test reads'
         $ticketed | Should -Not -BeNullOrEmpty -Because 'the library must actually export the issue-required set this test reads'
+        # The ticket rule comes from the library for the same reason the enums
+        # do, and for a sharper one: this test used to carry its own non-blank
+        # copy of it, so when the library's check turned out to admit 'TODO', 0
+        # and -17, the guard agreed with the defect instead of reporting it.
+        Get-Command Test-CIQuarantineIssueNumber -ErrorAction SilentlyContinue |
+            Should -Not -BeNullOrEmpty -Because 'the library must expose the issue-number predicate this test reads, rather than each side keeping its own copy of the rule'
 
         $examined = 0
         foreach ($e in $script:Live.Quarantined) {
             [string]$e.class | Should -BeIn $legal -Because "$($e.file) must carry a class that is a decision about a measured suite"
             [string]$e.reason | Should -Not -BeNullOrEmpty -Because "$($e.file) must say why it is skipped"
             if ([string]$e.class -in $ticketed) {
-                $hasIssue = ($e.PSObject.Properties.Match('issue').Count -gt 0) -and -not [string]::IsNullOrWhiteSpace([string]$e.issue)
-                $hasIssue | Should -BeTrue -Because "$($e.file) is class '$($e.class)', whose exclusion is expected to end, so something must be tracking that ending"
+                $hasIssue = ($e.PSObject.Properties.Match('issue').Count -gt 0) -and (Test-CIQuarantineIssueNumber $e.issue)
+                $hasIssue | Should -BeTrue -Because "$($e.file) is class '$($e.class)', whose exclusion is expected to end, so something must be tracking that ending — and a ticket that tracks it is a positive integer, not a placeholder"
             }
             $examined++
         }
@@ -140,11 +146,20 @@ Describe 'CI suite selection: the live tree' {
         # an entry the clause above ADMITS. Before #1036 this was false for 188
         # suites — they were absent on entries carrying a class that no longer
         # exists — and the difference is empty only because that was fixed.
+        # ADMITTED means every rule the registry enforces, not the two that are
+        # cheapest to express. A ticketed-class entry whose `issue` is not a
+        # positive integer is refused by Get-CISuiteSelection, so counting it as
+        # admitted here would let this assertion certify a suite as lawfully
+        # absent on an entry the registry rejects.
         $admitted = @(
             $script:Live.Quarantined |
                 Where-Object {
                     [string]$_.class -in $script:CIQuarantineClasses -and
-                    -not [string]::IsNullOrWhiteSpace([string]$_.reason)
+                    -not [string]::IsNullOrWhiteSpace([string]$_.reason) -and
+                    (
+                        [string]$_.class -notin $script:CIQuarantineIssueRequiredClasses -or
+                        (Test-CIQuarantineIssueNumber $_.issue)
+                    )
                 } |
                 ForEach-Object { [string]$_.file }
         )
@@ -228,7 +243,7 @@ Describe 'CI suite selection: one induced failure per class the guard claims to 
     }
 
     It 'INDUCED (retired class): an entry still classed `unclassified` FAILS, and the refusal names the retirement' {
-        # The class this registry carried for 189 entries. Retiring it is the
+        # The class this registry carried for 188 entries. Retiring it is the
         # whole enforcement half of #1036: without this, "nobody looked" stays
         # a legal justification and the backlog can grow back one entry at a
         # time. The input here is one the pre-work registry ACTUALLY CONTAINED,
@@ -312,6 +327,48 @@ Describe 'CI suite selection: one induced failure per class the guard claims to 
         $rPerm = Get-CISuiteSelection -TestsRoot $perm.Dir -QuarantinePath $perm.QuarantinePath
         $rPerm.DriftDetails -join ' | ' | Should -BeExactly ''
         $rPerm.HasDrift | Should -BeFalse
+    }
+
+    It 'INDUCED (unusable-issue class): a ticketed entry whose issue is not a POSITIVE INTEGER FAILS' {
+        # The ticket requirement used to be a non-blank check, which is not the
+        # requirement: 'TODO', 0 and -17 are all non-blank, and each one would
+        # have admitted the entry, dropped the suite out of the gate and
+        # reported HasDrift False — a drop wearing a quarantine's badge, which
+        # is the exact thing the class documentation says the ticket prevents.
+        # Each arm is a SEPARATE tree so one refusal cannot cover for another.
+        foreach ($bad in @('TODO', 0, -5, '', '  ', '12.5', 'issue #1067')) {
+            $t = script:New-ScratchTree -Files @('a.Tests.ps1', 'b.Tests.ps1') -Quarantine @(
+                [ordered]@{ file = 'a.Tests.ps1'; class = 'linux-red'; reason = 'fixture'; issue = $bad }
+            )
+            $r = Get-CISuiteSelection -TestsRoot $t.Dir -QuarantinePath $t.QuarantinePath
+            $r.HasDrift | Should -BeTrue -Because "issue '$bad' names no ticket anyone can close, so it must not admit the entry"
+            ($r.DriftDetails -join ' ') | Should -Match 'no issue number'
+        }
+
+        # The other polarity arm (the positive and negative test cases have to
+        # travel together): a real ticket, as an int and as the numeric string
+        # a hand-edited registry can easily produce, must be clean. Without
+        # this, every assertion above is satisfied by a predicate that refuses
+        # everything — which would redden the live registry's twelve entries.
+        foreach ($good in @(1234, '1234', 1)) {
+            $t = script:New-ScratchTree -Files @('a.Tests.ps1', 'b.Tests.ps1') -Quarantine @(
+                [ordered]@{ file = 'a.Tests.ps1'; class = 'linux-red'; reason = 'fixture'; issue = $good }
+            )
+            $r = Get-CISuiteSelection -TestsRoot $t.Dir -QuarantinePath $t.QuarantinePath
+            $r.DriftDetails -join ' | ' | Should -BeExactly '' -Because "issue '$good' is a ticket that exists, so it must admit the entry"
+            $r.HasDrift | Should -BeFalse
+        }
+    }
+
+    It 'INDUCED (unusable-issue class): the same refusal applies to `no-signal`, not just `linux-red`' {
+        # Both ticketed classes, because the rule lives in one set and a fix
+        # applied at one call site is the shape that leaves the other open.
+        $t = script:New-ScratchTree -Files @('a.Tests.ps1', 'b.Tests.ps1') -Quarantine @(
+            [ordered]@{ file = 'a.Tests.ps1'; class = 'no-signal'; reason = 'every test skipped'; issue = 'TODO' }
+        )
+        $r = Get-CISuiteSelection -TestsRoot $t.Dir -QuarantinePath $t.QuarantinePath
+        $r.HasDrift | Should -BeTrue
+        ($r.DriftDetails -join ' ') | Should -Match 'no issue number'
     }
 
     It 'INDUCED (missing-registry class): an absent registry FAILS instead of selecting everything' {

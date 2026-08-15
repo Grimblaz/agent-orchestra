@@ -48,6 +48,49 @@ $script:CIQuarantineIssueRequiredClasses = @('linux-red', 'no-signal')
 # say what happened to it rather than reporting an anonymous unknown class.
 $script:CIQuarantineRetiredClasses = @('unclassified')
 
+function Test-CIQuarantineIssueNumber {
+    <#
+    .SYNOPSIS
+        True when a quarantine entry's `issue` field names a ticket that could
+        actually exist: a positive integer.
+    .DESCRIPTION
+        THE POINT. The classes in $script:CIQuarantineIssueRequiredClasses are
+        exclusions expected to END, so the ticket is the whole mechanism that
+        ends them. A non-blank check is not that: `issue: "TODO"`, `issue: 0`
+        and `issue: -17` are all non-blank and all name nothing anyone can
+        close, so each would admit an entry, drop that suite from the gate and
+        report no drift — the "drop wearing a quarantine's badge" this file's
+        class docs say the requirement prevents.
+
+        This is a FUNCTION rather than a rule restated at each call site so the
+        registration suite can consume it. The suite previously carried its own
+        copy of the non-blank test, which is exactly why the suite could not
+        catch the library being too weak: both halves agreed, and both were
+        wrong.
+
+        Accepts an integer or a numeric string (JSON gives either). Rejects
+        null, empty, whitespace, non-numeric text, zero and negatives.
+    .PARAMETER Issue
+        The raw `issue` value off the entry, of any type, possibly $null.
+    .OUTPUTS
+        [bool]
+    #>
+    param($Issue)
+
+    if ($null -eq $Issue) { return $false }
+    $text = ([string]$Issue).Trim()
+    if ([string]::IsNullOrWhiteSpace($text)) { return $false }
+
+    # Parsed as an integer specifically: `12.5` and `1e3` are not issue
+    # numbers, and an invariant-culture parse keeps a thousands separator or a
+    # localised sign from sneaking one through.
+    [int]$parsed = 0
+    if (-not [int]::TryParse($text, [System.Globalization.NumberStyles]::AllowLeadingSign, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$parsed)) {
+        return $false
+    }
+    return ($parsed -ge 1)
+}
+
 function Get-CISuiteSelection {
     <#
     .SYNOPSIS
@@ -87,7 +130,7 @@ function Get-CISuiteSelection {
                          it REQUIRES an issue.
 
         RETIRED: `unclassified`, which meant "never registered under the old
-        allowlist, and whether it is CI-viable has never been measured". 189
+        allowlist, and whether it is CI-viable has never been measured". 188
         entries carried it. Issue #1035 measured every one of them on Linux and
         issue #1036 spent that measurement, so the class no longer describes
         anything true and is refused rather than merely discouraged — a class
@@ -189,8 +232,12 @@ function Get-CISuiteSelection {
         # Only the classes whose exclusion is expected to END are ticket-bound.
         # 'never-ci' is permanent by design, so demanding an issue for it would
         # manufacture a ticket nobody can ever close.
-        if ($script:CIQuarantineIssueRequiredClasses -contains $class -and ($null -eq $issue -or [string]::IsNullOrWhiteSpace([string]$issue))) {
-            $invalid.Add("${file}: class '$class' with no issue number. An exclusion that is expected to end, with no ticket, is a permanent one that has not admitted it.")
+        if ($script:CIQuarantineIssueRequiredClasses -contains $class -and -not (Test-CIQuarantineIssueNumber $issue)) {
+            # The value is echoed when there IS one, because "no issue number"
+            # reads as an absent field and the widened check also refuses a
+            # present-but-unusable one ('TODO', 0, -17).
+            $got = if ($null -eq $issue -or [string]::IsNullOrWhiteSpace([string]$issue)) { '' } else { " (got '$issue')" }
+            $invalid.Add("${file}: class '$class' with no issue number$got. An exclusion that is expected to end, with no ticket, is a permanent one that has not admitted it. The ticket must be a POSITIVE INTEGER; a placeholder, a zero or a negative names nothing anyone can close.")
         }
         if ($script:CIQuarantineRetiredClasses -contains $class) { $unclassified++ }
     }
