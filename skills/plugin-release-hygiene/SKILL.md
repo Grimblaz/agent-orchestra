@@ -45,7 +45,7 @@ Make the shipping consequence of an entry-point edit visible at the moment it ha
 
 ## Composite References
 
-- [references/release-exhibits.md](references/release-exhibits.md): the incident detail behind Release Lenses - the collision this repository actually hit, the files it conflicted across, and how it was resolved
+- [references/release-exhibits.md](references/release-exhibits.md): the incident detail behind § Release Lenses — the collision this repository actually hit, the files it conflicted across, and how it was resolved
 
 ## Maintainer Flow
 
@@ -103,9 +103,26 @@ Allowed `keying_strategy` values are `session_id`, `branch_slug`, and `session_f
 
 ### 5. Apply The Bump
 
-Resolve the repo root with `git rev-parse --show-toplevel`, then locate `.github/scripts/bump-version.ps1`. **Compute the next semver from `main`'s version, not your branch's** — read it with `git show origin/main:.claude-plugin/plugin.json` — then apply the chosen level. *(Corrected under issue #1051, parent #1045 amendment A5.2: this read "from the current `.claude-plugin/plugin.json` version", which is the branch-local increment that produces two internally-consistent branches on one number. `bump-version.ps1` does not check whether a version is already taken on `main`, so nothing catches the collision until the merge conflicts across every version-bearing file at once.)*
+Resolve the repo root with `git rev-parse --show-toplevel`, then locate `.github/scripts/bump-version.ps1`. **Compute the next semver from the default branch's version, not your branch's**, and read it *fresh* — `git show` performs no network update, so an unfetched `origin/main` is whatever your last fetch left behind:
 
-**Re-check after any merge of `main`.** A bump that was valid when made can collide later, and re-running the script with the next free number is safer than hand-editing seven occurrences across five files. Issue #1050's own run hit this twice in one session: the branch stood at `3.21.0` while `main` had shipped `3.21.1`, and after merging, `main` moved again to `3.21.2` before the branch landed at `3.22.0`.
+```powershell
+git fetch origin main --quiet
+git show origin/main:.claude-plugin/plugin.json
+```
+
+Run that in `pwsh`. Under Git Bash on Windows, MSYS argument conversion rewrites the ref-and-path argument into `origin\main;.claude-plugin\plugin.json` and `git show` exits 128 with `fatal: ambiguous argument`; prefix `MSYS_NO_PATHCONV=1` if you must run it there. If the ref cannot be resolved at all — a fork whose default branch is not `main`, or a checkout with no such remote-tracking ref — resolve the default branch the way this skill's own hook does (`Get-PRHDefaultBranch` in `scripts/plugin-release-hygiene-hook.ps1`, which walks a six-rung ladder rather than assuming the name). If it still cannot be read, say so and stop. Do not fall back to the branch-local value: that fallback is the whole defect this step exists to remove.
+
+*(Corrected under issue #1051, parent #1045 amendment A5.2: this step read "from the current `.claude-plugin/plugin.json` version", which is the branch-local increment that produces two internally-consistent branches on one number.)*
+
+**What reading the default branch does and does not prevent.** It tells you what has *landed*, not what an open PR has already *claimed*. Two branches cut from the same base both read the same version and both derive the same next one — the collision in the lens below, and the one this repository was sitting in when this step was written. To check what is claimed rather than what has landed, read the open PR heads:
+
+```powershell
+gh pr list --state open --json number,headRefName
+```
+
+`.github/scripts/release-gate.ps1` is a **landing backstop, not a prevention**: it compares the head's version against a freshly fetched base with a strict `>`, so a same-number PR cannot merge green once its conflicts are resolved — but it passes for *both* branches while both are open, it does not re-run when the base moves underneath an idle PR, and a `CONFLICTING` PR suppresses `pull_request` workflows entirely, so what you actually see is a stale green rather than a red. The structural fix is tracked in [#864](https://github.com/Grimblaz/agent-orchestra/issues/864).
+
+**Re-check before landing, not only after a merge.** A bump that was valid when made can collide later, and the two ways it happens need different triggers: `main` advancing *underneath* an idle branch is not a merge your branch performs, so "re-check after merging" never fires for it. Re-check after any merge of `main` into your branch **and again immediately before you land**. Re-run the script with the next free number rather than hand-editing — see the occurrence-count note below. If the delay pushed the release past the date already written into the changelog, re-run so the date matches the release rather than the bump. Issue #1050's own run hit this twice in one session: the branch stood at `3.21.0` while `main` had shipped `3.21.1`, and after merging, `main` moved again to `3.21.2` before the branch landed at `3.22.0`.
 
 Before invoking the script, construct a categorized CHANGELOG entry body. Group changes into the appropriate subsection(s) — `Fixed`, `Added`, or `Changed` — as a markdown bullet list. Pass the body as `-ChangelogEntry` and the primary category as `-ChangelogSection`. The script uses today's date internally (`Get-Date -Format 'yyyy-MM-dd'`); the caller only supplies the body.
 
@@ -151,7 +168,11 @@ One way a bump that is correct when you make it is wrong by the time it lands.
 
 #### Two branches can bump to the same version, and each one is internally consistent
 
-`bump-version.ps1` writes a version across several occurrences in several files and does **not** check whether that version is already taken on `main`. So two branches working in parallel can both land on the same number, and nothing catches it: each branch's release gate passes, CI passes, the changelog entry looks right, and the developer's own plugin cache agrees. It surfaces only at the merge, as a simultaneous conflict across every version-bearing file plus the changelog. **Read `main`'s current version before bumping** — `git show origin/main:.claude-plugin/plugin.json` — rather than incrementing from your own branch's value, and **re-check after any merge of `main`**, because a bump valid when made can collide later. Re-run the script with the next free number rather than hand-editing; the occurrence count across files is more than you will remember to fix by hand. Why it matters past tidiness: Claude Code keys its plugin cache by this version, so two different trees published under one number means a same-version install keeps serving whichever snapshot it cached first — the exact staleness the bump exists to prevent, failing silently. Changelog ordering is a separate resolution from the number, and after any scripted changelog merge verify the encoding: a stray BOM, `U+FFFD` replacement characters, and lost em-dashes are the recurring three. Exhibit: [references/release-exhibits.md](references/release-exhibits.md) § Two branches at 3.12.0.
+`bump-version.ps1` writes a version across several occurrences in several files and does **not** check whether that number is already taken — not on `main`, and not on another open PR. So two branches cut from the same base both read the same current version, both derive the same next one, and each stays internally consistent: the changelog entry looks right and the developer's own plugin cache agrees. It surfaces at the merge, as a simultaneous conflict across every version-bearing file plus the changelog. **Read `main`'s current version before bumping** rather than incrementing from your own branch's value — § 5 above carries the command, the fetch it depends on, and the shell it actually runs in — and **re-check immediately before you land**, not only after a merge: `main` advancing underneath an idle branch is not a merge your branch performs, so a re-check keyed to merging never fires for it. Re-run the script rather than hand-editing; the occurrence count across files is more than you will remember to fix by hand.
+
+Be precise about what catches this and what does not, because the difference decides what you are entitled to trust. `.github/scripts/release-gate.ps1` compares the head's version against a freshly fetched base with a strict `>`, so a same-number PR cannot *merge* green once its conflicts are resolved — that much is guarded, and it is issue #864's fix shape 2, already shipped. But it is a landing backstop and nothing earlier: it passes for **both** branches while both are open, and it does not re-run when the base moves under an idle PR. The window between the two bumps is unguarded. Worse, the moment the first branch merges, the loser goes `CONFLICTING`, GitHub cannot build a merge ref, and every `pull_request` workflow silently does not run while `gh pr checks` keeps reporting the previous commit's results — **"no workflow ran" and "every workflow passed" look identical at a glance.** The signal you would use to notice the collision is the one the collision switches off. Structural work is open at [#864](https://github.com/Grimblaz/agent-orchestra/issues/864); until it lands, checking the open PR heads is the only way to see a number that is claimed but not landed.
+
+Why it matters past tidiness: Claude Code keys its plugin cache by this version, so two different trees published under one number means a same-version install keeps serving whichever snapshot it cached first — the exact staleness the bump exists to prevent, failing silently. Changelog ordering is a separate resolution from the number. Exhibit: [references/release-exhibits.md](references/release-exhibits.md) § Two branches at 3.12.0.
 
 ## Related Guidance
 

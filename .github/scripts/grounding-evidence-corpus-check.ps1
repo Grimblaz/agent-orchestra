@@ -22,12 +22,19 @@
                       spans, or appear in prose but not adjacent to each
                       other, or do not appear at all.
 
-    Detection is structural (span-aware pattern matching), not
-    substring-counting -- a body that merely MENTIONS the sentinel or bold
-    literal in prose (e.g. quoting the contract itself) must not be counted
-    as a real persisted block. See
+    Detection is structural (span-aware pattern matching) rather than
+    substring-counting: the sentinel must be immediately followed by the
+    bold heading, and occurrences inside fenced blocks or inline code spans
+    are excluded. Those two exclusions are the WHOLE of what this decides.
+    They cover the common quoting shapes -- a fenced example, or the literal
+    wrapped in backticks -- but they do not make the detector immune to
+    quotation in general: an unfenced, column-0 paste of the
+    sentinel-plus-heading pair in prose classifies as `canonical`, because
+    nothing in the surrounding text distinguishes use from mention. Read a
+    `canonical` result as "the pair is present in a non-code position", not
+    as "a block was really persisted here". See
     .github/scripts/Tests/grounding-evidence-corpus-check.Tests.ps1 fixture 5
-    for the load-bearing anti-vacuity regression case this guards against.
+    for the anti-vacuity regression case the span exclusion does guard.
 
     Top-level/CLI execution below is guarded behind the
     `$MyInvocation.InvocationName -eq '.'` idiom (matching
@@ -50,6 +57,13 @@
     upstream fix (issue #866) worked. This script intentionally implements
     NO backfill-detection heuristic (rejected as fragile in the #866 plan);
     this disclosure is the chosen mitigation instead.
+
+    SECOND LIMITATION, independent of the first: detection cannot decide use
+    from mention in general. Excluding fenced blocks and inline code spans is
+    the entire discrimination performed -- an unfenced, column-0 paste of the
+    sentinel-plus-heading pair in prose reads as `canonical`. See the
+    detection paragraph above. Neither limitation is fixed by the other, and
+    a `canonical` count is an upper bound on both axes at once.
     ==========================================================================
 
 .PARAMETER IssueNumbers

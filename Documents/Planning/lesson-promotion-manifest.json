@@ -8,7 +8,9 @@
     "snapshot_date": "2026-08-09",
     "count": 46,
     "authority": "issue #1045 Amendment A1",
-    "note": "The store lives outside this repository and is absent from every CI runner. `count` is the pinned anchor a standing check can hold; reconciling the roster against the live store is a dated one-time observation recorded at delivery, not a regression guard."
+    "note": "The store lives outside this repository and is absent from every CI runner. `count` is the pinned anchor a standing check can hold; reconciling the roster against the live store is a dated one-time observation recorded at delivery, not a regression guard.",
+    "reconciliation_record": "Documents/Planning/lesson-promotion-store-reconciliation.md",
+    "reconciliation_note": "AC6 / A2.3 two-track reconciliation, dated. AC6 names the chunk PR as the evidence surface; the file exists because a PR body is not where a later reader looks, and the 2026-09-08 store sweep is the reader this was written for. No CI check can perform this comparison - a runner gets a clone and the store is not in it - so the record is the only durable evidence there will be."
   },
   "declared_states": [
     "promoted",
@@ -348,7 +350,7 @@
           "Documents/Design/*.md"
         ],
         "note": "Documents/Design/grounding-evidence-delivery-route.md asserted that span-aware detection means a body that merely discusses the sentinel is \"never mistaken\" for one containing it. This lesson establishes that no use-versus-mention rule decided by surrounding text is decidable, and that \"not inside a fence\" specifically is not; the same document already records its own fence exclusion being silently broken by CRLF.",
-        "resolution": "The absolute was removed rather than the detector defended: the sentence now says the detector is not fooled by the shapes it models, and names the unfenced column-0 paste it does not catch. Corrected under parent #1045 amendment A5.1, which the maintainer ruled on 2026-08-10 by extending A4.5 scope to admit this contradiction and the release one."
+        "resolution": "The absolute was removed rather than the detector defended, at all three surfaces that carried it: Documents/Design/grounding-evidence-delivery-route.md, the .github/scripts/grounding-evidence-corpus-check.ps1 docstring, and the Tests docstring. The guarantee is now stated positively instead of as an immunity - the sentinel must be immediately followed by the bold heading and occurrences inside fenced blocks or inline code spans are excluded, and that pair of exclusions is the whole of what the detector decides - so the claim can come out false and the unfenced column-0 paste it does not catch is named at each surface. The script's HONESTY DISCLOSURE now carries the detection-shape limitation alongside the end-state/backfill one, which is what makes the design document's pointer to it resolve. Corrected under parent #1045 amendment A5.1, which the maintainer ruled on 2026-08-10 by extending A4.5 scope to admit this contradiction and the release one."
       }
     },
     {
@@ -811,7 +813,7 @@
           "Documents/Design/*.md"
         ],
         "note": "skills/plugin-release-hygiene/SKILL.md section 5 directed \"Compute the next semver from the current .claude-plugin/plugin.json version\" - the branch-local increment this lesson proves produces two internally-consistent branches on one number. The skill read main elsewhere, but only to decide whether to speak, never to choose the number, and said nothing about re-bumping after a merge.",
-        "resolution": "Section 5 now directs reading main via git show origin/main:.claude-plugin/plugin.json and adds a re-check-after-merge clause. Corrected under parent #1045 amendment A5.2, ruled by the maintainer on 2026-08-10. Reproduced live twice during issue #1050: branch 3.21.0 against main 3.21.1, then main 3.21.2 against branch 3.22.0 at the merge."
+        "resolution": "Section 5 now directs reading the default branch's version with a fetch immediately before the read, names the shell the command actually runs in, defers to Get-PRHDefaultBranch when the ref cannot be resolved, refuses the branch-local fallback outright, and re-triggers the check before landing rather than only after a merge. It also states its own bound: reading the default branch shows what has landed, not what an open PR has claimed, so the two-branches-off-one-base shape stays open and release-gate.ps1 is a landing backstop rather than a prevention. Structural fix tracked at #864. Corrected under parent #1045 amendment A5.2, ruled by the maintainer on 2026-08-10. Issue #1050 produced two adjacent failures that are NOT the same shape: branch 3.21.0 against main's already-shipped 3.21.1 (a duplicate number, prevented by reading main), then main moving to 3.21.2 under the branch's 3.22.0 (a version-line conflict, prevented only by a re-check before landing)."
       }
     },
     {
@@ -2071,10 +2073,14 @@
         },
         {
           "surface": "skills/design-exploration/SKILL.md",
+          "anchor": "#### Telling a declaration from text quoting it is decidable by position, never by a heuristic"
+        },
+        {
+          "surface": "skills/design-exploration/SKILL.md",
           "anchor": "## Composite References"
         }
       ],
-      "note": "incident detail behind the five design lenses, including the six-point agentic-tooling creed in full"
+      "note": "incident detail behind the five design lenses, including the six-point agentic-tooling creed in full. The fifth cited_by row was added by chunk 3 (#1051), which had shipped the lens without it: the citation check is forward-only, so a lens citing this file with no row here audits green while its rename-migration path is silently broken. The registry has to be updated in the same commit as the lens."
     },
     {
       "file": "skills/agent-memory-compaction/references/compaction-exhibits.md",

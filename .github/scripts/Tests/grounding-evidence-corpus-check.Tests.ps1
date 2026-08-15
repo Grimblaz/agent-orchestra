@@ -25,12 +25,20 @@
       - absent:        neither of the above.
 
     Detection MUST be structural, not substring-counting: a body that
-    merely MENTIONS the sentinel or bold literal multiple times in prose
-    (acceptance criteria text, design-decision prose, quoted contract
-    excerpts, etc.) without ever containing a real persisted block must
-    classify `absent`. Fixture 5 below is the load-bearing anti-vacuity
-    case that a naive `$body -match '<!-- grounding-evidence -->'`
-    classifier would wrongly call `canonical`.
+    mentions the sentinel or bold literal in prose *inside a fenced block
+    or an inline code span* -- acceptance criteria text, design-decision
+    prose, quoted contract excerpts -- must classify `absent`. Fixture 5
+    below is the load-bearing anti-vacuity case that a naive
+    `$body -match '<!-- grounding-evidence -->'` classifier would wrongly
+    call `canonical`.
+
+    Scope of that requirement, stated so the fixtures are not read as
+    proving more than they do: the span exclusions are the whole of the
+    discrimination. An unfenced, column-0 paste of the sentinel-plus-heading
+    pair classifies `canonical` and is NOT a defect under this contract --
+    see the detection paragraph and HONESTY DISCLOSURE in the script under
+    test. A fixture asserting `absent` for that shape would be asserting a
+    guarantee the detector does not make.
 
     Genuine-red (issue #866 plan step s4): the script under test,
     .github/scripts/grounding-evidence-corpus-check.ps1, does NOT exist

@@ -917,6 +917,28 @@ function Get-LessonPromotionAudit {
         ) | Where-Object { $_ -clike 'skills/*' } | ForEach-Object { ($_ -split '/')[0..1] -join '/' } | Select-Object -Unique
         $drift.Add('no caller-supplied receiving-skill set; the reverse scan fell back to a manifest-derived population, which cannot detect a directory removed from the manifest')
     }
+
+    # Containment - the pin's other direction, and the half that was missing. Pinning the set in the
+    # caller stops the MANIFEST shrinking the population. Nothing stopped the CALLER's set from
+    # failing to cover the manifest, and that omission is silent in the worst way: the loop below
+    # simply never visits an uncovered skill, so both its orphan-file scan and its
+    # `## Composite References` completeness arm are skipped while the audit reports zero drift.
+    # Demonstrated on the chunk-3 delivery (#1051) - the audit returned HasDrift=False both with and
+    # without the receiving entry that delivery had to hand-add, so the edit was unenforceable and
+    # forgetting it would have looked identical to doing it. This is the same shape as the absent-key
+    # escape closed for chunk counts above, pointing in the direction future promotions travel.
+    if ($ReceivingSkillDirs -and $receiving.Count -ge 1) {
+        $needHomes = @(
+            @($entries | Where-Object { [string](Get-LPField $_ 'state' '') -ceq 'promoted' } | ForEach-Object { [string](Get-LPField $_ 'home' '') }) +
+            @($exhibits | ForEach-Object { [string](Get-LPField $_ 'gating_skill' '') })
+        ) | Where-Object { $_ -clike 'skills/*' } | ForEach-Object { ($_ -split '/')[0..1] -join '/' } | Select-Object -Unique
+        foreach ($needed in $needHomes) {
+            if ($receiving -cnotcontains $needed) {
+                $drift.Add("'$needed' is a skill this manifest promotes into or gates an exhibit on, but the caller's receiving-skill set does not cover it - an uncovered skill is one the reverse scan never visits, so its unmanifested references files and its 'Composite References' completeness both go unchecked")
+            }
+        }
+    }
+
     foreach ($skillRel in $receiving) {
         $refDir = Join-Path (Join-Path $RepoRoot ($skillRel -replace '/', [System.IO.Path]::DirectorySeparatorChar)) 'references'
         if (-not (Test-Path -LiteralPath $refDir -PathType Container)) { continue }
