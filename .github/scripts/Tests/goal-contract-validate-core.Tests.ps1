@@ -789,10 +789,16 @@ exit $LASTEXITCODE
         # NOTE (#929 AC2): the goal-run runtime-state cleanliness pair — the
         # positive case and its negative control — deliberately does NOT live
         # here. It is an integration claim spanning this predicate and
-        # skills/session-startup/scripts/Ensure-ScratchGitignore.ps1, and this
-        # suite is quarantined out of .github/workflows/pester.yml's
-        # selection, so a regression test placed here would
-        # never execute in CI. Both cases live in
+        # skills/session-startup/scripts/Ensure-ScratchGitignore.ps1.
+        #
+        # THE ORIGINAL REASON HAS EXPIRED; THE PLACEMENT STILL STANDS. That
+        # reason was that this suite was quarantined out of pester.yml, so a
+        # regression test placed here would never execute in CI. #1036 promoted
+        # this suite and it now runs on every pull request, so that argument no
+        # longer applies. What survives is the second reason below, which was
+        # always the stronger one: the claim belongs beside the script that
+        # writes the ignore entries, and two copies of one assertion is the
+        # two-sources-of-truth defect. Both cases live in
         # .github/scripts/Tests/Ensure-ScratchGitignore.Tests.ps1 (T10/T11),
         # which is selected and runs on every PR. Do not re-add a copy here:
         # two copies of the same assertion is the two-sources-of-truth defect

@@ -1125,10 +1125,26 @@ A PR with a malformed pipeline-metrics block.
                     if ($joined -match 'issue view \d+ --json comments') {
                         $global:LASTEXITCODE = 0; return '{"comments":[]}'
                     }
+                    # --body-file FIRST. Find-OrUpsertComment posts new comments
+                    # through a temp file, so `$Args[-1]` is the temp PATH, not
+                    # the body — and the --body branch below matches such a call
+                    # by prefix. Only the post COUNT is asserted today, which the
+                    # old branch preserved, so this was latent; it is closed
+                    # because #1036 promotes this suite into the gate.
+                    if ($joined -match '(issue|pr) comment \d+ .*--body-file') {
+                        $fileIdx = [Array]::IndexOf($Args, '--body-file')
+                        $bodyText = ''
+                        if ($fileIdx -ge 0 -and $fileIdx + 1 -lt $Args.Count) {
+                            $bodyFile = [string]$Args[$fileIdx + 1]
+                            if (Test-Path -LiteralPath $bodyFile) { $bodyText = Get-Content -LiteralPath $bodyFile -Raw }
+                        }
+                        $script:_PostedComments.Add($bodyText) | Out-Null
+                        $global:LASTEXITCODE = 0; return 'https://github.com/example/example/pull/769#issuecomment-1'
+                    }
                     if ($joined -match '(issue|pr) comment \d+ --body') {
                         # Capture the comment body for assertion in off-switch test.
-                        $bodyArgIdx = ($Args | Select-Object -SkipLast 0) | ForEach-Object { $_ } | Select-String -Pattern '^--body$' -List
-                        $script:_PostedComments.Add([string]($Args[-1])) | Out-Null
+                        $bodyIdx = [Array]::IndexOf($Args, '--body')
+                        $script:_PostedComments.Add([string]($(if ($bodyIdx -ge 0 -and $bodyIdx + 1 -lt $Args.Count) { $Args[$bodyIdx + 1] } else { $Args[-1] }))) | Out-Null
                         $global:LASTEXITCODE = 0; return 'https://github.com/example/example/pull/769#issuecomment-1'
                     }
                     if ($joined -match 'api repos/[^/]+/[^/]+ ') {

@@ -251,9 +251,10 @@ evidence: issue-893-plan-marker-posted
 
         It 'refuses a bodyFile reached through a junction inside the scratch root whose target is OUTSIDE it (M1, issue #893 s11)' -Skip:(-not $IsWindows) {
             # `New-Item -ItemType Junction` is an NTFS reparse-point
-            # primitive with no Linux equivalent; latent guard for a future
-            # Linux CI run (this suite is quarantined out of pester.yml's
-            # current selection).
+            # primitive with no Linux equivalent. Written as a latent guard for
+            # a future Linux CI run, when this suite was quarantined out of
+            # pester.yml; #1036 promoted it, so the guard is active and the
+            # platform skip is what keeps this off the Linux runner.
             # Real reparse-point spoof: the junction itself lives inside the
             # scratch root (so Resolve-Path's traversed-path string passes
             # the string-prefix containment check unchanged), but its target
@@ -279,9 +280,10 @@ evidence: issue-893-plan-marker-posted
 
         It 'F1: refuses a bodyFile read when the SCRATCH ROOT ITSELF is a junction/symlink, not only descendant segments (issue #893 PR #917 review)' -Skip:(-not $IsWindows) {
             # `New-Item -ItemType Junction` is an NTFS reparse-point
-            # primitive with no Linux equivalent; latent guard for a future
-            # Linux CI run (this suite is quarantined out of pester.yml's
-            # current selection).
+            # primitive with no Linux equivalent. Written as a latent guard for
+            # a future Linux CI run, when this suite was quarantined out of
+            # pester.yml; #1036 promoted it, so the guard is active and the
+            # platform skip is what keeps this off the Linux runner.
             # The prior per-segment walk seeded $walked = $resolvedScratchRoot
             # and only tested segments joined AFTER the root -- the root
             # itself was never passed to Test-MarkerPathSegmentIsReparsePoint.

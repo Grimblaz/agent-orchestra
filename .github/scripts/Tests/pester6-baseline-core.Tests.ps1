@@ -23,8 +23,13 @@
     small scratch fixture directory (not the whole on-disk corpus) — each
     Invoke-Pester6BaselineCapture call spawns a fresh pwsh process, so this
     file is slower than a pure-unit test file but still runs in low-single-
-    digit seconds per call. It is intentionally quarantined out of pester.yml's
-    CI selection (per the plan's non-goal: s2 does not touch pester.yml); CI
+    digit seconds per call. It WAS intentionally quarantined out of pester.yml's
+    CI selection (per the plan's non-goal: s2 does not touch pester.yml), and
+    #1036 promoted it on the measurement showing it green on Linux, so it now
+    runs on every pull request. That reversal is safe rather than lucky: T2
+    self-skips when fewer than two Pester majors are installed, which is exactly
+    the CI condition described below, so promotion does not turn T2 red — it
+    runs the rest of the file and skips the one case CI cannot satisfy. CI
     installs only a single pinned Pester major via pester.yml, and T2's
     honoring proof needs at least two distinct installed majors to be
     meaningful.
@@ -39,10 +44,25 @@ BeforeAll {
     # Discover installed Pester versions to drive the RequiredVersion-honoring
     # tests without hardcoding version numbers that may drift after this
     # migration completes.
+    #
+    # ONE VERSION PER MAJOR, highest within each. Not because same-major
+    # probing would prove nothing: the library pins with `-RequiredVersion` on
+    # an EXACT full version and pre-checks that exact string, so ANY two
+    # distinct versions discriminate — 6.2.0 against 6.1.0 included. What T2
+    # actually proves is the exact-version pin, and the proof is
+    # non-coincidental because the probed version is not the newest installed.
+    # One-per-major is chosen to match the contract this file already states —
+    # in its .DESCRIPTION and in T2's own skip message — which is written in
+    # terms of two distinct MAJORS. The cost is real and worth naming: in an
+    # environment carrying only one Pester major, T2 now skips where a list of
+    # full versions would have let it run.
     $script:InstalledVersions = @(
         Get-Module -Name Pester -ListAvailable |
             Select-Object -ExpandProperty Version |
             Sort-Object -Descending -Unique |
+            Group-Object -Property Major |
+            ForEach-Object { $_.Group | Sort-Object -Descending | Select-Object -First 1 } |
+            Sort-Object -Descending |
             ForEach-Object { $_.ToString() }
     )
 

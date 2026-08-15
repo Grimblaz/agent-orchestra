@@ -147,6 +147,24 @@ A PR body with no pipeline-metrics marker block and no body orchestration signal
                 if ($joined -match 'api repos/[^/]+/[^/]+ ') {
                     $global:LASTEXITCODE = 0; return '{"owner":{"login":"example"},"name":"example"}'
                 }
+                # --body-file FIRST. Find-OrUpsertComment's new-comment path
+                # posts through a temp file (find-or-upsert-comment.ps1,
+                # Send-NewCommentViaBodyFile, added by #1035's review), so this
+                # is the shape the product emits. The --body branch below
+                # matched it by prefix while IndexOf looked for the literal
+                # '--body' element, found none, and recorded nothing — so every
+                # assertion counting posted comments read zero against a product
+                # that had composed and posted the comment correctly.
+                if ($joined -match '(issue|pr) comment \d+ .*--body-file') {
+                    $idx = [Array]::IndexOf($Args, '--body-file')
+                    if ($idx -ge 0 -and $idx + 1 -lt $Args.Count) {
+                        $bodyFile = [string]$Args[$idx + 1]
+                        if (Test-Path -LiteralPath $bodyFile) {
+                            $script:FCLS4PostedComments.Add((Get-Content -LiteralPath $bodyFile -Raw))
+                        }
+                    }
+                    $global:LASTEXITCODE = 0; return 'https://github.com/example/example/pull/794#issuecomment-1'
+                }
                 if ($joined -match '(issue|pr) comment \d+ --body') {
                     $idx = [Array]::IndexOf($Args, '--body')
                     if ($idx -ge 0 -and $idx + 1 -lt $Args.Count) {

@@ -100,6 +100,17 @@ Describe 'run-pester-sharded — real-git allowlist correctness' {
         # ~1.07s on an idle machine and which ten concurrent workers starved
         # past it on the gate's own first run.
         $isolation | Should -Contain 'ci-glob-audit-core.Tests.ps1'
+        # And the spine command suite, added by #1036 with the promotion that
+        # first exposed it to the fan-out: a 50-millisecond bound, which is the
+        # tightest in the corpus. Measured 15/15 alone and 13/15 with the box
+        # saturated, so this placement rests on an observation rather than on
+        # the shape of the assertion.
+        $isolation | Should -Contain 'orchestra-spine-command.Tests.ps1'
+        # And the orphan-branch absorption suite, which carries two absolute
+        # real-git bounds — 3s over five residual commits and 5s over fifty —
+        # plus a scale-invariant ratio between them. Measured 16/16 alone and
+        # 14/16 saturated.
+        $isolation | Should -Contain 'test-orphan-branch-commits-absorbed.Tests.ps1'
     }
 
     It 'T2h: each sequential-shard entry''s stated basis is present in the file it names' {
@@ -115,9 +126,27 @@ Describe 'run-pester-sharded — real-git allowlist correctness' {
             @{ File = 'run-pester-sharded.Tests.ps1'; Pattern = 'git' + ' -C \$fixture init'; Why = 'real git init fixture' }
             @{ File = 'run-pester-sharded.Tests.ps1'; Pattern = 'status --porcelain --untracked' + '-files=all'; Why = 'tree-state snapshot compared against the runner' }
             @{ File = 'ci-glob-audit-core.Tests.ps1'; Pattern = '\$bound = \d+'; Why = 'a wall-clock bound a neighbour can starve' }
+            @{ File = 'orchestra-spine-command.Tests.ps1'; Pattern = 'Elapsed\.TotalMilliseconds \| Should -BeLessThan \d+'; Why = 'a sub-second wall-clock bound a neighbour can starve' }
+            @{ File = 'test-orphan-branch-commits-absorbed.Tests.ps1'; Pattern = '\$sw\d*\.ElapsedMilliseconds \| Should -BeLessThan \d+'; Why = 'a wall-clock bound over a real-git batch a neighbour can starve' }
+            # The two REAL-GIT members. Their bases are also pinned by T2e/T2f,
+            # but they belong here too: the set-equality above is only a real
+            # guard if $checks covers the whole shard, and scoping it to the
+            # isolation list would leave the other list's members able to lose
+            # their basis silently — the asymmetry #1036's review found.
+            @{ File = 'plugin-release-hygiene.Tests.ps1'; Pattern = 'git' + ' init'; Why = 'real git init/commit fixtures needing an isolated git environment' }
+            @{ File = 'session-cleanup-detector.Tests.ps1'; Pattern = 'GIT_TERMINAL' + '_PROMPT'; Why = 'ambient git env mutation needing an isolated git environment' }
         )
 
         $selfSource = Get-Content -LiteralPath (Join-Path $script:TestsDir 'run-pester-sharded.Tests.ps1') -Raw
+
+        # SET-EQUALITY, not a hand-maintained sample. Without this the title of
+        # this test is false: $checks was a hand-written array, so a fifth shard
+        # entry added with no row here was unexamined and every assertion stayed
+        # green — including this one, whose name promises otherwise.
+        $shard = @(Get-SequentialShardFiles)
+        $checked = @($checks | ForEach-Object { $_.File } | Sort-Object -Unique)
+        $checked | Should -Be ($shard | Sort-Object -Unique) `
+            -Because 'every sequential-shard entry must have a stated basis pinned here; a member with no row is a placement nobody can tell from a default'
 
         foreach ($check in $checks) {
             $path = Join-Path $script:TestsDir $check.File
@@ -1114,16 +1143,19 @@ throw 'deliberate discovery failure'
             [int]$limit | Should -BeGreaterThan 0
             # A limit at or above the platform ceiling discharges nothing.
             [int]$limit | Should -BeLessThan 360
-            # And it is a bound rather than a formality: the gate's own measured
-            # wall clock before this change was 2m11s, and the whole 254-suite
-            # corpus #1036 promotes into is roughly a five-minute CPU-bound floor.
+            # And it is a bound rather than a formality. The gate's own measured
+            # wall clock before the fan-out was 2m11s at 65 selected suites;
+            # after #1036's promotion to 241 it is 12m50s measured (runs
+            # 31447289622, 31448817506), so the 25-minute bound is ~1.9x rather
+            # than the 5.5x it was. Five minutes of raise remain below this
+            # ceiling — escalate rather than spend them silently.
             [int]$limit | Should -BeLessOrEqual 30 -Because 'a bound many multiples above any plausible run is the platform ceiling with extra steps'
         }
 
         It 'S6d: the disclosure''s figures are derived at run time, not typed into the workflow' {
             # A count typed here reads as a disclosure and is false the next time
-            # anyone touches the registry — which is exactly what #1036 is
-            # chartered to do next.
+            # anyone touches the registry — which is exactly what #1036 did,
+            # taking it from 190 entries to 14.
             $script:GateRun | Should -Match '::notice' -Because 'an annotation renders on the checks surface; a plain host line renders only inside the step log'
             $script:GateRun | Should -Match '\$selection\.Selected\.Count' -Because 'the disclosed count must be the one this run derived'
             $script:GateRun | Should -Match '\$excludedNames' -Because 'the excluded count must be derived from the selection too'

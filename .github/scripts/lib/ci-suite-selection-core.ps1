@@ -33,7 +33,67 @@
 
 #region Get-CISuiteSelection
 
-$script:CIQuarantineClasses = @('unclassified', 'linux-red', 'never-ci')
+# The legal class set. `unclassified` was a member until issue #1036 and is
+# deliberately NOT one now: every entry that carried it has been measured on
+# Linux, and re-admitting the class would re-admit "nobody looked" as a reason.
+# An entry still carrying it is refused by name, whatever its reason says.
+$script:CIQuarantineClasses = @('linux-red', 'never-ci', 'no-signal')
+
+# Classes whose exclusion is expected to END, and which therefore may not sit in
+# the registry without something tracking that ending. `never-ci` is absent by
+# design: it is permanent, so a ticket it will never close would be noise.
+$script:CIQuarantineIssueRequiredClasses = @('linux-red', 'no-signal')
+
+# The class the registry used to allow, kept ONLY so the refusal can name it and
+# say what happened to it rather than reporting an anonymous unknown class.
+$script:CIQuarantineRetiredClasses = @('unclassified')
+
+function Test-CIQuarantineIssueNumber {
+    <#
+    .SYNOPSIS
+        True when a quarantine entry's `issue` field names a ticket that could
+        actually exist: a positive integer.
+    .DESCRIPTION
+        THE POINT. The classes in $script:CIQuarantineIssueRequiredClasses are
+        exclusions expected to END, so the ticket is the whole mechanism that
+        ends them. A non-blank check is not that: `issue: "TODO"`, `issue: 0`
+        and `issue: -17` are all non-blank and all name nothing anyone can
+        close, so each would admit an entry, drop that suite from the gate and
+        report no drift — the "drop wearing a quarantine's badge" this file's
+        class docs say the requirement prevents.
+
+        This is a FUNCTION rather than a rule restated at each call site so the
+        registration suite can consume it. The suite previously carried its own
+        copy of the non-blank test, which is exactly why the suite could not
+        catch the library being too weak: both halves agreed, and both were
+        wrong.
+
+        Accepts an integer or a numeric string (JSON gives either). Rejects
+        null, empty, whitespace, non-numeric text, zero and negatives.
+    .PARAMETER Issue
+        The raw `issue` value off the entry, of any type, possibly $null.
+    .OUTPUTS
+        [bool]
+    #>
+    param($Issue)
+
+    if ($null -eq $Issue) { return $false }
+    $text = ([string]$Issue).Trim()
+    if ([string]::IsNullOrWhiteSpace($text)) { return $false }
+
+    # Parsed as an integer specifically: `12.5` and `1e3` are not issue
+    # numbers. What rejects a thousands separator is the ABSENCE of
+    # `AllowThousands` from the styles below, not the culture; `1,067` parses
+    # fine under any culture once that flag is added. The invariant culture is
+    # here so the parse does not vary by host locale. `AllowLeadingSign` lets
+    # an explicit `+1067` in; zero and negatives are rejected by the `-ge 1`
+    # below, not by the parse.
+    [int]$parsed = 0
+    if (-not [int]::TryParse($text, [System.Globalization.NumberStyles]::AllowLeadingSign, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$parsed)) {
+        return $false
+    }
+    return ($parsed -ge 1)
+}
 
 function Get-CISuiteSelection {
     <#
@@ -48,22 +108,43 @@ function Get-CISuiteSelection {
         quarantine accumulates entries for deleted files and stops meaning
         anything, which is the same defect wearing the other hat.
 
-        QUARANTINE CLASSES, and why there are three rather than two:
+        QUARANTINE CLASSES. Every one of them is a DECISION about a suite that
+        was actually measured. There is deliberately no class meaning "not
+        looked at yet":
 
-          unclassified — never registered under the old allowlist; whether it
-                         is CI-viable has never been measured. This is a
-                         BACKLOG, not a decision, and it should shrink to zero.
           linux-red    — measured failing on the CI platform. Temporary by
                          construction, so an issue number is REQUIRED; an entry
                          with no ticket is a drop wearing a quarantine's badge.
-          never-ci     — structurally cannot run in CI (needs a live `gh`, a
-                         network, an interactive terminal, a real clock). This
-                         is permanent and legitimate.
+                         The class says where the failure was OBSERVED, not
+                         that the cause is platform-specific — several entries
+                         reproduce on Windows, and their reasons say so, because
+                         this instrument runs only Linux and cannot tell the
+                         difference on its own.
+          never-ci     — structurally cannot run in CI, permanently, for a
+                         reason nothing in this repository's power removes: a
+                         live network or remote-state dependency, an
+                         interactive terminal. NOT for an obstacle the gate
+                         chooses and could unchoose — a checkout depth, an
+                         absent token — which is a decision, not a structure.
+          no-signal    — the suite executes and yields no verdict at all (every
+                         test skipped, or nothing discovered). Promoting it
+                         would redden the gate, because a suite that executes
+                         zero tests is not a passing suite. The condition
+                         producing it is expected to end, so like `linux-red`
+                         it REQUIRES an issue.
 
-        Collapsing `never-ci` into `linux-red` is what turns a quarantine into
-        a graveyard: after a few months most entries are permanent, no entry is
-        actionable, and nobody reads the file — which is exactly how the
-        allowlist this replaces stopped being read.
+        RETIRED: `unclassified`, which meant "never registered under the old
+        allowlist, and whether it is CI-viable has never been measured". 188
+        entries carried it. Issue #1035 measured every one of them on Linux and
+        issue #1036 spent that measurement, so the class no longer describes
+        anything true and is refused rather than merely discouraged — a class
+        that only shrinks by good intentions does not shrink.
+
+        Collapsing `never-ci` into `linux-red`, or widening `never-ci` to
+        absorb a backlog, is what turns a quarantine into a graveyard: after a
+        few months most entries are permanent, no entry is actionable, and
+        nobody reads the file — which is exactly how the allowlist this
+        replaces stopped being read.
     .PARAMETER TestsRoot
         Directory holding the `*.Tests.ps1` files.
     .PARAMETER QuarantinePath
@@ -78,6 +159,12 @@ function Get-CISuiteSelection {
         StaleQuarantine [string[]] (quarantined names with no file on disk),
         InvalidEntries [string[]], UnclassifiedCount [int], HasDrift [bool],
         DriftDetails [string[]].
+
+        UnclassifiedCount counts entries still carrying the RETIRED
+        `unclassified` class. It is structurally zero in a healthy tree now,
+        because such an entry is also an invalid entry and so is drift; it is
+        still reported separately so the audit and the gate's job summary can
+        say "the backlog is gone" rather than having to infer it from silence.
     #>
     param(
         [Parameter(Mandatory)][string]$TestsRoot,
@@ -132,18 +219,31 @@ function Get-CISuiteSelection {
         }
         $quarantinedNames.Add($file)
         if ($script:CIQuarantineClasses -notcontains $class) {
-            $invalid.Add("${file}: class '$class' is not one of $($script:CIQuarantineClasses -join ', ')")
+            # A retired class gets its own message. "not one of ..." is true but
+            # unhelpful for the one class that used to be legal and is the
+            # single most likely thing a stale entry or a copied template still
+            # carries; naming the retirement tells the author what to do next.
+            if ($script:CIQuarantineRetiredClasses -contains $class) {
+                $invalid.Add("${file}: class '$class' was RETIRED by issue #1036. It meant the suite's CI-viability had never been measured; #1035 measured the whole corpus on Linux, so no entry may still rest on nobody having looked. Re-classify as one of $($script:CIQuarantineClasses -join ', ') from what the suite actually does, or remove the entry and let the gate run it.")
+            }
+            else {
+                $invalid.Add("${file}: class '$class' is not one of $($script:CIQuarantineClasses -join ', ')")
+            }
         }
         if ([string]::IsNullOrWhiteSpace($reason)) {
             $invalid.Add("${file}: empty reason. An exclusion nobody has to justify is the allowlist again.")
         }
-        # Only the TEMPORARY class is ticket-bound. 'never-ci' is permanent by
-        # design and 'unclassified' is covered by one umbrella ticket, so
-        # demanding a per-file issue for either would just manufacture noise.
-        if ($class -eq 'linux-red' -and ($null -eq $issue -or [string]::IsNullOrWhiteSpace([string]$issue))) {
-            $invalid.Add("${file}: class 'linux-red' with no issue number. A temporary exclusion with no ticket is a permanent one that has not admitted it.")
+        # Only the classes whose exclusion is expected to END are ticket-bound.
+        # 'never-ci' is permanent by design, so demanding an issue for it would
+        # manufacture a ticket nobody can ever close.
+        if ($script:CIQuarantineIssueRequiredClasses -contains $class -and -not (Test-CIQuarantineIssueNumber $issue)) {
+            # The value is echoed when there IS one, because "no issue number"
+            # reads as an absent field and the widened check also refuses a
+            # present-but-unusable one ('TODO', 0, -17).
+            $got = if ($null -eq $issue -or [string]::IsNullOrWhiteSpace([string]$issue)) { '' } else { " (got '$issue')" }
+            $invalid.Add("${file}: class '$class' with no issue number$got. An exclusion that is expected to end, with no ticket, is a permanent one that has not admitted it. The ticket must be a POSITIVE INTEGER; a placeholder, a zero or a negative names nothing anyone can close.")
         }
-        if ($class -eq 'unclassified') { $unclassified++ }
+        if ($script:CIQuarantineRetiredClasses -contains $class) { $unclassified++ }
     }
 
     $onDisk = @(Get-ChildItem -LiteralPath $TestsRoot -Filter '*.Tests.ps1' -File | Sort-Object Name)

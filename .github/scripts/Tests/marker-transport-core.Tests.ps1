@@ -414,13 +414,13 @@ Describe 'marker-transport-core' {
     Context 'New-MarkerComment: large-body native invocation (M2, issue #893 s11)' -Skip:(-not $IsWindows) {
         # Windows-only OS primitive: the fixture below is a `.cmd` batch
         # file (`@echo off` / `exit /b 0`), a Windows-specific external-
-        # process shape with no Linux equivalent. None of this suite's
-        # Describe blocks are selected by pester.yml today (this suite is
-        # quarantined out of it - class unclassified, issue #993 - and pester.yml
-        # selects by glob MINUS that registry, so an entry is exactly why a file is
-        # excluded). The -Skip:(-not $IsWindows) guard below is a separate, runtime
-        # skip that would gate this Context if #993 ever de-quarantines the suite,
-        # so this is a latent guard against a future Linux run, not        # an active regression fix.
+        # process shape with no Linux equivalent. This suite WAS quarantined out
+        # of pester.yml (class unclassified, issue #993) when the guard below was
+        # written, which made it a latent guard against a hypothetical future
+        # Linux run. It is not latent any more: #1035 measured the suite on Linux,
+        # #1036 promoted it, and pester.yml now selects it on every pull request.
+        # The -Skip:(-not $IsWindows) guard is what keeps this Context off the
+        # Linux runner, and it is now load-bearing rather than anticipatory.
         BeforeAll {
             $script:SavedPath = $env:PATH
         }
@@ -482,9 +482,11 @@ exit /b 0
     Context 'Console.OutputEncoding UTF-8 pin (CE Gate #893 live-run fix, S1/S3(a))' -Skip:(-not $IsWindows) {
         # Windows-only OS primitive: the fixture below is a `.cmd` batch
         # file (`@echo off` / `type` / `exit /b 0`), a Windows-specific
-        # external-process shape with no Linux equivalent. None of this
-        # suite's Describe blocks are selected by pester.yml today (this
-        # suite is quarantined out of it), so this is a latent guard, not an active fix.
+        # external-process shape with no Linux equivalent. This suite WAS
+        # quarantined out of pester.yml when that was written, which made this a
+        # latent guard; #1036 promoted it, so pester.yml selects it on every
+        # pull request now and the -Skip:(-not $IsWindows) guard is what keeps
+        # this Context off the Linux runner. Active, not latent.
         BeforeAll {
             $script:EncodingSavedPath = $env:PATH
         }
