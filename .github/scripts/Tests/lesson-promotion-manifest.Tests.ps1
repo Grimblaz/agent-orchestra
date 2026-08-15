@@ -759,6 +759,42 @@ description: "Another skill. Use when reconciling a promoted roster against its 
         ($uncovered.DriftDetails -join ' ') | Should -Match 'skills/demo-skill'
     }
 
+    It 'INDUCED (uncovered-home class, semantics): containment is CONTAINMENT, and what it buys is the orphan scan' {
+        # The first fixture for this clause asserted a discriminating pair and stopped there, which
+        # left three things unpinned (#1065 review, M6). Defense proved each by mutation:
+        #   (b) demo-skill is BOTH the sole promoted home and the sole exhibit gating_skill, so
+        #       deleting the exhibit-side term from the union kept the test GREEN;
+        #   (c) replacing containment with set-EQUALITY kept it GREEN, and the live tree cannot
+        #       break that tie because the caller's set equals the derived set exactly - yet a
+        #       promotion that adds the receiving entry BEFORE the manifest row (which is what
+        #       chunk 3 did) reds under equality;
+        #   (a) the tree carried no unmanifested file, so the test never demonstrated the silence
+        #       its own drift message asserts - that an uncovered skill's orphan scan is skipped.
+        # This pins all three.
+        $t = script:New-ScratchTree {
+            param($c)
+            # An orphan the covering run must report and the uncovered run must MISS.
+            Set-Content -LiteralPath (Join-Path $c.Dir 'skills/demo-skill/references/orphan.md') `
+                -Encoding utf8 -Value '# Not in the manifest'
+        }
+
+        $args = @{ RepoRoot = $t.Dir; ManifestPath = $t.ManifestPath
+                   ExpectedRosterCount = 2; ExpectedPromotedByChunk = @{ '1' = 1 } }
+
+        # (a) The silence is real: covered sees the orphan, uncovered sees only containment.
+        $covered = Get-LessonPromotionAudit @args -ReceivingSkillDirs @('skills/demo-skill')
+        ($covered.DriftDetails -join ' | ') | Should -Match 'orphan\.md' -Because 'a covered skill''s references directory IS scanned'
+
+        $uncovered = Get-LessonPromotionAudit @args -ReceivingSkillDirs @('skills/some-other-skill')
+        ($uncovered.DriftDetails -join ' | ') | Should -Match 'does not cover it'
+        ($uncovered.DriftDetails -join ' | ') | Should -Not -Match 'orphan\.md' -Because 'this is the silence the clause exists to close - an uncovered skill is never visited, so its orphan is invisible'
+
+        # (c) Containment, not equality: a SUPERSET caller set is lawful. Under an equality
+        # implementation this reds, which is the ordering a real promotion walks through.
+        $superset = Get-LessonPromotionAudit @args -ReceivingSkillDirs @('skills/demo-skill', 'skills/not-yet-promoted')
+        ($superset.DriftDetails -join ' | ') | Should -Not -Match 'does not cover it' -Because 'the pin may cover MORE than the manifest names; only the reverse is drift'
+    }
+
     It 'REGRESSION (scalar-collapse class): an all-blank receiving set REPORTS rather than throwing' {
         # The containment clause shipped with a crash the live tree could not show. The
         # manifest-derived fallback was an unwrapped pipeline, and `Select-Object -Unique` returns a
