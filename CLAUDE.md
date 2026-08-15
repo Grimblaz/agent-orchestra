@@ -103,6 +103,25 @@ Quality is the first constraint — ahead of speed and token cost; when they con
 
 We remove later checks **only with evidence, never on a cost argument**: a stage earns relaxation only when its *irreducible-catch rate* (defects catchable **only** at that stage) trends to ~0 over a large-enough sample. The instrument is the **phase-containment ledger** — the per-finding record of where a defect was introduced, the earliest phase it was catchable, and where it was caught ([Documents/Design/phase-containment-ledger.md](Documents/Design/phase-containment-ledger.md)); governance lives in umbrella #761. So annotate every sustained finding, and retire later steps once they demonstrably catch nothing new.
 
+## What a finding turns into — filing is the exception
+
+A review that finds things is working as intended. Coverage-first stands, and nothing here relaxes it: **this section governs a finding's destination, never whether to look for it.** What is not working is the default destination. Measured 2026-08-15: **324 open issues against 395 ever closed**, every month since March opening roughly 1.7–2× what it closed, and **40% of the open set untouched for 90 days or more**. Those were filed and then nothing happened — the filing cost its write-up, a slice of attention at every triage since, and returned nothing.
+
+**The default is fix it, or drop it with a one-line reason. Filing is the exception and has to earn itself.**
+
+**Eligibility to defer is not a decision to file.** `skills/safe-operations/SKILL.md` § Moment 2 / Moment 3 and `Test-DeferralCriteria.ps1` decide whether a finding is *eligible* for deferral, and the AC cross-check still force-accepts anything mapping to an acceptance criterion. Eligibility is necessary, not sufficient. Every eligible finding must then pass:
+
+- **The pickup test.** If an afternoon opened up tomorrow, would this actually get picked up? When the honest answer is no, it is not a backlog item — it is something already decided against. Drop it, say so in one line, and move on. An issue nobody will pick up is worse than no issue, because it must also be re-read at every triage from now on.
+
+A finding that is true but fails the pickup test has two lawful homes, and the tracker is neither:
+
+1. **Fix it in the PR that found it.** The bar for "now" is lower than it feels: when fixing costs less than writing the issue would, filing was always the more expensive option. A run that absorbs its own residue leaves an acceptable resting state; one that sheds issues has moved the cost rather than paid it.
+2. **Turn it into a guard.** If it genuinely must not be lost, encode it where it fires at the moment it becomes relevant — a test, a standing check, an `in_file_pins` row, a lens with its exhibit, a comment at the site. This is the half with the leverage: **a guard fires when the condition recurs; an issue fires never.** Prefer it especially for "remember that X is true" findings, which are most of what gets filed and none of what a tracker is good at. This repository already carries that machinery; route residue into it rather than alongside it.
+
+**An agent proposing a follow-up states, per item, why *both* other homes were rejected** — why it cannot be fixed now, and why no guard can hold it. A proposal answering neither has not finished its analysis, and the Filing Approval Gate (`safe-operations` § 2e) should return it rather than present it.
+
+Two failure modes this is aimed at, both of which read as diligence: filing rather than fixing, because filing feels like the responsible middle between scope creep and sweeping it away; and filing rather than dropping, because dropping feels like losing information. Deferral dressed as diligence is still deferral, and it is the mechanism by which one unit of work becomes two or three.
+
 ## What a finished run is true of
 
 Five properties, scoped to the **act** of a run declaring itself done — not to a lane, and not to every run. How a run makes each one true stays its own choice; that its completion account exists, outlives the session, and carries a review assertion that would read false had no review run, does not. Depth, the account's own shape, and the evidence obligations: [skills/verification-before-completion/SKILL.md](skills/verification-before-completion/SKILL.md).
