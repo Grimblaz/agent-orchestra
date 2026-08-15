@@ -47,15 +47,19 @@ BeforeAll {
     # Per-chunk promoted share: parent #1045 § Walking-skeleton lens list, as partitioned by A1.
     # Chunk 1 takes 19. Chunk 2 was ASSIGNED 27 and promoted 25. The other two returned a `conflict`
     # verdict against shipped doctrine, and parent #1045 amendment A4.5 routes a second contradiction
-    # of any kind up rather than resolving it in-chunk - requested as A5 and unruled at chunk 2
-    # delivery. Their lens sections were removed from the tree rather than shipped beside the
-    # sentences they contradict, and the two entries passed to CHUNK 3 (#1051) under the parent's
-    # section chunk-sequence, which assigns chunk 3 "any roster entries not yet terminal". So 25 is
-    # the whole of chunk 2's promoted share, not a reduced one: no chunk-2 row is non-terminal.
-    # Chunk 3 adds its own promoted count here when it lands. An ABSENT key is the quiet escape -
-    # the audit iterates only the keys handed to it, so a chunk promoting under a key nobody
-    # declared would be counted by nothing.
-    $script:ExpectedPromotedByChunk = @{ '1' = 19; '2' = 25 }
+    # of any kind up rather than resolving it in-chunk - so they were requested as A5, which was
+    # still unruled when chunk 2 delivered. Their lens sections were held out of the tree rather than
+    # shipped beside the sentences they contradict, and the two entries passed to CHUNK 3 (#1051)
+    # under the parent's section chunk-sequence, which assigns chunk 3 "any roster entries not yet
+    # terminal". So 25 is the whole of chunk 2's promoted share, not a reduced one: no chunk-2 row is
+    # non-terminal.
+    #
+    # That is history now. The maintainer ruled A5 on 2026-08-10, chunk 3 landed both lenses beside
+    # the corrected sentences, and its share is the '3' key below. An ABSENT key is the quiet escape
+    # the '3' key closes - the audit iterates only the keys handed to it, so a chunk promoting under
+    # a key nobody declared would be counted by nothing. The receiving-set pin below has the same
+    # escape in its own register, closed by the containment clause and its INDUCED fixture.
+    $script:ExpectedPromotedByChunk = @{ '1' = 19; '2' = 25; '3' = 2 }
     # The skills this promotion effort receives into. A references/ file appearing in any of these
     # needs a manifest row; directories outside the set belong to other skills and predate this
     # manifest, which is not the registry for them.
@@ -69,6 +73,7 @@ BeforeAll {
         'skills/test-driven-development'
         'skills/design-exploration'
         'skills/agent-memory-compaction'
+        'skills/plugin-release-hygiene'
     )
 
     $script:Live = Get-LessonPromotionAudit -RepoRoot $script:RepoRoot -ManifestPath $script:ManifestPath `
@@ -726,6 +731,107 @@ description: "Another skill. Use when reconciling a promoted roster against its 
             -ExpectedRosterCount 2 -ExpectedPromotedByChunk @{ '9' = 0 } -ReceivingSkillDirs @('skills/demo-skill')
         $r.HasDrift | Should -BeTrue
         ($r.DriftDetails -join ' ') | Should -Match 'which the caller.s expected-share map does not declare'
+    }
+
+    It 'INDUCED (uncovered-home class): a promoted home the caller''s receiving set omits FAILS' {
+        # The undeclared-chunk escape above, one register over, and open until chunk 3 closed it.
+        # Pinning the receiving set in the caller stops the MANIFEST shrinking the population; until
+        # the containment clause landed, nothing stopped the CALLER's set from failing to COVER the
+        # manifest. That direction is the silent one: an omitted skill is simply never visited, so
+        # its unmanifested-file scan and its `## Composite References` arm are both skipped and the
+        # audit still reports zero drift. Found by running it, not reading it - on the real tree the
+        # audit returned HasDrift=False both with and without the entry chunk 3 had to hand-add, so
+        # that edit was unenforceable and omitting it would have looked exactly like doing it.
+        #
+        # Asserted as a discriminating PAIR on one tree: the same manifest must go green under a set
+        # that covers it and red under one that does not. A red-only assertion would also pass if the
+        # clause simply always fired.
+        $t = script:New-ScratchTree { }
+
+        $covered = Get-LessonPromotionAudit -RepoRoot $t.Dir -ManifestPath $t.ManifestPath `
+            -ExpectedRosterCount 2 -ExpectedPromotedByChunk @{ '1' = 1 } -ReceivingSkillDirs @('skills/demo-skill')
+        $covered.HasDrift | Should -BeFalse -Because 'the covering set is the control half of the pair; if this is red the mutation below proves nothing'
+
+        $uncovered = Get-LessonPromotionAudit -RepoRoot $t.Dir -ManifestPath $t.ManifestPath `
+            -ExpectedRosterCount 2 -ExpectedPromotedByChunk @{ '1' = 1 } -ReceivingSkillDirs @('skills/some-other-skill')
+        $uncovered.HasDrift | Should -BeTrue
+        ($uncovered.DriftDetails -join ' ') | Should -Match "does not cover it"
+        ($uncovered.DriftDetails -join ' ') | Should -Match 'skills/demo-skill'
+    }
+
+    It 'INDUCED (uncovered-home class, semantics): containment is CONTAINMENT, and what it buys is the orphan scan' {
+        # The first fixture for this clause asserted a discriminating pair and stopped there, which
+        # left three things unpinned (#1065 review, M6). Defense proved each by mutation:
+        #   (b) demo-skill is BOTH the sole promoted home and the sole exhibit gating_skill, so
+        #       deleting the exhibit-side term from the union kept the test GREEN;
+        #   (c) replacing containment with set-EQUALITY kept it GREEN, and the live tree cannot
+        #       break that tie because the caller's set equals the derived set exactly - yet a
+        #       promotion that adds the receiving entry BEFORE the manifest row (which is what
+        #       chunk 3 did) reds under equality;
+        #   (a) the tree carried no unmanifested file, so the test never demonstrated the silence
+        #       its own drift message asserts - that an uncovered skill's orphan scan is skipped.
+        # This pins all three.
+        $t = script:New-ScratchTree {
+            param($c)
+            # An orphan the covering run must report and the uncovered run must MISS.
+            Set-Content -LiteralPath (Join-Path $c.Dir 'skills/demo-skill/references/orphan.md') `
+                -Encoding utf8 -Value '# Not in the manifest'
+        }
+
+        $args = @{ RepoRoot = $t.Dir; ManifestPath = $t.ManifestPath
+                   ExpectedRosterCount = 2; ExpectedPromotedByChunk = @{ '1' = 1 } }
+
+        # (a) The silence is real: covered sees the orphan, uncovered sees only containment.
+        $covered = Get-LessonPromotionAudit @args -ReceivingSkillDirs @('skills/demo-skill')
+        ($covered.DriftDetails -join ' | ') | Should -Match 'orphan\.md' -Because 'a covered skill''s references directory IS scanned'
+
+        $uncovered = Get-LessonPromotionAudit @args -ReceivingSkillDirs @('skills/some-other-skill')
+        ($uncovered.DriftDetails -join ' | ') | Should -Match 'does not cover it'
+        ($uncovered.DriftDetails -join ' | ') | Should -Not -Match 'orphan\.md' -Because 'this is the silence the clause exists to close - an uncovered skill is never visited, so its orphan is invisible'
+
+        # (c) Containment, not equality: a SUPERSET caller set is lawful. Under an equality
+        # implementation this reds, which is the ordering a real promotion walks through.
+        $superset = Get-LessonPromotionAudit @args -ReceivingSkillDirs @('skills/demo-skill', 'skills/not-yet-promoted')
+        ($superset.DriftDetails -join ' | ') | Should -Not -Match 'does not cover it' -Because 'the pin may cover MORE than the manifest names; only the reverse is drift'
+    }
+
+    It 'REGRESSION (scalar-collapse class): an all-blank receiving set REPORTS rather than throwing' {
+        # The containment clause shipped with a crash the live tree could not show. The
+        # manifest-derived fallback was an unwrapped pipeline, and `Select-Object -Unique` returns a
+        # SCALAR at exactly one distinct home and $null at zero - `.Count` on either throws under
+        # this library's `Set-StrictMode -Version 3.0`. The real manifest has ten distinct homes so
+        # it returned an array and stayed quiet; every scratch tree in this file has ONE, which is
+        # the shape that crashed. Three prosecution passes disagreed about whether the crash existed
+        # because they ran different trees, and both observations were right (#1065 review, M1).
+        #
+        # The collapse threshold is a DATA property, so the live tree can cross it in either
+        # direction. This test pins the fixture side, where it is reachable today.
+        $t = script:New-ScratchTree { }
+
+        # `Should -Not -Throw` runs its scriptblock in a CHILD scope, so a plain `$r =` inside it
+        # never reaches the assertions below and they read $null. Capture script-scoped.
+        $script:BlankSetResult = $null
+        { $script:BlankSetResult = Get-LessonPromotionAudit -RepoRoot $t.Dir -ManifestPath $t.ManifestPath `
+                -ExpectedRosterCount 2 -ExpectedPromotedByChunk @{ '1' = 1 } -ReceivingSkillDirs @('   ') } |
+            Should -Not -Throw -Because 'an all-blank receiving set is a caller error the audit must REPORT; a terminating exception tells the caller the check errored, not that it found drift'
+
+        $script:BlankSetResult.HasDrift | Should -BeTrue
+        ($script:BlankSetResult.DriftDetails -join ' ') | Should -Match 'no caller-supplied receiving-skill set'
+    }
+
+    It 'REGRESSION (path-form class): a caller entry differing only in separator or trailing slash is NOT a finding' {
+        # The containment comparison normalized its left side to two `/`-joined segments and compared
+        # against the caller's array verbatim, so a path-equivalent entry reded a lawful tree. Worse,
+        # the reverse scan below builds its `## Composite References` needle from the same raw
+        # string, so one backslash entry produced a false containment red AND a false convention red
+        # on a mangled path - two checks, not one (#1065 review, M4).
+        $t = script:New-ScratchTree { }
+
+        foreach ($form in @('skills\demo-skill', 'skills/demo-skill/', 'skills\demo-skill\')) {
+            $r = Get-LessonPromotionAudit -RepoRoot $t.Dir -ManifestPath $t.ManifestPath `
+                -ExpectedRosterCount 2 -ExpectedPromotedByChunk @{ '1' = 1 } -ReceivingSkillDirs @($form)
+            $r.HasDrift | Should -BeFalse -Because "'$form' is path-equivalent to the covering entry and must not red a lawful tree"
+        }
     }
 
     It 'INDUCED (retuned-marker class): a mandate_marker that appears in no agent body FAILS' {

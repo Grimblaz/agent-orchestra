@@ -25,12 +25,30 @@
       - absent:        neither of the above.
 
     Detection MUST be structural, not substring-counting: a body that
-    merely MENTIONS the sentinel or bold literal multiple times in prose
-    (acceptance criteria text, design-decision prose, quoted contract
-    excerpts, etc.) without ever containing a real persisted block must
-    classify `absent`. Fixture 5 below is the load-bearing anti-vacuity
-    case that a naive `$body -match '<!-- grounding-evidence -->'`
-    classifier would wrongly call `canonical`.
+    mentions the sentinel or bold literal in prose *inside a fenced block
+    or an inline code span* -- acceptance criteria text, design-decision
+    prose, quoted contract excerpts -- must classify `absent`. Fixture 5
+    below is the load-bearing anti-vacuity case that a naive
+    `$body -match '<!-- grounding-evidence -->'` classifier would wrongly
+    call `canonical`.
+
+    Scope of that requirement, stated so the fixtures are not read as
+    proving more than they do. Only FENCED quoting and inline code spans are
+    excluded. These all classify `canonical` and are NOT defects under this
+    contract -- a fixture asserting `absent` for any of them would be
+    asserting a guarantee the detector does not make:
+
+      - a paste at column 0;
+      - a paste indented by 3, 4 or 8 spaces (a 4-space indented code block
+        is markdown code, and is NOT excluded);
+      - a sentinel with arbitrary prose before it on the same line;
+      - a sentinel and heading separated by blank lines.
+
+    Two shapes classify `absent` only INCIDENTALLY -- a blockquoted (`> `)
+    or list-prefixed (`- `) paste, rejected by the bold heading's line
+    anchor rather than by any quoting rule. Do not add fixtures that treat
+    those as a guarantee. See the detection paragraph and HONESTY DISCLOSURE
+    in the script under test.
 
     Genuine-red (issue #866 plan step s4): the script under test,
     .github/scripts/grounding-evidence-corpus-check.ps1, does NOT exist

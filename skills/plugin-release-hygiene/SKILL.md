@@ -1,6 +1,6 @@
 ---
 name: plugin-release-hygiene
-description: "Maintainer-side version-bump guardrail and Claude startup drift backstop guidance for plugin entry-point edits. Use when entry-point files change, when choosing patch/minor/major overrides, or when documenting/running the Claude plugin update surface. DO NOT USE FOR: CI release automation, registry publishing, or purely manual non-agent edit flows."
+description: "Maintainer-side version-bump guardrail and Claude startup drift backstop guidance for plugin entry-point edits. Use when entry-point files change, when choosing patch/minor/major overrides, when documenting/running the Claude plugin update surface, or when bumping a version another branch may already have taken. DO NOT USE FOR: CI release automation, registry publishing, or purely manual non-agent edit flows."
 provides: release-hygiene
 suggested-next-step: pwsh ./skills/plugin-release-hygiene/scripts/plugin-release-hygiene-hook.ps1
 applies-when: changeset.touchesPluginEntryPoint()
@@ -42,6 +42,10 @@ Any edit touching one of those paths requires a release-hygiene check before the
 ## Purpose
 
 Make the shipping consequence of an entry-point edit visible at the moment it happens. The default behavior is deterministic: propose a patch bump, offer a structured override for minor or major user-visible changes, or allow an explicit no-bump skip for comment-only edits. Coalesce that decision once per active state key so repeated edits do not spam the maintainer.
+
+## Composite References
+
+- [references/release-exhibits.md](references/release-exhibits.md): the incident detail behind § Release Lenses — the collision this repository actually hit, the files it conflicted across, and how it was resolved
 
 ## Maintainer Flow
 
@@ -99,7 +103,36 @@ Allowed `keying_strategy` values are `session_id`, `branch_slug`, and `session_f
 
 ### 5. Apply The Bump
 
-Resolve the repo root with `git rev-parse --show-toplevel`, then locate `.github/scripts/bump-version.ps1`. Compute the next semver from the current `.claude-plugin/plugin.json` version and the chosen level.
+Resolve the repo root with `git rev-parse --show-toplevel`, then locate `.github/scripts/bump-version.ps1`. **Compute the next semver from the default branch's version, not your branch's**, and read it *fresh* — `git show` performs no network update, so an unfetched `origin/main` is whatever your last fetch left behind:
+
+```powershell
+git fetch origin main --quiet
+git show origin/main:.claude-plugin/plugin.json
+```
+
+Run that in `pwsh`. Under Git Bash on Windows, MSYS argument conversion rewrites the ref-and-path argument into `origin\main;.claude-plugin\plugin.json` and `git show` exits 128 with `fatal: ambiguous argument`; prefix `MSYS_NO_PATHCONV=1` if you must run it there.
+
+If the ref cannot be resolved at all — a fork whose default branch is not `main`, or a checkout with no such remote-tracking ref — `Get-PRHDefaultBranch` in `scripts/plugin-release-hygiene-hook.ps1` resolves the default branch through a ladder, and its first five rungs are safe to use here: `origin/HEAD`, `origin/main`, `origin/master`, then local `main` and `master`, each of which *verifies* the ref exists. **Its last two rungs are not answers to this question.** Rung 6 returns whatever `git symbolic-ref HEAD` gives — your own working branch — and rung 7 assumes the literal string `main` without checking anything. Either outcome is the **stop** condition, not a value to read: if the ladder falls through to them, say so and stop. Do not fall back to the branch-local value; that fallback is the whole defect this step exists to remove, and rung 6 delivers it silently while looking like a resolution.
+
+*(Corrected under issue #1051, parent #1045 amendment A5.2: this step read "from the current `.claude-plugin/plugin.json` version", which is the branch-local increment that produces two internally-consistent branches on one number.)*
+
+**What reading the default branch does and does not prevent.** It tells you what has *landed*, not what an open PR has already *claimed*. Two branches cut from the same base both read the same version and both derive the same next one — the collision in the lens below, and the one this repository was sitting in when this step was written.
+
+To check what is *claimed*, listing the open PRs is only the first half — branch names carry no version, so the list alone tells you nothing. Read each head's manifest:
+
+```powershell
+gh pr list --state open --json headRefName --jq '.[].headRefName' | ForEach-Object {
+    $b64 = (gh api "repos/{owner}/{repo}/contents/.claude-plugin/plugin.json?ref=$_" --jq '.content') -join ''
+    $json = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b64)) | ConvertFrom-Json
+    '{0,-40} {1}' -f $_, $json.version
+}
+```
+
+The `-join ''` is load-bearing: the contents API returns base64 wrapped across several lines, so piping it straight into a decoder decodes each line separately and yields garbage. This form is verified against this repository.
+
+`.github/scripts/release-gate.ps1` is a **landing backstop, not a prevention**: it compares the head's version against a freshly fetched base with a strict `>`, so a same-number PR cannot merge green once its conflicts are resolved — but it passes for *both* branches while both are open, it does not re-run when the base moves underneath an idle PR, and a `CONFLICTING` PR suppresses `pull_request` workflows entirely, so what you actually see is a stale green rather than a red. The structural fix is tracked in [#864](https://github.com/Grimblaz/agent-orchestra/issues/864).
+
+**Re-check before landing, not only after a merge.** A bump that was valid when made can collide later, and the two ways it happens need different triggers: `main` advancing *underneath* an idle branch is not a merge your branch performs, so "re-check after merging" never fires for it. Re-check after any merge of `main` into your branch **and again immediately before you land**. Re-run the script with the next free number rather than hand-editing — see the occurrence-count note below. If the delay pushed the release past the date already written into the changelog, re-run so the date matches the release rather than the bump. Issue #1050's own run hit this twice in one session: the branch stood at `3.21.0` while `main` had shipped `3.21.1`, and after merging, `main` moved again to `3.21.2` before the branch landed at `3.22.0`.
 
 Before invoking the script, construct a categorized CHANGELOG entry body. Group changes into the appropriate subsection(s) — `Fixed`, `Added`, or `Changed` — as a markdown bullet list. Pass the body as `-ChangelogEntry` and the primary category as `-ChangelogSection`. The script uses today's date internally (`Get-Date -Format 'yyyy-MM-dd'`); the caller only supplies the body.
 
@@ -134,6 +167,22 @@ claude plugin uninstall <plugin@marketplace>
 ```
 
 When a drift-check or maintainer flow needs one of these commands, attempt the command and parse the actual failure before claiming the surface is unavailable.
+
+## Release Lenses
+
+> **Authoritative source**: which lessons are promoted here, what anchor each one lives at, and the trigger text that has to reach a reader are recorded in `Documents/Planning/lesson-promotion-manifest.json`. `.github/scripts/Tests/lesson-promotion-manifest.Tests.ps1` is what stops this section and that manifest drifting apart, and it is the suite a red comes from. **Renaming a heading below is a migration, not a regression** — update that lesson's `anchor` in the manifest in the same commit as the rename. A red naming an anchor you just renamed is reporting a manifest row left behind, not a lost lens.
+
+One way a bump that is correct when you make it is wrong by the time it lands.
+
+### When you are choosing a version number, or landing after a merge
+
+#### Two branches can bump to the same version, and each one is internally consistent
+
+`bump-version.ps1` writes a version across several occurrences in several files and does **not** check whether that number is already taken — not on `main`, and not on another open PR. So two branches cut from the same base both read the same current version, both derive the same next one, and each stays internally consistent: the changelog entry looks right and the developer's own plugin cache agrees. It surfaces at the merge, as a simultaneous conflict across every version-bearing file plus the changelog. **Read `main`'s current version before bumping** rather than incrementing from your own branch's value — § 5 above carries the command, the fetch it depends on, and the shell it actually runs in — and **re-check immediately before you land**, not only after a merge: `main` advancing underneath an idle branch is not a merge your branch performs, so a re-check keyed to merging never fires for it. Re-run the script rather than hand-editing; the occurrence count across files is more than you will remember to fix by hand.
+
+Be precise about what catches this and what does not, because the difference decides what you are entitled to trust — **§ 5 above states the bound in full**, and the one line worth carrying here is that the shipped gate is a *landing* backstop and nothing earlier, so the window between two open bumps is unguarded. The part that makes it bite: the moment the first branch merges, the loser goes `CONFLICTING`, GitHub cannot build a merge ref, and every `pull_request` workflow silently does not run while `gh pr checks` keeps reporting the previous commit's results — **"no workflow ran" and "every workflow passed" look identical at a glance.** The signal you would use to notice the collision is the one the collision switches off. Structural work is open at [#864](https://github.com/Grimblaz/agent-orchestra/issues/864).
+
+Why it matters past tidiness: Claude Code keys its plugin cache by this version, so two different trees published under one number means a same-version install keeps serving whichever snapshot it cached first — the exact staleness the bump exists to prevent, failing silently. Changelog ordering is a separate resolution from the number. Exhibit: [references/release-exhibits.md](references/release-exhibits.md) § Two branches at 3.12.0.
 
 ## Related Guidance
 

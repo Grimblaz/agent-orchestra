@@ -22,12 +22,37 @@
                       spans, or appear in prose but not adjacent to each
                       other, or do not appear at all.
 
-    Detection is structural (span-aware pattern matching), not
-    substring-counting -- a body that merely MENTIONS the sentinel or bold
-    literal in prose (e.g. quoting the contract itself) must not be counted
-    as a real persisted block. See
+    Detection is structural (span-aware pattern matching) rather than
+    substring-counting. What `canonical` actually requires, stated as the
+    behaviour rather than as a guarantee:
+
+      - the sentinel ends its own line (arbitrary prose may PRECEDE it on
+        that line);
+      - a bold heading follows, starting its own line apart from leading
+        whitespace, with blank lines between the two permitted;
+      - neither occurrence sits inside a fenced block (``` or ~~~) or an
+        inline code span.
+
+    Those are the discriminations. Two consequences a reader has to have,
+    because the earlier wording here got both of them wrong:
+
+    NOT excluded -- an INDENTED code block. A 4-space (or 3-, or 8-) space
+    indented paste of the pair classifies `canonical`, because the bold
+    heading's anchor tolerates leading whitespace. Indented code blocks are
+    one of markdown's two ways of writing code, so "quoting is excluded" is
+    false; only FENCED quoting is. There is no column-0 requirement of any
+    kind, and a sentinel with prose before it on the same line still counts.
+
+    Excluded, but incidentally -- a blockquoted (`> `) or list-prefixed
+    (`- `) paste classifies `absent`. That falls out of the line anchor
+    rejecting a non-whitespace prefix, not from any rule about quoting, so
+    do not rely on it as protection.
+
+    Read a `canonical` result as "the pair appears in a position this
+    detector cannot distinguish from a persisted block", never as "a block
+    was really persisted here". See
     .github/scripts/Tests/grounding-evidence-corpus-check.Tests.ps1 fixture 5
-    for the load-bearing anti-vacuity regression case this guards against.
+    for the anti-vacuity regression case the fence exclusion does guard.
 
     Top-level/CLI execution below is guarded behind the
     `$MyInvocation.InvocationName -eq '.'` idiom (matching
@@ -50,6 +75,15 @@
     upstream fix (issue #866) worked. This script intentionally implements
     NO backfill-detection heuristic (rejected as fragile in the #866 plan);
     this disclosure is the chosen mitigation instead.
+
+    SECOND LIMITATION, independent of the first: detection cannot decide use
+    from mention in general. Only FENCED quoting and inline code spans are
+    excluded -- an indented code block, or a paste at any indentation with
+    arbitrary prose preceding the sentinel on its line, reads `canonical`.
+    See the detection paragraph above for the exact behaviour and for the
+    two shapes (blockquote, list item) that are excluded only incidentally.
+    Neither limitation is fixed by the other, and a `canonical` count is an
+    upper bound on both axes at once.
     ==========================================================================
 
 .PARAMETER IssueNumbers

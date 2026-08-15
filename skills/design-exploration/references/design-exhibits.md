@@ -8,6 +8,7 @@ This file is the incident detail behind the lenses in [`skills/design-exploratio
 - [Four grounding errors all pointing one way](#four-grounding-errors-all-pointing-one-way)
 - [The six-point creed in full](#the-six-point-creed-in-full)
 - [An append that landed outside the region it belonged to](#an-append-that-landed-outside-the-region-it-belonged-to)
+- [Three rounds of quoting heuristics, all failed](#three-rounds-of-quoting-heuristics-all-failed)
 
 ## Three doctrine records that already settled the shape
 
@@ -66,3 +67,21 @@ The first: `LEDGER.md` records were documented as append-only, with an explicit 
 The tempting repair, "document `Add-Content`," was impossible under execution. The two real options were to change the format (opening marker only, records running to end of file) or to change the claim. The format was changed. The consequence accepted deliberately: everything after the marker is a record, so the file can carry no trailing prose. Whole-line HTML comments were exempted so a store can still annotate itself and so a leftover end marker from the old format is ignored rather than reported broken.
 
 The second defect: the partition check keyed presence on a life key of the form `name@admitted-date`. That keying was correct, and it fixed the name-reuse defect on a *dated* corpus. But no surface writes `metadata.admitted` yet, so on the real store all **170 entries evaluate to `name@unknown`**, both sides of the comparison match on the bare name, and the check answered `still-hot` for a life that had left with no record. The resolution was a **third verdict — `unverifiable`, exit 2** — so the check declines to answer rather than returning the name-keyed answer wearing the life-keyed answer's name.
+
+## Three rounds of quoting heuristics, all failed
+
+*Cited from § Telling a declaration from text quoting it is decidable by position, never by a heuristic.*
+
+Lived on #1017, the agent-memory-compaction split-store stanza. The check had to tell a store that *declared* the split-store stanza marker from a store that had *quoted* the shipped adoption recipe into itself. The shipped documentation prints the very marker the format is detected by, so a conforming index and a quoting index can contain byte-identical text.
+
+Three fixes shipped, each caught by the next adversarial pass:
+
+1. **Scope the search to the header region.** Failed: a "note to self" at the top of an index *is* the header region.
+2. **Also require column 0.** Failed *worse* than the defect it replaced — the same commit moved the shipped snippet to column 0 so it would be copy-pasteable, so a verbatim paste now landed at column 0 by construction. The remedy widened its own defect's reach.
+3. **Also track fenced-code state.** Failed in **both** directions at once. Quoting a fenced block requires a longer outer fence, whose inner triple-backtick run toggles a naive state machine back off, so a legacy store read as split; and an *unclosed* fence above the first heading hid a **real** stanza, so a fully conforming split store read as legacy and its size axis went silently dark.
+
+What worked: the declaration must be the file's **first non-blank line**. A file cannot quote something at its own first line without that line *being* its first line. No spoofing surface, no fence parser to get wrong, one sentence to document.
+
+Two riders from the same run. A guard's **threshold** is part of the guard: the residue check ("has this store still got policy text in it?") fired on **one** matching line, which failed four *lawful* stores — including one carrying the shipped check-command line, a line the live store carries today. Raised to a run of three and documented as a proxy. A store quoting its policy is not a store that still contains it.
+
+And from the owner ruling that closed the run: before tightening a guard so a subject cannot opt out of being measured, ask **what the guard would force the subject to fabricate**. Making the size axis mandatory for any store adopting the split would have pushed downstream consumers to copy the harness's own observed limit into their store — manufacturing the hand-picked-absolute-dressed-as-a-formula defect the rule exists to prevent. Where a value must be measured locally, optional-and-honest beats mandatory-and-copied.

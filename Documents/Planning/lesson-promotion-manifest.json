@@ -8,7 +8,9 @@
     "snapshot_date": "2026-08-09",
     "count": 46,
     "authority": "issue #1045 Amendment A1",
-    "note": "The store lives outside this repository and is absent from every CI runner. `count` is the pinned anchor a standing check can hold; reconciling the roster against the live store is a dated one-time observation recorded at delivery, not a regression guard."
+    "note": "The store lives outside this repository and is absent from every CI runner. `count` is the pinned anchor a standing check can hold; reconciling the roster against the live store is a dated one-time observation recorded at delivery, not a regression guard.",
+    "reconciliation_record": "Documents/Planning/lesson-promotion-store-reconciliation.md",
+    "reconciliation_note": "AC6 / A2.3 two-track reconciliation, dated. AC6 names the chunk PR as the evidence surface; the file exists because a PR body is not where a later reader looks, and the 2026-09-08 store sweep is the reader this was written for. No CI check can perform this comparison - a runner gets a clone and the store is not in it - so the record is the only durable evidence there will be."
   },
   "declared_states": [
     "promoted",
@@ -121,6 +123,28 @@
         "Documents/Planning/lesson-promotion-manifest.json",
         ".github/scripts/Tests/lesson-promotion-manifest.Tests.ps1",
         "migration, not a regression"
+      ]
+    },
+    {
+      "surface": "skills/plugin-release-hygiene/SKILL.md",
+      "scope": "section",
+      "anchor": "## Release Lenses",
+      "must_contain": [
+        "Authoritative source",
+        "Documents/Planning/lesson-promotion-manifest.json",
+        ".github/scripts/Tests/lesson-promotion-manifest.Tests.ps1",
+        "migration, not a regression"
+      ]
+    },
+    {
+      "surface": "Documents/Planning/lesson-promotion-store-reconciliation.md",
+      "scope": "file",
+      "note": "Pins the AC6 reconciliation record. roster_snapshot.reconciliation_record points at this file and NOTHING resolved that pointer - it was the only path-valued field in this manifest with no reader, so a rename left a dangling pointer at HasDrift=False, and the record's own audience is a sweep arriving weeks later (#1065 review, M15). This row is the guardrail; it also pins the counts, so the record and the roster cannot drift apart silently.",
+      "must_contain": [
+        "Lesson-promotion store reconciliation",
+        "0 divergences",
+        "69 of 69 destinations confirmed",
+        "Still owed"
       ]
     }
   ],
@@ -308,10 +332,37 @@
     },
     {
       "lesson": "reference_quoted_text_needs_position_not_heuristic",
-      "state": "pending",
+      "state": "promoted",
       "chunk": 3,
       "issue": 1051,
-      "pending_reason": "Assigned to chunk 2 (#1050); not promoted there. The contradiction procedure returned a `conflict` verdict against shipped doctrine, and parent #1045 amendment A4.5 routes a second contradiction of any kind up rather than resolving it in-chunk - requested as amendment A5 (#1045 comment 5244634056) and UNRULED at chunk 2 delivery. Chunk 2 removed the lens section from the tree rather than shipping it beside the sentence it contradicts, and passed the entry to chunk 3 under parent section chunk-sequence, which assigns it \"any roster entries not yet terminal\". Chunk 3 reads the A5 ruling and takes the entry to a terminal state; it must not promote on its own authority while A5 is open."
+      "kind": "lens",
+      "fires_in": "design",
+      "identity": "name-keyed",
+      "home": "skills/design-exploration/SKILL.md",
+      "anchor": "#### Telling a declaration from text quoting it is decidable by position, never by a heuristic",
+      "triggers": [
+        {
+          "surface": "skills/design-exploration/SKILL.md",
+          "surface_kind": "description",
+          "text": "designing a rule that must tell a declaration from text quoting it"
+        },
+        {
+          "surface": "skills/design-exploration/SKILL.md",
+          "surface_kind": "body",
+          "anchor": "#### Telling a declaration from text quoting it is decidable by position, never by a heuristic",
+          "text": "positional invariant a quote cannot satisfy"
+        }
+      ],
+      "checked_against": {
+        "verdict": "conflict",
+        "surfaces": [
+          "skills/design-exploration/SKILL.md",
+          "CLAUDE.md",
+          "Documents/Design/*.md"
+        ],
+        "note": "Documents/Design/grounding-evidence-delivery-route.md asserted that span-aware detection means a body that merely discusses the sentinel is \"never mistaken\" for one containing it. This lesson establishes that no use-versus-mention rule decided by surrounding text is decidable, and that \"not inside a fence\" specifically is not; the same document already records its own fence exclusion being silently broken by CRLF.",
+        "resolution": "The absolute was removed rather than the detector defended, at all three surfaces that carried it: Documents/Design/grounding-evidence-delivery-route.md, the .github/scripts/grounding-evidence-corpus-check.ps1 docstring, and the Tests docstring. The guarantee is now stated positively instead of as an immunity - the sentinel must be immediately followed by the bold heading and occurrences inside fenced blocks or inline code spans are excluded, and that pair of exclusions is the whole of what the detector decides - so the claim can come out false and the unfenced column-0 paste it does not catch is named at each surface. The script's HONESTY DISCLOSURE now carries the detection-shape limitation alongside the end-state/backfill one, which is what makes the design document's pointer to it resolve. Corrected under parent #1045 amendment A5.1, which the maintainer ruled on 2026-08-10 by extending A4.5 scope to admit this contradiction and the release one."
+      }
     },
     {
       "lesson": "reference_boilerplate_propagation_is_where_a_claim_goes_false",
@@ -744,10 +795,37 @@
     },
     {
       "lesson": "reference_version_collision_invisible_until_merge",
-      "state": "pending",
+      "state": "promoted",
       "chunk": 3,
       "issue": 1051,
-      "pending_reason": "Assigned to chunk 2 (#1050); not promoted there. The contradiction procedure returned a `conflict` verdict against shipped doctrine, and parent #1045 amendment A4.5 routes a second contradiction of any kind up rather than resolving it in-chunk - requested as amendment A5 (#1045 comment 5244634056) and UNRULED at chunk 2 delivery. Chunk 2 removed the lens section from the tree rather than shipping it beside the sentence it contradicts, and passed the entry to chunk 3 under parent section chunk-sequence, which assigns it \"any roster entries not yet terminal\". Chunk 3 reads the A5 ruling and takes the entry to a terminal state; it must not promote on its own authority while A5 is open."
+      "kind": "lens",
+      "fires_in": "release",
+      "identity": "name-keyed",
+      "home": "skills/plugin-release-hygiene/SKILL.md",
+      "anchor": "#### Two branches can bump to the same version, and each one is internally consistent",
+      "triggers": [
+        {
+          "surface": "skills/plugin-release-hygiene/SKILL.md",
+          "surface_kind": "description",
+          "text": "bumping a version another branch may already have taken"
+        },
+        {
+          "surface": "skills/plugin-release-hygiene/SKILL.md",
+          "surface_kind": "body",
+          "anchor": "#### Two branches can bump to the same version, and each one is internally consistent",
+          "text": "Read `main`'s current version before bumping"
+        }
+      ],
+      "checked_against": {
+        "verdict": "conflict",
+        "surfaces": [
+          "skills/plugin-release-hygiene/SKILL.md",
+          "CLAUDE.md",
+          "Documents/Design/*.md"
+        ],
+        "note": "skills/plugin-release-hygiene/SKILL.md section 5 directed \"Compute the next semver from the current .claude-plugin/plugin.json version\" - the branch-local increment this lesson proves produces two internally-consistent branches on one number. The skill read main elsewhere, but only to decide whether to speak, never to choose the number, and said nothing about re-bumping after a merge.",
+        "resolution": "Section 5 now directs reading the default branch's version with a fetch immediately before the read, names the shell the command actually runs in, defers to Get-PRHDefaultBranch when the ref cannot be resolved, refuses the branch-local fallback outright, and re-triggers the check before landing rather than only after a merge. It also states its own bound: reading the default branch shows what has landed, not what an open PR has claimed, so the two-branches-off-one-base shape stays open and release-gate.ps1 is a landing backstop rather than a prevention. Structural fix tracked at #864. Corrected under parent #1045 amendment A5.2, ruled by the maintainer on 2026-08-10. Issue #1050 produced two adjacent failures that are NOT the same shape: branch 3.21.0 against main's already-shipped 3.21.1 (a duplicate number, prevented by reading main), then main moving to 3.21.2 under the branch's 3.22.0 (a version-line conflict, prevented only by a re-check before landing)."
+      }
     },
     {
       "lesson": "reference_concurrent_merge_falsifies_cited_claims",
@@ -2006,10 +2084,14 @@
         },
         {
           "surface": "skills/design-exploration/SKILL.md",
+          "anchor": "#### Telling a declaration from text quoting it is decidable by position, never by a heuristic"
+        },
+        {
+          "surface": "skills/design-exploration/SKILL.md",
           "anchor": "## Composite References"
         }
       ],
-      "note": "incident detail behind the five design lenses, including the six-point agentic-tooling creed in full"
+      "note": "incident detail behind the five design lenses, including the six-point agentic-tooling creed in full. The fifth cited_by row was added by chunk 3 (#1051), which had shipped the lens without it: the citation check is forward-only, so a lens citing this file with no row here audits green while its rename-migration path is silently broken. The registry has to be updated in the same commit as the lens."
     },
     {
       "file": "skills/agent-memory-compaction/references/compaction-exhibits.md",
@@ -2070,6 +2152,22 @@
         }
       ],
       "note": "incident detail behind the two tooling lenses"
+    },
+    {
+      "file": "skills/plugin-release-hygiene/references/release-exhibits.md",
+      "gating_skill": "skills/plugin-release-hygiene/SKILL.md",
+      "promoted_by": "issue #1051",
+      "cited_by": [
+        {
+          "surface": "skills/plugin-release-hygiene/SKILL.md",
+          "anchor": "#### Two branches can bump to the same version, and each one is internally consistent"
+        },
+        {
+          "surface": "skills/plugin-release-hygiene/SKILL.md",
+          "anchor": "## Composite References"
+        }
+      ],
+      "note": "Incident detail behind the release lens, promoted under parent #1045 amendment A5.2."
     }
   ]
 }
