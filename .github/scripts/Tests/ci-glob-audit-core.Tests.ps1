@@ -1723,10 +1723,13 @@ Describe 'End to end: the shipped controls through the shipped execution path' {
     }
 
     It 'scrubs a credential out of captured output at CAPTURE, so the partial artifact carries it scrubbed too' {
-        # 189 of the suites this audit runs have never been vetted, and the
-        # measure job holds a live bearer credential in the checkout's git
-        # config for gate parity. Actions' secret masking covers the job log
-        # stream, not a body composed in-process nor an artifact's contents.
+        # 189 of the suites this audit ran had never been vetted anywhere when
+        # this was written; #1036 has since promoted 176 into the gate. The
+        # scrubber's premise is unchanged: the audit's population is by
+        # construction wider than the gate's, and the measure job holds a live
+        # bearer credential in the checkout's git config for gate parity.
+        # Actions' secret masking covers the job log stream, not a body
+        # composed in-process nor an artifact's contents.
         $dir = Join-Path $script:Scratch 'secret-suite'
         New-Item -ItemType Directory -Force -Path $dir | Out-Null
         $suite = Join-Path $dir 'leaks.Tests.ps1'

@@ -129,7 +129,11 @@ jobs:
             # malformed registry must not be diagnosed by a job that failed to
             # start for some other reason.
             Write-Host "::error::CI suite selection drift:"
-            $selection.DriftDetails | ForEach-Object { Write-Host "::error::  $_" }
+            # Sanitised like every other annotation channel in this file (see
+            # the ::notice and ::warning emissions below): drift text quotes
+            # registry values, and a newline in one would start a line at
+            # column 0, which the runner parses as a second workflow command.
+            $selection.DriftDetails | ForEach-Object { Write-Host ("::error::  {0}" -f ($_ -replace '[\r\n]+', ' ')) }
             exit 1
           }
 

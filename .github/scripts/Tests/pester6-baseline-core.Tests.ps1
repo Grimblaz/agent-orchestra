@@ -45,14 +45,17 @@ BeforeAll {
     # tests without hardcoding version numbers that may drift after this
     # migration completes.
     #
-    # ONE VERSION PER MAJOR, highest within each. T2's contract — stated in this
-    # file's .DESCRIPTION and in T2's own skip message — is about two distinct
-    # MAJORS, because that is what makes "the child imported what was pinned"
-    # observable rather than coincidental. A list of full versions does not
-    # deliver that: with 6.2.0, 6.1.0 and 5.7.1 installed, the top two share a
-    # major, so T2 would probe two 6.x builds while its message claims it is
-    # comparing majors, and would count 6.2.0/6.1.0 as satisfying a gate written
-    # for 6.x/5.x.
+    # ONE VERSION PER MAJOR, highest within each. Not because same-major
+    # probing would prove nothing: the library pins with `-RequiredVersion` on
+    # an EXACT full version and pre-checks that exact string, so ANY two
+    # distinct versions discriminate — 6.2.0 against 6.1.0 included. What T2
+    # actually proves is the exact-version pin, and the proof is
+    # non-coincidental because the probed version is not the newest installed.
+    # One-per-major is chosen to match the contract this file already states —
+    # in its .DESCRIPTION and in T2's own skip message — which is written in
+    # terms of two distinct MAJORS. The cost is real and worth naming: in an
+    # environment carrying only one Pester major, T2 now skips where a list of
+    # full versions would have let it run.
     $script:InstalledVersions = @(
         Get-Module -Name Pester -ListAvailable |
             Select-Object -ExpandProperty Version |

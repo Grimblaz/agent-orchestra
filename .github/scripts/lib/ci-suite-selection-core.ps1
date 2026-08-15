@@ -82,8 +82,12 @@ function Test-CIQuarantineIssueNumber {
     if ([string]::IsNullOrWhiteSpace($text)) { return $false }
 
     # Parsed as an integer specifically: `12.5` and `1e3` are not issue
-    # numbers, and an invariant-culture parse keeps a thousands separator or a
-    # localised sign from sneaking one through.
+    # numbers. What rejects a thousands separator is the ABSENCE of
+    # `AllowThousands` from the styles below, not the culture; `1,067` parses
+    # fine under any culture once that flag is added. The invariant culture is
+    # here so the parse does not vary by host locale. `AllowLeadingSign` lets
+    # an explicit `+1067` in; zero and negatives are rejected by the `-ge 1`
+    # below, not by the parse.
     [int]$parsed = 0
     if (-not [int]::TryParse($text, [System.Globalization.NumberStyles]::AllowLeadingSign, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$parsed)) {
         return $false

@@ -336,7 +336,7 @@ Describe 'CI suite selection: one induced failure per class the guard claims to 
         # reported HasDrift False — a drop wearing a quarantine's badge, which
         # is the exact thing the class documentation says the ticket prevents.
         # Each arm is a SEPARATE tree so one refusal cannot cover for another.
-        foreach ($bad in @('TODO', 0, -5, '', '  ', '12.5', 'issue #1067')) {
+        foreach ($bad in @('TODO', 0, -5, '', '  ', '12.5', '1e3', '1,067', 'issue #1067')) {
             $t = script:New-ScratchTree -Files @('a.Tests.ps1', 'b.Tests.ps1') -Quarantine @(
                 [ordered]@{ file = 'a.Tests.ps1'; class = 'linux-red'; reason = 'fixture'; issue = $bad }
             )
