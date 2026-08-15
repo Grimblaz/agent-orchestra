@@ -308,8 +308,11 @@ Describe 'Find-OrUpsertComment' {
         # not a target. Keeping the title and moving the fixture would have
         # left a test whose name asserts the opposite of what ships, so the
         # claim was inverted instead. The full population is covered in
-        # marker-line1-selection.Tests.ps1, which — unlike this file — runs in
-        # CI (this one is quarantined `unclassified` under issue #993).
+        # marker-line1-selection.Tests.ps1, which was written because this file
+        # did not then run in CI (quarantined `unclassified` under issue #993).
+        # Both run in CI now — #1035 measured this suite on Linux and #1036
+        # promoted it — so the two are belt and braces rather than a substitute
+        # and the thing it substituted for.
         It 'requires the marker to be the comment first line, not merely contained in it' {
             $script:mockComments = @(
                 @{ id = 42; body = "header line`n<!-- frame-credit-ledger-123 -->`nbody after" }

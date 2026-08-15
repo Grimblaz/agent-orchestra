@@ -117,7 +117,13 @@ function Protect-CIGlobAuditSecret {
         Scrub credential-shaped material out of anything captured from an
         unaudited suite before it reaches a permanent public surface.
     .DESCRIPTION
-        189 of the suites this audit runs have never been vetted; the measure
+        This audit runs the WHOLE corpus, quarantine included, so it executes
+        suites the per-PR gate does not — and it did so when, at issue #1036's
+        branch point (`3e39c91`), 188 of them had never been vetted anywhere.
+        #1036 has since promoted 176 of those into
+        the gate, but this scrubber's premise is unchanged: the audit's
+        population is by construction wider than the gate's, so it will always
+        be running something less exercised than the gated set. The measure
         job checks out with credential persistence ON, deliberately, for gate
         parity; and any suite that prints its git config on failure would
         otherwise publish a bearer token verbatim into a durable public issue
@@ -1675,11 +1681,12 @@ function Get-CIGlobAuditReachability {
             function resolved the root to an ABSOLUTE path and then tested
             `StartsWith`. That comparison is false for every row the pipeline
             can produce, forever. It worked in exactly one circumstance: when
-            `Resolve-Path` threw because the root did not exist. All 253
-            in-population suites sit directly under the tests root and the 191
-            quarantined ones are not in `SelectedNames`, so for the population
-            this audit exists to attempt, BOTH arms were dead at once and the
-            record affirmatively printed `clean: True`.
+            `Resolve-Path` threw because the root did not exist. Every
+            in-population suite sits directly under the tests root, and at the
+            time this was written the 191 quarantined ones were not in
+            `SelectedNames` (issue #1036 has since cut that to 14), so for the
+            population this audit exists to attempt, BOTH arms were dead at once
+            and the record affirmatively printed `clean: True`.
           * `Resolve-Path` on a row's own `Path` must never be called. This
             function runs BEFORE any persistence, with no try/catch above it,
             so a suite deleted between Prepare and Compose would convert a
@@ -2347,9 +2354,11 @@ function New-CIGlobAuditRecordDocuments {
                 # WHICH END IS KEPT DEPENDS ON WHAT THE DETAIL IS, and getting
                 # this wrong in either direction breaks R5 on a different
                 # population. Structured failure messages are joined head-first
-                # and the FIRST one classifies `linux-red` against `never-ci`,
-                # so a blanket tail-keep would degrade the 191-suite population
-                # R5 exists for. A console tail was deliberately selected as a
+                # and the FIRST one classifies a failure into its quarantine
+                # class, so a blanket tail-keep would degrade the population R5
+                # exists for — 191 suites when this was written, 14 after issue
+                # #1036, and whatever the audit's own wider population is on any
+                # given run. A console tail was deliberately selected as a
                 # TAIL because for a suite that never returned the last thing
                 # it printed is where it stopped — and keeping its head, which
                 # is what shipped, systematically discards exactly the stopping
@@ -2437,7 +2446,11 @@ function New-CIGlobAuditRecordDocuments {
     # come out any other way and rendering it as evidence overstates it.
     [void]$sb.AppendLine("- Registry lint: this record exists only because the gate's own selection procedure reported **no drift** when the population was derived; the run refuses outright otherwise. The ``HasDrift`` value below is that enforced precondition restated, not a second, independent check — it could not read anything else here.")
     [void]$sb.AppendLine("- ``HasDrift`` (as enforced at derivation): **$($Population.HasDrift)**")
-    [void]$sb.AppendLine("- Selected $($Population.SelectedCount); quarantine entries $($Population.QuarantinedCount) (unclassified $($Population.UnclassifiedCount)); stale $(@($Population.StaleQuarantine).Count).")
+    # `unclassified` was retired by issue #1036, so this figure is expected to be
+    # zero and is emitted anyway: a reader must be able to tell "the backlog is
+    # gone" from "nobody reported the backlog". A non-zero value here is an entry
+    # that the gate's own selection would already refuse.
+    [void]$sb.AppendLine("- Selected $($Population.SelectedCount); quarantine entries $($Population.QuarantinedCount) (entries on the RETIRED ``unclassified`` class, which should be 0: $($Population.UnclassifiedCount)); stale $(@($Population.StaleQuarantine).Count).")
     [void]$sb.AppendLine("- Derived population **$(@($Population.Names).Count)**; in-population rows in this record **$($inPop.Count)**; out-of-population rows **$($outPop.Count)** (named below).")
     $missing = @($Population.Names | Where-Object { $n = $_; -not ($inPop | Where-Object { $_.Name -eq $n }) })
     $extra = @($inPop | Where-Object { $Population.Names -notcontains $_.Name } | ForEach-Object { $_.Name })
@@ -2619,7 +2632,8 @@ function New-CIGlobAuditRecordDocuments {
 
     # ---- the per-suite table paginates, exactly as detail does ----
     # It did not, and the summary measured 41,111 codepoints of a 65,536 cap at
-    # today's 253 suites — 1.7x the planning estimate, overflowing at roughly
+    # the 253 suites on disk when that was measured — 1.7x the planning
+    # estimate, overflowing at roughly
     # 400. The throw on overflow precedes every persist call with no try/catch
     # above it, so a corpus-growth threshold turned a red-by-construction audit
     # into a NO-RECORD audit: not the summary, not the detail documents, not

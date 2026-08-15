@@ -394,7 +394,7 @@ switch ($Mode) {
         $target = script:Resolve-OutFile -Candidate $OutFile -Fallback 'ci-glob-audit-population.json'
         $doc | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $target -Encoding utf8
 
-        Write-Host "Population derived: $($population.Names.Count) in-population suite(s) (selected $($population.SelectedCount), quarantined $($population.QuarantinedCount), unclassified $($population.UnclassifiedCount)), plus $($script:ControlExpectations.Count) out-of-population control(s), across $ShardCount shard(s)."
+        Write-Host "Population derived: $($population.Names.Count) in-population suite(s) (selected $($population.SelectedCount), quarantined $($population.QuarantinedCount), on the RETIRED unclassified class $($population.UnclassifiedCount)), plus $($script:ControlExpectations.Count) out-of-population control(s), across $ShardCount shard(s)."
         Write-Host "HasDrift: $($population.HasDrift)"
 
         if ($env:GITHUB_OUTPUT) {

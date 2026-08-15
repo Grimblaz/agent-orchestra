@@ -208,12 +208,19 @@ exit `$LASTEXITCODE
         $stdoutPath = Join-Path $TestDrive ([System.Guid]::NewGuid().ToString('N') + '.stdout.txt')
         $stderrPath = Join-Path $TestDrive ([System.Guid]::NewGuid().ToString('N') + '.stderr.txt')
 
+        # -WindowStyle is a Windows-only parameter of Start-Process: on Linux and macOS
+        # PowerShell rejects it outright ("The parameter '-WindowStyle' is not supported
+        # for the cmdlet 'Start-Process' on this edition of PowerShell") before the child
+        # even starts. It only suppresses the console flash on Windows, and this call
+        # already redirects both streams, so it is splatted in there and omitted elsewhere.
+        $hiddenWindow = if ($IsWindows) { @{ WindowStyle = 'Hidden' } } else { @{} }
+
         $proc = Start-Process -FilePath 'pwsh' `
             -ArgumentList @('-NoProfile', '-NonInteractive', '-File', $harnessPath) `
             -RedirectStandardOutput $stdoutPath `
             -RedirectStandardError $stderrPath `
             -PassThru `
-            -WindowStyle Hidden
+            @hiddenWindow
 
         $waited = $proc.WaitForExit($TimeoutSeconds * 1000)
         if (-not $waited) {
@@ -336,6 +343,19 @@ function global:gh {
     if (`$joined -match 'issue view \d+ --json comments') {
         `$global:LASTEXITCODE = 0
         return '$IssueCommentsJson'
+    }
+
+    # --body-file FIRST -- see the note in frame-credit-ledger-fail-open. The
+    # --body branch matches a --body-file call by prefix and captures nothing.
+    if (`$joined -match '(issue|pr) comment \d+ .*--body-file') {
+        `$global:UpsertCalled = `$true
+        `$idx = [Array]::IndexOf(`$Args, '--body-file')
+        if (`$idx -ge 0 -and `$idx + 1 -lt `$Args.Count) {
+            `$bodyFile = [string]`$Args[`$idx + 1]
+            if (Test-Path -LiteralPath `$bodyFile) { `$global:UpsertBody = Get-Content -LiteralPath `$bodyFile -Raw }
+        }
+        `$global:LASTEXITCODE = 0
+        return 'https://github.com/example/example/pull/429#issuecomment-1'
     }
 
     if (`$joined -match '(issue|pr) comment \d+ --body') {

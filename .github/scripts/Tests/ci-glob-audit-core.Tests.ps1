@@ -212,7 +212,7 @@ Describe 'Population: the gate''s own enumeration, before the quarantine is subt
 
     It 'is the union of selected and non-stale quarantined suites, not just the selected set' {
         $t = script:New-FixtureTree -Files @('a.Tests.ps1', 'b.Tests.ps1', 'c.Tests.ps1') -Quarantine @(
-            [ordered]@{ file = 'b.Tests.ps1'; class = 'unclassified'; reason = 'never registered'; issue = $null }
+            [ordered]@{ file = 'b.Tests.ps1'; class = 'no-signal'; reason = 'every test skipped'; issue = 970 }
             [ordered]@{ file = 'c.Tests.ps1'; class = 'linux-red'; reason = 'fails on linux'; issue = 904 }
         )
         $pop = Get-CIGlobAuditPopulation -TestsRoot $t.Dir -QuarantinePath $t.QuarantinePath
@@ -235,7 +235,9 @@ Describe 'Population: the gate''s own enumeration, before the quarantine is subt
 
     It 'REFUSES to derive a population from a drifted registry, with no override' {
         $t = script:New-FixtureTree -Files @('a.Tests.ps1') -Quarantine @(
-            [ordered]@{ file = 'gone.Tests.ps1'; class = 'unclassified'; reason = 'deleted long ago'; issue = $null }
+            # A legal class, deliberately: STALENESS must be the only drift cause
+            # here, or this test would pass for a reason it does not name.
+            [ordered]@{ file = 'gone.Tests.ps1'; class = 'never-ci'; reason = 'deleted long ago'; issue = $null }
         )
         # A fail-closed predicate whose caller could carry on regardless would
         # be a fail-open writer, so there is deliberately no -AllowDrift switch.
@@ -250,7 +252,7 @@ Describe 'Population: the gate''s own enumeration, before the quarantine is subt
         # only exact under no-drift says something untrue about why the run is
         # refusing, on the one surface a maintainer reads when it fires.
         $t = script:New-FixtureTree -Files @('a.Tests.ps1') -Quarantine @(
-            [ordered]@{ file = 'gone.Tests.ps1'; class = 'unclassified'; reason = 'deleted'; issue = $null }
+            [ordered]@{ file = 'gone.Tests.ps1'; class = 'never-ci'; reason = 'deleted'; issue = $null }
         )
         $message = ''
         try { Get-CIGlobAuditPopulation -TestsRoot $t.Dir -QuarantinePath $t.QuarantinePath }
@@ -1721,10 +1723,13 @@ Describe 'End to end: the shipped controls through the shipped execution path' {
     }
 
     It 'scrubs a credential out of captured output at CAPTURE, so the partial artifact carries it scrubbed too' {
-        # 189 of the suites this audit runs have never been vetted, and the
-        # measure job holds a live bearer credential in the checkout's git
-        # config for gate parity. Actions' secret masking covers the job log
-        # stream, not a body composed in-process nor an artifact's contents.
+        # 189 of the suites this audit ran had never been vetted anywhere when
+        # this was written; #1036 has since promoted 176 into the gate. The
+        # scrubber's premise is unchanged: the audit's population is by
+        # construction wider than the gate's, and the measure job holds a live
+        # bearer credential in the checkout's git config for gate parity.
+        # Actions' secret masking covers the job log stream, not a body
+        # composed in-process nor an artifact's contents.
         $dir = Join-Path $script:Scratch 'secret-suite'
         New-Item -ItemType Directory -Force -Path $dir | Out-Null
         $suite = Join-Path $dir 'leaks.Tests.ps1'

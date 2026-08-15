@@ -18,8 +18,10 @@ jobs:
     # to GitHub's own 360-minute ceiling on every pull request until a human
     # noticed — and the first signal is a job that looks like it is running
     # normally. This chunk is what makes that live: it fans the gate out and
-    # promotes the corpus's most plausible non-returning worker, and #1036
-    # then promotes ~188 suites that have never executed on Linux.
+    # promotes the corpus's most plausible non-returning worker. #1036 has
+    # since landed and promoted 176 more, taking the gate from 65 selected
+    # suites to 241 of 255 on disk — all of them measured on Linux first by
+    # #1035, so "never executed on Linux" no longer describes any of them.
     #
     # THE ARITHMETIC, FROM THIS GATE'S OWN RUNS — not from a model.
     # An earlier revision of this comment sized the bound from run 31361629558,
@@ -46,10 +48,23 @@ jobs:
     # than quietly replaced — a bound justified by an estimate its own next run
     # falsifies is the defect this comment was rewritten to fix.
     #
-    # 25 minutes is therefore **5.5x the measured job**, with headroom for the
-    # ~188 suites #1036 promotes into it, and still 14x BELOW the platform
-    # ceiling this exists to stop us reaching. Re-derive it from the gate's own
-    # runs when #1036 lands; do not re-derive it from the audit's distribution.
+    # 25 minutes was 5.5x the measured job at 65 selected suites, and still 14x
+    # BELOW the platform ceiling this exists to stop us reaching.
+    #
+    # RE-DERIVED AT #1036's LANDING, which is what the previous revision of this
+    # comment instructed. Measured from this gate's own runs over the expanded
+    # selection — 31447289622 and 31448817506, both 241 selected / 241 reported
+    # / 241 passed, 6094 test cases: the Pester step is 770-772s and the job
+    # 793-857s. Against the 1500s bound that is **~1.9x, not 5.5x**. The margin
+    # is real but it is a third of what it was, and it shrank because coverage
+    # grew 3.7x, which is the trade this gate exists to make.
+    #
+    # NOT RAISED, deliberately. run-pester-sharded.Tests.ps1 asserts this stays
+    # at or below 30, so there are five minutes of raise available before a
+    # guard breaks; spending them silently is how a bound stops meaning
+    # anything. If a future expansion needs more, escalate rather than edit.
+    # Re-derive from the gate's own runs, never from the audit's distribution:
+    # the audit runs one suite at a time per runner and the gate runs ten on one.
     timeout-minutes: 25
     steps:
       # Pinned by commit, matching ci-full-glob-audit.yml. A mutable tag on the
@@ -114,7 +129,11 @@ jobs:
             # malformed registry must not be diagnosed by a job that failed to
             # start for some other reason.
             Write-Host "::error::CI suite selection drift:"
-            $selection.DriftDetails | ForEach-Object { Write-Host "::error::  $_" }
+            # Sanitised like every other annotation channel in this file (see
+            # the ::notice and ::warning emissions below): drift text quotes
+            # registry values, and a newline in one would start a line at
+            # column 0, which the runner parses as a second workflow command.
+            $selection.DriftDetails | ForEach-Object { Write-Host ("::error::  {0}" -f ($_ -replace '[\r\n]+', ' ')) }
             exit 1
           }
 
@@ -176,7 +195,7 @@ jobs:
             $md.Add('')
             $md.Add("**$($selection.Selected.Count) of $onDisk** suites on disk were selected to run. **$($excludedNames.Count)** were excluded by ``.github/scripts/Tests/ci-quarantine.json`` ($($byClass -join ', ')).")
             $md.Add('')
-            $md.Add('A suite is excluded only by an explicit, classified, reasoned entry in that registry. `unclassified` is a BACKLOG, not a decision: those suites were omitted by an allowlist that no longer exists and their CI-viability has never been measured here.')
+            $md.Add('A suite is excluded only by an explicit, classified, reasoned entry in that registry, and every legal class is a DECISION about a suite that was actually measured — issue #1036 retired `unclassified`, which meant "nobody looked", so `Get-CISuiteSelection` now refuses an entry carrying it. `linux-red` says where a failure was observed, not that its cause is platform-specific; `never-ci` is for an obstacle nothing here can remove, never one the gate chooses; `no-signal` is a suite that executes and yields no verdict. `linux-red` and `no-signal` require an issue number; `never-ci` deliberately does not, because a permanent exclusion does not need a ticket nobody can ever close.')
             $md.Add('')
             $md.Add('<details><summary>The ' + $excludedNames.Count + ' suites this check does not cover</summary>')
             $md.Add('')

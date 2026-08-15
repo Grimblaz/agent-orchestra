@@ -665,8 +665,11 @@ entries:
 
     Context 'the rendered maintainer line, asserted where CI actually runs it (#998 review M16)' {
         # The only prior assertion on this string lived in
-        # phase-containment-emission-check.Tests.ps1, which is CI-quarantined
-        # (ci-quarantine.json). This suite is not quarantined, so these run.
+        # phase-containment-emission-check.Tests.ps1, which was CI-quarantined
+        # when this Context was written, so the string was asserted nowhere CI
+        # would see it. Both suites run in CI now — #1035 measured the corpus on
+        # Linux and #1036 promoted that suite — so this is a second assertion
+        # rather than the only live one.
 
         BeforeAll {
             # Dot-sourcing the entry point skips its top-level execution (it

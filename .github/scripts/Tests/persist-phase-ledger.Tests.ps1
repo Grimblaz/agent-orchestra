@@ -170,6 +170,32 @@ Describe 'Invoke-PersistPhaseLedger' {
                 return (@{ html_url = "https://github.com/$script:Owner/$script:Repo/issues/$script:IssueNumber#issuecomment-$id" } | ConvertTo-Json)
             }
 
+            # POST: gh issue comment <N> --body-file <path>  (or gh pr comment).
+            # This branch must come FIRST. Find-OrUpsertComment's new-comment
+            # path posts through a temp file (find-or-upsert-comment.ps1,
+            # Send-NewCommentViaBodyFile, added by #1035's review to dodge the
+            # Windows argv limit), so --body-file is the shape the product
+            # actually emits. The --body branch below matches it BY PREFIX while
+            # [Array]::IndexOf looks for the literal '--body' element and finds
+            # none: $bodyIdx is -1, $Args[0] is read instead, and the mock
+            # cheerfully records the verb ("issue") as the comment body. Every
+            # assertion downstream then failed against a correct product.
+            if ($joined -match '^(issue|pr) comment \d+ .*--body-file') {
+                if ($script:simulatePostFailure) { $global:LASTEXITCODE = 1; return '' }
+                $newId = $script:NextCommentId
+                $script:NextCommentId++
+                $fileIdx = [Array]::IndexOf($Args, '--body-file')
+                $bodyText = ''
+                if ($fileIdx -ge 0 -and $fileIdx + 1 -lt $Args.Count) {
+                    $bodyFile = [string]$Args[$fileIdx + 1]
+                    if (Test-Path -LiteralPath $bodyFile) { $bodyText = Get-Content -LiteralPath $bodyFile -Raw }
+                }
+                Add-MockComment -Id $newId -Body $bodyText
+                $script:PostLog.Add([PSCustomObject]@{ Body = $bodyText })
+                $global:LASTEXITCODE = 0
+                return "https://github.com/$script:Owner/$script:Repo/issues/$script:IssueNumber#issuecomment-$newId"
+            }
+
             # POST: gh issue comment <N> --body <text>  (or gh pr comment)
             if ($joined -match '^(issue|pr) comment \d+ --body') {
                 if ($script:simulatePostFailure) { $global:LASTEXITCODE = 1; return '' }

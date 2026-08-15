@@ -93,12 +93,19 @@ exit `$LASTEXITCODE
         $stdoutPath = Join-Path $TestDrive ([System.Guid]::NewGuid().ToString('N') + '.stdout.txt')
         $stderrPath = Join-Path $TestDrive ([System.Guid]::NewGuid().ToString('N') + '.stderr.txt')
 
+        # -WindowStyle is a Windows-only parameter of Start-Process: on Linux and macOS
+        # PowerShell rejects it outright ("The parameter '-WindowStyle' is not supported
+        # for the cmdlet 'Start-Process' on this edition of PowerShell") before the child
+        # even starts. It only suppresses the console flash on Windows, and this call
+        # already redirects both streams, so it is splatted in there and omitted elsewhere.
+        $hiddenWindow = if ($IsWindows) { @{ WindowStyle = 'Hidden' } } else { @{} }
+
         $proc = Start-Process -FilePath 'pwsh' `
             -ArgumentList @('-NoProfile', '-NonInteractive', '-File', $harnessPath) `
             -RedirectStandardOutput $stdoutPath `
             -RedirectStandardError $stderrPath `
             -PassThru `
-            -WindowStyle Hidden
+            @hiddenWindow
 
         $waited = $proc.WaitForExit($TimeoutSeconds * 1000)
         $probeContent = (Test-Path $probeFile) ? (Get-Content $probeFile -Raw) : ''
@@ -155,6 +162,27 @@ function global:gh {
     if (`$joined -match 'api repos/') {
         `$global:LASTEXITCODE = 0
         return '{"full_name":"example/example"}'
+    }
+
+    # --body-file FIRST, and it is not an alternative spelling to be thorough
+    # about: Find-OrUpsertComment's new-comment path posts through a temp file
+    # (find-or-upsert-comment.ps1, Send-NewCommentViaBodyFile), so this is the
+    # shape the product actually emits. The --body branch below matched it by
+    # prefix while IndexOf looked for the literal '--body' element, found none,
+    # and wrote an empty body to the probe — which silently disarmed the CONTROL
+    # test whose whole job is to prove the FAILED path is reachable.
+    if (`$joined -match '(issue|pr) comment \d+ .*--body-file') {
+        `$idx = [Array]::IndexOf(`$Args, '--body-file')
+        `$body = ''
+        if (`$idx -ge 0 -and `$idx + 1 -lt `$Args.Count) {
+            `$bodyFile = [string]`$Args[`$idx + 1]
+            `$body = (Test-Path -LiteralPath `$bodyFile) ? (Get-Content -LiteralPath `$bodyFile -Raw) : ''
+        }
+        if (`$env:CR7_UPSERT_PROBE_FILE) {
+            Add-Content -LiteralPath `$env:CR7_UPSERT_PROBE_FILE -Value `$body -Encoding UTF8
+        }
+        `$global:LASTEXITCODE = 0
+        return 'https://github.com/example/example/pull/769#issuecomment-1'
     }
 
     if (`$joined -match '(issue|pr) comment \d+ --body') {

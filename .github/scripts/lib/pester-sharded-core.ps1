@@ -45,9 +45,13 @@
 # is not wrong -- its bound is deliberately mutation-proven -- so the fix is to
 # give it back the conditions it was calibrated under rather than to loosen it.
 #
-# NOT open here: re-deriving membership for the whole corpus. That question
-# arrives with #1036's ~188 promotions, and it now arrives with a named third
-# class rather than as a surprise.
+# Membership for the whole corpus was re-derived when #1036 landed, which is
+# what an earlier revision of this comment deferred. #1036 promoted 176 suites,
+# scanned all of them for the three hazards these lists name, took six
+# candidates to a contention experiment, and moved the two below that failed it.
+# The scan is static and cannot see a hazard reached through a helper it does
+# not recognise, so a clean result there is not proof of absence. Ongoing
+# re-derivation as the corpus changes belongs to #1047's standing audit.
 # ---------------------------------------------------------------------------
 function Get-RealGitFiles {
     [CmdletBinding()]
@@ -81,7 +85,28 @@ function Get-IsolationRequiredFiles {
         # does real git init/commit in its own fixtures, so it would qualify
         # for the list above too -- it is here because isolation is the reason
         # that would survive if the git fixtures went away.
-        'run-pester-sharded.Tests.ps1'
+        'run-pester-sharded.Tests.ps1',
+        # Wall-clock bound, and the tightest one in the corpus: 50 MILLISECONDS
+        # (orchestra-spine-command.Tests.ps1, the no-spine fallback timing
+        # assertion). Added by #1036 when it promoted this suite, on measurement
+        # rather than on suspicion -- run alone it is 15 of 15, and run while the
+        # box is saturated it fails 2 of 15. A bound with that little headroom
+        # cannot survive a ten-wide fan-out on a four-vCPU runner, and the
+        # failure would arrive on a stranger's pull request looking like a defect
+        # in whatever they touched.
+        'orchestra-spine-command.Tests.ps1',
+        # Wall-clock bounds over REAL git work, two of them: a five-residual-
+        # commit run inside 3s (:266) and a fifty-commit run inside 5s (:293),
+        # plus a sub-linearity ratio between them (:295). The ratio is
+        # scale-invariant and would survive contention; the two absolute bounds
+        # are what a neighbour can starve, and the tighter of them is the 3s one
+        # over five commits rather than the 5s one over fifty.
+        # Measured by #1036 alongside the promotion: 16 of 16 alone, 14 of 16
+        # with the box saturated. It supplies its own git identity per command,
+        # so it does NOT belong on the real-git list -- isolation is the reason,
+        # and the two lists are kept apart precisely so a suite added for the
+        # wrong one can still be removed for the right one.
+        'test-orphan-branch-commits-absorbed.Tests.ps1'
     )
 }
 

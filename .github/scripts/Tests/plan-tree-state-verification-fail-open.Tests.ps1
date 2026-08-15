@@ -61,12 +61,19 @@ exit `$global:LASTEXITCODE
         $stdoutPath = Join-Path $TestDrive ([System.Guid]::NewGuid().ToString('N') + '.stdout.txt')
         $stderrPath = Join-Path $TestDrive ([System.Guid]::NewGuid().ToString('N') + '.stderr.txt')
 
+        # -WindowStyle is a Windows-only parameter of Start-Process: on Linux and macOS
+        # PowerShell rejects it outright ("The parameter '-WindowStyle' is not supported
+        # for the cmdlet 'Start-Process' on this edition of PowerShell") before the child
+        # even starts. It only suppresses the console flash on Windows, and this call
+        # already redirects both streams, so it is splatted in there and omitted elsewhere.
+        $hiddenWindow = if ($IsWindows) { @{ WindowStyle = 'Hidden' } } else { @{} }
+
         $proc = Start-Process -FilePath 'pwsh' `
             -ArgumentList @('-NoProfile', '-NonInteractive', '-File', $harnessPath) `
             -RedirectStandardOutput $stdoutPath `
             -RedirectStandardError $stderrPath `
             -PassThru `
-            -WindowStyle Hidden
+            @hiddenWindow
 
         $waited = $proc.WaitForExit($TimeoutSeconds * 1000)
         if (-not $waited) {

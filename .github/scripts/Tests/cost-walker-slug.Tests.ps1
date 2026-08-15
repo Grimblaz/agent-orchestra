@@ -4,13 +4,14 @@
 # Get-CostTranscriptSlug coverage, split out of cost-walker.Tests.ps1 by issue
 # #908 so it can be gated by CI on its own.
 #
-# Why the split: cost-walker.Tests.ps1 is quarantined out of
-# .github/workflows/pester.yml's selection, and this repository currently has no way to
-# measure whether it is Linux-clean (no Linux runner available to the
+# Why the split, as it stood at the time: cost-walker.Tests.ps1 was quarantined
+# out of .github/workflows/pester.yml's selection, and this repository had no way
+# to measure whether it was Linux-clean (no Linux runner available to the
 # maintainer, and its 13 conditional skips gate on git-remote availability
-# rather than on platform, so a local run cannot stand in for one). Promoting
-# it wholesale would therefore be an unmeasured bet. This file is Linux-clean by
-# construction and can be promoted on evidence rather than assumption:
+# rather than on platform, so a local run could not stand in for one). Promoting
+# it wholesale would therefore have been an unmeasured bet. This file is
+# Linux-clean by construction and could be promoted on evidence rather than
+# assumption:
 # Get-CostTranscriptSlug is a pure string function, every assertion is a string
 # or integer comparison, and the Windows-shaped paths below are only ever
 # function arguments -- nothing here touches the filesystem, git, or a PSDrive.
@@ -21,7 +22,14 @@
 # citing 'C:\fake\path' literals as the #909 failure shape. Review measured that
 # claim as unsubstantiated (4 such literals, none reaching path composition, vs
 # 61 in the #909 comparator) and it has been withdrawn -- see issue #932. The
-# split stands on the absence of evidence either way, not on evidence of redness.
+# split stood on the absence of evidence either way, not on evidence of redness.
+#
+# THE EVIDENCE NOW EXISTS, and it settles the question in the parent suite's
+# favour. Issue #1035 measured the whole corpus on Linux and cost-walker.Tests.ps1
+# passed; #1036 promoted it, so both suites run on every pull request and neither
+# is an unmeasured bet any more. The split is retained because a pure-string
+# function with its own file is cheaper to reason about than one buried in a
+# larger suite -- not because the parent cannot be gated.
 
 Describe 'Get-CostTranscriptSlug' {
     BeforeAll {
