@@ -759,6 +759,45 @@ description: "Another skill. Use when reconciling a promoted roster against its 
         ($uncovered.DriftDetails -join ' ') | Should -Match 'skills/demo-skill'
     }
 
+    It 'REGRESSION (scalar-collapse class): an all-blank receiving set REPORTS rather than throwing' {
+        # The containment clause shipped with a crash the live tree could not show. The
+        # manifest-derived fallback was an unwrapped pipeline, and `Select-Object -Unique` returns a
+        # SCALAR at exactly one distinct home and $null at zero - `.Count` on either throws under
+        # this library's `Set-StrictMode -Version 3.0`. The real manifest has ten distinct homes so
+        # it returned an array and stayed quiet; every scratch tree in this file has ONE, which is
+        # the shape that crashed. Three prosecution passes disagreed about whether the crash existed
+        # because they ran different trees, and both observations were right (#1065 review, M1).
+        #
+        # The collapse threshold is a DATA property, so the live tree can cross it in either
+        # direction. This test pins the fixture side, where it is reachable today.
+        $t = script:New-ScratchTree { }
+
+        # `Should -Not -Throw` runs its scriptblock in a CHILD scope, so a plain `$r =` inside it
+        # never reaches the assertions below and they read $null. Capture script-scoped.
+        $script:BlankSetResult = $null
+        { $script:BlankSetResult = Get-LessonPromotionAudit -RepoRoot $t.Dir -ManifestPath $t.ManifestPath `
+                -ExpectedRosterCount 2 -ExpectedPromotedByChunk @{ '1' = 1 } -ReceivingSkillDirs @('   ') } |
+            Should -Not -Throw -Because 'an all-blank receiving set is a caller error the audit must REPORT; a terminating exception tells the caller the check errored, not that it found drift'
+
+        $script:BlankSetResult.HasDrift | Should -BeTrue
+        ($script:BlankSetResult.DriftDetails -join ' ') | Should -Match 'no caller-supplied receiving-skill set'
+    }
+
+    It 'REGRESSION (path-form class): a caller entry differing only in separator or trailing slash is NOT a finding' {
+        # The containment comparison normalized its left side to two `/`-joined segments and compared
+        # against the caller's array verbatim, so a path-equivalent entry reded a lawful tree. Worse,
+        # the reverse scan below builds its `## Composite References` needle from the same raw
+        # string, so one backslash entry produced a false containment red AND a false convention red
+        # on a mangled path - two checks, not one (#1065 review, M4).
+        $t = script:New-ScratchTree { }
+
+        foreach ($form in @('skills\demo-skill', 'skills/demo-skill/', 'skills\demo-skill\')) {
+            $r = Get-LessonPromotionAudit -RepoRoot $t.Dir -ManifestPath $t.ManifestPath `
+                -ExpectedRosterCount 2 -ExpectedPromotedByChunk @{ '1' = 1 } -ReceivingSkillDirs @($form)
+            $r.HasDrift | Should -BeFalse -Because "'$form' is path-equivalent to the covering entry and must not red a lawful tree"
+        }
+    }
+
     It 'INDUCED (retuned-marker class): a mandate_marker that appears in no agent body FAILS' {
         # The one HIGH finding of PR #1061's review, and the sharpest shape in this file: the A4.3
         # derivation reads the tree, but its only INPUT is a manifest field. Point mandate_marker at

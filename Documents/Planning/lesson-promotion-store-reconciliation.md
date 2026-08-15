@@ -4,13 +4,21 @@ Umbrella [#1045](https://github.com/Grimblaz/agent-orchestra/issues/1045), **AC6
 
 ## Why this file exists rather than only a PR body
 
-AC6 names the chunk PR as the evidence surface, and the reconciliation is carried there too. This file exists because **a PR body is not where a later reader looks.** The private store lives at `~/.claude/projects/{project-slug}/memory/`, is not under version control, and — as `lesson-promotion-manifest.json`'s own `roster_snapshot.note` records — is *absent from every CI runner*. No check in this repository can perform this comparison, now or after any amount of CI work: a runner gets a clone and the store is not in it. That makes the reconciliation an agent-session act with a dated result, and this file the thing a future session reads to know when it last happened and what it found.
+AC6 names the chunk PR as the evidence surface, and the reconciliation is carried there too. This file exists because **a PR body is not where a later reader looks.** The private store lives at `~/.claude/projects/{project-slug}/memory/`, is not under version control, and — as `lesson-promotion-manifest.json`'s own `roster_snapshot.note` records — is *absent from every CI runner*.
+
+Be precise about which part is unavailable to CI, because the first draft of this paragraph over-claimed. **The manifest↔store join** is what needs the store: a GitHub-hosted runner gets a clone, and the store is not in it. That leg is unavailable to any check keyed to this repository's contents alone. The **repo-side leg is not** — that every promoted entry's `home` file exists and carries its manifest `anchor` is checked today by `lesson-promotion-manifest.Tests.ps1`, on every run, with no store present. And the store-side leg is not unavailable *in principle*: a self-hosted runner on the store's host, or the store supplied as a job artifact, would reach it. Neither is proposed here — the store is private and putting it on a runner changes what it is — but the claim is "not available to CI as this repository is configured", not "impossible". *(The earlier form read "now or after any amount of CI work", an unbounded universal over the future — the same unfalsifiable-absolute shape amendment A5.1 exists to remove, in the document that records A5.1. Corrected on review of PR #1065.)*
+
+That makes the store-side reconciliation an agent-session act with a dated result, and this file the thing a future session reads to know when it last happened and what it found.
 
 Specifically, the memory store's own **2026-09-08 sweep** decides whether every rostered lesson is lawfully landing-initiated. This record is what that sweep should read first.
 
 ## Reconciliation of 2026-08-15
 
-Performed against `Documents/Planning/lesson-promotion-manifest.json` at branch `claude/1051-a5-residue` (chunk 3, PR [#1065](https://github.com/Grimblaz/agent-orchestra/pull/1065)), baseline `6626102`, and the store's `LEDGER.md` / `SLATE.md` as of the same date.
+Performed against `Documents/Planning/lesson-promotion-manifest.json` on the branch that became PR [#1065](https://github.com/Grimblaz/agent-orchestra/pull/1065) (chunk 3), and the store's `LEDGER.md` / `SLATE.md` as of the same date.
+
+**Anchoring, for the reader arriving after the merge.** The comparison was run at branch commit `6626102`. That commit is **not reachable from `main`** — this repository squash-merges, so a fresh clone weeks later cannot resolve it, which matters because a fresh clone is exactly this record's intended reader. Cite **PR #1065 as merged** instead; its merge commit is the durable anchor, and the § Result table below already uses that convention for chunks 1 and 2 (`d610bbe`, `3e39c91`). The manifest did change between `6626102` and the shipped state, so the baseline is not the shipped tree: **the delta touched no `state`, `home`, `anchor`, `chunk` or `issue` field** — only `resolution` prose, two `roster_snapshot` keys, a `cited_by` row and an `in_file_pins` row — so all 46 rows are identical and the roster conclusion below survives it. Verified rather than assumed.
+
+**Store-side snapshot.** `LEDGER.md` carried **271** rows and `SLATE.md` **399** at the time of this run. Those totals are the fingerprint: a later sweep that re-runs the method and gets different counts knows the store moved, and can tell that from a genuine divergence.
 
 ### What was compared
 
@@ -28,6 +36,12 @@ Lawful pairings, from A2.3's own sequencing — in flight before the merge, exit
 - `landing = landed` with exit `executed` — the exit was written.
 - `landing = landed` with exit `reconciled` — the exit was written **and later read back** at a sweep, with the destination confirmed to carry the lesson and the landing confirmed an ancestor of `origin/main`. `reconciled` is strictly stronger than `executed`.
 
+**The exit vocabulary has three values, not two.** `LEDGER.md` carries `executed` (239), `reconciled` (25) and **`proposed` (7)**. `proposed` is declared by the store's own `POLICY.md` rule 3 — an unattended session may *record a proposal* but may not execute a removal — so it is a lawful state, not a malformed one. It did not arise on this roster: all 69 on-roster promote rows are `executed` or `reconciled`, zero `proposed`. It is named here because the table above would otherwise be silent about a value the **next** reconciliation will certainly meet: the seven live `proposed` rows are dated 2026-08-10 and destined for a successor umbrella. A roster row sitting at `landed` with a `proposed` exit is **not** covered by the pairings above and should be treated as a finding requiring a ruling, not as lawful by omission.
+
+**Provenance, per amendment A2 (tag every grounding claim).** The three pairings above are **inferred** from the observed store, not read from a declaration: no store-side document enumerates the exit vocabulary or states that `reconciled` is stronger than `executed`. `POLICY.md` rule 3 is *source-read* and grounds the `proposed`/`executed` distinction and the destination read-back; the `executed`→`reconciled` ordering is the inferred part. Two of this record's own corrections moved the verdict toward zero divergence and none moved it away, so an inferred rule fitted to the data it then judges is exactly the risk — recorded here rather than left for a reader to notice.
+
+**One pairing is now source-read rather than inferred**: `landed` + `executed`, written at merge without a sweep, is lawful for a promotion exit under an approved vehicle — ruled by the store's owner on 2026-08-15, recorded under § Still owed item 1. That closes the question the first draft of this record left silently instructed.
+
 A landing row names its **issue** while in flight and its **merged PR and commit** once landed; both are lawful references to the same vehicle.
 
 ### Result — all 46 rows, both tracks
@@ -36,8 +50,10 @@ A landing row names its **issue** while in flight and its **merged PR and commit
 | --- | --- | ---: | --- | --- | --- |
 | 1 | #1049 → PR #1055 @ `d610bbe` | 19 | `landed` | `executed` | reconciles |
 | 2 | #1050 → PR #1061 @ `3e39c91` | 25 | `landed` | `reconciled` | reconciles |
-| 3 | #1051 → PR #1065 | 2 | `in-flight` | *(none — lawful pre-merge)* | reconciles |
-| | | **46** | | | **0 divergences** |
+| 3 | #1051 → PR #1065 | 2 | `in-flight` | *(none — lawful pre-merge)* | **provisional — see § Still owed** |
+| | | **46** | | | **0 divergences, as of the date above** |
+
+> **Read the chunk-3 row with its date.** Its two assertions — `in-flight`, no exit row — are correct *before* PR #1065 merges and **false after**, and this table will not change on its own. A reader arriving later cannot tell "correctly in flight" from "merged weeks ago and the exit rows were never written" from the table alone; § Still owed is what distinguishes them. That is why the cell says provisional rather than inheriting the green footer.
 
 **Divergence verdict, stated in the polarity AC6 requires: none.** Every one of the 46 manifest rows carries a Track A landing row naming its own chunk's vehicle, and a Track B exit row in a state lawful for that landing phase. No manifest row lacks a store counterpart, and no rostered lesson sits in a pairing the sequence does not allow.
 
@@ -64,7 +80,20 @@ Not a divergence, but the substantive thing this reconciliation surfaced and the
 
 ## Still owed
 
-1. After PR #1065 merges: flip `reference_quoted_text_needs_position_not_heuristic` and `reference_version_collision_invisible_until_merge` from `landing | in-flight` to `landed`, and write their `executed | promote` LEDGER rows citing the merge commit.
+1. After PR #1065 merges: flip `reference_quoted_text_needs_position_not_heuristic` and `reference_version_collision_invisible_until_merge` from `landing | in-flight` to `landed`, and write their promote exit rows citing the merge commit.
+
+   Those rows carry **`executed`**, not `proposed`.
+
+   **Ruled by the store's owner on 2026-08-15**, resolving an apparent conflict between two authorities:
+
+   - The store's **`POLICY.md` rule 3**: exits are *proposed* by any session and *executed* only in an interactive sweep with the owner present.
+   - Parent **#1045 amendment A2.3**, which this record cites as its own authority: promoted lessons reach landing-in-flight "with the **executed** exit row following after merge."
+
+   **A2.3 governs for this class.** The owner's ruling: *approving the change is the approval* — once a promotion has been approved and merged, executing its recorded exit needs no second consent. Rule 3's owner-present requirement guards against an unattended session removing something nobody agreed to lose; a landing-initiated promotion under an approved umbrella is not that case, because the removal was authorized when the promotion was.
+
+   Scope, so this is not read wider than it was ruled: it covers **promotion exits whose landing row was already in flight against an approved, merged vehicle**. Demotions, dedupes, structural rewrites and body deletions are untouched — rule 3 still governs those, and the seven live `proposed | promote` rows remain lawful as proposals awaiting a sweep.
+
+   *(Recorded because the evidence could not have settled it: both prior chunks merged on 2026-08-10 and all 44 of their `executed` rows are stamped 2026-08-10, so a merge-time write and a same-day sweep are indistinguishable in the ledger. The reading was never observable — it had to be ruled.)*
 2. At the next sweep: promote chunk 1's 19 exit rows from `executed` to `reconciled` on the read-back evidence recorded above.
 3. Umbrella #1045 closes when (1) is done, this record is current, and AC1's chunk-3 demonstrations exist — not when PR #1065 merges.
 

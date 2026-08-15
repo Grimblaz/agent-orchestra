@@ -643,10 +643,14 @@ function Get-LessonPromotionAudit {
                 # no agent body mandates a load of that skill; when one does, the check refuses the
                 # main-session-only reading and requires the manifest to record the loader. The
                 # relaxation is real but SMALL, and the size is stated because the first draft of
-                # this comment claimed five and the true number is ONE - `agent-memory-compaction`,
-                # whose single lens has no executing agent body at all. The other seven homes carry
-                # a loader and would pass under the pre-A4.3 rule unchanged. A comment that inflates
-                # what removing a guard buys is the wrong kind of justification (PR #1061, F10).
+                # this comment claimed five. As of chunk 3 the true number is TWO of nine promoted
+                # homes - `agent-memory-compaction`, whose single lens has no executing agent body
+                # at all, and `plugin-release-hygiene`, which chunk 3 added and which is loaded by a
+                # PostToolUse hook rather than by any agent body. The other seven carry a loader and
+                # would pass under the pre-A4.3 rule unchanged. A comment that inflates what removing
+                # a guard buys is the wrong kind of justification (PR #1061, F10) - and one that
+                # DEFLATES it is the same defect mirrored, which is what this comment did between
+                # chunk 3's delivery and its review (#1065 review, M19). Recount when a home is added.
                 # It is not a hole: adding a mandated load to that body turns this red until the
                 # manifest records it, and a mandate_marker that reaches no agent body is itself
                 # drift, so the derivation cannot be emptied from the manifest side.
@@ -909,12 +913,57 @@ function Get-LessonPromotionAudit {
     #     Recursive, because unaccounted content parks one directory deeper than a flat scan reaches.
     # @($null) has a Count of 1, so an omitted parameter would silently look like a supplied
     # population of one blank directory - the fallback would never announce itself.
-    $receiving = @($ReceivingSkillDirs | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-    if ($receiving.Count -lt 1) {
-        $receiving = @(
+    #
+    # Caller entries are normalized to the separator and trailing-slash form the manifest uses.
+    # Without it the containment clause below compares a normalized left side against a raw right
+    # side, so `skills\demo-skill` reds as uncovered while the scan below visits that directory
+    # perfectly well - and the scan builds its `## Composite References` needle from the same raw
+    # string, so one backslash entry breaks TWO checks rather than one (#1065 review, M4).
+    $receiving = @(
+        $ReceivingSkillDirs |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            ForEach-Object { ($_ -replace '\\', '/').TrimEnd('/') })
+
+    # Derived ONCE and shared by the fallback and the containment clause below. The first draft
+    # carried two byte-identical copies of this expression with nothing pinning them together, so a
+    # future edit to what counts as a needed home would have desynchronized the two populations
+    # silently (#1065 review, M3 - reported by all five prosecution passes).
+    #
+    # The outer @() is load-bearing, not decoration: `Select-Object -Unique` returns a SCALAR at
+    # exactly one distinct home and $null at zero, and `.Count` on either throws under this file's
+    # `Set-StrictMode -Version 3.0`. Unwrapped, this assignment crashed the audit on every
+    # small-manifest tree - which is the shape every induced fixture builds (#1065 review, M1).
+    # `file` is read alongside `gating_skill` deliberately, and it is the half that cannot be turned
+    # off. `gating_skill` is free text no check validates, and for a skill reached ONLY through it -
+    # the cross-chunk shape the forward guard below is written for, where an exhibit lands a chunk
+    # before its lens - blanking that one field removed the containment requirement and produced
+    # zero drift of any kind: not "gating_skill missing", nothing. Demonstrated by mutation against
+    # the live tree on `skills/terminal-hygiene`, the one skill currently in that position
+    # (#1065 review, M5). `file` is existence-checked further down, so deriving the home from it
+    # too means the requirement survives a blanked sibling field.
+    $manifestHomes = @(
+        @(
             @($entries | Where-Object { [string](Get-LPField $_ 'state' '') -ceq 'promoted' } | ForEach-Object { [string](Get-LPField $_ 'home' '') }) +
-            @($exhibits | ForEach-Object { [string](Get-LPField $_ 'gating_skill' '') })
-        ) | Where-Object { $_ -clike 'skills/*' } | ForEach-Object { ($_ -split '/')[0..1] -join '/' } | Select-Object -Unique
+            @($exhibits | ForEach-Object { [string](Get-LPField $_ 'gating_skill' '') }) +
+            @($exhibits | ForEach-Object { [string](Get-LPField $_ 'file' '') })
+        ) | Where-Object { $_ -clike 'skills/*' } | ForEach-Object { ($_ -split '/')[0..1] -join '/' } | Select-Object -Unique)
+
+    # And say so out loud rather than only routing around it: a blank or non-`skills/` gating_skill
+    # is a malformed row, not a lawful one. Without this the field could be emptied and the only
+    # symptom would be a check quietly covering less than it did yesterday.
+    foreach ($x in $exhibits) {
+        $gs = [string](Get-LPField $x 'gating_skill' '')
+        $xf = [string](Get-LPField $x 'file' '')
+        if ([string]::IsNullOrWhiteSpace($gs)) {
+            $drift.Add("exhibit '$xf' carries a blank 'gating_skill' - the field gates which skill's references directory is scanned, and nothing else validates it")
+        }
+        elseif (-not ($gs -clike 'skills/*')) {
+            $drift.Add("exhibit '$xf' declares gating_skill '$gs', which is not a 'skills/*' path - the containment derivation reads only 'skills/*' values, so this row gates nothing")
+        }
+    }
+
+    if ($receiving.Count -lt 1) {
+        $receiving = $manifestHomes
         $drift.Add('no caller-supplied receiving-skill set; the reverse scan fell back to a manifest-derived population, which cannot detect a directory removed from the manifest')
     }
 
@@ -927,12 +976,20 @@ function Get-LessonPromotionAudit {
     # without the receiving entry that delivery had to hand-add, so the edit was unenforceable and
     # forgetting it would have looked identical to doing it. This is the same shape as the absent-key
     # escape closed for chunk counts above, pointing in the direction future promotions travel.
-    if ($ReceivingSkillDirs -and $receiving.Count -ge 1) {
-        $needHomes = @(
-            @($entries | Where-Object { [string](Get-LPField $_ 'state' '') -ceq 'promoted' } | ForEach-Object { [string](Get-LPField $_ 'home' '') }) +
-            @($exhibits | ForEach-Object { [string](Get-LPField $_ 'gating_skill' '') })
-        ) | Where-Object { $_ -clike 'skills/*' } | ForEach-Object { ($_ -split '/')[0..1] -join '/' } | Select-Object -Unique
-        foreach ($needed in $needHomes) {
+    #
+    # Guarded on the caller-supplied set alone. The first draft also required `$receiving.Count -ge 1`,
+    # which protected nothing - by that point an all-blank set has already been replaced by the
+    # manifest-derived fallback, against which containment is satisfied by construction - while being
+    # the sole cause of the M1 crash. Removing it was proved behaviour-identical on every case that
+    # already worked (#1065 review, M2).
+    #
+    # Lawful removal direction, since the two registers now constrain each other and nothing else
+    # says this: an entry leaves the caller's set only when that skill's `references/` directory is
+    # gone from the tree. Dropping it because the manifest no longer names the skill inverts the
+    # older and more load-bearing half of the pin - the manifest must not be able to shrink the
+    # scanned population (#1065 review, M20).
+    if ($ReceivingSkillDirs) {
+        foreach ($needed in $manifestHomes) {
             if ($receiving -cnotcontains $needed) {
                 $drift.Add("'$needed' is a skill this manifest promotes into or gates an exhibit on, but the caller's receiving-skill set does not cover it - an uncovered skill is one the reverse scan never visits, so its unmanifested references files and its 'Composite References' completeness both go unchecked")
             }

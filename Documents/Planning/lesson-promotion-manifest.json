@@ -135,6 +135,17 @@
         ".github/scripts/Tests/lesson-promotion-manifest.Tests.ps1",
         "migration, not a regression"
       ]
+    },
+    {
+      "surface": "Documents/Planning/lesson-promotion-store-reconciliation.md",
+      "scope": "file",
+      "note": "Pins the AC6 reconciliation record. roster_snapshot.reconciliation_record points at this file and NOTHING resolved that pointer - it was the only path-valued field in this manifest with no reader, so a rename left a dangling pointer at HasDrift=False, and the record's own audience is a sweep arriving weeks later (#1065 review, M15). This row is the guardrail; it also pins the counts, so the record and the roster cannot drift apart silently.",
+      "must_contain": [
+        "Lesson-promotion store reconciliation",
+        "0 divergences",
+        "69 of 69 destinations confirmed",
+        "Still owed"
+      ]
     }
   ],
   "loading_surfaces": {
